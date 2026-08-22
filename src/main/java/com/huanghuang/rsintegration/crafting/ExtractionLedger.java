@@ -46,6 +46,19 @@ public final class ExtractionLedger implements AutoCloseable {
     private CraftLogContext logContext;
 
     private final Map<INetwork, List<ItemStack>> networkEntryCache = new HashMap<>();
+    /** Backend-neutral endpoint used by migrated callers. */
+    @Nullable
+    private CraftStorageEndpoint storageEndpoint;
+
+    public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
+        this.storageEndpoint = endpoint;
+        this.networkEntryCache.clear();
+    }
+
+    private CraftStorageEndpoint endpointFor(@Nullable INetwork network) {
+        if (storageEndpoint != null) return storageEndpoint;
+        return network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+    }
 
     /** Attach a correlation context for structured log output. */
     public void setLogContext(@Nullable CraftLogContext ctx) {
@@ -95,7 +108,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state == State.IDLE) transition(State.RESERVING);
 
         if (network != null) {
-            ItemStack matched = findAvailableInNetwork(network, ingredient, count);
+            ItemStack matched = findAvailableInNetwork(network, ingredient, count, player);
             if (!matched.isEmpty()) {
                 ItemStack result = matched.copyWithCount(count);
                 // Pass original Ingredient (not Ingredient.of(result)) so tag-based
@@ -109,7 +122,7 @@ public final class ExtractionLedger implements AutoCloseable {
             INetwork bindingNet = AltarBindingRegistry.resolveNetworkForAltar(
                     player, altarDim, altarPos);
             if (bindingNet != null) {
-                ItemStack matched = findAvailableInNetwork(bindingNet, ingredient, count);
+                ItemStack matched = findAvailableInNetwork(bindingNet, ingredient, count, player);
                 if (!matched.isEmpty()) {
                     ItemStack result = matched.copyWithCount(count);
                     recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, result.copy(),
@@ -141,7 +154,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state == State.IDLE) transition(State.RESERVING);
 
         Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
-        if (network != null && reserveExactAvailability(network, template, count, pendingNet)) {
+        if (network != null && reserveExactAvailability(network, template, count, pendingNet, player)) {
             ItemStack reserved = template.copyWithCount(count);
             recordEntry(new Entry(Source.NETWORK, ingredient, reserved, null,
                     null, null, network, true));
@@ -150,7 +163,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         if (altarDim != null && altarPos != null) {
             INetwork bindingNet = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
-            if (bindingNet != null && reserveExactAvailability(bindingNet, template, count, pendingNet)) {
+            if (bindingNet != null && reserveExactAvailability(bindingNet, template, count, pendingNet, player)) {
                 ItemStack reserved = template.copyWithCount(count);
                 recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, reserved, null,
                         altarDim, altarPos, bindingNet, true));
@@ -181,7 +194,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state == State.IDLE) transition(State.RESERVING);
 
         int networkAvailable = network != null
-                ? countExactAvailableInNetwork(network, template) : 0;
+                ? countExactAvailableInNetwork(network, template, player) : 0;
         int inventoryAvailable = countExactAvailableInInventory(player, template);
         int[] allocation = allocateExactAcrossSources(count, networkAvailable, inventoryAvailable);
         if (allocation.length == 0) return ItemStack.EMPTY;
@@ -190,7 +203,7 @@ public final class ExtractionLedger implements AutoCloseable {
         Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
         if (allocation[0] > 0) {
             if (network == null
-                    || !reserveExactAvailability(network, template, allocation[0], pendingNet)) {
+                    || !reserveExactAvailability(network, template, allocation[0], pendingNet, player)) {
                 cancelReservationsSince(mark);
                 return ItemStack.EMPTY;
             }
@@ -221,11 +234,18 @@ public final class ExtractionLedger implements AutoCloseable {
 
     @Nonnull
     public ItemStack reserveFromNetwork(@Nonnull Ingredient ingredient, int count, @Nonnull INetwork network) {
+        return reserveFromNetwork(ingredient, count, network, null);
+    }
+
+    /** Endpoint-aware overload for server-thread callers with a player context. */
+    @Nonnull
+    public ItemStack reserveFromNetwork(@Nonnull Ingredient ingredient, int count,
+                                        @Nonnull INetwork network, @Nullable ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
-        ItemStack matched = findAvailableInNetwork(network, ingredient, count);
+        ItemStack matched = findAvailableInNetwork(network, ingredient, count, player);
         if (matched.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack template = matched.copyWithCount(count);
@@ -268,6 +288,11 @@ public final class ExtractionLedger implements AutoCloseable {
         LinkedHashMap<CraftingResolver.StackKey, Integer> networkCounts = new LinkedHashMap<>();
         if (network != null) {
             List<ItemStack> stored = networkEntryCache.computeIfAbsent(network, n -> {
+                if (storageEndpoint != null) {
+                    return storageEndpoint.snapshot(player).snapshot()
+                            .map(snapshot -> snapshot.items().stream().map(item -> item.stack().copy()).toList())
+                            .orElseGet(List::of);
+                }
                 List<ItemStack> list = new ArrayList<>();
                 var cache = n.getItemStorageCache();
                 if (cache != null) {
@@ -682,7 +707,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
     }
 
-    private static ItemStack extractOne(Entry entry, INetwork network, ServerPlayer player) {
+    private ItemStack extractOne(Entry entry, INetwork network, ServerPlayer player) {
         return switch (entry.source) {
             case ALTAR_BINDING -> {
                 if (entry.preExtracted != null) yield entry.preExtracted.copy();
@@ -697,6 +722,17 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             case NETWORK -> {
                 INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
+                if (storageEndpoint != null) {
+                    var result = entry.exactIdentity
+                            ? storageEndpoint.extractExact(player, entry.template, entry.count, false)
+                            : storageEndpoint.extractMatching(player, entry.originalIngredient, entry.count, false);
+                    ItemStack extracted = ItemStack.EMPTY;
+                    for (ItemStack part : result.extractedStacks()) {
+                        if (extracted.isEmpty()) extracted = part.copy();
+                        else extracted.grow(part.getCount());
+                    }
+                    yield extracted;
+                }
                 if (source == null) yield ItemStack.EMPTY;
                 yield entry.exactIdentity
                         ? RSIntegrationNetwork.extractExactFromNetwork(
@@ -762,8 +798,19 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private boolean reserveExactAvailability(INetwork network, ItemStack template, int needed,
-                                             Map<CraftingResolver.StackKey, Integer> pending) {
+                                             Map<CraftingResolver.StackKey, Integer> pending,
+                                             @Nullable ServerPlayer player) {
         try {
+            if (storageEndpoint != null && player != null) {
+                long available = storageEndpoint.snapshot(player).snapshot()
+                        .map(snapshot -> snapshot.countExact(storageEndpoint.session().itemKey(template)))
+                        .orElse(0L);
+                CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+                available -= pending.getOrDefault(key, 0);
+                if (available < needed) return false;
+                pending.merge(key, needed, Integer::sum);
+                return true;
+            }
             var cache = network.getItemStorageCache();
             if (cache == null) return false;
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
@@ -784,8 +831,16 @@ public final class ExtractionLedger implements AutoCloseable {
         }
     }
 
-    private int countExactAvailableInNetwork(INetwork network, ItemStack template) {
+    private int countExactAvailableInNetwork(INetwork network, ItemStack template,
+                                             @Nullable ServerPlayer player) {
         try {
+            if (storageEndpoint != null && player != null) {
+                long available = storageEndpoint.snapshot(player).snapshot()
+                        .map(snapshot -> snapshot.countExact(storageEndpoint.session().itemKey(template)))
+                        .orElse(0L);
+                return (int) Math.min(Integer.MAX_VALUE, Math.max(0L,
+                        available - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0)));
+            }
             var cache = network.getItemStorageCache();
             if (cache == null) return 0;
             int available = 0;
@@ -831,9 +886,15 @@ public final class ExtractionLedger implements AutoCloseable {
         return total;
     }
 
-    private ItemStack findAvailableInNetwork(INetwork network, Ingredient ingredient, int needed) {
+    private ItemStack findAvailableInNetwork(INetwork network, Ingredient ingredient, int needed,
+                                             @Nullable ServerPlayer player) {
         try {
             List<ItemStack> stacks = networkEntryCache.computeIfAbsent(network, n -> {
+                if (storageEndpoint != null && player != null) {
+                    return storageEndpoint.snapshot(player).snapshot()
+                            .map(snapshot -> snapshot.items().stream().map(item -> item.stack().copy()).toList())
+                            .orElseGet(List::of);
+                }
                 List<ItemStack> list = new ArrayList<>();
                 var cache = n.getItemStorageCache();
                 if (cache != null) {
@@ -1206,7 +1267,7 @@ public final class ExtractionLedger implements AutoCloseable {
         transition(State.ROLLED_BACK);
     }
 
-    private static void refundEntry(Entry e, @Nullable INetwork network,
+    private void refundEntry(Entry e, @Nullable INetwork network,
                                     @Nullable ServerPlayer player) {
         ItemStack refund = e.refundableStack();
         if (refund.isEmpty()) {
@@ -1215,6 +1276,16 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         switch (e.source) {
             case NETWORK, ALTAR_BINDING -> {
+                if (storageEndpoint != null && player != null) {
+                    var result = storageEndpoint.insert(player, refund, false);
+                    ItemStack leftover = result.remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty()) {
+                        RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
+                                leftover.getDisplayName().getString(), leftover.getCount());
+                        refundLeftoverToPlayerOrNetwork(leftover, player, network);
+                    }
+                    return;
+                }
                 INetwork net = e.sourceNetwork != null ? e.sourceNetwork : network;
                 if (net != null) {
                     var tracker = net.getItemStorageTracker();

@@ -1,0 +1,44 @@
+package com.huanghuang.rsintegration.crafting;
+
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+
+import javax.annotation.Nonnull;
+import java.util.Objects;
+
+/**
+ * Storage boundary used by recursive crafting.
+ *
+ * <p>The resolver and ledger must depend on this boundary rather than a native
+ * storage-mod network object. A backend owns the concrete {@link StorageSession};
+ * recursive crafting only sees validated item operations and structured results.</p>
+ */
+public interface CraftStorageEndpoint {
+    StorageSession session();
+
+    default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player) {
+        return session().snapshotItems(Objects.requireNonNull(player, "player"));
+    }
+
+    default StorageOperationResult extractExact(@Nonnull ServerPlayer player,
+                                                @Nonnull ItemStack template,
+                                                long amount, boolean simulate) {
+        Objects.requireNonNull(template, "template");
+        return session().extractExact(player, session().itemKey(template), amount, simulate);
+    }
+
+    default StorageOperationResult extractMatching(@Nonnull ServerPlayer player,
+                                                   @Nonnull Ingredient ingredient,
+                                                   long amount, boolean simulate) {
+        return session().extractMatching(player, ingredient, amount, simulate);
+    }
+
+    default StorageOperationResult insert(@Nonnull ServerPlayer player,
+                                          @Nonnull ItemStack stack, boolean simulate) {
+        return session().insert(player, stack, simulate);
+    }
+}

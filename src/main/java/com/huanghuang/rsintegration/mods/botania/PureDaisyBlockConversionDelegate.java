@@ -47,6 +47,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     private final Set<BlockPos> placed = new LinkedHashSet<>();
     private boolean harvested;
     private int requestedBatch = 1;
+    private long startTick;
     private Set<UUID> entitiesBefore = Set.of();
 
     @Override
@@ -145,6 +146,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
             placed.add(target);
         }
         harvested = false;
+        startTick = level.getGameTime();
         markCraftStarted();
         return true;
     }
@@ -152,6 +154,10 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     @Override
     protected boolean isMachineCraftFinished(@Nonnull ServerLevel current, @Nonnull BlockEntity blockEntity) {
         if (placed.isEmpty()) return false;
+        // Botania's block state can be observed before the recipe's configured
+        // duration has elapsed (for example during a same-tick block update).
+        // Keep the RS batch pending for at least the native Pure Daisy time.
+        if (current.getGameTime() - startTick < recipe.getTime()) return false;
         if (!harvested && placed.stream().allMatch(target ->
                 current.getBlockState(target).is(recipe.getOutputState().getBlock()))) {
             harvested = true;

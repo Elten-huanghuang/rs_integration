@@ -38,6 +38,7 @@
     "ironfurnaces.BlockIronFurnaceTileBaseMixin",
     "forbidden.ClibanoMainBlockEntityAccessor",
     "sophisticatedbackpacks.InventoryInteractionHelperMixin",
+    "sophisticatedbackpacks.PlayerInventoryProviderMixin",
     "sophisticatedbackpacks.InventoryHelperExternalItemMixin",
     "sophisticatedbackpacks.MagnetUpgradeWrapperMixin",
     "sophisticatedbackpacks.PickupUpgradeWrapperMixin",
