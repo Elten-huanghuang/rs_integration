@@ -1,13 +1,12 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.util.BackpackRSUtils;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.util.Action;
-import com.refinedmods.refinedstorage.api.util.IComparer;
-import com.refinedmods.refinedstorage.api.util.StackListEntry;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
+import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -110,11 +109,11 @@ public abstract class RefillUpgradeWrapperMixin
 
     @Unique
     private void rsi$rsRefill(Player player, IItemHandler playerInv) {
-        INetwork network = BackpackRSUtils.getNetwork(player.level(), this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
-        if (network == null) return;
-
-        IStorageCache<ItemStack> cache = network.getItemStorageCache();
-        if (cache == null) return;
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) return;
+        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        if (session == null) return;
+        StorageSnapshotResult snapshotResult = session.snapshotItems(serverPlayer);
+        if (!snapshotResult.successful()) return;
 
         FilterLogic filter = getFilterLogic();
         IItemHandler filterHandler = filter.getFilterHandler();
@@ -145,23 +144,19 @@ public abstract class RefillUpgradeWrapperMixin
             }
             if (missing <= 0) continue;
 
-            // Snapshot the RS storage cache's stack list before iterating.
-            // cache.getList().getStacks() returns a live view backed by RS's
-            // Guava ArrayListMultimap; the extractItem/insertItem calls below
-            // mutate that same multimap, so iterating the view directly throws
-            // ConcurrentModificationException (crash on the server tick thread).
-            java.util.List<StackListEntry<ItemStack>> cacheSnapshot =
-                    new java.util.ArrayList<>(cache.getList().getStacks());
-            for (StackListEntry<ItemStack> cacheEntry : cacheSnapshot) {
-                ItemStack rsStack = cacheEntry.getStack();
+            for (StoredItem storedItem : snapshotResult.snapshot().orElseThrow().items()) {
+                ItemStack rsStack = storedItem.stack();
                 if (rsStack.isEmpty()) continue;
                 if (!ItemHandlerHelper.canItemStacksStack(rsStack, filterStack)) continue;
                 if (!filter.matchesFilter(rsStack)) continue;
 
                 int toExtract = Math.min(missing, rsStack.getMaxStackSize());
-                ItemStack extracted = network.extractItem(rsStack.copy(), toExtract,
-                        IComparer.COMPARE_NBT, Action.PERFORM);
-                if (extracted.isEmpty()) continue;
+                StorageOperationResult extraction = StorageBackpackUtils.extractExact(
+                        session, serverPlayer, rsStack, toExtract, false);
+                if (extraction == null || extraction.status() == StorageOperationStatus.FAILED
+                        || extraction.status() == StorageOperationStatus.INVALID_RESPONSE
+                        || extraction.extractedStacks().isEmpty()) continue;
+                ItemStack extracted = extraction.extractedStacks().get(0);
 
                 ItemStack toFill = extracted.copy();
                 ItemStack remainder;
@@ -176,10 +171,9 @@ public abstract class RefillUpgradeWrapperMixin
                 missing -= filled;
 
                 if (!remainder.isEmpty()) {
-                    ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
-                    if (!leftover.isEmpty()) {
-                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                    }
+                    StorageOperationResult returned = session.insert(serverPlayer, remainder, false);
+                    if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
+                        ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
                 }
                 if (missing <= 0) break;
             }

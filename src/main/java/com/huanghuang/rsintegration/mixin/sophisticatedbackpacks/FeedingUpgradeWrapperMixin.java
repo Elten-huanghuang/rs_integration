@@ -1,13 +1,12 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.BackpackRSUtils;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
+import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.RSFeedingPolicy;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.util.Action;
-import com.refinedmods.refinedstorage.api.util.IComparer;
-import com.refinedmods.refinedstorage.api.util.StackListEntry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -85,15 +84,19 @@ public abstract class FeedingUpgradeWrapperMixin
                                              CallbackInfoReturnable<Boolean> cir) {
         if (!this.rsi$isRs) return;
 
-        INetwork network = BackpackRSUtils.getNetwork(level, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
-        if (network == null) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
             cir.setReturnValue(false);
             cir.cancel();
             return;
         }
-
-        IStorageCache<ItemStack> cache = network.getItemStorageCache();
-        if (cache == null) {
+        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        if (session == null) {
+            cir.setReturnValue(false);
+            cir.cancel();
+            return;
+        }
+        StorageSnapshotResult snapshotResult = session.snapshotItems(serverPlayer);
+        if (!snapshotResult.successful()) {
             cir.setReturnValue(false);
             cir.cancel();
             return;
@@ -106,8 +109,8 @@ public abstract class FeedingUpgradeWrapperMixin
             return;
         }
 
-        for (StackListEntry<ItemStack> cacheEntry : cache.getList().getStacks()) {
-            ItemStack rsStack = cacheEntry.getStack();
+        for (StoredItem storedItem : snapshotResult.snapshot().orElseThrow().items()) {
+            ItemStack rsStack = storedItem.stack();
             if (rsStack.isEmpty()) continue;
             if (!rsStack.isEdible()) continue;
             if (!filter.matchesFilter(rsStack)) continue;
@@ -122,9 +125,12 @@ public abstract class FeedingUpgradeWrapperMixin
             if (!RSFeedingPolicy.canFeed(hungerRule, missingFood, foodValue,
                     hurt, shouldFeedImmediatelyWhenHurt())) continue;
 
-            ItemStack extracted = network.extractItem(rsStack.copy(), 1,
-                    IComparer.COMPARE_NBT, Action.PERFORM);
-            if (extracted.isEmpty()) continue;
+            StorageOperationResult extraction = StorageBackpackUtils.extractExact(
+                    session, serverPlayer, rsStack, 1, false);
+            if (extraction == null || extraction.status() == StorageOperationStatus.FAILED
+                    || extraction.status() == StorageOperationStatus.INVALID_RESPONSE
+                    || extraction.extractedStacks().isEmpty()) continue;
+            ItemStack extracted = extraction.extractedStacks().get(0);
 
             ItemStack previousMainHand = player.getMainHandItem();
             ItemStack food = extracted.copyWithCount(1);
@@ -143,14 +149,16 @@ public abstract class FeedingUpgradeWrapperMixin
             }
 
             if (!consumed) {
-                ItemStack leftover = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
-                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                StorageOperationResult returned = session.insert(serverPlayer, extracted.copy(), false);
+                if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
+                    ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
                 continue;
             }
 
             if (!remainder.isEmpty()) {
-                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
-                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                StorageOperationResult returned = session.insert(serverPlayer, remainder, false);
+                if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
+                    ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
             }
 
             cir.setReturnValue(true);
