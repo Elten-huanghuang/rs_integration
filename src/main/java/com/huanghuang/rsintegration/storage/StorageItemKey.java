@@ -10,6 +10,10 @@ import java.util.Objects;
 
 /** Backend-qualified canonical identity, reconstruction payload, and defensive display stack. */
 public final class StorageItemKey {
+    public static final int MAX_BACKEND_PAYLOAD_BYTES = 2 * 1024 * 1024;
+    public static final int MAX_CANONICAL_IDENTITY_BYTES = 2 * 1024 * 1024;
+    public static final int MAX_NBT_DEPTH = 512;
+
     private final StorageBackendId backendId;
     private final ResourceLocation itemType;
     private final CompoundTag backendPayload;
@@ -32,6 +36,9 @@ public final class StorageItemKey {
         if (canonicalIdentity.length == 0) {
             throw new IllegalArgumentException("canonical storage identity must not be empty");
         }
+        if (canonicalIdentity.length > MAX_CANONICAL_IDENTITY_BYTES) {
+            throw new IllegalArgumentException("canonical storage identity is too large");
+        }
         if (displayStack.isEmpty()) throw new IllegalArgumentException("display stack must not be empty");
         this.itemType = BuiltInRegistries.ITEM.getResourceKey(displayStack.getItem())
                 .orElseThrow(() -> new IllegalArgumentException("display stack item is not registered"))
@@ -46,7 +53,19 @@ public final class StorageItemKey {
                                                        CompoundTag backendPayload,
                                                        byte[] canonicalIdentity,
                                                        ItemStack displayStack) {
+        StorageIdentityBytes.validateBounds(Objects.requireNonNull(backendPayload, "backendPayload"));
         return new StorageItemKey(backendId, backendPayload, canonicalIdentity, displayStack);
+    }
+
+    /** Creates a key from a structured backend identity while retaining a separate reconstruction payload. */
+    public static StorageItemKey withCanonicalIdentity(StorageBackendId backendId,
+                                                       CompoundTag backendPayload,
+                                                       CompoundTag canonicalIdentity,
+                                                       ItemStack displayStack) {
+        StorageIdentityBytes.validateBounds(Objects.requireNonNull(backendPayload, "backendPayload"));
+        return new StorageItemKey(backendId, backendPayload,
+                StorageIdentityBytes.exact(Objects.requireNonNull(canonicalIdentity,
+                        "canonicalIdentity")), displayStack);
     }
 
     /** Creates a vanilla/Forge stack identity, including serialized capabilities. */

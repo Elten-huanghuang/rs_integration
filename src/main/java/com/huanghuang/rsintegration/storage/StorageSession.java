@@ -11,6 +11,7 @@ import java.util.Set;
  * Authorized live view of one backend network; implementations own native handles.
  * Every method must be called on the Minecraft server thread. Async planning may only retain
  * immutable {@link StorageSnapshot} data and the session's {@link StorageReference}.
+ * Successful snapshots must use the same backend id as {@link #reference()}.
  * Operation results must report the supplied simulate flag through {@link StorageOperationResult#mode()}.
  */
 public interface StorageSession {
@@ -22,6 +23,11 @@ public interface StorageSession {
 
     default boolean supports(StorageCapability capability) {
         return capabilities().contains(Objects.requireNonNull(capability, "capability"));
+    }
+
+    /** Maps a native stack to this backend's authoritative item identity. */
+    default StorageItemKey itemKey(ItemStack stack) {
+        return StorageItemKey.fromItemStack(reference().backendId(), stack);
     }
 
     StorageSnapshotResult snapshotItems(ServerPlayer player);

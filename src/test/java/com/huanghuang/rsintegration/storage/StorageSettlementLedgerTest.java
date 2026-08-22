@@ -27,9 +27,9 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var secondToken = ledger.tokenSince(secondMark);
 
         ledger.beginCommit();
-        ledger.recordExtraction(first, StorageOperationResult.extracted(
+        ledger.recordExtraction(first, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 2, List.of(new ItemStack(Items.DIAMOND, 2))));
-        ledger.recordExtraction(second, StorageOperationResult.extracted(
+        ledger.recordExtraction(second, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.GOLD_INGOT))));
 
         assertEquals(StorageSettlementLedger.State.COMMITTED, ledger.finishCommit());
@@ -44,7 +44,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         StorageSettlementLedger ledger = new StorageSettlementLedger();
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 5);
         ledger.beginCommit();
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 5, List.of(new ItemStack(Items.DIAMOND, 3))));
 
         assertEquals(StorageSettlementLedger.State.RECOVERY_REQUIRED, ledger.finishCommit());
@@ -52,6 +52,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var asset = ledger.recoveryAssets(entry).get(0);
         assertEquals(3, asset.stack().getCount());
         ledger.recordRecovery(entry, asset.id(), StorageOperationResult.inserted(
+                StorageOperationMode.PERFORM,
                 new ItemStack(Items.DIAMOND, 3), new ItemStack(Items.DIAMOND, 1)));
         assertEquals(1, ledger.recoveryAssets(entry).get(0).stack().getCount());
         ledger.recordRecoveredAmount(entry, asset.id(), 1);
@@ -66,6 +67,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 2);
         ledger.beginCommit();
         ledger.recordExtraction(entry, StorageOperationResult.failedExtraction(
+                StorageOperationMode.PERFORM,
                 2, StorageOperationStatus.INVALID_RESPONSE,
                 List.of(new ItemStack(Items.DIAMOND, 2)), List.of(),
                 StorageDiagnosticCode.INVALID_NATIVE_RESPONSE));
@@ -80,7 +82,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         StorageSettlementLedger ledger = new StorageSettlementLedger();
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 3);
         ledger.beginCommit();
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 3, List.of(new ItemStack(Items.DIAMOND, 3))));
         ledger.finishCommit();
         ledger.beginRecovery();
@@ -117,7 +119,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         StorageSettlementLedger ledger = new StorageSettlementLedger();
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 2);
         ledger.beginCommit();
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 2, List.of(new ItemStack(Items.DIAMOND, 2))));
         assertEquals(StorageSettlementLedger.State.COMMITTED, ledger.finishCommit());
 
@@ -135,7 +137,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         StorageSettlementLedger ledger = new StorageSettlementLedger();
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 1);
         ledger.beginCommit();
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.DIAMOND))));
         ledger.finishCommit();
         ledger.beginRecovery();
@@ -156,9 +158,11 @@ class StorageSettlementLedgerTest extends BootstrapTest {
 
         assertThrows(IllegalStateException.class, ledger::finishCommit);
         assertThrows(IllegalArgumentException.class, () -> ledger.recordExtraction(entry,
-                StorageOperationResult.extracted(1, List.of(new ItemStack(Items.DIAMOND)))));
+                StorageOperationResult.extracted(StorageOperationMode.PERFORM,
+                        1, List.of(new ItemStack(Items.DIAMOND)))));
         assertThrows(IllegalArgumentException.class, () -> ledger.recordExtraction(entry,
-                StorageOperationResult.inserted(new ItemStack(Items.DIAMOND, 2), ItemStack.EMPTY)));
+                StorageOperationResult.inserted(StorageOperationMode.PERFORM,
+                        new ItemStack(Items.DIAMOND, 2), ItemStack.EMPTY)));
         assertThrows(IllegalArgumentException.class, () -> ledger.recordExtraction(entry,
                 StorageOperationResult.extracted(StorageOperationMode.SIMULATE,
                         2, List.of(new ItemStack(Items.DIAMOND, 2)))));
@@ -175,21 +179,23 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 1);
         ledger.beginCommit();
         assertThrows(IllegalArgumentException.class, () -> ledger.recordExtraction(entry,
-                StorageOperationResult.extracted(1, List.of(new ItemStack(Items.GOLD_INGOT)))));
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+                StorageOperationResult.extracted(StorageOperationMode.PERFORM,
+                        1, List.of(new ItemStack(Items.GOLD_INGOT)))));
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.DIAMOND))));
         ledger.finishCommit();
         ledger.beginRecovery();
         StorageSettlementLedger foreign = new StorageSettlementLedger();
         var foreignEntry = foreign.reserve(source(), key(Items.DIAMOND), 1);
         foreign.beginCommit();
-        foreign.recordExtraction(foreignEntry, StorageOperationResult.extracted(
+        foreign.recordExtraction(foreignEntry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.DIAMOND))));
         foreign.finishCommit();
         foreign.beginRecovery();
         assertThrows(IllegalArgumentException.class, () -> ledger.recordRecovery(
                 entry, foreign.recoveryAssets(foreignEntry).get(0).id(),
-                StorageOperationResult.inserted(new ItemStack(Items.DIAMOND), ItemStack.EMPTY)));
+                StorageOperationResult.inserted(StorageOperationMode.PERFORM,
+                        new ItemStack(Items.DIAMOND), ItemStack.EMPTY)));
     }
 
     @Test
@@ -200,6 +206,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         malformed.getOrCreateTag().putDouble("unstable", Double.NaN);
         ledger.beginCommit();
         ledger.recordExtraction(entry, StorageOperationResult.failedExtraction(
+                StorageOperationMode.PERFORM,
                 1, StorageOperationStatus.INVALID_RESPONSE, List.of(), List.of(malformed),
                 StorageDiagnosticCode.INVALID_NATIVE_RESPONSE));
 
@@ -249,7 +256,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
                 .orElseThrow(() -> new IllegalArgumentException("foreign entry")));
         second.beginCommit();
         assertThrows(IllegalArgumentException.class, () -> second.recordExtraction(
-                foreignId, StorageOperationResult.extracted(
+                foreignId, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                         1, List.of(new ItemStack(Items.DIAMOND)))));
     }
 
@@ -260,7 +267,7 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var localId = local.reserve(source(), key(Items.DIAMOND), 1);
         var foreignId = foreign.reserve(source(), key(Items.GOLD_INGOT), 1);
         local.beginCommit();
-        local.recordExtraction(localId, StorageOperationResult.extracted(
+        local.recordExtraction(localId, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
                 1, List.of(new ItemStack(Items.DIAMOND))));
         local.finishCommit();
 
@@ -290,7 +297,8 @@ class StorageSettlementLedgerTest extends BootstrapTest {
         var entry = ledger.reserve(source(), key(Items.DIAMOND), 2);
         ItemStack extracted = new ItemStack(Items.DIAMOND, 2);
         ledger.beginCommit();
-        ledger.recordExtraction(entry, StorageOperationResult.extracted(2, List.of(extracted)));
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(
+                StorageOperationMode.PERFORM, 2, List.of(extracted)));
         extracted.setCount(1);
         ledger.finishCommit();
         ledger.beginRecovery();

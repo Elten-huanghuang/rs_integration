@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
-import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
@@ -24,12 +23,11 @@ final class RefinedStorageSnapshotMapper {
             for (ItemStack stack : read.items()) {
                 if (!stack.isEmpty() && stack.getCount() > 0) {
                     items.add(new StoredItem(
-                            StorageItemKey.fromItemStack(RefinedStorageIds.BACKEND, stack),
+                            RefinedStorageItemKeys.fromStack(stack),
                             stack.getCount()));
                 }
             }
-            return StorageSnapshotResult.success(items.isEmpty()
-                    ? StorageSnapshot.EMPTY : new StorageSnapshot(items));
+            return StorageSnapshotResult.success(new StorageSnapshot(RefinedStorageIds.BACKEND, items));
         } catch (IllegalArgumentException e) {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.INVALID_RESPONSE,
                     StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);

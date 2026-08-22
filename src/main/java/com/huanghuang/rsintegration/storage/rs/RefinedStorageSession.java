@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StoragePermissionResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.storage.StorageThreadGuard;
@@ -39,6 +40,11 @@ final class RefinedStorageSession implements StorageSession {
     public StorageReference reference() { return reference; }
 
     @Override
+    public StorageItemKey itemKey(ItemStack stack) {
+        return RefinedStorageItemKeys.fromStack(stack);
+    }
+
+    @Override
     public StorageSnapshotResult snapshotItems(ServerPlayer player) {
         StorageThreadGuard.requireServerThread(player);
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.VIEW);
@@ -46,6 +52,8 @@ final class RefinedStorageSession implements StorageSession {
                 toSnapshotStatus(permission), permission.diagnosticCode());
         try {
             return RefinedStorageSnapshotMapper.map(driver.snapshotItems());
+        } catch (RefinedStorageUnavailableException e) {
+            return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
         } catch (RuntimeException | LinkageError e) {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
@@ -61,8 +69,11 @@ final class RefinedStorageSession implements StorageSession {
     private StoragePermissionResult checkPermissionInternal(ServerPlayer player, StoragePermission permission) {
         Objects.requireNonNull(permission, "permission");
         try {
+            if (!driver.isAvailable()) return StoragePermissionResult.unavailable();
             return driver.hasPermission(player, permission)
                     ? StoragePermissionResult.allowed() : StoragePermissionResult.denied();
+        } catch (RefinedStorageUnavailableException e) {
+            return StoragePermissionResult.unavailable();
         } catch (RuntimeException | LinkageError e) {
             return StoragePermissionResult.failed(StorageDiagnosticCode.PERMISSION_CHECK_FAILED);
         }
@@ -103,9 +114,6 @@ final class RefinedStorageSession implements StorageSession {
         validateAmount(amount);
         if (amount == 0) return StorageOperationResult.extracted(
                 mode(simulate), 0, List.of());
-        if (ingredient.isEmpty()) return StorageOperationResult.failedExtraction(
-                mode(simulate), amount,
-                StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return failedPermissionExtraction(
                 amount, permission, mode(simulate));
@@ -114,9 +122,18 @@ final class RefinedStorageSession implements StorageSession {
                 mode(simulate), amount, toOperationStatus(snapshot.status()), List.of(), List.of(),
                 snapshot.diagnosticCode());
 
+        StorageSnapshot.MatchResult match = snapshot.snapshot().orElseThrow().match(ingredient);
+        if (match.status() == StorageSnapshot.MatchStatus.EMPTY_INGREDIENT) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
+        }
+        if (!match.successful()) return StorageOperationResult.failedExtraction(
+                mode(simulate), amount, StorageOperationStatus.FAILED,
+                List.of(), List.of(), match.diagnosticCode());
+
         long remaining = amount;
         List<ItemStack> extracted = new ArrayList<>();
-        for (StoredItem stored : snapshot.snapshot().orElseThrow().matching(ingredient)) {
+        for (StoredItem stored : match.items()) {
             if (remaining <= 0) break;
             long target = Math.min(remaining, stored.amount());
             StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver,

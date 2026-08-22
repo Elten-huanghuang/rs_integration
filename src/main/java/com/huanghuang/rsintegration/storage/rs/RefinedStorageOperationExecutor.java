@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /** Pure operation sequencing around a replaceable RS driver. */
@@ -30,6 +31,9 @@ final class RefinedStorageOperationExecutor {
                         input, StorageOperationMode.SIMULATE);
                 return StorageOperationResult.inserted(
                         StorageOperationMode.SIMULATE, input, remainder);
+            } catch (RefinedStorageUnavailableException e) {
+                return StorageOperationResult.failedInsert(StorageOperationMode.SIMULATE,
+                        input, StorageOperationStatus.UNAVAILABLE);
             } catch (IllegalArgumentException e) {
                 return StorageOperationResult.failedInsert(StorageOperationMode.SIMULATE,
                         input, StorageOperationStatus.INVALID_RESPONSE,
@@ -48,11 +52,16 @@ final class RefinedStorageOperationExecutor {
                     input, StorageOperationMode.PERFORM);
             simulated = StorageOperationResult.inserted(
                     StorageOperationMode.SIMULATE, input, remainder);
+        } catch (RefinedStorageUnavailableException e) {
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.UNAVAILABLE);
         } catch (IllegalArgumentException e) {
-            return StorageOperationResult.failedInsert(input, StorageOperationStatus.INVALID_RESPONSE,
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.INVALID_RESPONSE,
                     StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
         } catch (RuntimeException | LinkageError e) {
-            return StorageOperationResult.failedInsert(input, StorageOperationStatus.FAILED,
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
         long simulatedTransfer = simulated.transferredAmount().orElseThrow();
@@ -61,15 +70,23 @@ final class RefinedStorageOperationExecutor {
         if (simulatedTransfer > 0) {
             try {
                 recordAccepted.accept(acceptedEstimate.copy());
+            } catch (RefinedStorageUnavailableException e) {
+                return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                        input, StorageOperationStatus.UNAVAILABLE);
             } catch (RuntimeException | LinkageError e) {
-                return StorageOperationResult.failedInsert(input, StorageOperationStatus.FAILED,
+                return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                        input, StorageOperationStatus.FAILED,
                         StorageDiagnosticCode.CHANGE_TRACKING_FAILED);
             }
         }
         try {
             beforePerform.accept(acceptedEstimate.copy());
+        } catch (RefinedStorageUnavailableException e) {
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.UNAVAILABLE);
         } catch (RuntimeException | LinkageError e) {
-            return StorageOperationResult.failedInsert(input, StorageOperationStatus.FAILED,
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.FAILED,
                     StorageDiagnosticCode.INSERT_OBSERVER_FAILED);
         }
         try {
@@ -78,7 +95,10 @@ final class RefinedStorageOperationExecutor {
                 return StorageOperationResult.indeterminateInsert(input,
                         StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
             }
-            return StorageOperationResult.inserted(input, remainder);
+            return StorageOperationResult.inserted(StorageOperationMode.PERFORM, input, remainder);
+        } catch (RefinedStorageUnavailableException e) {
+            return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                    input, StorageOperationStatus.UNAVAILABLE);
         } catch (IllegalArgumentException e) {
             return StorageOperationResult.indeterminateInsert(input,
                     StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
@@ -102,6 +122,21 @@ final class RefinedStorageOperationExecutor {
         List<ItemStack> recovery = new ArrayList<>();
         StorageOperationMode mode = simulate
                 ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM;
+        Objects.requireNonNull(driver, "driver");
+        Objects.requireNonNull(expectedKey, "expectedKey");
+        Objects.requireNonNull(template, "template");
+        if (requestedAmount < 0 || target < 0 || target > requestedAmount) {
+            throw new IllegalArgumentException("invalid extraction amounts");
+        }
+        try {
+            if (template.isEmpty() || !expectedKey.equals(RefinedStorageItemKeys.fromStack(template))) {
+                return StorageOperationResult.failedExtraction(mode, requestedAmount,
+                        StorageOperationStatus.INVALID_REQUEST, extracted, recovery);
+            }
+        } catch (IllegalArgumentException e) {
+            return StorageOperationResult.failedExtraction(mode, requestedAmount,
+                    StorageOperationStatus.INVALID_REQUEST, extracted, recovery);
+        }
         if (simulate && target > Integer.MAX_VALUE) {
             return StorageOperationResult.failedExtraction(mode, requestedAmount,
                     StorageOperationStatus.UNAVAILABLE, extracted, recovery,
@@ -113,6 +148,9 @@ final class RefinedStorageOperationExecutor {
             ItemStack result;
             try {
                 result = driver.extract(template.copyWithCount(1), request, simulate);
+            } catch (RefinedStorageUnavailableException e) {
+                return StorageOperationResult.failedExtraction(mode, requestedAmount,
+                        StorageOperationStatus.UNAVAILABLE, extracted, recovery);
             } catch (RuntimeException | LinkageError e) {
                 return simulate
                         ? StorageOperationResult.failedExtraction(mode, requestedAmount,
@@ -133,7 +171,7 @@ final class RefinedStorageOperationExecutor {
             if (result.isEmpty()) break;
             StorageItemKey returnedKey;
             try {
-                returnedKey = StorageItemKey.fromItemStack(expectedKey.backendId(), result);
+                returnedKey = RefinedStorageItemKeys.fromStack(result);
             } catch (IllegalArgumentException e) {
                 if (!simulate) recovery.add(result.copy());
                 return simulate
@@ -176,6 +214,9 @@ final class RefinedStorageOperationExecutor {
             if (remainder == null) return false;
             if (!remainder.isEmpty()) recovery.add(remainder.copy());
             return true;
+        } catch (RefinedStorageUnavailableException e) {
+            recovery.add(result.copy());
+            return false;
         } catch (RuntimeException | LinkageError e) {
             return false;
         }

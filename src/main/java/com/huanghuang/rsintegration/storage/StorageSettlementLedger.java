@@ -209,6 +209,12 @@ public final class StorageSettlementLedger {
                 StorageItemKey.fromItemStack(entry.key.backendId(), stack));
     }
 
+    /** Validates confirmed fragments using the source session's backend-specific identity rules. */
+    public void recordExtraction(EntryId id, StorageOperationResult result, StorageSession session) {
+        Objects.requireNonNull(session, "session");
+        recordExtraction(id, result, session::itemKey);
+    }
+
     /** Uses the backend's authoritative key mapper to validate every confirmed fragment. */
     public void recordExtraction(EntryId id, StorageOperationResult result,
                                  Function<ItemStack, StorageItemKey> keyMapper) {

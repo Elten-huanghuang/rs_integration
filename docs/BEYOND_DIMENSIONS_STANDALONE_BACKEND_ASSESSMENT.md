@@ -1478,6 +1478,93 @@ git diff --check
 
 下一步仍应先做接入前审计，而不是直接迁移业务：锁定新账本与未来编排 facade 的调用协议，列出旧 `ExtractionLedger` 每一类来源和失败路径如何映射，再选择一个 blast radius 最小的只读/低风险调用面作为首次迁移。BD adapter、生命周期注册、`mods.toml` 可选依赖和核心功能切换继续留在后续明确阶段。
 
+### 17.8 2026-08-22：第七轮契约审计与四项阻断修复
+
+第七轮只读审计发现四项会阻断阶段 1 冻结的问题，随后仅在 storage 基础层和未注册的 RS adapter 骨架内完成修复。现有业务、旧 `ExtractionLedger`、生命周期和 `mods.toml` 仍未改变。
+
+- `StorageSnapshot` 现在必须显式携带 `StorageBackendId`，构造时拒绝任何其他 backend 的 `StoredItem`。通用无归属的 `StorageSnapshot.EMPTY` 已移除；空快照同样必须声明归属。`StorageSession` 契约明确要求成功快照的 backend 等于 session reference 的 backend。
+- RS exact extraction 在调用 native driver 前，会从 reconstruction payload 重新生成 RS canonical key 并与请求 key 完整比较。payload、物品类型或 canonical identity 任一不一致都会返回已知零转移的 `INVALID_REQUEST`，不会触发 native 提取或补偿路径。
+- RS Ingredient matching 进入受控异常边界。第三方 Ingredient 的 `isEmpty` 或 `test` 抛出 runtime/linkage failure 时，返回 `FAILED + INGREDIENT_MATCH_FAILED`；异常发生在任何提取前，不会被错误标记为未知 mutation。
+- `StorageItemKey` 对 reconstruction payload 和 canonical identity 分别设置 2 MiB 上限，并对 NBT 设置 512 层深度上限。默认 exact identity 和后端自定义 canonical identity 两条构造路径都执行边界检查，避免未来持久化或网络输入造成无界内存分配或递归栈耗尽。
+
+新增回归覆盖混合 backend 快照、空快照归属、payload/key 不一致时 native driver 零调用、抛异常的自定义 Ingredient，以及超深 NBT、超大 payload/canonical byte 数组。storage/RS 范围现为 **81 项测试全部通过**；完整项目现为 **1111 项测试全部通过**，0 failure、0 error、0 skipped。`javap -public`、核心隔离测试和 `git diff --check` 同时通过。
+
+这轮修复仍不会影响当前游戏功能：新 registry/adapter/ledger 没有生命周期注册或业务调用者，RS 仍是发布必需依赖。阶段定位保持为 **阶段 1 实现基本完成、继续审计后再冻结；阶段 2 仅有未注册 RS 骨架**。
+
+### 17.9 2026-08-22：阶段 1 契约冻结
+
+在最后一次有界审计中完成三项收口修复，此后停止无边界的基础接口细化：
+
+- `StorageOperationResult` 统一校验失败状态与诊断码。`FAILED`、`INVALID_RESPONSE` 必须携带诊断；`DENIED`、`INVALID_REQUEST` 不允许伪装成带 backend exception 的结果；`INDETERMINATE` 继续只允许真实 mutation 路径和非空诊断。
+- Ingredient 安全匹配从 RS executor 移到 backend-neutral `StorageSnapshot.match`，使用 `SUCCESS / EMPTY_INGREDIENT / FAILED` 结构化结果。RS 和未来 BD adapter 共用同一异常边界，第三方 `isEmpty` 或 `test` 异常不会逃逸。
+- 删除所有会隐式选择 `PERFORM` 的 insert/extract/failure 工厂重载。所有可模拟操作现在必须在编译期显式传入 `StorageOperationMode`；只有名称本身表示真实 mutation 未知的 indeterminate 工厂固定为 `PERFORM`。
+
+新增测试覆盖失败诊断矛盾、自定义 Ingredient 的 `isEmpty`/`test` 异常、空 Ingredient 状态和公共嵌套类型隔离。storage/RS 范围现为 **82 项全部通过**；完整项目 **1112 项全部通过**，0 failure、0 error、0 skipped。`javap -public` 确认公开 operation 工厂全部要求 mode，`git diff --check`、核心 optional-type 隔离和 `mods.toml` 无变更检查通过。
+
+自本节起，**阶段 1 通用存储契约冻结**。后续不再以猜测未来需求为由反复修改基础接口；只有 RS/BD adapter 的真实夹具或游戏环境测试提供可复现证据时才允许解冻。下一项工作进入阶段 2：完成并验证 RS adapter 的注册/生命周期边界，然后实现 BD 1.20.1 adapter；业务迁移仍需等两个后端都能通过相同 session 契约后开始。
+
+### 17.10 2026-08-22：阶段 2 第一批，RS adapter 生命周期接线
+
+阶段 2 开始实施。新增 `StorageBackendRuntime` 作为模组进程生命周期内的统一后端持有者，并在 `FMLCommonSetupEvent` 开头通过纯字符串 descriptor 加载 RS provider。相同 backend ID 在同一模组生命周期内最多尝试加载一次，首次成功或失败结果都会保留，避免配置重载、重复事件或后续调用造成重复注册。loader 的 runtime/linkage failure 继续被隔离为结构化结果，错误 backend ID 不能污染 runtime 状态。
+
+RS session 仍然按玩家解析请求临时创建；runtime 只长期持有无网络状态的 `RefinedStorageBackend`，不会缓存 `INetwork`、玩家或服务器对象，因此跨世界退出和同一 JVM 内服务器重启不需要清理陈旧网络引用。本批没有接入 BD、没有修改 `mods.toml`、没有迁移任何业务调用点，现有功能仍走原 RS 路径。
+
+本批已通过 storage/RS 定向测试、完整测试和 `compileJava`。Gradle XML 的最终统计为 storage/RS **81 项通过**，完整项目 **1115 项通过**，0 failure、0 error、0 skipped；`git diff --check` 通过。17.9 的“82 项”是此前按控制台输出手工记录的历史数字，本节起统一以 Gradle XML 汇总为准。真实 RS 客户端/专服冒烟仍是阶段 2 的后续验收项，不能由单元测试替代。
+
+专服冒烟已推进到 Forge 发现 `refinedstorage-1.12.4.jar`、读取 RSI Mixin 配置并准备 18 个当前环境可用的 Mixin；随后 Minecraft 因开发目录尚未接受 EULA 而正常停止，尚未进入 `FMLCommonSetupEvent`，因此不能把这次运行记作 lifecycle 注册成功。EULA 不由自动化代替用户接受。
+
+同时再次核对 `D:\sd\BeyondDimensions`：当前分支为 `1.20.1`，提交为 `6642c5ae2cd87e42db2b0b530b120faead97c6bd`。源码确认网络引用使用整数 ID、玩家可枚举多个成员网络、`UnifiedStorage.insert` 返回余量、`extract` 返回实际提取量，`ItemStackKey` 身份包含 item、tag 和 Forge caps。尝试生成本地 BD jar 时，Gradle 8.14.3 已下载且 Java 17 选择问题已排除，但插件仓库下载 `foojay-resolver-1.0.0.jar` 时 TLS 握手被远端终止；在获得真实编译 jar 前，不提交靠猜测签名的 BD adapter。
+
+### 17.11 2026-08-22：阶段 2 第二批，RS adapter 运行状态与身份语义加固
+
+本批暂停 BD，只针对 RS 1.12.4 的真实 API 和字节码完成适配器加固。`INetwork.canRun()` 已确认同时包含控制器所在位置已加载、能量足够和红石模式允许三个条件，而 RS 的 `insertItem` / `extractItem` 本身不会代替调用者检查该状态。
+
+- `NativeRefinedStorageDriver` 在快照、权限、tracker、插入和提取每次 native 调用前验证 `canRun()`，并通过控制器维度与坐标重新执行严格解析，要求当前位置仍返回同一个 `INetwork` 对象。断电、红石关闭、区块卸载、控制器拆除或同坐标网络重建都会令旧 session 返回 `UNAVAILABLE`，不会继续使用缓存的旧网络对象。
+- 新增内部不可用异常，将“门禁在 native mutation 前拒绝”与普通 backend exception 分开。模拟和正式插入、提取在确定尚未调用 RS mutation 时保留已知零转移；只有 native mutation 已经开始后发生的未知异常继续报告 `INDETERMINATE`。
+- RS item key 现在以 RS 的 `ItemStack.isSameItemSameTags` 语义构造 canonical identity，即 item + 原生 tag，不把 Forge capabilities 纳入 RS 等价判断；完整 `ItemStack.save` 仍作为 reconstruction payload 保留。快照聚合、请求模板校验和 native 返回栈校验全部使用同一个 RS key mapper。
+- `StorageSession.itemKey` 公开后端权威身份映射，`StorageSettlementLedger` 增加接收 session 的重载。后续业务迁移记录 RS 提取结果时必须通过 session mapper，不能退回默认 Forge 完整 payload 等价规则。
+
+新增回归覆盖 RS item+tag 等价、null/空 tag 与原生比较的一致性、模拟与正式操作之间网络失效的已知零结果，以及不可用提取不被误报为 mutation 未知。storage/RS 定向范围全部通过；完整 Gradle XML 统计为 **1119 项通过**，0 failure、0 error、0 skipped；`compileJava` 随全量测试成功，`git diff --check` 通过。
+
+本批没有接入 BD、没有修改 `mods.toml`、没有迁移递归合成、机器管理中心、一键吃、次元磁铁或其他现有业务调用点。当前线上功能仍走旧 RS 路径；新门禁只影响尚未被业务消费的通用 RS adapter。真实专服仍需在用户接受开发目录 EULA 后验证断电、红石关闭、拆除控制器和重建控制器四种场景。
+
+### 17.12 2026-08-22：RS-only 开发专服启动验收
+
+用户接受开发目录 EULA 后，1.20.1 Forge userdev 专服已在仅提供 Refined Storage 的最小后端环境中真实启动。日志确认 RSI 和 RS 完成构造及配置加载，`FMLCommonSetupEvent` 成功注册 `refinedstorage` backend，世界创建及 RecipeCatalog 预热完成，最终到达 `Done (20.853s)`。因此阶段 2 的“RS adapter 能随专服生命周期加载并注册”已经通过，不再只是单元测试推断。
+
+启动验收同时暴露并修复三个与存储契约无关、但会阻断开发专服的生命周期问题：
+
+- 生产混淆版 `refinedstorage-1.12.4.jar` 不能直接放入 Forge userdev 的 `run/mods`；否则会因 Mojang 映射名不匹配触发 `NoSuchMethodError`。`build.gradle` 现在通过 `runtimeOnly fg.deobf("local:refinedstorage:1.12.4")` 提供开发运行时映射后的 RS jar，`run/mods` 中原文件仅改名为 `.disabled`，`libs` 下的发布依赖未删除。
+- common 模组主类中的 `DistExecutor.safeRunWhenOn` 会在专服构造期检查并拒绝带 client-only 引用的 referent。客户端事件集中迁入 `ClientEventBootstrap`，按物理端通过 `unsafeRunWhenOn` 延迟调用；专服不再解析这些客户端监听器。
+- 模组构造函数不能在 Forge 实际加载 COMMON 配置前调用 `ConfigValue.get()`。配置缓存现在只在对应 `ModConfigEvent.Loading/Reloading` 后刷新；会改变 registry shape 的 Sophisticated Backpacks 物品注册只按模组存在性决定，运行功能开关仍在配置加载后读取。
+
+本次日志中的可选模组 Mixin `ClassNotFoundException` 和 `MarketRegistry not available` 是最小 RS-only 开发环境缺少相应可选模组时的软失败，没有阻止专服到达 `Done`。本次 Gradle TTY 没有把 `stop` 转发到 Minecraft 控制台，最终使用 Ctrl+C 结束已知 `runServer` 会话，因此本轮不宣称正常停服和世界保存流程已验收。
+
+启动修复完成后，全量 Gradle XML 汇总为 **1119 项测试全部通过**，0 failure、0 error、0 skipped；独立 `compileJava --no-daemon` 与 `git diff --check` 同时通过。
+
+本轮仍未创建真实 RS 控制器网络，也未验证真实快照、模拟/正式插入与提取、权限/security extension、断电、红石关闭、区块卸载、控制器拆除或同坐标重建。这些属于阶段 2 后续的游戏内交互验收，不能由“专服到达 Done”替代。BD adapter、`mods.toml` 可选依赖改造和业务迁移仍未开始；当前发布版依然必须安装 RS。
+
+### 17.13 2026-08-22：RS adapter 游戏内验收入口
+
+为避免把现有旧业务路径误当成新 storage adapter 的测试，新增管理员命令 `/rsi_storage_test`。该命令只解析已注册的 `refinedstorage` backend，不引用 BD，也不改变正常功能调用点；命令要求权限等级 2。
+
+- `/rsi_storage_test snapshot`：读取玩家当前 RS 网络的后端无关快照，只报告 item key 数量和 revision。
+- `/rsi_storage_test simulate_insert`：使用主手物品执行模拟插入，验证返回状态、接收数量和余量已知性，不改变 RS 库存。
+- `/rsi_storage_test roundtrip <1-64>`：将主手物品指定数量真实插入 RS，随后使用同一 session 的后端权威身份立即提取相同数量。插入未完整接收时不会继续提取；该命令不会修改玩家背包，但若用户在执行期间人为断电或拆除网络，可能按结果语义留下待人工检查的网络物品，因此只用于专门测试世界。
+
+本入口编译通过，尚未宣称游戏内操作已通过；必须使用重新打包的 JAR 在真实 RS 控制器网络中执行上述命令，并记录每条命令的聊天输出及 `latest.log`。
+
+### 17.14 2026-08-22：RS adapter 首次真实存取通过
+
+在植物科技实例的真实 RS 网络中执行了本入口，日志确认：
+
+- `RS snapshot OK: 147 item keys, revision=-1`：真实快照成功。
+- `RS simulate insert: status=SUCCESS, accepted=64, remainderKnown=true`：64 个物品模拟插入成功，库存未因模拟操作改变。
+- 两次 `RS roundtrip: inserted=1, extracted=1, extractStatus=SUCCESS`：真实插入和提取均准确完成，后端身份映射和数量结算一致。
+- 客户端随后正常保存所有维度并退出；没有 RSI 自身的 ERROR、异常或 `INDETERMINATE` 结果。
+
+因此，RS adapter 的“快照、模拟插入、正式插入/提取”基础通路已通过真实游戏验收，可以开始**RS-only 的业务接入**。本结论不代表断电、红石关闭、区块卸载、控制器拆除/重建等故障场景已经验收；这些场景仍应在业务接入前后作为回归测试保留。BD 仍未接入。
+
 ## 附录 A：关键代码证据
 
 ### RSI

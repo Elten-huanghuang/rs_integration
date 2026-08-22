@@ -5,13 +5,11 @@ import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
-import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
-import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
@@ -41,7 +39,6 @@ import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRSMo
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.network.binding.BindingTooltipHandler;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatNetworkHandler;
@@ -52,6 +49,9 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.storage.StorageBackendDescriptors;
+import com.huanghuang.rsintegration.storage.StorageBackendLoadResult;
+import com.huanghuang.rsintegration.storage.StorageBackendRuntime;
 import com.huanghuang.rsintegration.transfer.ContainerTransferClient;
 import com.huanghuang.rsintegration.transfer.ContainerTransferNetworkHandler;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -124,6 +124,7 @@ public final class RSIntegrationMod {
     public static final String MOD_NAME = "RS Integration";
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
+    public static final StorageBackendRuntime STORAGE_BACKENDS = new StorageBackendRuntime();
 
     // Cached boolean 閳?avoids per-tick ConfigValue.get() Map lookup + sync overhead
     private static boolean verboseLogging;
@@ -141,14 +142,6 @@ public final class RSIntegrationMod {
 
     public static final IEventBus MOD_BUS =
             FMLJavaModLoadingContext.get().getModEventBus();
-
-    static {
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
-            MOD_BUS.addListener(AetherworksClientSetup::onRegisterOverlays);
-            MOD_BUS.addListener(
-                    com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup::onRegisterOverlays);
-        });
-    }
 
     private record ModuleEntry(String modId, ForgeConfigSpec.BooleanValue configFlag,
                                Supplier<IModIntegration> supplier) {}
@@ -214,15 +207,19 @@ public final class RSIntegrationMod {
 
     public RSIntegrationMod() {
         RSIntegrationConfig.register();
-        refreshConfigCache();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
+            if (e.getConfig().getType() == ModConfig.Type.COMMON) {
+                refreshConfigCache();
+            }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
                 migrateServerConfig(e.getConfig());
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
             }
         });
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
-            refreshConfigCache();
+            if (e.getConfig().getType() == ModConfig.Type.COMMON) {
+                refreshConfigCache();
+            }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
             }
@@ -232,28 +229,26 @@ public final class RSIntegrationMod {
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
         ForgeChunkManager.setForcedChunkLoadingCallback(
                 MOD_ID, (level, ticketHelper) -> {});
-        if (enabled(RSIntegrationConfig.ENABLE_SOPHISTICATED_BACKPACKS, ModIds.SOPHISTICATED_BACKPACKS)) {
+        // Registry contents cannot depend on a config that is loaded after mod construction.
+        if (ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) {
             SophisticatedBackpacksItems.init(MOD_BUS);
         }
         ModItems.init(MOD_BUS);
 
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> ContainerTransferClient::registerKeyMappings);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> RSSidePanelClient::registerKeyMappings);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> RSIKeyBindings::registerKeyMappings);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> com.huanghuang.rsintegration.client.ClientEventBootstrap::register);
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient::init);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient::init);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.sidepanel.client.WorldPickClient::init);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> () -> {
-                    com.huanghuang.rsintegration.crafting.CraftProgressKeybind.register();
-                    MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftProgressOverlay.class);
-                });
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
@@ -308,6 +303,14 @@ public final class RSIntegrationMod {
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
+        StorageBackendLoadResult rsBackend = STORAGE_BACKENDS.load(
+                StorageBackendDescriptors.REFINED_STORAGE);
+        if (rsBackend.loaded()) {
+            LOGGER.info("[RSI-Storage] Registered backend {}", rsBackend.backendId());
+        } else {
+            LOGGER.warn("[RSI-Storage] Backend {} was not registered: {}",
+                    rsBackend.backendId(), rsBackend.status());
+        }
         com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.initialize();
         for (ModuleEntry entry : MODULES) {
             if (!entry.configFlag().get()) continue;
@@ -318,7 +321,8 @@ public final class RSIntegrationMod {
             module.registerRecipeHandler();
             module.registerNetworkPackets();
             module.initCommon();
-            DistExecutor.safeRunWhenOn(Dist.CLIENT, module.clientInitSupplier());
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> module.clientInitSupplier().get()::run);
         }
 
         // --- FarmingForBlockheads Market (virtual exchange, no IModIntegration) ---
@@ -536,40 +540,32 @@ public final class RSIntegrationMod {
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) {
             ContainerTransferNetworkHandler.register();
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> ContainerTransferClient::init);
         }
         if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) {
-            DistExecutor.safeRunWhenOn(Dist.CLIENT,
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> RSSidePanelModule::initClient);
             RSSidePanelModule.initCommon();
         }
 
         // Binding tooltip handler
         com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket.register();
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> () -> MinecraftForge.EVENT_BUS.register(BindingTooltipHandler.class));
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
-                () -> () -> MinecraftForge.EVENT_BUS.register(
-                        com.huanghuang.rsintegration.network.binding.BindingHintOverlay.class));
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
         com.huanghuang.rsintegration.enchanting.EnchantingRestockNetworkHandler.register();
         com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockSnapshotPacket.register();
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                MinecraftForge.EVENT_BUS.register(
-                        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class));
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.villager.client.VillagerRestockClient::init);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.enchanting.client.EnchantingRestockClient::init);
         com.huanghuang.rsintegration.reforging.ReforgingRestockNetworkHandler.register();
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient::init);
         com.huanghuang.rsintegration.anvilmemory.AnvilMemoryNetworkHandler.register();
         MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.anvilmemory.AnvilMemoryEvents.class);
-        DistExecutor.safeRunWhenOn(Dist.CLIENT,
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.anvilmemory.AnvilMemoryClient::init);
         ConfigSyncPacket.register();
 
@@ -666,32 +662,6 @@ public final class RSIntegrationMod {
 
         // Auto-eat system
         AutoEatNetworkHandler.register();
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
-                        com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class));
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> {
-            if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
-                        com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
-            }
-            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
-                    CraftProgressClientEvents::onClientLogin);
-            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
-                    CraftProgressClientEvents::onClientLogout);
-        });
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
-                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
-                                com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache.clear()));
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
-                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
-                                com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout()));
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () ->
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
-                        (net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) ->
-                                com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.clear()));
-
         // Resonance disk factory 閳?register with RS storage disk registry
         ResonanceNetworkHandler.register();
         API.instance().getStorageDiskRegistry().add(
@@ -712,9 +682,8 @@ public final class RSIntegrationMod {
     }
 
     private static boolean enabled(ForgeConfigSpec.BooleanValue config, String modId) {
-        if (!config.get()) return false;
         if (!ModList.get().isLoaded(modId)) return false;
-        return true;
+        return config.get();
     }
 
     @SuppressWarnings("removal")

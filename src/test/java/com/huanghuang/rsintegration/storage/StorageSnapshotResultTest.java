@@ -10,7 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StorageSnapshotResultTest {
     @Test
     void failureIsDistinctFromSuccessfulEmptySnapshot() {
-        StorageSnapshotResult empty = StorageSnapshotResult.success(StorageSnapshot.EMPTY);
+        StorageSnapshotResult empty = StorageSnapshotResult.success(new StorageSnapshot(
+                new StorageBackendId("test"), java.util.List.of()));
         StorageSnapshotResult unavailable = StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
 
         assertEquals(StorageSnapshotStatus.SUCCESS, empty.status());
