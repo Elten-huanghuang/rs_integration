@@ -14,6 +14,8 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
+import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.JeiSubtreeBuilder;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
@@ -178,6 +180,9 @@ public final class CraftingPlanScreen extends Screen {
     private boolean foldAllHovered;
     // Tree-view [Expand All] / [Collapse All] toolbar button hitbox (top-right of the viewport).
     private OutputDestination outputDestination;
+    @Nullable
+    private StorageReference storageReference;
+    private List<StorageNetworkDescriptor> storageNetworks = List.of();
     private int outputSelectorX, outputSelectorY, outputSegmentW, outputSelectorH;
     private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
     // Alternative-recipe dropdown (screen space); open node + row hitboxes.
@@ -303,6 +308,8 @@ public final class CraftingPlanScreen extends Screen {
         this.outputDestination = hasStorageBackend()
                 ? CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH)
                 : OutputDestination.PLAYER_INVENTORY;
+        this.storageReference = plan.storageReference();
+        this.storageNetworks = plan.storageNetworks();
         // Adaptive view routing (§2.5): non-trivial plans open in the tree; simple ones stay on the card.
         this.viewMode = plan.steps().size() > 2 ? ViewMode.TREE : ViewMode.CARD;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
@@ -342,6 +349,11 @@ public final class CraftingPlanScreen extends Screen {
     public void updatePlan(PlanResponse newPlan) {
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
+        // The server response is authoritative.  Accepting only non-null
+        // references leaves a stale RS selection alive after a backend switch
+        // or an unavailable network response.
+        this.storageReference = newPlan.storageReference();
+        this.storageNetworks = newPlan.storageNetworks();
         if (previous != null) {
             selectedMachineIndex = findMachineCandidate(previous.dimension(), previous.x(), previous.y(), previous.z());
             if (selectedMachineIndex < 0) {
@@ -658,6 +670,24 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
+    private void cycleStorageTarget() {
+        if (storageNetworks.isEmpty()) return;
+        int current = -1;
+        if (storageReference != null) {
+            for (int i = 0; i < storageNetworks.size(); i++) {
+                if (storageReference.equals(storageNetworks.get(i).reference())) {
+                    current = i;
+                    break;
+                }
+            }
+        }
+        StorageNetworkDescriptor next = storageNetworks.get((current + 1) % storageNetworks.size());
+        storageReference = next.reference();
+        RSIntegrationMod.debug("[RSI-Plan] selected storage target {}", storageReference);
+        lastRefreshCount = -1;
+        requestPlanRefresh();
+    }
+
     private void onConfirm() {
         commitRepeatCountInput();
         if (plan.executionBlocked() && !selectedPath.isDirty()) return;
@@ -731,7 +761,8 @@ public final class CraftingPlanScreen extends Screen {
         GenericCraftPacket packet = new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
                         executionTarget(plan.clickedOutput(), plan.targetResult()), requestId,
-                        outputDestination).withMachineSelectionMode(machineSelectionMode);
+                        outputDestination).withMachineSelectionMode(machineSelectionMode)
+                .withStorageReference(storageReference);
         BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
     }
 
@@ -1086,12 +1117,42 @@ public final class CraftingPlanScreen extends Screen {
         gfx.fill(outputSelectorX + 10, outputSelectorY + outputSelectorH - 2,
                 outputSelectorX + outputSegmentW - 10, outputSelectorY + outputSelectorH - 1, 0xFF69D98A);
 
-        Component destination = Component.translatable(outputDestination == OutputDestination.RS_NETWORK
-                ? "rsi.plan.output.rs" : "rsi.plan.output.player");
+        Component destination;
+        if (outputDestination == OutputDestination.PLAYER_INVENTORY) {
+            destination = Component.translatable("rsi.plan.output.player");
+        } else if (storageReference != null) {
+            StorageNetworkDescriptor selected = storageNetworks.stream()
+                    .filter(network -> storageReference.equals(network.reference()))
+                    .findFirst().orElse(null);
+            destination = selected == null
+                    ? Component.translatable("rsi.plan.output.storage")
+                    : storageTargetLabel(selected);
+        } else {
+            destination = Component.translatable("rsi.plan.output.storage");
+        }
         String value = destination.getString();
         int arrowW = font.width(" ↔");
         gfx.drawString(font, value + " ↔", outputSelectorX + (outputSegmentW - font.width(value + " ↔")) / 2,
                 textY, textColor, false);
+    }
+
+    /**
+     * Network references are protocol data, not player-facing names. Older
+     * discovery paths used the canonical RS id (v1|...) as the descriptor
+     * display name; keep accepting that data but never render it directly.
+     */
+    private static Component storageTargetLabel(StorageNetworkDescriptor descriptor) {
+        String displayName = descriptor.displayName();
+        String backend = descriptor.reference().backendId().value();
+        String networkId = descriptor.reference().networkId();
+        if ("refinedstorage".equals(backend)
+                && (displayName.startsWith("v1|") || displayName.equals(networkId))) {
+            return Component.translatable("rsi.plan.output.rs_target");
+        }
+        if ("beyonddimensions".equals(backend) && displayName.equals(networkId)) {
+            return Component.translatable("rsi.plan.output.bd_target", networkId);
+        }
+        return Component.literal(displayName);
     }
 
     private static boolean hasStorageBackend() {
@@ -2589,11 +2650,25 @@ public final class CraftingPlanScreen extends Screen {
                 return true;
             }
         }
-        if (button == 0 && outputSelectorH > 0
+        if ((button == 0 || button == 1) && outputSelectorH > 0
                 && mx >= outputSelectorX && mx < outputSelectorX + outputSegmentW
                 && my >= outputSelectorY && my < outputSelectorY + outputSelectorH) {
-            selectOutputDestination(outputDestination == OutputDestination.RS_NETWORK
-                    ? OutputDestination.PLAYER_INVENTORY : OutputDestination.RS_NETWORK);
+            if (button == 1) {
+                if (!storageNetworks.isEmpty()) {
+                    if (outputDestination != OutputDestination.RS_NETWORK) {
+                        selectOutputDestination(OutputDestination.RS_NETWORK);
+                    } else {
+                        cycleStorageTarget();
+                    }
+                }
+            } else {
+                // Left click is the stable primary toggle: player inventory
+                // versus the currently selected backend network. Right click
+                // cycles concrete networks without making the player target
+                // unreachable when RS and BD are installed together.
+                selectOutputDestination(outputDestination == OutputDestination.RS_NETWORK
+                        ? OutputDestination.PLAYER_INVENTORY : OutputDestination.RS_NETWORK);
+            }
             return true;
         }        // Scrollbar thumbs first (both view modes) — grab the thumb, or click the track to jump.
         if (button == 0) {

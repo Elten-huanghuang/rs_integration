@@ -38,9 +38,16 @@ public final class BindingHintOverlay {
         var target = BindingEventHandler.bindingTargetPos(mc.level, hit.getBlockPos());
         if (target == null) return;
         boolean bound = BindingStorage.hasBinding(held, mc.level.dimension().location(), target);
-        Component text = bound
-                ? Component.translatable("gui.rs_integration.binding_hint.unbind")
-                : Component.translatable("gui.rs_integration.binding_hint.bind");
+        var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
+        boolean bdTerminal = itemId != null
+                && "beyonddimensions".equals(itemId.getNamespace())
+                && "net_terminal_item".equals(itemId.getPath());
+        String key = bdTerminal
+                ? (bound ? "gui.rs_integration.binding_hint.unbind_alt"
+                        : "gui.rs_integration.binding_hint.bind_alt")
+                : (bound ? "gui.rs_integration.binding_hint.unbind"
+                        : "gui.rs_integration.binding_hint.bind");
+        Component text = Component.translatable(key);
         int color = bound ? UNBIND : BIND;
 
         Font font = mc.font;

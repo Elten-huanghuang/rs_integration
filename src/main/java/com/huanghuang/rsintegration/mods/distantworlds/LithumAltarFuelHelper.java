@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.distantworlds;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
@@ -97,6 +98,43 @@ public final class LithumAltarFuelHelper {
         return true;
     }
 
+    public boolean ensureFuel(net.minecraft.server.level.ServerLevel level, CraftStorageEndpoint endpoint,
+                              net.minecraft.server.level.ServerPlayer player) {
+        if (furnacePos == null || endpoint == null) return false;
+        BlockEntity furnace = level.getBlockEntity(furnacePos);
+        if (!LithumAltarStructureHelper.isFurnace(furnace)) return false;
+        IItemHandler handler = handler(furnace);
+        if (handler == null || handler.getSlots() <= FUEL_SLOT) return false;
+        ItemStack current = handler.getStackInSlot(FUEL_SLOT);
+        if (!current.isEmpty() && current.is(FUEL_TAG)) return true;
+        ItemStack candidate = selectFuel(endpoint, player);
+        if (candidate.isEmpty()) return false;
+        int requested = Math.min(RSIntegrationConfig.DISTANT_WORLDS_FUEL_BATCH_SIZE.get(),
+                LithumFuelInventoryLogic.insertionRoom(current, candidate, handler.getSlotLimit(FUEL_SLOT)));
+        if (requested <= 0) return false;
+        ItemStack simulated = handler.insertItem(FUEL_SLOT, candidate.copyWithCount(requested), true);
+        int accepted = requested - simulated.getCount();
+        if (accepted <= 0) return false;
+        var simulatedExtract = endpoint.extractExact(player, candidate.copyWithCount(1), accepted, true);
+        if (simulatedExtract.transferredAmount().orElse(0L) != accepted) return false;
+        var extractedResult = endpoint.extractExact(player, candidate.copyWithCount(1), accepted, false);
+        ItemStack extracted = extractedResult.extractedStacks().stream().findFirst()
+                .map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        if (extracted.getCount() != accepted) {
+            if (!extracted.isEmpty()) endpoint.insert(player, extracted, false);
+            return false;
+        }
+        ItemStack remainder = handler.insertItem(FUEL_SLOT, extracted, false);
+        if (!remainder.isEmpty()) endpoint.insert(player, remainder, false);
+        int inserted = extracted.getCount() - remainder.getCount();
+        if (inserted <= 0) return false;
+        fuelType = candidate.copyWithCount(1);
+        insertedCount += inserted;
+        furnace.setChanged();
+        level.sendBlockUpdated(furnacePos, furnace.getBlockState(), furnace.getBlockState(), 3);
+        return true;
+    }
+
     public void refundUnused(net.minecraft.server.level.ServerLevel level, INetwork network,
                              net.minecraft.server.level.ServerPlayer player) {
         if (furnacePos == null || insertedCount <= 0) return;
@@ -114,6 +152,21 @@ public final class LithumAltarFuelHelper {
             net.minecraft.world.Containers.dropItemStack(level, furnacePos.getX() + 0.5,
                     furnacePos.getY() + 1, furnacePos.getZ() + 0.5, remainder);
         }
+        insertedCount = Math.max(0, insertedCount - extracted.getCount());
+    }
+
+    public void refundUnused(net.minecraft.server.level.ServerLevel level, CraftStorageEndpoint endpoint,
+                             net.minecraft.server.level.ServerPlayer player) {
+        if (endpoint == null || furnacePos == null || insertedCount <= 0) return;
+        BlockEntity furnace = level.getBlockEntity(furnacePos);
+        IItemHandler handler = handler(furnace);
+        if (handler == null) return;
+        ItemStack current = handler.getStackInSlot(FUEL_SLOT);
+        int count = LithumFuelInventoryLogic.refundableAddedCount(baseline, insertedCount, current);
+        if (count <= 0) return;
+        ItemStack extracted = handler.extractItem(FUEL_SLOT, count, false);
+        ItemStack remainder = extracted.isEmpty() ? ItemStack.EMPTY : endpoint.insert(player, extracted, false).remainder().orElse(ItemStack.EMPTY);
+        if (!remainder.isEmpty() && player != null) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, remainder);
         insertedCount = Math.max(0, insertedCount - extracted.getCount());
     }
 
@@ -143,6 +196,27 @@ public final class LithumAltarFuelHelper {
             int index = key == null ? -1 : priority.indexOf(key.toString());
             return index < 0 ? Integer.MAX_VALUE : index;
         }).thenComparing((ItemStack stack) -> {
+            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            return key == null ? "" : key.toString();
+        }));
+        return candidates.isEmpty() ? ItemStack.EMPTY : candidates.get(0);
+    }
+
+    private static ItemStack selectFuel(CraftStorageEndpoint endpoint,
+                                        net.minecraft.server.level.ServerPlayer player) {
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return ItemStack.EMPTY;
+        List<? extends String> priority = RSIntegrationConfig.DISTANT_WORLDS_FUEL_PRIORITY.get();
+        List<ItemStack> candidates = new ArrayList<>();
+        for (var entry : snapshot.items()) {
+            ItemStack stack = entry.stack();
+            if (!stack.isEmpty() && stack.is(FUEL_TAG)) candidates.add(stack.copyWithCount(1));
+        }
+        candidates.sort(Comparator.comparingInt((ItemStack stack) -> {
+            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            int index = key == null ? -1 : priority.indexOf(key.toString());
+            return index < 0 ? Integer.MAX_VALUE : index;
+        }).thenComparing(stack -> {
             ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
             return key == null ? "" : key.toString();
         }));

@@ -82,7 +82,10 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        }
+        privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>(3);
         for (IngredientSpec spec : specs) {
             ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
@@ -106,7 +109,6 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
         this.ledger = sharedLedger;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
         return start(player, materials);
     }
 

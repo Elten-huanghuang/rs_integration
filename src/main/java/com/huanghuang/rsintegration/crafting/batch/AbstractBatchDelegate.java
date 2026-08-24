@@ -279,7 +279,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** Mark this delegate as using the chain-owned committed ledger. */
     public final void useSharedLedger(@Nonnull ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
+        CraftStorageEndpoint selected = sharedLedger.storageEndpoint();
+        if (selected != null) this.storageEndpoint = selected;
         this.usingSharedLedger = true;
+    }
+
+    /** Attach the chain-selected storage backend before private-ledger starts. */
+    public final void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
+        this.storageEndpoint = endpoint;
     }
 
     /** Called by the chain after {@link #validateAndInit} succeeds. */
@@ -368,6 +375,11 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             storageEndpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
         }
         return storageEndpoint;
+    }
+
+    /** True when this operation has a selected backend, RS or otherwise. */
+    protected final boolean hasStorageAccess() {
+        return storageEndpoint() != null;
     }
 
     /** Insert into the selected storage backend and return any remainder. */

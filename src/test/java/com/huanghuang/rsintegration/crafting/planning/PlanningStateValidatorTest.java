@@ -53,6 +53,16 @@ class PlanningStateValidatorTest extends BootstrapTest {
                 planRequiring(new ItemStack(Items.COAL), 1)));
     }
 
+    @Test
+    void completeStateRejectsChangedInventoryQuantity() {
+        PlanningSnapshot cached = snapshot(Map.of(
+                new StackKey(Items.COAL, null), 8), "network:inventory");
+        PlanningSnapshot current = snapshot(Map.of(
+                new StackKey(Items.COAL, null), 3), "network:inventory");
+
+        assertFalse(PlanningStateValidator.sameState(cached, current));
+    }
+
     private static PlanningSnapshot snapshot(Map<StackKey, Integer> available,
                                              String networkFingerprint) {
         return new PlanningSnapshot(UUID.fromString("00000000-0000-0000-0000-000000000001"),

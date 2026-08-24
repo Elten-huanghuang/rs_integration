@@ -115,7 +115,10 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        }
+        privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>(INPUT_COUNT);
         for (IngredientSpec spec : specs) {
             ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
@@ -140,7 +143,6 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         this.ledger = sharedLedger;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
         return startCraft(player, materials);
     }
 

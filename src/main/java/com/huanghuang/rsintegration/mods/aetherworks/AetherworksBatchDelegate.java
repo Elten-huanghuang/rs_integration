@@ -102,7 +102,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             this.tempMax = 3000;
         }
 
-        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        }
         this.materialsPlaced = false;
         this.recordedInputItem = null;
         return true;

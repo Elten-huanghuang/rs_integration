@@ -224,11 +224,12 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         // Ars refuses to start while any scanned pedestal contains an old item.
         // Recover every stale stack before placing this operation's materials.
-        if (network == null) {
+        if (!hasStorageAccess()) {
             network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
         }
-        int recovered = ArsPedestalRecovery.recover(
-                level, pedestalLayout.pedestalPositions(), player, network);
+        int recovered = storageEndpoint() != null
+                ? ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, storageEndpoint())
+                : ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, network);
         if (recovered > 0) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-ArsApparatus] Recovered {} occupied pedestal stack(s) into RS",
@@ -560,7 +561,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     private void refundRejectedStart(ServerPlayer player, ServerLevel level,
                                      List<ItemStack> materials) {
         if (!ownsRejectedStartRefund(usingSharedLedger)) return;
-        if (network == null) {
+        if (!hasStorageAccess()) {
             network = CraftPacketUtils.resolveNetworkForCraft(
                     player, level.dimension(), machinePos);
         }
@@ -578,7 +579,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     private void returnExistingCentralItem(ServerPlayer player, ServerLevel level,
                                            ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network == null) {
+        if (!hasStorageAccess()) {
             network = CraftPacketUtils.resolveNetworkForCraft(
                     player, level.dimension(), machinePos);
         }

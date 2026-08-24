@@ -108,6 +108,9 @@ public final class AsyncCraftChain {
     private final UUID playerId;
     private final MinecraftServer server;
     private final INetwork network;
+    /** Backend-neutral storage endpoint; RS is retained only as a compatibility handle. */
+    @Nullable
+    private final CraftStorageEndpoint storageEndpoint;
     private final List<CraftingResolver.ResolutionStep> steps;
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     /**
@@ -206,21 +209,41 @@ public final class AsyncCraftChain {
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            List<CraftingResolver.ResolutionStep> steps) {
-        this(UUID.randomUUID(), playerId, server, network, steps, null);
+        this(UUID.randomUUID(), playerId, server, network, steps, null, null);
+    }
+
+    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+                           @Nullable CraftStorageEndpoint storageEndpoint,
+                           List<CraftingResolver.ResolutionStep> steps) {
+        this(UUID.randomUUID(), playerId, server, network, steps, null, storageEndpoint);
     }
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            CraftPlanGraph graph) {
         this(UUID.randomUUID(), playerId, server, network,
-                ExecutionEquivalence.projectFlatSteps(graph), graph);
+                ExecutionEquivalence.projectFlatSteps(graph), graph, null);
+    }
+
+    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+                           @Nullable CraftStorageEndpoint storageEndpoint,
+                           CraftPlanGraph graph) {
+        this(UUID.randomUUID(), playerId, server, network,
+                ExecutionEquivalence.projectFlatSteps(graph), graph, storageEndpoint);
     }
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
                            CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
                            int repeatCount) {
+        this(playerId, server, network, null, graph, terminalStep, repeatCount);
+    }
+
+    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+                           @Nullable CraftStorageEndpoint storageEndpoint,
+                           CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
+                           int repeatCount) {
         this(UUID.randomUUID(), playerId, server, network,
                 compatibilitySteps(ExecutionEquivalence.projectFlatSteps(graph),
-                        terminalStep, repeatCount), graph);
+                        terminalStep, repeatCount), graph, storageEndpoint);
         // The resolver graph describes the materials needed by terminalStep; it
         // does not contain terminalStep itself. Running that graph scheduler would
         // therefore finish after the intermediates and silently skip the requested
@@ -238,17 +261,21 @@ public final class AsyncCraftChain {
 
     AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
                     List<CraftingResolver.ResolutionStep> steps) {
-        this(craftId, playerId, server, network, steps, null);
+        this(craftId, playerId, server, network, steps, null, null);
     }
 
     private AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
                             List<CraftingResolver.ResolutionStep> steps,
-                            @Nullable CraftPlanGraph graph) {
+                            @Nullable CraftPlanGraph graph,
+                            @Nullable CraftStorageEndpoint storageEndpoint) {
         this.craftId = Objects.requireNonNull(craftId, "craftId");
         this.progressPublisher = new CraftProgressPublisher(craftId);
         this.playerId = playerId;
         this.server = server;
         this.network = network;
+        this.storageEndpoint = storageEndpoint != null
+                ? storageEndpoint
+                : network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
         this.steps = List.copyOf(steps);
         if (graph != null) {
             CraftPlanValidator.validate(graph);
@@ -260,9 +287,7 @@ public final class AsyncCraftChain {
                 error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error),
                 AsyncCraftManager.getInstance()::enqueueCompletion);
         this.ledger.setLogContext(ctx);
-        if (network != null) {
-            this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-        }
+        if (this.storageEndpoint != null) this.ledger.setStorageEndpoint(this.storageEndpoint);
         int cap;
         try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
         catch (Exception e) { cap = 1; }
@@ -746,7 +771,7 @@ public final class AsyncCraftChain {
             if (state == State.ABORTED) return true;
             waitingForVanillaBudget = currentStepIdx < steps.size()
                     && steps.get(currentStepIdx).modType() == ModType.GENERIC;
-            if (!ledger.isCommitted() && !ledger.commit(network, online)) {
+            if (!ledger.isCommitted() && !commitLedger(ledger, online)) {
                 abort("Commit failed after vanilla batch",
                         Component.translatable("rsi.async.abort.vanilla_commit_failed"));
                 return true;
@@ -918,25 +943,22 @@ public final class AsyncCraftChain {
             currentStepIdx = idx;
             ExtractionLedger nodeLedger = new ExtractionLedger();
             nodeLedger.setLogContext(ctx);
-            if (network != null) {
-                nodeLedger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-            }
+            if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
             OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
             MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
             List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
             boolean initialReserved = true;
             for (ItemStack initial : checkout.initialStacks()) {
-                ItemStack reserved = nodeLedger.reserveExactAcrossNetworkAndInventory(
-                        initial, initial.getCount(), network, online);
+                ItemStack reserved = reserveExact(nodeLedger, initial, initial.getCount(), online);
                 if (reserved.isEmpty()) {
                     initialReserved = false;
                     break;
                 }
                 operationInventory.add(reserved);
             }
-            if (!initialReserved || !operation.commit(() -> nodeLedger.commit(network, online))) {
+            if (!initialReserved || !operation.commit(() -> commitLedger(nodeLedger, online))) {
                 graphAdmissions.releaseMaterial(admission);
-                if (nodeLedger.isCommitted()) nodeLedger.refundCommitted(network, online);
+                if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
                 else nodeLedger.rollback(online);
                 operation.close();
                 graphScheduler.releaseClaim(vanillaNode);
@@ -956,7 +978,7 @@ public final class AsyncCraftChain {
                 // Vanilla execution is synchronous and has no external machine side
                 // effect. A failed logical start can therefore refund exact inputs.
                 graphAdmissions.refundCommittedMaterial(admission);
-                if (nodeLedger.isCommitted()) nodeLedger.refundCommitted(network, online);
+                if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
                 operation.close();
                 nodeLedger.close();
                 if (graphScheduler.state(vanillaNode) == DagScheduler.NodeState.RUNNING) {
@@ -1295,6 +1317,11 @@ public final class AsyncCraftChain {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
                 }
+                if (candidate instanceof AbstractBatchDelegate abd) {
+                    // Preparation may inspect storage-backed fuel or catalyst
+                    // availability. Reuse the endpoint selected for this chain.
+                    abd.setStorageEndpoint(storageEndpoint);
+                }
                 IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), machine.dim(), machine.pos());
                 if (result.state() == IBatchDelegate.PreparationState.READY) {
@@ -1351,7 +1378,7 @@ public final class AsyncCraftChain {
         if (operationGroup && workerReusable) {
             operationCost = Math.min(operationCost, Math.max(1,
                     reusableWorkerCapacity(delegate.getGraphSpecs(),
-                            delegate.getMaterialReservationScopes(), online, network)));
+                            delegate.getMaterialReservationScopes(), online, storageEndpoint)));
         }
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
@@ -1394,9 +1421,16 @@ public final class AsyncCraftChain {
         if (specs == null || specs.isEmpty() || online == null) return 1;
         Map<CraftingResolver.StackKey, Integer> available = network == null
                 ? MaterialSources.listAllAvailable(online, (INetwork) null)
-                : MaterialSources.listAllAvailable(online,
-                        CraftStorageEndpoints.fromLegacyNetwork(network));
+                : MaterialSources.listAllAvailable(online, network);
         return reusableWorkerCapacity(specs, scopes, available);
+    }
+
+    static int reusableWorkerCapacity(List<IngredientSpec> specs,
+                                      List<IBatchDelegate.MaterialReservationScope> scopes,
+                                      ServerPlayer online, @Nullable CraftStorageEndpoint endpoint) {
+        if (specs == null || specs.isEmpty() || online == null) return 1;
+        return reusableWorkerCapacity(specs, scopes,
+                MaterialSources.listAllAvailable(online, endpoint));
     }
 
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
@@ -1426,9 +1460,7 @@ public final class AsyncCraftChain {
             NodeAdmissionCoordinator.Admission admission) {
         ExtractionLedger nodeLedger = new ExtractionLedger();
         nodeLedger.setLogContext(ctx);
-        if (network != null) {
-            nodeLedger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-        }
+        if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
         IBatchDelegate delegate = prepared.delegate();
         OperationExecutionKernel.Session operationSession = null;
         boolean ownershipTransferred = false;
@@ -1538,8 +1570,8 @@ public final class AsyncCraftChain {
                 }
             }
             boolean committed = operationSession != null
-                    ? operationSession.commit(() -> nodeLedger.commit(network, online))
-                    : nodeLedger.commit(network, online);
+                    ? operationSession.commit(() -> commitLedger(nodeLedger, online))
+                    : commitLedger(nodeLedger, online);
             if (!committed) {
                 if (operationSession != null) operationSession.close();
                 return GraphDispatchResult.retry("node ledger commit did not complete");
@@ -1565,7 +1597,9 @@ public final class AsyncCraftChain {
                     () -> startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger))
                     : startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger);
             if (!accepted) {
-                runtime.markStartFailed("delegate rejected graph dispatch after start attempt");
+                runtime.markStartFailed("delegate rejected graph dispatch after start attempt: delegate="
+                        + delegate.getClass().getSimpleName()
+                        + " recipe=" + prepared.step().recipeId());
             }
             return GraphDispatchResult.started(runtime);
         } catch (RuntimeException exception) {
@@ -1581,7 +1615,7 @@ public final class AsyncCraftChain {
                 return GraphDispatchResult.started(runtime);
             }
             if (operationSession != null) operationSession.close();
-            if (nodeLedger.isCommitted()) nodeLedger.refundCommitted(network, online);
+            if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
             try {
                 delegate.onBatchFailed(online, "graph dispatch failed before start");
                 terminalCleanupInvoked = true;
@@ -1651,9 +1685,7 @@ public final class AsyncCraftChain {
             if (producer.isEmpty()) continue;
             ItemStack leftover = producer.copy();
             try {
-                if (network != null) {
-                    leftover = TrackedNetworkInsertion.insert(network, online, producer);
-                }
+                leftover = insertIntoStorage(online, producer);
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
                         "Producer material transfer to RS failed for private-ledger node {}"),
@@ -1823,8 +1855,7 @@ public final class AsyncCraftChain {
         for (MaterialBroker.Fragment fragment : checkout.fragments()) {
             ItemStack planned = fragment.stack();
             if (fragment.source() instanceof MaterialSource.InitialPool) {
-                ItemStack reserved = ledger.reserveExactAcrossNetworkAndInventory(
-                        planned, planned.getCount(), network, online);
+                ItemStack reserved = reserveExact(ledger, planned, planned.getCount(), online);
                 if (reserved.isEmpty()) return null;
                 materials.add(reserved);
             } else if (fragment.source() instanceof MaterialSource.ProducerOutput) {
@@ -1884,8 +1915,9 @@ public final class AsyncCraftChain {
                         }
                         material = planned.get(0);
                     } else {
-                        material = ledger.reserve(
-                                spec.ingredient(), spec.count(), network, online, null, null);
+                        material = storageEndpoint != null
+                                ? ledger.reserve(spec.ingredient(), spec.count(), storageEndpoint, online, null, null)
+                                : ledger.reserve(spec.ingredient(), spec.count(), network, online, null, null);
                         if (material.isEmpty() || material.getCount() != spec.count()) {
                             ledger.cancelReservationsSince(reservationMark);
                             return null;
@@ -2075,8 +2107,7 @@ public final class AsyncCraftChain {
                 // remain eligible and the ledger captures the exact stack it selected.
                 ItemStack initial;
                 ItemStack exactTemplate = combined.isEmpty() ? planned : combined;
-                initial = ledger.reserveExactAcrossNetworkAndInventory(
-                        exactTemplate, remaining, network, online);
+                initial = reserveExact(ledger, exactTemplate, remaining, online);
                 if (initial.isEmpty()) {
                     ledger.cancelReservationsSince(reservationMark);
                     return null;
@@ -2684,10 +2715,7 @@ public final class AsyncCraftChain {
                             // Do not invoke an RS-typed method in that case: besides
                             // being invalid, linking that signature crashes when RS is
                             // absent from the classpath.
-                            if (network != null) {
-                                reserved = executionLedger.reserveFromNetwork(
-                                        spec.ingredient(), stillNeeded, network, online);
-                            }
+                            reserved = reserveIngredient(executionLedger, spec.ingredient(), stillNeeded, online);
                             if (reserved.isEmpty()) {
                                 reserved = executionLedger.reserveFromInventory(
                                         spec.ingredient(), stillNeeded, online);
@@ -2787,9 +2815,7 @@ public final class AsyncCraftChain {
 
             ItemStack reserved = ItemStack.EMPTY;
             if (allowPhysicalFallback) {
-                if (network != null) {
-                    reserved = executionLedger.reserveFromNetwork(ingredient, stillNeeded, network, online);
-                }
+                reserved = reserveIngredient(executionLedger, ingredient, stillNeeded, online);
                 if (reserved.isEmpty()) {
                     reserved = executionLedger.reserveFromInventory(ingredient, stillNeeded, online);
                 }
@@ -3125,7 +3151,7 @@ public final class AsyncCraftChain {
                     waitingForMachineLease = true;
                     return null;
                 }
-                if (!flatOperationSession.commit(() -> ledger.commit(network, online))) {
+                if (!flatOperationSession.commit(() -> commitLedger(ledger, online))) {
                     closeFlatOperationScope();
                     RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for {}"),
                             step.recipeId());
@@ -3137,6 +3163,7 @@ public final class AsyncCraftChain {
                     return null;
                 }
                 if (delegate instanceof AbstractBatchDelegate abd) {
+                    abd.setStorageEndpoint(storageEndpoint);
                     abd.useSharedLedger(ledger);
                 }
                 if (!flatOperationSession.tryStart(
@@ -3178,7 +3205,7 @@ public final class AsyncCraftChain {
                 // products are now network-owned, so recoverCommittedVirtual must NOT
                 // re-deliver them on abort (that would duplicate). The ledger refund
                 // on abort returns whatever this step consumed back to the network.
-                if (network != null && !virtualInventory.isEmpty()) {
+                if (storageEndpoint != null && !virtualInventory.isEmpty()) {
                     flushVirtualInventory(online);
                     snapshotCommittedVirtual(); // virtualInventory now empty ->empty snapshot
                 }
@@ -3192,7 +3219,7 @@ public final class AsyncCraftChain {
                     return null;
                 }
                 if (!flatOperationSession.commit(() -> {
-                    if (!ledger.isCommitted()) return ledger.commit(network, online);
+                    if (!ledger.isCommitted()) return commitLedger(ledger, online);
                     return true;
                 })) {
                     closeFlatOperationScope();
@@ -3268,7 +3295,7 @@ public final class AsyncCraftChain {
                     catch (Exception ignored) { }
                     return null;
                 }
-                if (!ledger.commit(network, online)) {
+                if (!commitLedger(ledger, online)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for generic step {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
@@ -3279,6 +3306,7 @@ public final class AsyncCraftChain {
                     return null;
                 }
                 if (delegate instanceof AbstractBatchDelegate abd) {
+                    abd.setStorageEndpoint(storageEndpoint);
                     abd.useSharedLedger(ledger);
                 }
                 if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
@@ -3466,7 +3494,7 @@ public final class AsyncCraftChain {
                     }
                     return null;
                 }
-                if (!ledger.commit(network, online)) {
+                if (!commitLedger(ledger, online)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for parallel {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
@@ -3644,8 +3672,8 @@ public final class AsyncCraftChain {
                 }
             }
 
-            if (needed > 0 && network != null) {
-                ItemStack reserved = ledger.reserveFromNetwork(spec.ingredient(), needed, network, online);
+            if (needed > 0 && storageEndpoint != null) {
+                ItemStack reserved = ledger.reserveFromEndpoint(spec.ingredient(), needed, storageEndpoint, online);
                 if (!reserved.isEmpty()) {
                     if (material.isEmpty()) {
                         material = reserved;
@@ -3695,8 +3723,9 @@ public final class AsyncCraftChain {
                 materials.add(ItemStack.EMPTY);
                 continue;
             }
-            ItemStack reserved = targetLedger.reserve(
-                    spec.ingredient(), spec.count(), network, online, null, null);
+            ItemStack reserved = storageEndpoint != null
+                    ? targetLedger.reserve(spec.ingredient(), spec.count(), storageEndpoint, online, null, null)
+                    : targetLedger.reserve(spec.ingredient(), spec.count(), network, online, null, null);
             if (reserved.isEmpty() || reserved.getCount() != spec.count()) {
                 while (targetLedger.reservationMark() > mark) {
                     targetLedger.cancelLastReservation();
@@ -3882,9 +3911,7 @@ public final class AsyncCraftChain {
             if (owed.isEmpty()) continue;
             if (online != null) {
                 ItemStack leftover = owed.copy();
-                if (network != null) {
-                    leftover = TrackedNetworkInsertion.insert(network, online, owed);
-                }
+                leftover = insertIntoStorage(online, owed);
                 if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
             } else if (!insertOrDropAtSpawn(owed.copy())) {
                 // Drop throttle tripped (network full/absent, player offline,
@@ -3900,12 +3927,12 @@ public final class AsyncCraftChain {
     }
 
     private void flushVirtualInventory(ServerPlayer online) {
-        if (network == null) return;
+        if (storageEndpoint == null) return;
         var iter = virtualInventory.iterator();
         while (iter.hasNext()) {
             ItemStack vi = iter.next();
             if (!vi.isEmpty()) {
-                ItemStack leftover = TrackedNetworkInsertion.insert(network, online, vi);
+                ItemStack leftover = insertIntoStorage(online, vi);
                 if (online != null && !leftover.isEmpty()) {
                     safeGiveToPlayer(online, leftover);
                 } else if (online == null && !leftover.isEmpty()) {
@@ -3930,8 +3957,8 @@ public final class AsyncCraftChain {
      *         (throttle tripped -further drops would be silently discarded)
      */
     private boolean insertOrDropAtSpawn(ItemStack stack) {
-        if (network != null) {
-            ItemStack stillLeft = TrackedNetworkInsertion.insert(network, resolvePlayer(), stack);
+        if (storageEndpoint != null) {
+            ItemStack stillLeft = insertIntoStorage(resolvePlayer(), stack);
             if (stillLeft.isEmpty()) return true;
             stack = stillLeft;
         }
@@ -3968,7 +3995,7 @@ public final class AsyncCraftChain {
                 addToVirtualInventory(stack);
             }
         }
-        if (!ledger.commit(network, online)) {
+        if (!commitLedger(ledger, online)) {
             RSIntegrationMod.LOGGER.warn(ctx.format("Commit failed for player {} after {} steps"),
                     online.getName().getString(), steps.size());
             online.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
@@ -3977,7 +4004,7 @@ public final class AsyncCraftChain {
             return;
         }
 
-        if (network != null) {
+        if (storageEndpoint != null) {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
                     boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
@@ -3985,7 +4012,7 @@ public final class AsyncCraftChain {
                     ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
                     ItemStack rsCandidate = leftover.copy();
                     if (!leftover.isEmpty()) {
-                        leftover = TrackedNetworkInsertion.insert(network, online, rsCandidate);
+                        leftover = insertIntoStorage(online, rsCandidate);
                     }
                     ItemStack inserted = InsertedStackDelta.between(vi, leftover);
                     if (targetOutput != null && vi.is(targetOutput.getItem())) {
@@ -4042,6 +4069,49 @@ public final class AsyncCraftChain {
 
     private ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
         return PlayerUtils.insertIntoPlayerInventory(player, stack);
+    }
+
+    /**
+     * Backend-neutral storage helpers. The legacy INetwork field remains only
+     * for native RS compatibility; all migrated execution paths use the
+     * resolved endpoint and its session operations.
+     */
+    private boolean commitLedger(ExtractionLedger target, @Nullable ServerPlayer player) {
+        if (player == null) return false;
+        if (storageEndpoint != null) target.setStorageEndpoint(storageEndpoint);
+        return target.commit(network, player);
+    }
+
+    private void refundCommitted(ExtractionLedger target, @Nullable ServerPlayer player) {
+        if (storageEndpoint != null) target.setStorageEndpoint(storageEndpoint);
+        target.refundCommitted(network, player);
+    }
+
+    private ItemStack reserveIngredient(ExtractionLedger target, Ingredient ingredient,
+                                        int amount, ServerPlayer player) {
+        if (amount <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        if (storageEndpoint != null) {
+            ItemStack stored = target.reserveFromEndpoint(ingredient, amount, storageEndpoint, player);
+            if (!stored.isEmpty()) return stored;
+        } else if (network != null) {
+            ItemStack stored = target.reserveFromNetwork(ingredient, amount, network, player);
+            if (!stored.isEmpty()) return stored;
+        }
+        return target.reserveFromInventory(ingredient, amount, player);
+    }
+
+    private ItemStack reserveExact(ExtractionLedger target, ItemStack template,
+                                   int amount, ServerPlayer player) {
+        if (storageEndpoint != null) {
+            return target.reserveExactAcrossNetworkAndInventory(template, amount, storageEndpoint, player);
+        }
+        return target.reserveExactAcrossNetworkAndInventory(template, amount, network, player);
+    }
+
+    private ItemStack insertIntoStorage(@Nullable ServerPlayer player, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
+        if (storageEndpoint == null || player == null) return stack.copy();
+        return storageEndpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
     }
 
     private void fireOnDone() {
@@ -4282,7 +4352,7 @@ public final class AsyncCraftChain {
                 if (nodeLedger != null && nodeLedger.isCommitted()) {
                     for (ExtractionLedger.ReservationToken token : runtime.queuedReservationTokens()) {
                         try {
-                            nodeLedger.refundCommitted(token, network, player);
+                            refundCommitted(nodeLedger, player);
                         } catch (Exception e) {
                             RSIntegrationMod.LOGGER.error(ctx.format(
                                     "Error refunding queued reservation for graph node {}"), runtime.describe(), e);
@@ -4329,7 +4399,7 @@ public final class AsyncCraftChain {
                     try {
                         ExtractionLedger cleanupLedger = runtime.nodeLedger();
                         if (cleanupLedger != null && cleanupLedger.isCommitted()) {
-                            cleanupLedger.refundCommitted(network, player);
+                            refundCommitted(cleanupLedger, player);
                         }
                     } catch (Exception e) {
                         RSIntegrationMod.LOGGER.error(ctx.format(
@@ -4356,7 +4426,7 @@ public final class AsyncCraftChain {
                         && runtime.nodeLedger() != null
                         && runtime.nodeLedger().isCommitted()) {
                     try {
-                        runtime.nodeLedger().refundCommitted(network, player);
+                        refundCommitted(runtime.nodeLedger(), player);
                         RSIntegrationMod.LOGGER.debug(ctx.format(
                                 "Refunded committed materials for failed virtual recipe node {}"),
                                 runtime.describe());
@@ -4436,7 +4506,7 @@ public final class AsyncCraftChain {
     private void refundOrRollbackLedger(@Nullable ServerPlayer player) {
         try {
             if (ledger.isCommitted()) {
-                ledger.refundCommitted(network, player);
+                refundCommitted(ledger, player);
             } else {
                 ledger.rollback(player);
             }

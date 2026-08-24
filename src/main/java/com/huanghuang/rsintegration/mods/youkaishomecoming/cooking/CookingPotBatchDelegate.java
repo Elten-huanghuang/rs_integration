@@ -131,8 +131,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -181,10 +182,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // Existing ingredients belong to the machine, not this operation's
         // reservation ledger. Return them to RS before placing fresh inputs so
         // a stale/partially completed pot cannot make the scheduler retry.
-        if (network == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        }
-        if (network == null || !drainExistingContentsToNetwork(be)) return false;
+        if (!hasStorageAccess() || !drainExistingContentsToNetwork(be)) return false;
 
         if (!isHeated(be)) {
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.no_heat"));

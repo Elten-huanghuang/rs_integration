@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
 import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -38,6 +39,24 @@ final class ArsPedestalRecovery {
             if (!remainder.isEmpty()) {
                 PlayerUtils.safeGiveToPlayer(player, remainder, network);
             }
+            recovered++;
+        }
+        return recovered;
+    }
+
+    static int recover(ServerLevel level, List<BlockPos> positions, ServerPlayer player,
+                       @Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null) return recover(level, positions, player, (INetwork) null);
+        int recovered = 0;
+        for (BlockPos position : positions) {
+            BlockEntity pedestal = level.getBlockEntity(position);
+            if (!(pedestal instanceof Container container)) continue;
+            ItemStack stack = container.getItem(0).copy();
+            if (stack.isEmpty()) continue;
+            container.setItem(0, ItemStack.EMPTY);
+            pedestal.setChanged();
+            ItemStack remainder = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
             recovered++;
         }
         return recovered;

@@ -119,8 +119,9 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -188,8 +189,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             forceChunkLoad(false);
             return false;
         }
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (network == null) {
+        if (!hasStorageAccess()) {
             forceChunkLoad(false);
             return false;
         }
@@ -224,11 +224,11 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                 // Rollback input slots and container slot
                 for (int i = 0; i < INPUT_SLOTS; i++) {
                     ItemStack refund = handler.extractItem(i, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger && network != null)
+                    if (!refund.isEmpty() && !usingSharedLedger && storageEndpoint() != null)
                         insertIntoStorage(player, refund, false);
                 }
                 ItemStack refundC = handler.extractItem(CONTAINER_SLOT, 64, false);
-                if (!refundC.isEmpty() && !usingSharedLedger && network != null)
+                if (!refundC.isEmpty() && !usingSharedLedger && storageEndpoint() != null)
                     insertIntoStorage(player, refundC, false);
                 be.setChanged();
                 forceChunkLoad(false);

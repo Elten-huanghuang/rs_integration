@@ -123,7 +123,8 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (network == null) return false;
+            if (network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) {
@@ -206,8 +207,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
                 @SuppressWarnings("unchecked")
                 List<ItemStack> remains = (List<ItemStack>) remainMethod.invoke(recipe, handler);
                 if (remains != null) {
-                    var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-                    if (network != null) {
+                    if (hasStorageAccess()) {
                         for (ItemStack rem : remains) {
                             if (!rem.isEmpty()) {
                                 insertIntoStorage(player, rem.copy(), false);

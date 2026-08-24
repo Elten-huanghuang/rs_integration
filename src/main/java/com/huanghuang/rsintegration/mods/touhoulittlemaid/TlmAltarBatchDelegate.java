@@ -315,7 +315,9 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.craftEverConfirmed = false;
         this.usingSharedLedger = false;
         clearSlotsFilled();
@@ -428,7 +430,9 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.usingSharedLedger = true;
         this.craftEverConfirmed = false;
         clearSlotsFilled();

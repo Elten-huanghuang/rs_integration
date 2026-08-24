@@ -41,7 +41,7 @@ public final class RefinedStorageBackend implements StorageBackend {
         Objects.requireNonNull(player, "player");
         StorageThreadGuard.requireServerThread(player);
         try {
-            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            INetwork network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
             return network == null
                     ? StorageResolutionResult.failure(StorageResolutionStatus.NOT_FOUND)
                     : createSession(network);

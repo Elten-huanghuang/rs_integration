@@ -103,8 +103,10 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         this.recipe = found;
         this.requiredMaterials = List.copyOf(specs);
         this.expected = output.copy();
-        this.rsNetwork = CraftPacketUtils.resolveNetworkForCraft(
-                player, resolved.dimension(), infuserPos);
+        if (storageEndpoint() == null) {
+            this.rsNetwork = CraftPacketUtils.resolveNetworkForCraft(
+                    player, resolved.dimension(), infuserPos);
+        }
         return PreparationResult.ready();
     }
 
@@ -166,12 +168,13 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null || infuserPos == null || requiredMaterials == null) return false;
-        if (rsNetwork == null) {
+        if (storageEndpoint() == null && rsNetwork == null) {
             rsNetwork = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), infuserPos);
         }
-        if (rsNetwork == null) return false;
+        if (storageEndpoint() == null && rsNetwork == null) return false;
 
         this.ledger = new ExtractionLedger();
+        this.ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : requiredMaterials) {
             ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
@@ -202,6 +205,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
+        useSharedLedger(sharedLedger);
         return startEntities(materials);
     }
 
@@ -322,7 +326,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
-        this.network = rsNetwork;
+        if (storageEndpoint() == null) this.network = rsNetwork;
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {

@@ -254,7 +254,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
 
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
             BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
@@ -485,7 +487,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.usingSharedLedger = true;
 
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
@@ -781,16 +785,21 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        if (starterFromRS != null && network != null) {
-            ItemStack leftover = insertIntoStorage(player, starterFromRS, false);
+        if (starterFromRS != null || starterFromStorage != null) {
+            ItemStack source = starterFromRS != null ? starterFromRS : starterFromStorage;
+            ItemStack leftover = storageEndpoint() != null
+                    ? insertIntoStorage(player, source, false)
+                    : ItemStack.EMPTY;
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
             starterFromRS = null;
+            starterFromStorage = null;
         }
         rollbackAll();
         resetState();
         starterFromRS = null;
+        starterFromStorage = null;
         ritualEverSeenActive = false;
     }
 
@@ -803,6 +812,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         resetState();
         starterFromRS = null;
+        starterFromStorage = null;
         ritualEverSeenActive = false;
     }
 
@@ -884,17 +894,26 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     @javax.annotation.Nullable
     private transient ItemStack starterFromRS;
+    private transient ItemStack starterFromStorage;
 
     private void returnStarterToSource(ItemStack stack) {
         if (stack.isEmpty()) return;
-        INetwork srcNetwork = starterFromRS != null ? network : null;
-        FaRitualHelper.returnStarterToSource(stack, player, srcNetwork);
+        if (starterFromStorage != null && storageEndpoint() != null) {
+            FaRitualHelper.returnStarterToSource(stack, player, storageEndpoint());
+        } else {
+            INetwork srcNetwork = starterFromRS != null ? network : null;
+            FaRitualHelper.returnStarterToSource(stack, player, srcNetwork);
+        }
         starterFromRS = null;
+        starterFromStorage = null;
     }
 
     private ItemStack findRitualStarterItem(ServerPlayer player, INetwork network) {
-        FaRitualHelper.StarterResult result = FaRitualHelper.findRitualStarterItem(player, network);
+        FaRitualHelper.StarterResult result = network == null && storageEndpoint() != null
+                ? FaRitualHelper.findRitualStarterItem(player, storageEndpoint())
+                : FaRitualHelper.findRitualStarterItem(player, network);
         starterFromRS = result.sourceNetwork() != null ? result.stack() : null;
+        starterFromStorage = result.sourceEndpoint() != null ? result.stack() : null;
         return result.stack();
     }
 
@@ -903,9 +922,14 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        INetwork srcNetwork = starterFromRS != null ? network : null;
-        FaRitualHelper.consumeRitualStarterUse(starterStack, player, srcNetwork);
+        if (starterFromStorage != null && storageEndpoint() != null) {
+            FaRitualHelper.consumeRitualStarterUse(starterStack, player, storageEndpoint());
+        } else {
+            INetwork srcNetwork = starterFromRS != null ? network : null;
+            FaRitualHelper.consumeRitualStarterUse(starterStack, player, srcNetwork);
+        }
         starterFromRS = null;
+        starterFromStorage = null;
     }
 
     // ── Essence validation (instance wrappers) ───────────────────

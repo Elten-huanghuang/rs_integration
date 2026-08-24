@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -618,17 +619,29 @@ public final class FaRitualHelper {
     public static final class StarterResult {
         private final ItemStack stack;
         private final INetwork sourceNetwork;
+        private final CraftStorageEndpoint sourceEndpoint;
 
         StarterResult(ItemStack stack, @Nullable INetwork sourceNetwork) {
+            this(stack, sourceNetwork, null);
+        }
+
+        StarterResult(ItemStack stack, @Nullable CraftStorageEndpoint sourceEndpoint) {
+            this(stack, null, sourceEndpoint);
+        }
+
+        private StarterResult(ItemStack stack, @Nullable INetwork sourceNetwork,
+                              @Nullable CraftStorageEndpoint sourceEndpoint) {
             this.stack = stack;
             this.sourceNetwork = sourceNetwork;
+            this.sourceEndpoint = sourceEndpoint;
         }
 
         public ItemStack stack() { return stack; }
         @Nullable public INetwork sourceNetwork() { return sourceNetwork; }
+        @Nullable public CraftStorageEndpoint sourceEndpoint() { return sourceEndpoint; }
         public boolean isEmpty() { return stack.isEmpty(); }
 
-        public static final StarterResult EMPTY = new StarterResult(ItemStack.EMPTY, null);
+        public static final StarterResult EMPTY = new StarterResult(ItemStack.EMPTY, (INetwork) null);
     }
 
     static StarterResult findRitualStarterItem(ServerPlayer player, @Nullable INetwork network) {
@@ -640,7 +653,7 @@ public final class FaRitualHelper {
                     && canStartRitual(stack)) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player inventory",
                         stack.getHoverName().getString());
-                return new StarterResult(stack, null);
+                return new StarterResult(stack, (INetwork) null);
             }
         }
         ItemStack offhand = player.getOffhandItem();
@@ -648,7 +661,7 @@ public final class FaRitualHelper {
                 && canStartRitual(offhand)) {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] Found RitualStarterItem '{}' in player offhand",
                     offhand.getHoverName().getString());
-            return new StarterResult(offhand, null);
+            return new StarterResult(offhand, (INetwork) null);
         }
 
         // 2. Fall back to RS network
@@ -682,6 +695,22 @@ public final class FaRitualHelper {
             }
         }
 
+        return StarterResult.EMPTY;
+    }
+
+    static StarterResult findRitualStarterItem(ServerPlayer player,
+                                                @Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null || FAReflection.ritualStarterItemClass == null) return StarterResult.EMPTY;
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return StarterResult.EMPTY;
+        for (var entry : snapshot.items()) {
+            ItemStack candidate = entry.stack();
+            if (candidate.isEmpty() || !FAReflection.ritualStarterItemClass.isInstance(candidate.getItem())
+                    || !canStartRitual(candidate)) continue;
+            ItemStack extracted = endpoint.extractExact(player, candidate.copyWithCount(1), 1, false)
+                    .extractedStacks().stream().findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+            if (!extracted.isEmpty()) return new StarterResult(extracted, endpoint);
+        }
         return StarterResult.EMPTY;
     }
 
@@ -751,6 +780,36 @@ public final class FaRitualHelper {
                         stack.getHoverName().getString());
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
+        }
+    }
+
+    static void returnStarterToSource(ItemStack stack, ServerPlayer player,
+                                      @Nullable CraftStorageEndpoint endpoint) {
+        if (stack.isEmpty() || endpoint == null) return;
+        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+        if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+    }
+
+    static void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player,
+                                        @Nullable CraftStorageEndpoint endpoint) {
+        if (starterStack.isEmpty()) return;
+        if (!player.isCreative()) {
+            try {
+                Object item = starterStack.getItem();
+                int remaining = (int) Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass,
+                        "getRemainingUses", "getRemainingUses", ItemStack.class).invoke(item, starterStack);
+                if (remaining > 0) {
+                    Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass,
+                            "setRemainingUses", "setRemainingUses", ItemStack.class, int.class)
+                            .invoke(item, starterStack, remaining - 1);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FA] consume BD RitualStarterItem failed", e);
+            }
+        }
+        if (endpoint != null) {
+            ItemStack leftover = endpoint.insert(player, starterStack, false).remainder().orElse(ItemStack.EMPTY);
+            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 

@@ -109,7 +109,6 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         this.ledger = sharedLedger;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, boundPos);
         this.attempts = materials.get(0).getCount();
         try {
             PmmoSalvageRuntime.Execution execution =

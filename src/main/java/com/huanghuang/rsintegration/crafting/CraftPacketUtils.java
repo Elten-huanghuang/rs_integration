@@ -192,15 +192,22 @@ public final class CraftPacketUtils {
     public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
                                                @Nonnull List<CraftingResolver.ResolutionStep> steps,
                                                @Nullable INetwork network) {
+        CraftStorageEndpoint endpoint = network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+        return executeCraftingSteps(player, steps, network, endpoint);
+    }
+
+    /** Endpoint-aware execution entry point. Native RS remains an optional compatibility argument. */
+    public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
+                                               @Nonnull List<CraftingResolver.ResolutionStep> steps,
+                                               @Nullable INetwork network,
+                                               @Nullable CraftStorageEndpoint endpoint) {
         RecipeManager rm = player.serverLevel().getRecipeManager();
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
         CraftLogContext ctx = CraftLogContext.create(player.getUUID(), primaryRecipe);
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setLogContext(ctx);
-            if (network != null) {
-                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-            }
+            if (endpoint != null) ledger.setStorageEndpoint(endpoint);
             List<ItemStack> virtualInventory = new ArrayList<>();
 
             RSIntegrationMod.LOGGER.debug(ctx.format("Starting {} steps"), steps.size());
@@ -242,8 +249,8 @@ public final class CraftPacketUtils {
                         }
 
                         if (stillNeeded > 0) {
-                            ItemStack reserved = network != null
-                                    ? ledger.reserveFromNetwork(ing, stillNeeded, network, player)
+                            ItemStack reserved = endpoint != null
+                                    ? ledger.reserveFromEndpoint(ing, stillNeeded, endpoint, player)
                                     : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(ing, stillNeeded, player);
@@ -344,8 +351,8 @@ public final class CraftPacketUtils {
                             RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: need {} more of {}, reserving from ledger..."),
                                     stepIdx + 1, steps.size(), stepId, stillNeeded,
                                     opts.length > 0 ? net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
-                            ItemStack reserved = network != null
-                                    ? ledger.reserveFromNetwork(spec.ingredient(), stillNeeded, network, player)
+                            ItemStack reserved = endpoint != null
+                                    ? ledger.reserveFromEndpoint(spec.ingredient(), stillNeeded, endpoint, player)
                                     : ItemStack.EMPTY;
                             if (reserved.isEmpty()) {
                                 reserved = ledger.reserveFromInventory(spec.ingredient(), stillNeeded, player);
@@ -392,7 +399,11 @@ public final class CraftPacketUtils {
             // max-stack-size chunks to prevent item-entity explosions).
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
-                    if (network == null) {
+                    if (endpoint != null) {
+                        ItemStack remainder = endpoint.insert(player, vi, false)
+                                .remainder().orElse(ItemStack.EMPTY);
+                        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                    } else if (network == null) {
                         PlayerUtils.safeGiveToPlayer(player, vi.copy(), null);
                     } else {
                         ItemStack remainder = TrackedNetworkInsertion.insert(network, player, vi);
@@ -1377,8 +1388,18 @@ public final class CraftPacketUtils {
      */
     private static boolean tryResolveAndRunChain(ServerPlayer player, INetwork network,
                                                   Ingredient ingredient, int count) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
-                player, CraftStorageEndpoints.fromLegacyNetwork(network));
+        return tryResolveAndRunChain(player, network, null, ingredient, count);
+    }
+
+    private static boolean tryResolveAndRunChain(ServerPlayer player, @Nullable INetwork network,
+                                                  @Nullable CraftStorageEndpoint endpoint,
+                                                  Ingredient ingredient, int count) {
+        Map<StackKey, Integer> available = endpoint != null
+                ? MaterialSources.listAllAvailable(player, endpoint)
+                : network != null
+                        ? MaterialSources.listAllAvailable(player,
+                                CraftStorageEndpoints.fromLegacyNetwork(network))
+                        : MaterialSources.listAllAvailable(player, (INetwork) null);
         List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
 
         // 1. Try typed resolver (includes multi-block candidates)
@@ -1401,7 +1422,7 @@ public final class CraftPacketUtils {
                 // All vanilla — execute inline
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.info.auto_crafting", steps.size()));
-                return executeCraftingSteps(player, steps, network);
+                return executeCraftingSteps(player, steps, network, endpoint);
             }
         }
 
@@ -1421,7 +1442,7 @@ public final class CraftPacketUtils {
                 wrapped.add(new ResolutionStep(id, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
             }
-            return executeCraftingSteps(player, wrapped, network);
+            return executeCraftingSteps(player, wrapped, network, endpoint);
         }
 
         RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {} x{}",
@@ -1442,7 +1463,7 @@ public final class CraftPacketUtils {
      */
     public static ItemStack ensureMaterialAvailable(ServerPlayer player, ResourceKey<Level> altarDim,
                                                      BlockPos altarPos, Ingredient ingredient, int count) {
-        return ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, null);
+        return ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, null, null);
     }
 
     /**
@@ -1456,9 +1477,29 @@ public final class CraftPacketUtils {
     public static ItemStack ensureMaterialAvailable(ServerPlayer player, ResourceKey<Level> altarDim,
                                                      BlockPos altarPos, Ingredient ingredient, int count,
                                                      @Nullable ExtractionLedger ledger) {
+        return ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger, null);
+    }
+
+    /**
+     * Ledger-aware material lookup with an already resolved storage network.
+     * Execution must reuse the network selected while building the recursive
+     * plan; resolving again from the player's current terminal/inventory can
+     * lose wireless or otherwise non-held NetworkItem context.
+     */
+    public static ItemStack ensureMaterialAvailable(ServerPlayer player, ResourceKey<Level> altarDim,
+                                                     BlockPos altarPos, Ingredient ingredient, int count,
+                                                     @Nullable ExtractionLedger ledger,
+                                                     @Nullable INetwork preferredNetwork) {
         if (ledger != null) {
-            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-            if (network == null && altarDim != null && altarPos != null) {
+            CraftStorageEndpoint endpoint = ledger.storageEndpoint();
+            INetwork network = preferredNetwork != null
+                    ? preferredNetwork
+                    : ledger != null && ledger.legacyNetwork() != null
+                            ? ledger.legacyNetwork()
+                            : endpoint == null
+                                    ? RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player)
+                                    : null;
+            if (endpoint == null && network == null && altarDim != null && altarPos != null) {
                 network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
             }
             ItemStack reserved = ledger.reserve(ingredient, count, network, player, altarDim, altarPos);
@@ -1466,8 +1507,8 @@ public final class CraftPacketUtils {
 
             // Auto-craft fallback (inline vanilla or async multi-block)
             if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get() && !ingredient.isEmpty()
-                    && network != null) {
-                if (tryResolveAndRunChain(player, network, ingredient, count)) {
+                    && (endpoint != null || network != null)) {
+                if (tryResolveAndRunChain(player, network, endpoint, ingredient, count)) {
                     // The first reserve cached the network before this inline
                     // craft inserted the requested intermediate stack.
                     ledger.invalidateNetworkSnapshot();
@@ -1492,7 +1533,7 @@ public final class CraftPacketUtils {
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return ItemStack.EMPTY;
         if (ingredient.isEmpty()) return ItemStack.EMPTY;
 
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        INetwork network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
         if (network == null) {
             network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
         }
@@ -1530,8 +1571,10 @@ public final class CraftPacketUtils {
             INetwork net = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
             if (net != null) return net;
         }
-        // Fall back to generic player inventory / nearby node scan
-        return RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        // Fall back only to a credential that is present now. A persisted
+        // resolver cache or nearby controller is not sufficient to select RS;
+        // otherwise an old RS coordinate can win over an active BD backend.
+        return RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
     }
 
     // ── keyed-counts helpers ──────────────────────────────────────

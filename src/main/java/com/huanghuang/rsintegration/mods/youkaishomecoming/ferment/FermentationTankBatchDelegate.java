@@ -153,8 +153,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -1038,8 +1039,10 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
      * or by extracting water bottles from RS network.
      */
     private boolean ensureWater(BlockEntity be, IFluidHandler fluidHandler, int deficitMb) {
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) {
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        if (this.network == null && storageEndpoint() == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Ferment] No network, cannot get water");
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
             return false;
@@ -1069,7 +1072,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 bottlesNeeded, perBottle, deficitMb);
 
         for (int i = 0; i < bottlesNeeded; i++) {
-            ItemStack waterBottle = findWaterHolder(network);
+            ItemStack waterBottle = storageEndpoint() != null
+                    ? findWaterHolder(storageEndpoint(), player)
+                    : findWaterHolder(network);
             if (waterBottle.isEmpty()) {
                 // Drain whatever we managed to fill and refund
                 player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
@@ -1156,6 +1161,31 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                         }
                     }
                 } catch (Exception ignored) { /* not a fluid holder or wrong type */ }
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private static ItemStack findWaterHolder(com.huanghuang.rsintegration.crafting.CraftStorageEndpoint endpoint,
+                                             ServerPlayer player) {
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return ItemStack.EMPTY;
+        for (var entry : snapshot.items()) {
+            ItemStack stack = entry.stack();
+            if (stack.isEmpty()) continue;
+            if (stack.is(net.minecraft.world.item.Items.WATER_BUCKET)
+                    || stack.is(net.minecraft.world.item.Items.POTION)) return stack;
+            if (YHKReflection.yhFluidHolderClass != null
+                    && YHKReflection.yhFluidHolderClass.isInstance(stack.getItem())) {
+                try {
+                    Method getFluid = stack.getItem().getClass().getMethod("getFluid");
+                    Object fluid = getFluid.invoke(stack.getItem());
+                    if (fluid != null && YHKReflection.yhFluidClass != null
+                            && YHKReflection.yhFluidClass.isInstance(fluid)
+                            && yhFluidTypeField != null && yhFluidTypeField.get(fluid) != null) {
+                        return stack;
+                    }
+                } catch (Exception ignored) { }
             }
         }
         return ItemStack.EMPTY;

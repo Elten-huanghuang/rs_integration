@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -26,33 +27,76 @@ public final class PlanningStateValidator {
     public static boolean revalidate(ServerPlayer player, PlanningSnapshot snapshot,
                                      ResourceKey<Level> dimension, BlockPos lookupPos,
                                      PlanRequestService requests) {
+        return revalidate(player, snapshot, dimension, lookupPos, requests, null);
+    }
+
+    public static boolean revalidate(ServerPlayer player, PlanningSnapshot snapshot,
+                                     ResourceKey<Level> dimension, BlockPos lookupPos,
+                                     PlanRequestService requests,
+                                     @Nullable StorageReference selectedReference) {
         if (player.hasDisconnected() || player.isRemoved()
                 || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())
                 || !requests.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
             return false;
         }
-        INetwork currentNetwork = net.minecraftforge.fml.ModList.get().isLoaded(
+        INetwork currentNetwork = selectedReference == null
+                && net.minecraftforge.fml.ModList.get().isLoaded(
                 com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
                 ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
                 : null;
-        Map<StackKey, Integer> currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
-        return snapshot.networkFingerprint().equals(networkFingerprint(currentNetwork, currentAvailable))
+        Map<StackKey, Integer> currentAvailable;
+        if (selectedReference != null) {
+            var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .resolve(selectedReference, player);
+            currentAvailable = endpoint.isPresent()
+                    ? MaterialSources.listAllAvailable(player, endpoint.orElseThrow())
+                    : Map.of();
+        } else {
+            currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
+        }
+        String fingerprint = selectedReference == null
+                ? networkFingerprint(currentNetwork, currentAvailable)
+                : networkFingerprint(selectedReference, currentAvailable);
+        return snapshot.networkFingerprint().equals(fingerprint)
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
     }
 
     /** Revalidates a preview snapshot for execution without tying it to a preview request generation. */
     public static boolean revalidateForExecution(ServerPlayer player, PlanningSnapshot snapshot,
                                                  ResourceKey<Level> dimension, BlockPos lookupPos) {
+        return revalidateForExecution(player, snapshot, dimension, lookupPos, null);
+    }
+
+    /**
+     * Revalidates an execution snapshot against the same explicitly selected
+     * storage backend used during planning.  A null reference retains the
+     * legacy current-RS lookup for packets that predate backend selection.
+     */
+    public static boolean revalidateForExecution(ServerPlayer player, PlanningSnapshot snapshot,
+                                                 ResourceKey<Level> dimension, BlockPos lookupPos,
+                                                 @Nullable StorageReference selectedReference) {
         if (player.hasDisconnected() || player.isRemoved()
                 || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) {
             return false;
         }
-        INetwork currentNetwork = net.minecraftforge.fml.ModList.get().isLoaded(
+        INetwork currentNetwork = selectedReference == null
+                && net.minecraftforge.fml.ModList.get().isLoaded(
                 com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
                 ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
                 : null;
-        Map<StackKey, Integer> currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
-        return snapshot.networkFingerprint().equals(networkFingerprint(currentNetwork, currentAvailable))
+        Map<StackKey, Integer> currentAvailable;
+        if (selectedReference != null) {
+            var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    .resolve(selectedReference, player);
+            if (endpoint.isEmpty()) return false;
+            currentAvailable = MaterialSources.listAllAvailable(player, endpoint.orElseThrow());
+        } else {
+            currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
+        }
+        String fingerprint = selectedReference == null
+                ? networkFingerprint(currentNetwork, currentAvailable)
+                : networkFingerprint(selectedReference, currentAvailable);
+        return snapshot.networkFingerprint().equals(fingerprint)
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
     }
 
@@ -131,6 +175,19 @@ public final class PlanningStateValidator {
             inventoryHash = 31 * inventoryHash + entry.getValue();
         }
         return (network == null ? "none" : Integer.toHexString(System.identityHashCode(network)))
+                + ':' + Integer.toHexString(inventoryHash);
+    }
+
+    /** Stable fingerprint for a backend-neutral selected network. */
+    public static String networkFingerprint(@Nullable StorageReference reference,
+                                             Map<StackKey, Integer> available) {
+        int inventoryHash = 1;
+        for (Map.Entry<StackKey, Integer> entry : available.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.comparing(StackKey::toString))).toList()) {
+            inventoryHash = 31 * inventoryHash + entry.getKey().hashCode();
+            inventoryHash = 31 * inventoryHash + entry.getValue();
+        }
+        return (reference == null ? "none" : reference.backendId().value() + "@" + reference.networkId())
                 + ':' + Integer.toHexString(inventoryHash);
     }
 

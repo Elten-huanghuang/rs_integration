@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.storage.rs;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -24,14 +23,26 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     @Override
     public boolean isAvailable() {
         try {
-            if (!network.canRun() || !(network.getLevel() instanceof ServerLevel level)
-                    || network.getPosition() == null) {
+            // The handle was already authenticated by NetworkItem/container
+            // resolution (or by resolveNetworkStrict for an explicit storage
+            // reference). Do not require a second coordinate lookup to return
+            // the identical INetwork instance: creative controllers and some
+            // wireless terminal paths legitimately expose a handle whose
+            // position is transient or whose wrapper is recreated by RS.
+            if (!network.canRun() || network.getLevel() == null
+                    || network.getItemStorageCache() == null
+                    || network.getItemStorageCache().getList() == null) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Storage] RS session unavailable: running={} level={} cache={} list={}",
+                        network.canRun(), network.getLevel() != null,
+                        network.getItemStorageCache() != null,
+                        network.getItemStorageCache() != null
+                                && network.getItemStorageCache().getList() != null);
                 return false;
             }
-            INetwork current = RSIntegrationNetwork.resolveNetworkStrict(
-                    level.getServer(), level.dimension(), network.getPosition());
-            return current == network;
+            return true;
         } catch (RuntimeException | LinkageError e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Storage] RS session availability probe failed", e);
             return false;
         }
     }

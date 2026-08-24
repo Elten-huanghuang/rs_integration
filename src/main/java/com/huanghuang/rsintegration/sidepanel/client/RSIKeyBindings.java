@@ -6,6 +6,9 @@ import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import com.huanghuang.rsintegration.network.binding.ExplicitMachineBindingPacket;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.settings.KeyConflictContext;
@@ -27,6 +30,8 @@ public final class RSIKeyBindings {
     public static KeyMapping KEY_SWIPE_EXTRACT;
     /** One-shot tick-budgeted scan that binds nearby supported machines. */
     public static KeyMapping KEY_BIND_NEARBY;
+    /** Configurable Alt + right-click chord for binding the held network terminal to a machine. */
+    public static KeyMapping KEY_BIND_MACHINE;
 
     private static volatile boolean registered;
 
@@ -73,6 +78,14 @@ public final class RSIKeyBindings {
                 GLFW.GLFW_KEY_SEMICOLON,
                 "key.categories.rsi"
         );
+        KEY_BIND_MACHINE = new KeyMapping(
+                "key.rsi.bind_machine",
+                KeyConflictContext.IN_GAME,
+                KeyModifier.ALT,
+                InputConstants.Type.MOUSE,
+                1,
+                "key.categories.rsi"
+        );
 
         RSIntegrationMod.MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent e) -> {
@@ -81,8 +94,10 @@ public final class RSIKeyBindings {
                     e.register(KEY_TRANSFER_RECIPE);
                     e.register(KEY_SWIPE_EXTRACT);
                     e.register(KEY_BIND_NEARBY);
+                    e.register(KEY_BIND_MACHINE);
                 });
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onKeyInput);
+        MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onMouseInput);
     }
 
     private static void onKeyInput(InputEvent.Key event) {
@@ -92,5 +107,31 @@ public final class RSIKeyBindings {
         while (KEY_BIND_NEARBY.consumeClick()) {
             NetworkHandler.CHANNEL.sendToServer(new NearbyBindingRequestPacket());
         }
+    }
+
+    private static void onMouseInput(InputEvent.MouseButton event) {
+        if (KEY_BIND_MACHINE == null || event.getAction() != GLFW.GLFW_PRESS) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || minecraft.screen != null) return;
+        InputConstants.Key mouseKey = InputConstants.Type.MOUSE.getOrCreate(event.getButton());
+        if (!KEY_BIND_MACHINE.isActiveAndMatches(mouseKey)) return;
+        if (!(minecraft.hitResult instanceof BlockHitResult hit)
+                || hit.getType() != HitResult.Type.BLOCK) return;
+        net.minecraft.world.InteractionHand hand = isBindableConnector(minecraft.player.getMainHandItem())
+                ? net.minecraft.world.InteractionHand.MAIN_HAND : net.minecraft.world.InteractionHand.OFF_HAND;
+        if (!isBindableConnector(minecraft.player.getItemInHand(hand))) return;
+        com.huanghuang.rsintegration.network.packet.NetworkHandler.CHANNEL.sendToServer(
+                new ExplicitMachineBindingPacket(hit.getBlockPos(),
+                        hand));
+    }
+
+    private static boolean isBindableConnector(net.minecraft.world.item.ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (id == null) return false;
+        if ("beyonddimensions".equals(id.getNamespace())
+                && "net_terminal_item".equals(id.getPath())) return true;
+        return "refinedstorage".equals(id.getNamespace())
+                && (id.getPath().contains("wireless") || id.getPath().contains("network"));
     }
 }

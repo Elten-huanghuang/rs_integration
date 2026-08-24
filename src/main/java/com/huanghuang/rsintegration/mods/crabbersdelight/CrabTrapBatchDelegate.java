@@ -89,8 +89,9 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -161,7 +162,6 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         }
         be.setChanged();
 
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] Bait inserted, waiting for loot");
         return true;
     }

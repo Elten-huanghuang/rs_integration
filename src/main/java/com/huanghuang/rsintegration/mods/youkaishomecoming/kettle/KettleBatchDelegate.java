@@ -126,8 +126,9 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -186,10 +187,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             forceChunkLoad(false);
             return false;
         }
-        if (network == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        }
-        if (network == null) {
+        if (!hasStorageAccess()) {
             forceChunkLoad(false);
             return false;
         }
@@ -388,9 +386,12 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                         && tankFluid.getFluid() == recipeResult.getFluid()) {
                     ItemStack result = collectResult(player);
                     if (!result.isEmpty()) {
-                        if (network == null)
+                        if (network == null && storageEndpoint() == null)
                             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, be.getBlockPos());
-                        if (network != null) {
+                        if (storageEndpoint() != null) {
+                            ItemStack remainder = insertIntoStorage(player, result, false);
+                            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
+                        } else if (network != null) {
                             ItemStack remainder = TrackedNetworkInsertion.insert(network, player, result);
                             if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
                         } else {
@@ -586,8 +587,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Last resort: extract water bucket from RS, use it to fill
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) {
+        if (!hasStorageAccess()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Kettle] No network, cannot get water");
             return false;
         }

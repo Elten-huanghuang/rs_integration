@@ -90,7 +90,8 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (network == null) return false;
+            if (network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -121,7 +122,6 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -189,7 +189,7 @@ public final class CompressorBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // Recover items left in input slot — only on private-ledger path
-        if (!usingSharedLedger && be != null && network != null) {
+        if (!usingSharedLedger && be != null && hasStorageAccess()) {
             IItemHandler handler = getHandler(be);
             if (handler != null) {
                 ItemStack input = handler.extractItem(1, 64, false);

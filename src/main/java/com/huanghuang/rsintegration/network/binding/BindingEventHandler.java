@@ -44,6 +44,8 @@ public final class BindingEventHandler {
 
     private static final List<MachineBindingTarget> TARGETS = new ArrayList<>();
     private static final Object BINDING_LOCK = new Object();
+    private static final ThreadLocal<Boolean> EXPLICIT_BIND_REQUEST =
+            ThreadLocal.withInitial(() -> false);
 
     private BindingEventHandler() {}
 
@@ -60,7 +62,7 @@ public final class BindingEventHandler {
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (!player.isShiftKeyDown()) return;
+        if (!player.isShiftKeyDown() && !EXPLICIT_BIND_REQUEST.get()) return;
 
         Block block = event.getLevel().getBlockState(event.getPos()).getBlock();
         String className = block.getClass().getName();
@@ -88,6 +90,18 @@ public final class BindingEventHandler {
         ItemStack held = player.getItemInHand(event.getHand());
         Optional<IBindingHook> hook = AltarBindingRegistry.findHook(held);
         if (hook.isEmpty()) {
+            return;
+        }
+        Optional<AltarBinding> selectedBinding = hook.get().createBinding(held);
+        if (selectedBinding.isEmpty()) return;
+        ResourceLocation bindingType = selectedBinding.orElseThrow().type();
+        // BD's portable terminal has its own native crouch-right-click action
+        // for binding the terminal to a BD network. RSI machine bindings for
+        // that terminal are deliberately a separate, explicit client action
+        // (the configurable Alt+right-click packet). Without this guard the
+        // same physical click can enter both paths and toggle the RSI machine
+        // binding twice, producing an immediate bind/unbind pair.
+        if (AltarBinding.BD_NETWORK.equals(bindingType) && !EXPLICIT_BIND_REQUEST.get()) {
             return;
         }
 
@@ -170,12 +184,12 @@ public final class BindingEventHandler {
                 BindingStorage.removeBinding(held, dim, clickedPos);
                 AltarBindingRegistry.unbind(
                         player.getUUID(), event.getLevel().dimension(), clickedPos,
-                        AltarBinding.RS_NETWORK);
+                        bindingType);
             }
             if (BindingStorage.hasBinding(held, dim, bindingPos)) {
                 BindingStorage.removeBinding(held, dim, bindingPos);
                 AltarBindingRegistry.unbind(player.getUUID(), event.getLevel().dimension(),
-                        bindingPos, AltarBinding.RS_NETWORK);
+                        bindingPos, bindingType);
                 AltarBindingRegistry.invalidateScanCache();
                 RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
@@ -183,7 +197,7 @@ public final class BindingEventHandler {
                         false);
                 sendBindingRefresh(player);
             } else {
-                Optional<AltarBinding> binding = hook.get().createBinding(held);
+                Optional<AltarBinding> binding = selectedBinding;
                 if (binding.isPresent()) {
                     AltarBindingRegistry.bind(player.getUUID(), event.getLevel().dimension(),
                             bindingPos, binding.get());
@@ -205,6 +219,23 @@ public final class BindingEventHandler {
             }
         }
         event.setCanceled(true);
+    }
+
+    /** Reuses the normal binding path for client-configurable mouse chords. */
+    public static void handleExplicitBind(ServerPlayer player, BlockPos pos,
+                                          net.minecraft.world.InteractionHand hand) {
+        if (player == null || pos == null || hand == null) return;
+        net.minecraft.world.phys.BlockHitResult hit = new net.minecraft.world.phys.BlockHitResult(
+                net.minecraft.world.phys.Vec3.atCenterOf(pos),
+                net.minecraft.core.Direction.UP, pos, false);
+        PlayerInteractEvent.RightClickBlock event =
+                new PlayerInteractEvent.RightClickBlock(player, hand, pos, hit);
+        EXPLICIT_BIND_REQUEST.set(true);
+        try {
+            onRightClickBlock(event);
+        } finally {
+            EXPLICIT_BIND_REQUEST.remove();
+        }
     }
 
     static boolean isPotentialNearbyTarget(Block block) {

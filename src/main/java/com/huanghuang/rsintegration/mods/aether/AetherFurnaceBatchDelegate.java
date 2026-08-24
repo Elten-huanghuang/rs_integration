@@ -137,7 +137,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            if (this.network == null && !hasStorageAccess()) return false;
+            ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -173,7 +174,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                                               boolean shared) {
         this.player = player;
         this.usingSharedLedger = shared;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
 
         if (!myLevel.hasChunkAt(myPos)) return false;
 
@@ -215,8 +218,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // consume fuel lazily over the recipe's processing time, and one unit (an
         // Icestone, Ambrosium, etc.) rarely lasts a whole craft. Any unconsumed
         // remainder is refunded to RS when the batch finishes.
-        if (network != null) {
-            ItemStack insertedFuel = fillFuelSlot(be, handler, network, player);
+        if (hasStorageAccess()) {
+            ItemStack insertedFuel = fillFuelSlot(be, handler, player);
             if (!insertedFuel.isEmpty()) {
                 suppliedFuel = insertedFuel.copyWithCount(1);
                 suppliedFuelCount += insertedFuel.getCount();
@@ -410,38 +413,39 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
      * the slot up to its stack limit; any unconsumed remainder is refunded to RS when
      * the batch finishes via {@link #refundLeftoverFuel}.
      */
-    private static ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, INetwork network,
-                                          ServerPlayer player) {
+    private ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, ServerPlayer player) {
         ItemStack fuelSlot = handler.getStackInSlot(1);
 
         // Slot occupied by a non-fuel item — leave it alone.
         if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) return ItemStack.EMPTY;
 
         // Match the existing fuel type, else pick any valid fuel present in RS.
-        ItemStack fuelType = fuelSlot.isEmpty() ? findFuelInNetwork(be, network) : fuelSlot;
+        ItemStack fuelType = fuelSlot.isEmpty() ? findFuelInStorage(be, player) : fuelSlot;
         if (fuelType.isEmpty()) return ItemStack.EMPTY;
 
         int slotLimit = Math.min(handler.getSlotLimit(1), fuelType.getMaxStackSize());
         int room = slotLimit - fuelSlot.getCount();
         if (room <= 0) return ItemStack.EMPTY;
 
-        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                .extractExactLegacy(network, player, fuelType.copyWithCount(1), room, false);
+        ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), room, false);
         if (extracted.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack remainder = handler.insertItem(1, extracted, false);
         if (!remainder.isEmpty()) {
-            com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                    .insertLegacy(network, player, remainder, false);
+            insertIntoStorage(player, remainder, false);
         }
         int inserted = extracted.getCount() - remainder.getCount();
         return inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
     }
 
     /** Find the first valid fuel type for this machine present in the RS network. */
-    private static ItemStack findFuelInNetwork(BlockEntity be, INetwork network) {
-        for (var entry : new java.util.ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
-            ItemStack stack = entry.getStack();
+    private ItemStack findFuelInStorage(BlockEntity be, ServerPlayer player) {
+        var endpoint = storageEndpoint();
+        if (endpoint == null) return ItemStack.EMPTY;
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return ItemStack.EMPTY;
+        for (var entry : snapshot.items()) {
+            ItemStack stack = entry.stack();
             if (stack.isEmpty()) continue;
             if (isValidFuelForMachine(be, stack)) return stack;
         }

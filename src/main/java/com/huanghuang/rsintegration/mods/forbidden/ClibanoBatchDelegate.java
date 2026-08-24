@@ -84,7 +84,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
-        if (network == null || expectedOutput.isEmpty()) {
+        if ((network == null && !hasStorageAccess()) || expectedOutput.isEmpty()) {
             resetState();
             resetOperationState();
             return false;
@@ -139,8 +139,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
-        if (network == null || materials.size() != 1 || recipe == null) return false;
+        if (!hasStorageAccess() || materials.size() != 1 || recipe == null) return false;
 
         ItemStack material = materials.get(0);
         if (material.isEmpty() || !recipe.getIngredients().get(0).test(material)) return false;
@@ -481,6 +480,16 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack findNetworkItem(java.util.function.Predicate<ItemStack> predicate) {
+        if (storageEndpoint() != null) {
+            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            if (snapshot == null) return ItemStack.EMPTY;
+            for (var entry : snapshot.items()) {
+                ItemStack stack = entry.stack();
+                if (!stack.isEmpty() && predicate.test(stack)) return stack.copyWithCount(1);
+            }
+            return ItemStack.EMPTY;
+        }
+        if (network == null) return ItemStack.EMPTY;
         for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
             ItemStack stack = entry.getStack();
             if (!stack.isEmpty() && predicate.test(stack)) return stack.copyWithCount(1);
@@ -523,7 +532,10 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     private void safeDeliver(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
         ItemStack remainder = stack.copy();
-        if (network != null) {
+        if (storageEndpoint() != null) {
+            remainder = insertIntoStorage(player, remainder, false);
+            if (remainder.isEmpty()) return;
+        } else if (network != null) {
             remainder = TrackedNetworkInsertion.insert(network, player, remainder);
             if (remainder.isEmpty()) return;
         }

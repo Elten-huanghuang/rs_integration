@@ -50,17 +50,24 @@ public final class RSSidePanelRequestPacket {
     static boolean refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
         UUID id = player.getUUID();
         if (REFRESH_TASKS.containsKey(id)) return true;
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
-            network = RSSidePanelNetworkHandler.getListenerNetwork(id);
-        }
+        // Opening/refreshing the panel must authenticate again from a current
+        // RS context. A retained last-known listener is not a credential and
+        // must not resurrect RS after the wireless terminal was discarded.
+        INetwork network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
         if (network == null) {
             RSSidePanelNetworkHandler.unregisterListener(id);
             RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, false, "");
             return false;
         }
         try {
+            // Publish the authenticated RS session before the listener is
+            // installed. registerListener may invalidate the short-lived
+            // resolver cache while replacing an old storage-cache listener.
+            RSIntegrationNetwork.rememberResolvedNetwork(player, network);
             RSSidePanelNetworkHandler.registerListener(player, network);
+            // Re-publish after listener replacement for the same reason: the
+            // listener lifecycle must never erase the crafting context.
+            RSIntegrationNetwork.rememberResolvedNetwork(player, network);
             IStorageCache<ItemStack> cache = network.getItemStorageCache();
             if (cache == null) {
                 RSSidePanelNetworkHandler.sendSync(player, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), 0, true, "");
@@ -223,7 +230,10 @@ public final class RSSidePanelRequestPacket {
         }
         context.enqueueWork(() -> {
             if (packet.isClosing) {
-                RSSidePanelNetworkHandler.unregisterListener(player.getUUID());
+                // Closing the UI must not invalidate the last validated RS
+                // network. Crafting can legitimately continue after the
+                // panel is hidden, and BD being installed must not change that.
+                RSSidePanelNetworkHandler.unregisterListener(player.getUUID(), false);
                 return;
             }
             if (SidePanelRequestRateLimiter.isRateLimited(player.getUUID())) return;

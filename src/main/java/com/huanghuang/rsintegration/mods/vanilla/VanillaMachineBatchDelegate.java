@@ -304,9 +304,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) {
-            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null) {
+                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            }
         }
         this.craftDone = false;
 
@@ -344,9 +346,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) {
-            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null) {
+                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            }
         }
         this.craftDone = false;
 
@@ -473,7 +477,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             int slotLimit = Math.min(existing.getMaxStackSize(), furnaceBE.getMaxStackSize());
             if (needed > slotLimit) return false;
             if (existing.getCount() >= needed) return true;
-            if (network == null) return false; // can't top up — insufficient fuel
+            if (!hasStorageAccess()) return false; // can't top up — insufficient fuel
             int topUp = needed - existing.getCount();
             ItemStack extra = extractExactFuel(existing, topUp);
             if (extra.isEmpty()) return false;
@@ -486,10 +490,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         // Slot empty: apply the shared deterministic policy (configured fuels
         // first, then other safe fuels, then the best safe partial coverage).
-        if (network == null) return false;
+        if (!hasStorageAccess()) return false;
         List<ItemStack> candidates = new ArrayList<>();
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            candidates.add(entry.getStack());
+        var endpoint = storageEndpoint();
+        if (endpoint == null) return false;
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return false;
+        for (var entry : snapshot.items()) {
+            candidates.add(entry.stack());
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),

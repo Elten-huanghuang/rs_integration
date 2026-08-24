@@ -123,7 +123,11 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        // The chain already selected the storage endpoint.  Do not replace a
+        // BD endpoint with a fresh RS lookup during graph dispatch.
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        }
         if (!acquireStaff(player)) return false;
         if (RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()
                 && !fuelHelper.findAndLock(level, pos)) {
@@ -183,20 +187,22 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
 
     private boolean acquireStaff(ServerPlayer player) {
         if (hasStaff(player)) return true;
-        if (network == null) return false;
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack candidate = entry.getStack();
-            if (!isStaff(candidate)) continue;
-            ItemStack extracted = com.huanghuang.rsintegration.network.RSIntegrationNetwork
-                    .extractExactFromNetwork(network, candidate, 1, player);
-            if (extracted.getCount() != 1) {
-                if (!extracted.isEmpty()) deliver(extracted);
-                return false;
+        if (storageEndpoint() != null) {
+            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            if (snapshot == null) return false;
+            for (var entry : snapshot.items()) {
+                ItemStack candidate = entry.stack();
+                if (!isStaff(candidate)) continue;
+                ItemStack extracted = extractExactFromStorage(player, candidate, 1, false);
+                if (extracted.getCount() != 1) {
+                    if (!extracted.isEmpty()) deliver(extracted);
+                    return false;
+                }
+                staff = extracted.copy();
+                networkStaff = extracted.copy();
+                staffFromNetwork = true;
+                return true;
             }
-            staff = extracted.copy();
-            networkStaff = extracted.copy();
-            staffFromNetwork = true;
-            return true;
         }
         return false;
     }
@@ -246,9 +252,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
 
     private void releaseNetworkStaff() {
         if (!staffFromNetwork || networkStaff.isEmpty()) return;
-        ItemStack remainder = network == null ? networkStaff.copy()
-                : com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                .insertLegacy(network, player, networkStaff, false);
+        ItemStack remainder = storageEndpoint() == null ? networkStaff.copy()
+                : insertIntoStorage(player, networkStaff, false);
         if (!remainder.isEmpty()) deliver(remainder);
         networkStaff = ItemStack.EMPTY;
         staffFromNetwork = false;
@@ -352,7 +357,9 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
                 LithumAltarStateReader.Snapshot snapshot = LithumAltarStateReader.read(level, pos);
                 if (snapshot != null && snapshot.maxEnergy() > 0
                         && snapshot.currentEnergy() < snapshot.maxEnergy()
-                        && !fuelHelper.ensureFuel(level, network, player)) {
+                        && !(storageEndpoint() != null
+                        ? fuelHelper.ensureFuel(level, storageEndpoint(), player)
+                        : fuelHelper.ensureFuel(level, network, player))) {
                     warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
                 }
             }
@@ -427,13 +434,15 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearPlacedMaterials();
-        fuelHelper.refundUnused(level, network, player);
+        if (storageEndpoint() != null) fuelHelper.refundUnused(level, storageEndpoint(), player);
+        else fuelHelper.refundUnused(level, network, player);
         releaseNetworkStaff();
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        fuelHelper.refundUnused(level, network, player);
+        if (storageEndpoint() != null) fuelHelper.refundUnused(level, storageEndpoint(), player);
+        else fuelHelper.refundUnused(level, network, player);
         releaseNetworkStaff();
         pendingResult = ItemStack.EMPTY;
         clearedRecipeTicks = 0;

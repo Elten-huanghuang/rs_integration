@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
+import com.huanghuang.rsintegration.storage.StorageReference;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
@@ -49,12 +51,15 @@ public record PlanResponse(
         @Nullable PlanGraphView graph,         // server-authored DAG view; null on legacy/fallback plans
         boolean executionBlocked,              // hard prerequisite failure, independent of material availability
         List<MachineCandidateView> machineCandidates,
-        Map<ResourceLocation, StepIssue> stepIssues
+        Map<ResourceLocation, StepIssue> stepIssues,
+        @Nullable StorageReference storageReference,
+        List<StorageNetworkDescriptor> storageNetworks
 ) {
     public PlanResponse {
         machineCandidates = machineCandidates == null ? List.of() : List.copyOf(machineCandidates);
         stepIssues = stepIssues == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(stepIssues));
+        storageNetworks = storageNetworks == null ? List.of() : List.copyOf(storageNetworks);
     }
 
     public record StepIssue(List<Component> warnings, boolean blocked) {
@@ -82,7 +87,30 @@ public record PlanResponse(
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
                 baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
-                machineCandidates, Map.of());
+                machineCandidates, Map.of(), null, List.of());
+    }
+
+    /** Backward-compatible constructor for callers that already provide step issues. */
+    public PlanResponse(boolean success, String targetName, ItemStack targetResult,
+                        List<PlanStep> steps, Map<IngredientKey, Availability> materials,
+                        List<String> missing, String recipeId,
+                        @Nullable String executionModTypeId, @Nullable String executionDim,
+                        int executionPosX, int executionPosY, int executionPosZ,
+                        List<Component> modWarnings, int repeatCount,
+                        @Nullable int[] embersCode, @Nullable Component[] embersAspectNames,
+                        @Nullable Component[] embersInputNames, long embersSeed,
+                        boolean embersCanInfer, boolean embersCodeFromCache,
+                        boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
+                        boolean executionBlocked, List<MachineCandidateView> machineCandidates,
+                        Map<ResourceLocation, StepIssue> stepIssues) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
+                embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
+                machineCandidates, stepIssues, null, List.of());
     }
 
     public Availability availability(ItemStack stack) {
@@ -122,7 +150,7 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
-                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false, List.of());
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, false, List.of(), Map.of(), null, List.of());
     }
 
     /** Backward-compat: plans without target-machine candidate snapshots. */
@@ -144,7 +172,7 @@ public record PlanResponse(
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
                 baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
-                List.of());
+                List.of(), Map.of(), null, List.of());
     }
 
     /** Backward-compat: no execution routing info (vanilla/generic path). */
@@ -154,7 +182,7 @@ public record PlanResponse(
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 null, null, 0, 0, 0, Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null, false, List.of());
+                Collections.emptyMap(), null, null, false, List.of(), Map.of(), null, List.of());
     }
 
     /** Backward-compat: no mod warnings. */
@@ -168,7 +196,7 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 Collections.emptyList(), 1,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null, false);
+                Collections.emptyMap(), null, null, false, List.of(), Map.of(), null, List.of());
     }
 
     /** Backward-compat: no embers data. */
@@ -183,6 +211,6 @@ public record PlanResponse(
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
                 modWarnings, repeatCount,
                 null, null, null, 0, false, false, false, null, Collections.emptySet(),
-                Collections.emptyMap(), null, null, false);
+                Collections.emptyMap(), null, null, false, List.of(), Map.of(), null, List.of());
     }
 }

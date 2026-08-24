@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -247,7 +248,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        this.ledger.setStorageEndpoint(storageEndpoint());
 
         // Ritual mode
         if (isRitual) {
@@ -738,17 +742,12 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         // Apply crafting remainders: items with hasCraftingRemainingItem() leave
         // getCraftingRemainingItem() behind; everything else is consumed.
         if (isWorktable) {
-            INetwork net = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
             for (ItemStack mat : materials) {
                 if (mat.hasCraftingRemainingItem()) {
                     ItemStack remainder = mat.getCraftingRemainingItem();
                     if (!remainder.isEmpty()) {
-                        if (net != null) {
-                            net.insertItem(remainder, remainder.getCount(),
-                                    com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-                        } else {
-                            ItemHandlerHelper.giveItemToPlayer(player, remainder);
-                        }
+                        ItemStack leftover = insertIntoStorage(player, remainder, false);
+                        if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, network);
                     }
                 }
             }

@@ -101,7 +101,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             this.recipeTemperature = 2800;
         }
 
-        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        }
         this.materialsPlaced = false;
         this.recordedInputItem = null;
         return true;

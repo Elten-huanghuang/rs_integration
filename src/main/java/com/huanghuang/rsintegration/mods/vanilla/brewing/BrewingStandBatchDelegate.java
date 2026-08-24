@@ -82,8 +82,6 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
-        if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         return place(materials);
     }
 
