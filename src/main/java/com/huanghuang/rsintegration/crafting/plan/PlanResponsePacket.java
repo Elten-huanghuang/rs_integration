@@ -4,6 +4,10 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
+import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageReferenceCodec;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -36,6 +40,8 @@ public final class PlanResponsePacket {
     private static final int MAX_MOD_TYPE_LENGTH = 128;
     private static final int MAX_DIMENSION_LENGTH = 128;
     private static final int MAX_MESSAGE_LENGTH = 2048;
+    private static final int MAX_BACKEND_ID_LENGTH = 64;
+    private static final int MAX_NETWORK_ID_LENGTH = StorageReference.MAX_NETWORK_ID_LENGTH;
 
     /** Reject corrupt counts before allocation or field decoding. */
     private static int readBoundedCount(FriendlyByteBuf buf) {
@@ -193,6 +199,21 @@ public final class PlanResponsePacket {
             buf.writeVarInt(entry.getValue().warnings().size());
             for (Component warning : entry.getValue().warnings()) buf.writeComponent(warning);
         }
+        buf.writeBoolean(plan.storageReference() != null);
+        if (plan.storageReference() != null) {
+            buf.writeNbt(StorageReferenceCodec.encode(plan.storageReference()));
+        }
+        buf.writeVarInt(plan.storageNetworks().size());
+        for (StorageNetworkDescriptor descriptor : plan.storageNetworks()) {
+            buf.writeUtf(descriptor.reference().backendId().value(), MAX_BACKEND_ID_LENGTH);
+            buf.writeUtf(descriptor.reference().networkId(), MAX_NETWORK_ID_LENGTH);
+            buf.writeUtf(descriptor.displayName(), StorageNetworkDescriptor.MAX_DISPLAY_NAME_LENGTH);
+            buf.writeBoolean(descriptor.defaultNetwork());
+            buf.writeVarInt(descriptor.capabilities().size());
+            for (StorageCapability capability : descriptor.capabilities()) {
+                buf.writeVarInt(capability.ordinal());
+            }
+        }
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
         PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
@@ -341,6 +362,36 @@ public final class PlanResponsePacket {
             for (int j = 0; j < warningCount; j++) warnings.add(readComponentOrEmpty(buf));
             stepIssues.put(stepRecipeId, new PlanResponse.StepIssue(warnings, blocked));
         }
+        StorageReference storageReference = null;
+        if (buf.readBoolean()) {
+            storageReference = StorageReferenceCodec.decode(buf.readNbt())
+                    .orElseThrow(() -> new DecoderException("invalid plan storage reference"));
+        }
+        int storageNetworkCount = readBoundedCount(buf);
+        List<StorageNetworkDescriptor> storageNetworks = new ArrayList<>(storageNetworkCount);
+        StorageCapability[] capabilities = StorageCapability.values();
+        for (int i = 0; i < storageNetworkCount; i++) {
+            String backendId = buf.readUtf(MAX_BACKEND_ID_LENGTH);
+            String networkId = buf.readUtf(MAX_NETWORK_ID_LENGTH);
+            String displayName = buf.readUtf(StorageNetworkDescriptor.MAX_DISPLAY_NAME_LENGTH);
+            boolean defaultNetwork = buf.readBoolean();
+            int capabilityCount = readBoundedCount(buf);
+            Set<StorageCapability> capabilitySet = EnumSet.noneOf(StorageCapability.class);
+            for (int j = 0; j < capabilityCount; j++) {
+                int ordinal = buf.readVarInt();
+                if (ordinal < 0 || ordinal >= capabilities.length) {
+                    throw new DecoderException("invalid storage capability: " + ordinal);
+                }
+                capabilitySet.add(capabilities[ordinal]);
+            }
+            try {
+                storageNetworks.add(new StorageNetworkDescriptor(
+                        new StorageReference(new com.huanghuang.rsintegration.storage.StorageBackendId(backendId), networkId),
+                        displayName, defaultNetwork, capabilitySet));
+            } catch (IllegalArgumentException e) {
+                throw new DecoderException("invalid storage network descriptor", e);
+            }
+        }
         // requestId follows the per-step diagnostics and is a required protocol field.
         long requestId = 0L;
         if (buf.readBoolean()) {
@@ -359,7 +410,7 @@ public final class PlanResponsePacket {
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
                 leftovers, clickedOutput, graph, executionBlocked, machineCandidates,
-                stepIssues), requestId);
+                stepIssues, storageReference, storageNetworks), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {

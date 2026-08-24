@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -176,12 +177,16 @@ public final class MalumCraftPacket {
         INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
         List<Integer> filledPedestalIndices = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            if (network != null) {
+                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+            }
             try {
                 // 1. Center item -> altar inventory slot 0
                 if (inputObj != null) {
                     Ingredient centerIng = (Ingredient) getField(inputObj, "ingredient");
                     if (centerIng != null) {
-                        ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, centerIng, centerCount, ledger);
+                        ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                                player, altarDim, pos, centerIng, centerCount, ledger, network);
                         if (stack.isEmpty()) {
                             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                     CraftPacketUtils.describeIngredient(centerIng)));
@@ -198,7 +203,8 @@ public final class MalumCraftPacket {
                     Ingredient ing = (Ingredient) getField(eItem, "ingredient");
                     if (ing == null) continue;
                     int itemCount = CraftPacketUtils.readIngredientCount(eItem, 1);
-                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, ing, itemCount, ledger);
+                    ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                            player, altarDim, pos, ing, itemCount, ledger, network);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                 CraftPacketUtils.describeIngredient(ing)));
@@ -217,7 +223,8 @@ public final class MalumCraftPacket {
                     int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
                     Item spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
                     Ingredient spiritIng = Ingredient.of(spiritItem);
-                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, spiritIng, sCount, ledger);
+                    ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                            player, altarDim, pos, spiritIng, sCount, ledger, network);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                 CraftPacketUtils.describeIngredient(spiritIng)));

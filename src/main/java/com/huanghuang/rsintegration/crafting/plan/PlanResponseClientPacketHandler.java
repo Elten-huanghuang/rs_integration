@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -21,6 +22,23 @@ final class PlanResponseClientPacketHandler {
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                 plan.recipeId());
+        // Error responses intentionally carry an empty target stack. Do not
+        // open a normal plan screen for those packets: ItemStack.EMPTY's
+        // hover name is "Air", which makes a failed request look like an
+        // actual recipe targeting air. Valid infeasible plans still have a
+        // recipe id/target and continue to open with their missing materials.
+        if (!plan.success()
+                && (plan.recipeId() == null || plan.recipeId().isEmpty())
+                && plan.targetResult().isEmpty()) {
+            var mc = Minecraft.getInstance();
+            if (mc.player != null) {
+                Component message = plan.modWarnings().isEmpty()
+                        ? Component.translatable("rsi.generic.error.craft_failed")
+                        : plan.modWarnings().get(0);
+                mc.player.displayClientMessage(message, false);
+            }
+            return;
+        }
         List<String> missing = localizeItemNames(plan.missing());
         String targetName = plan.targetResult().isEmpty()
                 ? plan.targetName()
@@ -32,7 +50,8 @@ final class PlanResponseClientPacketHandler {
                 plan.embersCode(), plan.embersAspectNames(), plan.embersInputNames(), plan.embersSeed(),
                 plan.embersCanInfer(), plan.embersCodeFromCache(), plan.executionMachineSupportsGui(),
                 plan.baseItem(), plan.boundMachineTypes(), plan.leftovers(), plan.clickedOutput(), plan.graph(),
-                plan.executionBlocked(), plan.machineCandidates(), plan.stepIssues());
+                plan.executionBlocked(), plan.machineCandidates(), plan.stepIssues(),
+                plan.storageReference(), plan.storageNetworks());
         openScreen(localized, requestId);
     }
 

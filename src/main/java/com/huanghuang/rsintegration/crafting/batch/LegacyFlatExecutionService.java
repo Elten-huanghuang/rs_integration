@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.util.TextBuilder;
@@ -28,6 +29,17 @@ public final class LegacyFlatExecutionService {
             LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             Consumer<AsyncCraftChain> completionWiring) {
+        return launch(player, network, null, steps, reason, recipeId, targetOutput,
+                outputDestination, completionWiring);
+    }
+
+    public static AsyncCraftChain launch(
+            ServerPlayer player, @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            List<CraftingResolver.ResolutionStep> steps,
+            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
+            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
+            Consumer<AsyncCraftChain> completionWiring) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(steps, "steps");
         Objects.requireNonNull(reason, "reason");
@@ -46,13 +58,24 @@ public final class LegacyFlatExecutionService {
                 recipeId, reason, legacyType.id(), chainSteps.size());
 
         AsyncCraftChain chain = new AsyncCraftChain(
-                player.getUUID(), player.getServer(), network, chainSteps);
+                player.getUUID(), player.getServer(), network, storageEndpoint, chainSteps);
         return submit(player, chain, chainSteps.size(), targetOutput,
                 outputDestination, completionWiring);
     }
 
     public static AsyncCraftChain launchIncompleteGraph(
             ServerPlayer player, INetwork network, CraftPlanGraph inputGraph,
+            CraftingResolver.ResolutionStep terminalStep, int repeatCount,
+            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
+            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
+            Consumer<AsyncCraftChain> completionWiring) {
+        return launchIncompleteGraph(player, network, null, inputGraph, terminalStep, repeatCount,
+                reason, recipeId, targetOutput, outputDestination, completionWiring);
+    }
+
+    public static AsyncCraftChain launchIncompleteGraph(
+            ServerPlayer player, @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint, CraftPlanGraph inputGraph,
             CraftingResolver.ResolutionStep terminalStep, int repeatCount,
             LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
@@ -64,7 +87,7 @@ public final class LegacyFlatExecutionService {
                 "[RSI-Craft] legacy incomplete-graph launch recipe={} reason={} modType={} graphNodes={}",
                 recipeId, reason, terminalStep.modType().id(), inputGraph.nodes().size());
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
-                inputGraph, terminalStep, repeatCount);
+                storageEndpoint, inputGraph, terminalStep, repeatCount);
         return submit(player, chain, chain.stepsCount(), targetOutput,
                 outputDestination, completionWiring);
     }

@@ -111,6 +111,21 @@ public final class StorageBackendRegistry {
         return List.copyOf(results);
     }
 
+    /**
+     * Returns the networks the player may explicitly target, preserving backend
+     * registration order. Failed/unavailable backends contribute no choices;
+     * the caller can still use {@link #discoverAllNetworksForPlayer(ServerPlayer)}
+     * when it needs diagnostics.
+     */
+    public List<StorageNetworkDescriptor> discoverNetworksForPlayer(ServerPlayer player) {
+        List<StorageNetworkDescriptor> networks = new ArrayList<>();
+        for (StorageBackendDiscovery discovery : discoverAllNetworksForPlayer(player)) {
+            if (!discovery.result().successful()) continue;
+            networks.addAll(discovery.result().networks());
+        }
+        return List.copyOf(networks);
+    }
+
     private static boolean safeAvailable(StorageBackend backend) {
         try {
             return backend.isAvailable();

@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -109,9 +110,32 @@ public final class MaterialSources {
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
                                                            CraftStorageEndpoint endpoint) {
         Map<StackKey, Integer> available = countInventory(player);
-        endpoint.snapshot(player).snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
+        // Keep the RS compatibility bridge on its native cache representation.
+        // StorageItemKey intentionally normalizes display stacks to count=1 and
+        // can lose backend-specific payload details; the old planner consumed
+        // StackListEntry directly and is authoritative for RS item identity.
+        if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
+            addNetworkItems(available, legacy.network());
+            return available;
+        }
+        var snapshotResult = endpoint.snapshot(player);
+        snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
                 available.merge(StackKey.of(item.stack(), true),
                         (int) Math.min(Integer.MAX_VALUE, item.amount()), Integer::sum)));
+        if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
+            int exact = 0;
+            for (var entry : available.entrySet()) {
+                var id = ForgeRegistries.ITEMS.getKey(entry.getKey().item());
+                if (id != null && id.toString().equals("confluence:demon_heart")) {
+                    exact += entry.getValue();
+                }
+            }
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Materials] snapshot status={} storedItems={} availableKeys={} confluence:demon_heart={}",
+                    snapshotResult.status(),
+                    snapshotResult.snapshot().map(s -> s.items().size()).orElse(0),
+                    available.size(), exact);
+        }
         return available;
     }
 

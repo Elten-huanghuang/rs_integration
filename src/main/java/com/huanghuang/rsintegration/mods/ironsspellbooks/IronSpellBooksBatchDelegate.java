@@ -88,7 +88,10 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        }
+        privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : specs) {
             ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, level.dimension(), pos,
@@ -107,7 +110,6 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         this.ledger = sharedLedger;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
         return start(player, materials);
     }
 

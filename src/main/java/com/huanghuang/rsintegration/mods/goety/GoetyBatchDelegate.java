@@ -730,7 +730,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        // Keep the chain-selected endpoint.  Re-resolving here would make a
+        // BD graph node fail simply because no RS INetwork exists at the altar.
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;

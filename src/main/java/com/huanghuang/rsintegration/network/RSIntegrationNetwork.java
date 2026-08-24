@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -26,13 +27,30 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class RSIntegrationNetwork {
 
     private static final PlayerNetworkResolutionCache<INetwork> RESOLUTION_CACHE =
             new PlayerNetworkResolutionCache<>(20);
+    private static final ConcurrentHashMap<UUID, INetwork> LAST_RESOLVED_NETWORKS =
+            new ConcurrentHashMap<>();
 
     private RSIntegrationNetwork() {}
+
+    /**
+     * Publishes a network that was already authenticated by an RS UI/container
+     * to the common player-resolution cache.  The side panel is only a UI
+     * consumer; it must not become a separate source of truth for crafting.
+     */
+    public static void rememberResolvedNetwork(ServerPlayer player, INetwork network) {
+        if (player == null || network == null) return;
+        UUID playerId = player.getUUID();
+        LAST_RESOLVED_NETWORKS.put(playerId, network);
+        RESOLUTION_CACHE.put(playerId, player.server, player.level().dimension(),
+                player.containerMenu, player.server.getTickCount(), network);
+    }
 
     @Nullable
     public static INetwork resolveNetworkFromPlayer(ServerPlayer player) {
@@ -43,15 +61,94 @@ public final class RSIntegrationNetwork {
         long tick = server.getTickCount();
         PlayerNetworkResolutionCache.Entry<INetwork> cached =
                 RESOLUTION_CACHE.get(playerId, server, dimension, menu, tick);
-        if (cached != null) {
+        if (cached != null && cached.value() != null) {
             PerformanceMonitor.recordNetworkResolve(true, cached.value() != null);
+            LAST_RESOLVED_NETWORKS.put(playerId, cached.value());
             return cached.value();
         }
 
+        // Do not treat a cached null as authoritative. A wireless terminal can
+        // be moved into the player's inventory, curios, or an RS container
+        // after the negative lookup was cached; execution must retry the
+        // player's own terminal before considering secondary integrations.
         INetwork network = resolveNetworkFromPlayerUncached(player);
+        if (network == null) {
+            // The RS grid may close between preview and execution. Reuse the
+            // last network resolved from this player's own terminal/container
+            // while it remains a live network; do not use this as the primary
+            // lookup, so newly inserted terminals are always rescanned first.
+            network = LAST_RESOLVED_NETWORKS.get(playerId);
+            if (network != null) {
+                try {
+                    if (!network.canRun() || network.getItemStorageCache() == null) {
+                        LAST_RESOLVED_NETWORKS.remove(playerId, network);
+                        network = null;
+                    }
+                } catch (RuntimeException | LinkageError invalid) {
+                    LAST_RESOLVED_NETWORKS.remove(playerId, network);
+                    network = null;
+                }
+            }
+            if (network != null) logResolved("last player terminal session", network);
+        } else {
+            rememberResolvedNetwork(player, network);
+        }
         RESOLUTION_CACHE.put(playerId, server, dimension, menu, tick, network);
         PerformanceMonitor.recordNetworkResolve(false, network != null);
         return network;
+    }
+
+    /**
+     * Resolves only an access context that is present right now.  In
+     * particular, this deliberately excludes LAST_RESOLVED_NETWORKS and the
+     * side panel's last-known network.  Those values are useful for legacy
+     * services, but are not credentials and must not select RS after a player
+     * has discarded the terminal that authenticated it.
+     */
+    @Nullable
+    public static INetwork resolveCurrentNetworkFromPlayer(ServerPlayer player) {
+        if (player == null) return null;
+
+        if (player.containerMenu instanceof ResonanceBackpackContainer backpack) {
+            INetwork network = backpack.getOwnerNetwork();
+            if (network != null) return network;
+        }
+
+        INetwork network = getNetworkFromContainer(player.containerMenu);
+        if (network != null) return network;
+        network = resolveFromPlayerInventory(player);
+        if (network != null) return network;
+        network = resolveFromContainerTerminal(player);
+        if (network != null) return network;
+
+        // A live side-panel listener is an active RS UI session.  Do not use
+        // getListenerNetwork(), because it also returns the retained,
+        // last-known network after the panel has been closed.
+        network = com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                .getActiveListenerNetwork(player.getUUID());
+        if (network != null) return network;
+
+        // A machine binding is an explicit, player-owned RS access path and
+        // remains valid even when no terminal is held.
+        return AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
+    }
+
+    /** Returns whether the supplied RS reference is backed by a current access context. */
+    public static boolean hasCurrentNetworkAccess(ServerPlayer player,
+                                                   StorageReference reference) {
+        if (player == null || reference == null
+                || !"refinedstorage".equals(reference.backendId().value())) return false;
+        INetwork network = resolveCurrentNetworkFromPlayer(player);
+        if (network == null) return false;
+        try {
+            if (network.getLevel() == null || network.getPosition() == null) return false;
+            String id = "v1|" + network.getLevel().dimension().location() + "@"
+                    + network.getPosition().getX() + "," + network.getPosition().getY()
+                    + "," + network.getPosition().getZ();
+            return id.equals(reference.networkId());
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
     }
 
     @Nullable
@@ -72,6 +169,16 @@ public final class RSIntegrationNetwork {
         net = resolveFromContainerTerminal(player);
         if (net != null) return net;
 
+        // Reuse the validated side-panel listener after the RS grid screen is
+        // closed; the crafting plan is a separate request and may arrive with
+        // no RS container or NetworkItem in the active player inventory.
+        net = com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                .getListenerNetwork(player.getUUID());
+        if (net != null) {
+            logResolved("RS side-panel listener", net);
+            return net;
+        }
+
         net = AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
         if (net != null) return net;
 
@@ -83,10 +190,12 @@ public final class RSIntegrationNetwork {
 
     public static void invalidateNetworkResolution(UUID playerId) {
         RESOLUTION_CACHE.invalidate(playerId);
+        LAST_RESOLVED_NETWORKS.remove(playerId);
     }
 
     public static void clearNetworkResolutionCache() {
         RESOLUTION_CACHE.clear();
+        LAST_RESOLVED_NETWORKS.clear();
         lastNearbyScan.clear();
     }
 
@@ -159,6 +268,36 @@ public final class RSIntegrationNetwork {
         return null;
     }
 
+    /**
+     * Crafting-only fallback for requests that have no terminal, network item,
+     * or machine binding. It never becomes the general-purpose resolver used
+     * by side-panel operations. The candidate must be running and the player
+     * must have at least one RS storage permission, matching the VIEW policy
+     * used by the storage backend adapter.
+     */
+    @Nullable
+    public static INetwork resolveNearbyNetworkForCraft(ServerPlayer player) {
+        INetwork network = resolveFromNearbyNode(player);
+        if (network == null) return null;
+        try {
+            if (!network.canRun()) return null;
+            var security = network.getSecurityManager();
+            if (security != null
+                    && !security.hasPermission(Permission.INSERT, player)
+                    && !security.hasPermission(Permission.EXTRACT, player)
+                    && !security.hasPermission(Permission.AUTOCRAFTING, player)) {
+                RSIntegrationMod.LOGGER.debug("[RSI] Nearby RS network rejected: no storage permission");
+                return null;
+            }
+            RSIntegrationMod.LOGGER.debug("[RSI] Resolved crafting network via nearby RS node at {}",
+                    network.getPosition());
+            return network;
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Nearby crafting network probe failed", failure);
+            return null;
+        }
+    }
+
     /** Resolves an explicit network without collapsing backend failures into a missing network. */
     @Nullable
     public static INetwork resolveNetworkStrict(MinecraftServer server,
@@ -204,7 +343,28 @@ public final class RSIntegrationNetwork {
     private static INetwork resolveFromNetworkItem(ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return null;
 
-        // Standard path: RS NetworkItem / WirelessGrid
+        // Let RS resolve the item through its own provider first.  This is
+        // important for wireless grid/crafting-monitor variants and keeps us
+        // independent of their private NBT layout across RS releases.
+        if (stack.getItem() instanceof NetworkItem networkItem) {
+            AtomicReference<INetwork> resolved = new AtomicReference<>();
+            try {
+                networkItem.applyNetwork(player.server, stack,
+                        resolved::set,
+                        ignored -> { });
+                INetwork net = resolved.get();
+                if (net != null) {
+                    logResolved("RS NetworkItem provider", net);
+                    return net;
+                }
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.debug("[RSI] NetworkItem provider resolution failed for {}",
+                        stack.getItem(), failure);
+            }
+        }
+
+        // Compatibility path for older/custom terminal items that still use
+        // the standard NetworkItem NBT contract.
         if (NetworkItem.isValid(stack)) {
             ResourceKey<Level> dim = NetworkItem.getDimension(stack);
             if (dim != null) {
@@ -213,7 +373,10 @@ public final class RSIntegrationNetwork {
                         NetworkItem.getY(stack),
                         NetworkItem.getZ(stack));
                 INetwork net = resolveNetwork(player.server, dim, pos);
-                if (net != null) return net;
+                if (net != null) {
+                    logResolved("NetworkItem coordinates", net);
+                    return net;
+                }
             }
         }
 

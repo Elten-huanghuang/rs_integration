@@ -230,7 +230,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Resolve network early so validateIdle can access it for crystal rituals
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
 
         // Validate idle state per machine type
         if (!validateIdle(player, level)) return false;
@@ -1265,7 +1267,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.filledSlotIndices = new ArrayList<>();
         this.filledPedestals = new ArrayList<>();
         this.waitTicks = 0;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
 
         // Verify the cached BlockEntity is still valid
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {

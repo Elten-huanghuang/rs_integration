@@ -48,6 +48,9 @@ public final class RSSidePanelNetworkHandler {
     public static final SimpleChannel CHANNEL = NetworkHandler.CHANNEL;
 
     private static final Map<UUID, ListenerEntry> playerListeners = new ConcurrentHashMap<>();
+    /** Last validated RS network retained after the side-panel/terminal UI closes. */
+    private static final Map<UUID, com.refinedmods.refinedstorage.api.network.INetwork>
+            lastKnownNetworks = new ConcurrentHashMap<>();
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
@@ -520,6 +523,7 @@ public final class RSSidePanelNetworkHandler {
                 pendingDeltas.clear(pid);
                 pendingSnapshotPriorities.remove(pid);
                 nextPriorityRefreshTick.remove(pid);
+                lastKnownNetworks.remove(pid, network);
                 com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(pid);
 
                 // Attempt immediate re-registration on the new cache.
@@ -626,10 +630,27 @@ public final class RSSidePanelNetworkHandler {
         entry.craftableKeys.addAll(craftableKeys);
         entryHolder[0] = entry;
         playerListeners.put(pid, entry);
+        lastKnownNetworks.put(pid, network);
+        // Keep the common RS resolver in sync with the UI listener.  Recursive
+        // crafting must work even after the panel is closed and must not depend
+        // on the client-side panel state.
+        com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                .rememberResolvedNetwork(player, network);
         return isNew;
     }
 
     public static void unregisterListener(UUID playerId) {
+        unregisterListener(playerId, true);
+    }
+
+    /**
+     * Detach the live side-panel cache listener while optionally retaining the
+     * last validated RS network for crafting requests. Closing the panel is a
+     * UI lifecycle event, not a network invalidation; clearing the resolution
+     * cache here made the presence of BD incorrectly hide an otherwise usable
+     * RS network until the terminal was opened again.
+     */
+    public static void unregisterListener(UUID playerId, boolean invalidateResolution) {
         ListenerEntry old = playerListeners.remove(playerId);
         if (old != null) {
             try {
@@ -641,7 +662,10 @@ public final class RSSidePanelNetworkHandler {
         synchronizedStackIds.remove(playerId);
         pendingSnapshotPriorities.remove(playerId);
         nextPriorityRefreshTick.remove(playerId);
-        com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
+        if (invalidateResolution) {
+            lastKnownNetworks.remove(playerId);
+            com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
+        }
     }
 
     private static long nextSyncGeneration(ServerPlayer player) {
@@ -664,6 +688,7 @@ public final class RSSidePanelNetworkHandler {
         dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
         syncGenerations.clear();
+        lastKnownNetworks.clear();
         machineScanCounter = 0;
         machineStatusSequence = 0;
         tickFiringConfirmed = false;
@@ -729,9 +754,16 @@ public final class RSSidePanelNetworkHandler {
         }
     }
 
-    static com.refinedmods.refinedstorage.api.network.INetwork getListenerNetwork(UUID playerId) {
+    /** Returns the validated network backing the player's active side-panel listener. */
+    public static com.refinedmods.refinedstorage.api.network.INetwork getListenerNetwork(UUID playerId) {
         ListenerEntry entry = playerListeners.get(playerId);
-        return entry != null ? entry.network : null;
+        return entry != null ? entry.network : lastKnownNetworks.get(playerId);
+    }
+
+    /** Returns only the live listener network; retained last-known state is not an access credential. */
+    public static com.refinedmods.refinedstorage.api.network.INetwork getActiveListenerNetwork(UUID playerId) {
+        ListenerEntry entry = playerListeners.get(playerId);
+        return entry == null ? null : entry.network;
     }
 
     static Set<UUID> trackedStackIds(UUID playerId) {
@@ -787,7 +819,10 @@ public final class RSSidePanelNetworkHandler {
     public static void onContainerClose(PlayerContainerEvent.Close event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
             RemoteGuiAuth.deauthorize(sp.getUUID(), event.getContainer());
-            com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(sp.getUUID());
+            // Closing a container is only a UI lifecycle event. Keep the last
+            // validated RS network available for a crafting request that is
+            // submitted immediately after the terminal closes. Explicit cache
+            // invalidation remains responsible for actual network changes.
         }
     }
 

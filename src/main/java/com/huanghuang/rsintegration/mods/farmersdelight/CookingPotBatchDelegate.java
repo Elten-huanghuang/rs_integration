@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
@@ -143,13 +144,14 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            CraftStorageEndpoint endpoint = storageEndpoint();
+            if (endpoint == null) return false;
+            ledger.setStorageEndpoint(endpoint);
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                        player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                ItemStack reserved = ledger.reserve(
+                        spec.ingredient(), spec.count(), endpoint, player, myDim, myPos);
                 if (reserved.isEmpty()) {
                     return false;
                 }
@@ -198,10 +200,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // A stale/partially completed pot must not block the scheduler. Drain
         // every slot before reserving this operation's inputs; the old contents
         // are not owned by the new shared ledger.
-        if (network == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        }
-        if (network == null || !drainExistingContentsToNetwork(itemHandler)) return false;
+        if (storageEndpoint() == null || !drainExistingContentsToNetwork(itemHandler)) return false;
 
         forceChunkLoad(true);
 
@@ -253,7 +252,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
                         slot, remainder.getHoverName().getString());
                 for (int back = 0; back < slot; back++) {
                     ItemStack refund = itemHandler.extractItem(back, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger && network != null)
+                    if (!refund.isEmpty() && !usingSharedLedger)
                         insertIntoStorage(player, refund, false);
                 }
                 be.setChanged();

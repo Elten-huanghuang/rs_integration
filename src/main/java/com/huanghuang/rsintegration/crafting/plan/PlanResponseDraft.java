@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
+import com.huanghuang.rsintegration.storage.StorageReference;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
@@ -47,7 +49,9 @@ public record PlanResponseDraft(
         @Nullable PlanGraphView graph,
         boolean executionBlocked,
         List<MachineCandidateView> machineCandidates,
-        Map<ResourceLocation, PlanResponse.StepIssue> stepIssues
+        Map<ResourceLocation, PlanResponse.StepIssue> stepIssues,
+        @Nullable StorageReference storageReference,
+        List<StorageNetworkDescriptor> storageNetworks
 ) {
     /** Backward-compat: drafts without per-step prerequisite diagnostics. */
     public PlanResponseDraft(boolean success, String targetName, ItemStack targetResult,
@@ -69,7 +73,7 @@ public record PlanResponseDraft(
                 modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
                 embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
                 baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
-                machineCandidates, Map.of());
+                machineCandidates, Map.of(), null, List.of());
     }
 
     /** Backward-compat: drafts without an explicit hard prerequisite gate. */
@@ -136,6 +140,7 @@ public record PlanResponseDraft(
         machineCandidates = machineCandidates == null ? List.of() : List.copyOf(machineCandidates);
         stepIssues = stepIssues == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(stepIssues));
+        storageNetworks = storageNetworks == null ? List.of() : List.copyOf(storageNetworks);
     }
 
     @Override
@@ -195,7 +200,7 @@ public record PlanResponseDraft(
                 embersSeed, embersCanInfer, embersCodeFromCache,
                 executionMachineSupportsGui, copyNullable(baseItem), boundMachineTypes,
                 leftovers, copyNullable(clickedOutput), graph == null ? null : copyGraph(graph),
-                executionBlocked, machineCandidates, stepIssues);
+                executionBlocked, machineCandidates, stepIssues, storageReference, storageNetworks);
     }
 
     private static PlanStep copyStep(PlanStep step) {

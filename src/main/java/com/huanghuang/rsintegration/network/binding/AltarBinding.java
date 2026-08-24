@@ -10,4 +10,5 @@ public record AltarBinding(
         CompoundTag data
 ) {
     public static final ResourceLocation RS_NETWORK = ResourceLocation.fromNamespaceAndPath("rs_integration", "rs_network");
+    public static final ResourceLocation BD_NETWORK = ResourceLocation.fromNamespaceAndPath("rs_integration", "beyonddimensions_network");
 }

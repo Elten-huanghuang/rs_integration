@@ -86,9 +86,11 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
 
         this.recipe = runicRecipe;
         this.expected = output.copy();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
-        return network == null
-                ? PreparationResult.retry("Runic Altar is not connected to the RS network")
+        if (!hasStorageAccess()) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        }
+        return !hasStorageAccess()
+                ? PreparationResult.retry("Runic Altar is not connected to a storage backend")
                 : PreparationResult.ready();
     }
 
@@ -108,8 +110,11 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
-        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(
-                network, getRequiredMaterials());
+        List<ItemStack> extracted = storageEndpoint() != null
+                ? BotaniaDelegateSupport.extractAtomically(
+                        storageEndpoint(), player, getRequiredMaterials())
+                : BotaniaDelegateSupport.extractAtomically(
+                        network, getRequiredMaterials());
         if (extracted.isEmpty()) return false;
         if (start(player, extracted)) return true;
         for (ItemStack stack : extracted) refundStandalone(player, stack);
@@ -126,6 +131,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
+        useSharedLedger(sharedLedger);
         return start(player, materials);
     }
 
@@ -172,7 +178,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean canStartNow() {
-        if (level == null || pos == null || recipe == null || network == null) return false;
+        if (level == null || pos == null || recipe == null || !hasStorageAccess()) return false;
         return level.getBlockEntity(pos) instanceof RunicAltarBlockEntity altar && isIdle(altar);
     }
 

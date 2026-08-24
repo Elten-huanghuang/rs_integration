@@ -5,7 +5,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
-import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -58,9 +57,10 @@ public final class NearbyBindingService {
 
         ItemStack connector = selectConnector(player);
         if (connector == null) return;
-        var networkBinding = RSBindingHook.INSTANCE.createBinding(connector);
+        var networkBinding = AltarBindingRegistry.findHook(connector)
+                .flatMap(hook -> hook.createBinding(connector));
         if (networkBinding.isEmpty()) {
-            player.displayClientMessage(Component.translatable("rsi.binding.nearby.invalid_connector"), true);
+            player.displayClientMessage(Component.translatable("rsi.binding.nearby.invalid_terminal"), true);
             return;
         }
 
@@ -76,25 +76,30 @@ public final class NearbyBindingService {
 
     private static ItemStack selectConnector(ServerPlayer player) {
         ItemStack main = player.getMainHandItem();
-        if (NetworkItem.isValid(main)) return main;
+        if (isBindingTerminal(main)) return main;
         ItemStack offhand = player.getOffhandItem();
-        if (NetworkItem.isValid(offhand)) return offhand;
+        if (isBindingTerminal(offhand)) return offhand;
 
         List<ItemStack> candidates = new ArrayList<>();
         for (ItemStack stack : player.getInventory().items) {
-            if (NetworkItem.isValid(stack)) candidates.add(stack);
+            if (isBindingTerminal(stack)) candidates.add(stack);
         }
         for (ItemStack stack : player.getInventory().armor) {
-            if (NetworkItem.isValid(stack)) candidates.add(stack);
+            if (isBindingTerminal(stack)) candidates.add(stack);
         }
         for (ItemStack stack : CuriosAccess.stacks(player)) {
-            if (NetworkItem.isValid(stack)) candidates.add(stack);
+            if (isBindingTerminal(stack)) candidates.add(stack);
         }
         if (candidates.size() == 1) return candidates.get(0);
         player.displayClientMessage(Component.translatable(candidates.isEmpty()
-                ? "rsi.binding.nearby.no_connector"
-                : "rsi.binding.nearby.multiple_connectors"), true);
+                ? "rsi.binding.nearby.no_terminal"
+                : "rsi.binding.nearby.multiple_terminals"), true);
         return null;
+    }
+
+    private static boolean isBindingTerminal(ItemStack stack) {
+        return stack != null && !stack.isEmpty()
+                && AltarBindingRegistry.findHook(stack).isPresent();
     }
 
     @SubscribeEvent

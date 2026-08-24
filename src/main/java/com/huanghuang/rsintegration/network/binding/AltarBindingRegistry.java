@@ -7,6 +7,9 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -153,7 +156,9 @@ public final class AltarBindingRegistry {
 
         ResourceKey<Level> dimKey = ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION, dim);
-        unbind(player.getUUID(), dimKey, pos, AltarBinding.RS_NETWORK);
+        for (ResourceLocation type : HOOKS.keySet()) {
+            unbind(player.getUUID(), dimKey, pos, type);
+        }
         invalidateScanCache();
         RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
         return removed[0];
@@ -483,8 +488,7 @@ public final class AltarBindingRegistry {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
                     continue;
                 }
-                INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
-                if (net != null) {
+                if (hasUsableStorageBinding(player, altarDim, entry.pos())) {
                     addCompatibleTypeIds(entryType, entry.blockKey(), modTypeIds, blockKeysByType);
                     if (isPmmoSalvageBinding(entry)) {
                         addTypeId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID,
@@ -664,8 +668,7 @@ public final class AltarBindingRegistry {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
                     continue;
                 }
-                INetwork net = resolveNetworkForAltar(player, altarDim, entry.pos());
-                if (net != null) {
+                if (hasUsableStorageBinding(player, altarDim, entry.pos())) {
                     return true;
                 }
             }
@@ -706,9 +709,47 @@ public final class AltarBindingRegistry {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
                     continue;
                 }
+                if (!hasUsableStorageBinding(player, altarDim, entry.pos())) continue;
                 out.add(new BoundMachine(entry.dim(), entry.pos(), type, entry.blockKey()));
             }
         }
+    }
+
+    /**
+     * Rebuilds the in-memory backend binding from the connector NBT when
+     * necessary, then validates the backend-qualified storage session. The
+     * previous implementation called only the RS coordinate resolver here,
+     * so BD bindings were visible to the client JEI mixin but were discarded
+     * from the server's bound-machine passport.
+     */
+    private static boolean hasUsableStorageBinding(ServerPlayer player,
+                                                    ResourceKey<Level> dim,
+                                                    BlockPos pos) {
+        GlobalPos key = GlobalPos.of(dim, pos);
+        List<AltarBinding> bindings = BINDINGS.valuesFor(key, player.getUUID());
+        if (bindings.isEmpty() && rebuildBindingFromNBT(player, dim, pos)) {
+            bindings = BINDINGS.valuesFor(key, player.getUUID());
+        }
+        for (AltarBinding binding : bindings) {
+            if (AltarBinding.RS_NETWORK.equals(binding.type())) {
+                if (resolveRsNetwork(player, binding) != null) return true;
+                continue;
+            }
+            if (AltarBinding.BD_NETWORK.equals(binding.type())) {
+                CompoundTag data = binding.data();
+                if (!data.contains("networkId", net.minecraft.nbt.Tag.TAG_INT)) continue;
+                int networkId = data.getInt("networkId");
+                if (networkId < 0) continue;
+                try {
+                    StorageReference reference = new StorageReference(
+                            new StorageBackendId("beyonddimensions"), Integer.toString(networkId));
+                    if (CraftStorageEndpoints.resolve(reference, player).isPresent()) return true;
+                } catch (RuntimeException | LinkageError ignored) {
+                    // Optional BD backend failures are treated as unavailable.
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean isPmmoSalvageBinding(BindingStorage.BindingEntry entry) {

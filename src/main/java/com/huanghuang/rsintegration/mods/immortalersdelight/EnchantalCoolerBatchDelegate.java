@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
@@ -115,13 +116,14 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) return false;
+            CraftStorageEndpoint endpoint = storageEndpoint();
+            if (endpoint == null) return false;
+            ledger.setStorageEndpoint(endpoint);
 
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
-                        player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+                ItemStack reserved = ledger.reserve(
+                        spec.ingredient(), spec.count(), endpoint, player, myDim, myPos);
                 if (reserved.isEmpty()) {
                     return false;
                 }
@@ -201,14 +203,13 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (network == null) {
+        if (storageEndpoint() == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.network_unavailable"));
             return false;
         }
 
         int evacuated = evacuateIdleProcessingSlots(itemHandler, getCookingProgress(be),
-                this::refundToRSNetwork);
+                this::refundToStorage);
         if (evacuated > 0) be.setChanged();
         if (evacuated < 0
                 || !acquireIdleInventory(itemHandler, be)) {
@@ -265,7 +266,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         int existingFuel = fuelSlot.is(Items.LAPIS_LAZULI) ? fuelSlot.getCount() : 0;
         int needed = 64 - existingFuel;
         if (needed > 0) {
-            int inserted = tryInsertFuelFromRS(itemHandler, needed);
+            int inserted = tryInsertFuelFromStorage(itemHandler, needed);
             if (inserted > 0) {
                 recordSlotSupply(FUEL_SLOT, new ItemStack(Items.LAPIS_LAZULI), inserted);
                 be.setChanged();
@@ -409,15 +410,15 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (!inventoryLease) return;
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
             ItemStack removed = extractOwnedSlotDelta(handler, slot);
-            if (!removed.isEmpty() && refundInputs) refundToRSNetwork(removed);
+            if (!removed.isEmpty() && refundInputs) refundToStorage(removed);
         }
         // Inputs and container share the same ledger. During shared-graph cleanup,
         // remove physical leftovers and let the ledger perform the only refund.
         ItemStack container = extractOwnedSlotDelta(handler, CONTAINER_SLOT);
-        if (!container.isEmpty() && refundInputs) refundToRSNetwork(container);
+        if (!container.isEmpty() && refundInputs) refundToStorage(container);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack fuel = extractOwnedSlotDelta(handler, FUEL_SLOT);
-        if (!fuel.isEmpty()) refundToRSNetwork(fuel);
+        if (!fuel.isEmpty()) refundToStorage(fuel);
         resetInventoryLease();
     }
 
@@ -567,7 +568,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    private void refundToRSNetwork(ItemStack stack) {
+    private void refundToStorage(ItemStack stack) {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (!leftover.isEmpty() && player != null) {
             net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -613,10 +614,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     /**
      * Try to insert up to {@code needed} lapis lazuli into the fuel slot,
-     * extracting from RS.  Tries lapis lazuli first, then lapis blocks
+     * extracting from the selected storage backend. Tries lapis lazuli first, then lapis blocks
      * (1 block = 9 lapis lazuli).  Returns the amount actually inserted.
      */
-    private int tryInsertFuelFromRS(IItemHandler handler, int needed) {
+    private int tryInsertFuelFromStorage(IItemHandler handler, int needed) {
         int inserted = 0;
 
         // 1) Try lapis lazuli directly

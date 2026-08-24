@@ -82,9 +82,20 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         LegacyRsStorageSession(INetwork network) { this.network = network; }
 
         @Override public com.huanghuang.rsintegration.storage.StorageReference reference() {
+            // Keep the transitional endpoint on the same canonical reference
+            // format as RefinedStorageBackend. Older packets used the raw
+            // "dimension@BlockPos{...}" form, which the typed resolver cannot
+            // parse and made an otherwise usable RS network appear missing on
+            // the next recipe-tree request.
+            var level = network.getLevel();
+            var position = network.getPosition();
+            if (level == null || position == null) {
+                throw new IllegalStateException("RS network has no location");
+            }
             return new com.huanghuang.rsintegration.storage.StorageReference(
                     new com.huanghuang.rsintegration.storage.StorageBackendId("refinedstorage"),
-                    network.getLevel().dimension().location() + "@" + network.getPosition());
+                    "v1|" + level.dimension().location() + "@"
+                            + position.getX() + "," + position.getY() + "," + position.getZ());
         }
 
         @Override public StorageSnapshotResult snapshotItems(ServerPlayer player) {

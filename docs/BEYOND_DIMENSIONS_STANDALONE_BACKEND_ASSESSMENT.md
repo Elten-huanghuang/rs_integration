@@ -1,5 +1,114 @@
 # BeyondDimensions 独立存储后端可行性评估报告
 
+> **2026-08-23 当前实施批次：BD 执行链后端化审计与修正（最新）**
+>
+> 本批先完成了“调用链是否真的使用所选后端”的审计和修正，没有把“能读取 BD 快照”误判为“BD 已完整可用”。当前变更包括：
+>
+> - `AsyncCraftChain` 的图节点、原版节点、机器节点、并行组、私有账本、退款、断线恢复、虚拟中间产物和最终产物回存统一经 `CraftStorageEndpoint`；RS 的 `INetwork` 只保留在兼容桥和 RS 状态门禁中。
+> - `GenericCraftPacket` 的所有递归/图异步启动分支都传递 endpoint；异步完成后的重复下单会保留 `StorageReference`，不会回退到默认 RS 网络。
+> - `ExtractionLedger.reserveFromEndpoint` 改为按 Ingredient 汇总多个 BD 具体物品变体，再由提交阶段执行匹配提取，避免“每个 BD 条目必须单独满足全部数量”的错误。
+> - 配方树输出选择器改为：左键在玩家背包与当前存储网络间切换，右键循环 RS/BD 的具体网络；核心递归文案改为“存储网络”，不再提示必须打开 RS 终端。
+> - BD 便携网络终端已接入现有机器绑定链：手持 `beyonddimensions:net_terminal_item` 使用可配置的 Alt+右键绑定/解绑机器；BD 终端原生的潜行右键网络绑定仍由 BD 自己处理，不会被 RSI 机器绑定入口重复消费。绑定类型携带 BD network ID，机器委托、配方树和绑定提示复用公共实现。
+> - 显式绑定包增加同一玩家/位置/手的短窗口去重，覆盖客户端按下/抬起重复投递导致的“绑定后立即解绑”；空计划错误不再打开目标为“空气”的配方树，而是直接显示失败原因。
+> - 修正 BD 默认网络解析：`getPrimaryNetFromPlayer` 不可用、未授权或指向其他网络时，会回退到已发现且已授权的网络（包括 `net_terminal_item` 绑定的 network ID），并将该引用写入计划，而不是只记录发现结果后继续报“未找到存储网络”。
+> - 进一步修正计划入口：即使后端默认解析返回空，只要发现列表中存在可解析的 BD 网络，也会把该网络提升为当前计划 endpoint；这覆盖 BD 玩家有成员资格但尚未设置 primary network 的情况。
+> - 计划请求遇到失效的旧 `StorageReference` 时不再立即报无网络，而是重新解析当前玩家的默认/发现网络；同时记录请求中的 backend/id 和恢复后的目标，便于区分 stale 引用与 BD 授权失败。
+> - 修正机器配方预览的旧 RS 门禁：BD endpoint 已成功解析时，不能因为兼容字段 `INetwork == null` 就把 typed resolver 判定为“无网络”；现在以统一 `CraftStorageEndpoint` 作为可用性依据。
+> - 中英文补齐了负载均衡、砖炉、Eidolon、Apotheosis 等实际缺失键，以及账本错误键；RS 专属模块的文案仍保留为 RS 专属，不伪装成 BD 支持。
+>
+> 本批 `compileJava` 和 `jar` 已通过。新增的双网络修正会同时发现 BD 玩家成员网络和背包中绑定终端指向的网络，并在日志输出 BD 发现的 network ID。**当前仍不能宣称 BD 已完成验收**：还缺 BD-only 实际启动、BD 网络真实存取、机器投料/回收、退款、配方树下单和无 RS 客户端/专服冒烟。下一次停点应是用最新 JAR 做一轮 BD-only 和 RS+BD 双装测试，而不是继续扩展基础接口。
+
+
+> **2026-08-23 接口复核与实施状态（本节为当前结论）**
+>
+> 已按 `D:\sd\BeyondDimensions` 的 `1.20.1` 源码重新核对公开 API：
+> `DimensionsNet.getPrimaryNetFromPlayer(Player)`、`getAllNetFromPlayer(Player)`、
+> `getNetFromId(int)`、`getId()`、`getPlayers()` 和 `getUnifiedStorage()` 均实际存在；
+> `UnifiedStorage` 继承 `IStackHandler`，提供 `getStorage()`、
+> `insert(IStackKey,long,boolean)`、`extract(IStackKey,long,boolean,boolean)`；
+> `ItemStackKey(ItemStack)`、`getReadOnlyStack()` 和 `KeyAmount.key()/amount()` 也已确认。
+> BD 的网络 ID 是服务端持久化整数，成员集合可用于 RSI 的 VIEW/EXTRACT/INSERT 基础授权映射。
+>
+> 第一批代码已经开始：新增 `storage/bd` 反射隔离适配器、BD provider/session，
+> 并在 `RSIntegrationMod` common setup 中通过可选 descriptor 尝试注册 BD。BD 未安装时只返回
+> `MOD_NOT_LOADED`，不会加载 BD 类；当前 `compileJava` 已通过。此批只完成后端入口、网络解析、
+> 成员校验、快照、精确/Ingredient 提取和插入余量规范化，**尚未迁移业务入口，也没有改为无 RS
+> 发布形态**。
+>
+> 当前实现暂用反射，因为 BD 工作树没有可直接复用的发布 API JAR，且其 Gradle 构建链尚未稳定产出
+> 发布物。拿到正式 BD JAR 后，应将反射边界替换为 `compileOnly` 强类型 driver，并保留同一
+> `StorageBackend` 契约；这预计是 1 个适配器文件级别的替换，不应影响核心业务层。
+>
+> **工作量更新**：后端骨架约 250 行；强类型 driver、测试夹具和真实网络验收还需约 150-250 行。
+> 之后的可选依赖/RS 专属类加载隔离约 20-35 个文件，约 400-800 行；机器委托、递归合成、
+> 磁铁、拾取/喂食/补货和 UI 入口不再逐个重写存储逻辑，预计主要是 endpoint 选择和绑定数据迁移。
+> RS+BD 同装时仍必须增加显式后端选择，不能默认把两个网络合并。
+
+> **本轮代码审计修正**：复核新增 `storage/bd` 后确认并修复了以下问题：
+> Ingredient 提取中间步骤失败会正确向上传播；正式插入/提取在 native 调用后发生异常时返回
+> `INDETERMINATE`；BD 返回的 KeyAmount 会校验数量范围和物品身份，避免把错误响应当成成功；
+> 大数量会受 Minecraft `ItemStack` 整数堆叠限制保护；网络删除、替换或失效后旧 session 不再继续操作；
+> 权限检查现在区分 `DENIED`、`UNAVAILABLE` 与 `FAILED`。同时删除了重复 backend ID 常量、无效导入和
+> 未使用反射常量。当前仍保留一个有意的边界：反射层是临时兼容方案，获得 BD 正式 API JAR 后应替换为
+> 强类型 driver，但不应再复制一套新的业务存取逻辑。
+
+> **扩展审计：用户界面、翻译和配方树仍有遗漏（当前必须纳入 P0）**：
+>
+> 1. **配方树网络来源尚未后端化**。`GenericCraftPacket.tryBuildPlan` 只在 RS 已加载时调用
+>    `CraftPacketUtils.resolveNetworkForCraft`，否则把材料来源降为玩家背包；它没有调用 BD
+>    `StorageBackendRegistry`。因此 BD-only 配方树目前只能“看配方/看背包”，不能从 BD 网络生成完整材料快照。
+> 2. **配方树下单没有保存网络引用**。`OutputDestination` 只有 `RS_NETWORK` 和
+>    `PLAYER_INVENTORY`；`GenericCraftPacket` 的默认值、编码、解码和服务端执行仍以 RS 网络为目标。
+>    `CraftingPlanScreen` 也只有“RS 网络/玩家背包”二段切换，`CraftingPlanPreferences` 只保存这个旧枚举。
+>    RS+BD 同装时没有选择 `backendId + networkId` 的入口，`CraftStorageEndpoints.resolveDefault()`
+>    还会按注册顺序取第一个后端，实际等价于 RS 优先猜测。
+> 3. **执行链仍存在 RS 原生参数**。`ResolutionContext`、`AsyncCraftChain`、
+>    `GenericBatchDelegate`、`AbstractBatchDelegate` 和多个机器 delegate 仍保存或接收 `INetwork`；
+>    `CraftStorageEndpoints` 的生产调用点大量通过 `fromLegacyNetwork` 进入 `LegacyRsCraftStorageEndpoint`。
+>    这意味着 BD session 虽然能单独做快照/存取，但还没有进入递归中间步骤、机器委托、退款和产物回收的真实调用链。
+> 4. **无 RS 下单前置判断仍写死 RS**。`GenericCraftPacket.handle` 使用
+>    `ModList.isLoaded("refinedstorage")` 判断网络目标；BD-only 且目标为网络时会在执行前直接拒绝。
+>    该判断应改为“是否有已选且可解析的后端引用”，不能只改成“是否安装任一存储模组”。
+> 5. **翻译键虽然中英文数量一致（各 944 个），语义仍是 RS 专属**。例如
+>    `rsi.plan.output.rs`、`rsi.generic.error.network_unavailable`、
+>    `rsi.ftb_quest.error.no_network`、`rsi.transfer.*`、`rsi.side_panel.*`、
+>    `rsi.enchanting.restock.*`、`rsi.villager.restock.*`、`rsi.autoeat.*` 和多个机器燃料/回收提示
+>    都直接显示“RS 网络”。需要新增通用“存储网络/当前后端/网络不可用/无提取权限”键，并以动态
+>    后端名或网络名渲染；不能靠把 `RS` 文本批量替换成 `BD`，因为 RS-only、BD-only、双装三种上下文不同。
+>    本轮同时补齐了三个实际缺失的静态键：`rsi.generic.error.machine_valid_failed`、
+>    `rsi.generic.error.not_bound`、`rsi.goety.error.ritual_start_failed`；剩余问题属于后端化文案，
+>    不能通过简单补 key 解决。
+> 6. **背包升级和机器绑定仍是 RS 格式**。`RSMagnetUpgradeItem` 只识别 `RSBlockPos`/
+>    `RSBlockDimension` 和 `ControllerBlockEntity`；`StorageBackpackUtils` 固定构造
+>    `refinedstorage` 坐标引用；`AltarBinding`/`BindingEventHandler` 只注册 `RS_NETWORK`。
+>    BD 需要自己的 network ID 绑定格式，并且双装时绑定物品必须携带后端 ID，不能复用 RS 坐标 NBT。
+> 7. **入口和 UI 仍是 RS 专属**。`RSJeiPlugin` 的 GUI handler 只注册 RS Grid；侧栏、传输模式、
+>    一键吃和机器管理中心的服务端同步/来源提示仍使用 `RSSidePanel*`、RS 终端上下文或 RS 词汇。
+>    BD 需要独立终端入口或通用 RSI 入口，且来源网络应随 `StorageReference` 传递。
+> 8. **明确的 RS-only 功能不应伪装成 BD 支持**。共振盘、RS Grid Mixin、RS 搜索语法和 RS 原生
+>    合成终端仍属于 RS 专属 P2；它们可以在 BD-only 隐藏，但核心递归合成、机器委托、磁铁、
+>    拾取/喂食/补货、FTB 提交和侧栏存取不能隐藏或静默回退到背包。
+>
+> **重复与复用审计结论**：没有发现自动生成的重复 BD 文件；新增 BD 适配器集中在
+> `storage/bd`，已复用 RSI 的 `StorageBackend`、`StorageSession`、`StorageSnapshot`、
+> `StorageOperationResult` 和 `StorageReference`。BD session 中与 RS session 相似的错误映射和
+> 分批逻辑是后端边界代码，暂不应复制到业务模块；下一步应把调用方的 `INetwork` 参数替换成
+> `StorageReference/StorageSession`，而不是再创建第三套“BD 递归合成”代码。
+
+> **下一批实施顺序**：先完成 `StorageReference` 在配方树请求包、计划缓存、异步链和 ledger 中的
+> 传递；再实现计划界面的后端/网络选择和通用翻译键；随后将 `MaterialSources`、中间步骤提取、
+> 机器委托退款/产物回存切换到选定 session；最后处理磁铁/绑定物品、侧栏和终端入口。完成这些前，
+> BD 后端只能算“已注册的适配器骨架”，不能算 BD 可用。
+
+> **2026-08-23 配方树网络目标接入（第一批已实现）**：`GenericCraftPacket` 现在可以携带版本化的
+> `StorageReference(backendId, networkId)`，服务端会优先解析该引用；未指定时保留 RS 终端解析，
+> 再按已注册后端选择默认网络。计划响应新增当前网络和可选网络列表，客户端计划界面在多个网络间
+> 循环选择，并把选择随下一次预览/下单请求发回服务端。BD-only 预览材料已经通过
+> `SessionCraftStorageEndpoint`/`MaterialSources` 读取 BD 快照，不再因为 RS 未安装而静默只看玩家背包。
+> 同时新增通用的“存储网络”文案键。该批仍**不等于 BD 执行完成**：递归执行、机器投放、退款和产物回收
+> 的旧委托链仍保存 `INetwork`，所以 BD 网络目前只能完成解析/快照入口；下一批必须将 endpoint 传入
+> `CraftingResolver`、`ExtractionLedger`、`AsyncCraftChain` 和各机器 delegate，并补齐事务测试。
+
 > 评估对象：RS Integration（下称 RSI）与 BeyondDimensions（下称 BD）  
 > 评估日期：2026-08-21  
 > RSI 工作树：`D:\sd\rs-integration`  
@@ -191,15 +300,15 @@ RS 提供 `Permission.EXTRACT`、`Permission.INSERT` 等操作级权限。BD 当
 - managers
 - players/members
 
-直接取得 `UnifiedStorage` 后进行插入、提取，不会自动携带发起玩家上下文。因此 **BD 适配器必须在访问存储前自行验证成员关系**，不能因为知道网络 ID 就允许操作。
+直接取得 `UnifiedStorage` 后进行插入、提取，不会自动携带发起玩家上下文。因此 **BD 适配器必须在访问存储前自行验证访问依据**，不能因为知道网络 ID 就允许操作。当前适配器接受 owner、manager、普通 member；另外，玩家背包中已绑定到该网络的 BD `NetedItem` 终端也可作为显式访问依据。
 
 首期建议权限映射：
 
 | RSI 操作 | RS | BD |
 |---|---|---|
-| 查看/规划 | RS view/extract 相关策略 | 必须是网络成员 |
-| 提取材料 | `Permission.EXTRACT` | 必须是网络成员 |
-| 插入/回收 | `Permission.INSERT` | 必须是网络成员 |
+| 查看/规划 | RS view/extract 相关策略 | owner/manager/member，或持有已绑定该网络的 BD 终端 |
+| 提取材料 | `Permission.EXTRACT` | owner/manager/member，或持有已绑定该网络的 BD 终端 |
+| 插入/回收 | `Permission.INSERT` | owner/manager/member，或持有已绑定该网络的 BD 终端 |
 | 修改绑定/管理设置 | 对应 RS 权限或所有权 | owner 或 manager |
 
 如果 BD 后续增加更细权限，映射只应修改 BD 适配器。
@@ -288,7 +397,7 @@ RS 提供 `Permission.EXTRACT`、`Permission.INSERT` 等操作级权限。BD 当
 绑定交互建议：
 
 - RS：潜行右键 RS 控制器，生成 RS `StorageReference`。
-- BD：潜行右键 BD 网络方块/终端，或在玩家只有一个主网络时通过绑定按键确认，生成 BD network ID 引用。
+- BD：BD 终端的潜行右键网络绑定仍由 BD 原生处理；RSI 机器绑定固定走可配置的 Alt+右键（默认 Alt+右键），生成 BD network ID 引用。两条动作相互隔离，避免一次点击同时绑定后又解绑机器。
 - RS + BD：点击哪个后端的网络目标就绑定哪个；禁止自动覆盖为另一个后端。
 - 旧物品：检测到 `RSBlockPos/RSBlockDimension` 时迁移或按旧 RS 引用读取，保存时升级为新 schema。
 
@@ -1662,3 +1771,143 @@ RSI 现在已经具备较完整的后端无关业务边界，继续接入 BD 的
 - 无 RS 时 common setup 会跳过 RS 业务模块注册；RS 专属 Mixin 由插件统一拒绝，避免目标类和 Mixin 本体提前加载。
 - `compileJava` 与 `jar` 已通过，产物为 `build/libs/rs_integration-1.3.5.jar`。
 - 仍需使用不含 RS 的 Forge 1.20.1 实例实际启动一次，确认 Forge/Mixin/可选模组组合的运行时边界；在该验证完成前，不宣称无 RS 已最终验收。
+
+### 17.19 2026-08-23：BD 图执行失败根因与修复
+
+日志中的 `delegate rejected graph dispatch after start attempt` 不是 BD 网络发现失败。失败链路已经确认是：BD 网络快照和计划生成成功，图节点账本也成功提交，但机器 delegate 只收到共享账本，没有收到该账本绑定的 `CraftStorageEndpoint`，随后 Enchantal Cooler 又调用旧的 `resolveNetworkForCraft`，在无 RS 的 BD 模式下得到空网络并拒绝启动。
+
+本次修复包括：
+
+- `ExtractionLedger` 暴露已选 endpoint；`AbstractBatchDelegate.useSharedLedger` 自动继承它。
+- 图执行和普通异步执行在 delegate 准备阶段提前注入 endpoint，保证准备、材料预留、机器启动、燃料提取和退款使用同一个后端会话。
+- Enchantal Cooler 的材料预留、燃料补充、机器清理和退款改为 endpoint 路径，不再以 RS `INetwork` 作为启动门禁。
+- 图节点拒绝日志增加 delegate 类名和配方 ID，后续不会再只显示无上下文的通用失败字符串。
+
+`compileJava` 已通过。该修复尚未替代完整 BD 游戏回归；下一次测试应使用 BD 网络中存放材料和燃料的 Enchantal Cooler 配方，确认材料能取出、机器实际开始工作、产物及失败退款回到同一 BD 网络。
+
+### 17.20 2026-08-23：首轮 BD 回归日志的两个问题
+
+植物科技实例的最新日志暴露了两个独立问题：
+
+1. 多步橡木楼梯链在第一步完成后复用主 `ExtractionLedger`，但 `StorageSettlementLedger` 仍停留在 `COMMITTED`，第二步再次 `beginCommit()` 时抛出 `ledger state COMMITTED is not one of [OPEN]`。`ExtractionLedger.reset()` 现在同步清理 settlement mirror，允许同一链安全提交下一步。
+2. `immortalers_delight:cooking/pitcher_sausage` 实际由 Farmer's Delight `CookingPotBatchDelegate` 执行，而非 Enchantal Cooler delegate。该 delegate 仍用 RS 网络解析作为启动门禁。现已改用选定 endpoint 预留材料、清空旧锅内容和执行启动检查，BD 网络不再被误判为不可用。
+
+本轮 `compileJava` 已通过；需用新 JAR 回归这两个场景：多步普通合成应完成全部步骤，FD Cooking Pot 配方应从 BD 网络取料并实际进入烹饪状态。
+
+### 17.21 2026-08-23：delegate endpoint 共性审计与 RS 回归保护
+
+针对日志中出现的 `delegate rejected graph dispatch after start attempt`，本轮没有继续只修单个 delegate，而是对所有共享图入口和高风险私有账本入口做了共性审计。确认的风险模式有三类：
+
+- 共享图已经选定 BD endpoint，delegate 启动时又重新解析 RS 网络并覆盖上下文；
+- `validateAndInit` 或私有账本路径把 `network != null` 当作唯一存储门禁；
+- 机器专属的 staff、ritual starter、燃料等附加物品仍直接读取 RS cache。
+
+已完成的修复包括：
+
+- Lithum altar 的 staff、燃料和燃料退款增加 endpoint 快照/提取/回存路径；
+- Goety、Forbidden Arcanus、Touhou Little Maid、Wizards Reborn、Malum 的共享启动不再覆盖链 endpoint；FA 的 RitualStarterItem 支持 BD endpoint 提取、消耗耐久后回存和失败返还；
+- Iron Furnaces 的网络解析和燃料候选改为 endpoint 优先，RS 仍保留原生 cache fallback；
+- Aether、Avaritia、Crab Trap、Farmer's Delight、Farmer's Respite、Youkai Homecoming 等私有账本入口在 endpoint 存在时不再因 `INetwork` 为空而提前失败，并把 endpoint 注入本地账本；
+- Botania 的若干世界交互 delegate 校验允许已选 endpoint，RS 模式仍按原 `INetwork` 路径执行；Clibano 的灵魂/燃料候选和失败回收也改为 endpoint 优先。
+
+本轮再次执行 `compileJava --no-daemon`，构建成功；现有 Mixin、JEI 和 Forge deprecated warning 未新增为错误。RS 保护原则保持不变：RS 安装时仍由 `LegacyRsCraftStorageEndpoint` 使用原 `INetwork`，RS 网络的 `canRun`、权限、快照、模拟/正式转移和失败回收继续由 RS adapter 负责；本轮没有用 BD 对象伪装 `INetwork`，也没有删除 RS fallback。`git diff --check` 通过。
+
+仍需真实游戏回归：RS 网络下递归合成、燃料补充、特殊 starter/staff、失败退款，以及 BD 网络下对应的 endpoint 路径。只有两套网络分别通过这些场景后，才能确认“RS 网络可用且 BD 不串网”。
+
+### 17.22 2026-08-24：RS/BD 双后端选择隔离与 RS 回归修复
+
+植物科技实例日志确认：BD 已能发现网络时，RS 失败并不是 RS 网络消失，而是关闭 RS 容器触发了全局 `onContainerClose`，无条件清空 RS 玩家网络解析缓存。下一次配方树请求没有终端上下文时，解析链因此错误落到 BD 或直接报“未找到可用的存储网络”。
+
+本轮修复：
+
+- 侧边栏关闭和普通容器关闭不再清理最后一次已验证的 RS 网络；只有 RS storage cache 真正失效、绑定变化、换维度、玩家退出或服务器清理才会失效。
+- 侧边栏 listener 移除后保留 `lastKnownNetworks`，递归合成可以继续使用刚关闭的 RS 终端网络；网络 cache 重建或失效时会删除该保留值并重新注册。
+- `ExtractionLedger` 的旧 `INetwork` 重载现在会优先使用已注入的 `CraftStorageEndpoint`，避免 BD endpoint 被遗留委托误判为空，也避免 RS/BD 同时安装时被旧网络参数覆盖。
+- Pure Daisy 和 Runic Altar 的独立提取、共享账本路径已补齐 endpoint 选择；RS 仍保留原生 fallback。
+
+后端选择规则现明确为：显式 `StorageReference` 优先；无显式目标时先尝试玩家当前 RS 终端/网络物品/绑定和最近已验证 RS session，再按注册顺序选择 backend 默认 session（当前为 RS、随后 BD）；一旦选定，整条递归链、账本、delegate、退款和产物回存都不得重新选择另一个 backend。日志中的 `BD discovery` 仅表示 BD 可发现网络，不代表 RS 不可用。
+
+本轮 `compileJava --no-daemon` 已通过。最终 JAR 需在包含 RS 和 BD 的实例中回归：关闭 RS 终端后继续递归合成、RS 单网络、BD 单网络、双网络显式选择，以及中间步骤失败退款。当前仍不能据此宣称所有委托已完成 BD 游戏验收；任何仍直接调用 `RSIntegrationNetwork` 的功能（RS 侧栏、RS 专属绑定/共鸣系统等）仍是 RS 专属功能，不应被 BD 默认选择覆盖。
+
+### 17.23：RS 单网络递归合成解析断裂修复
+
+植物科技实例最新日志显示：RS 后端启动注册成功，侧边栏也能同步粉色创造控制器的库存，但 JEI 递归合成请求只进入 BD discovery，随后报“未找到可用的存储网络”；已有 RS 网络下执行中间步骤又因没有 endpoint 快照而报告材料缺失。根因是侧边栏、RS backend 和递归合成分别维护网络上下文：侧边栏成功解析的 `INetwork` 没有发布到玩家通用解析缓存，且计划阶段的持久化 RS 引用在控制器暂时不可严格解析时会覆盖仍然有效的终端会话。
+
+本轮修复：
+
+- 新增统一的 `RSIntegrationNetwork.rememberResolvedNetwork`，侧边栏刷新和 listener 注册在成功认证 RS 网络后立即发布同一玩家会话；递归合成、RS backend 和关闭侧边栏后的请求共享这份缓存。
+- listener 替换过程会使短期解析缓存失效，注册完成后重新发布网络，避免“侧边栏显示正常、下一请求解析为空”。
+- 计划阶段对 RS 引用增加 live session 回退：引用坐标暂时不可用时，若当前玩家已有经过认证的 RS 会话，则继续使用该会话，不把有效 RS 网络误判为不可用。
+- 未改变 BD 选择规则，也未让侧边栏成为存储核心依赖；RS、BD 仍通过各自 `StorageBackend`/`StorageSession` 隔离。
+
+本轮 `compileJava --no-daemon` 已通过。新 JAR 需要回归 RS 单网络（侧边栏打开后关闭再从 JEI 下单）、RS+BD 双网络显式选择、BD 单网络，以及中间步骤材料从网络提取和失败退款。只有这些场景通过后，才能确认本次 RS 回归和 BD 兼容没有互相覆盖。
+
+### 17.24：RS 执行阶段旧引用回退
+
+01:11 的回归日志进一步确认：RS NetworkItem provider 已成功解析网络，侧边栏也同步了 RS 库存，计划响应成功；但执行阶段仍可能因计划携带的旧 `StorageReference` 严格坐标解析失败而直接报网络不可用，或使账本 endpoint 快照为空。此前只在计划阶段做了 RS live-session 回退，执行阶段仍存在断点。
+
+本轮修复：
+
+- 递归执行阶段与计划阶段统一处理 `StorageReference`：RS 引用失效时优先复用当前已认证的 RS `INetwork`，再尝试当前 RS 默认会话；不会把显式 BD 引用改成 RS。
+- 无显式存储引用且旧网络参数为空时，执行阶段调用统一 `CraftStorageEndpoints.resolveDefault`，确保 RS 单网络、BD 单网络和双后端选择都经过同一后端注册表。
+- 增加 `[RSI-ExecAvail]` INFO 诊断，明确记录 recipe、legacy network、endpoint backend、storage reference 和输出目标，后续可直接判断失败发生在网络解析还是材料快照。
+- RS driver 的可用性校验不再要求二次坐标查找返回同一个 `INetwork` 实例；已认证句柄只需保持运行、存在世界和 storage cache，即可继续使用。显式引用解析仍执行坐标、区块加载和网络归属校验。
+
+`compileJava --no-daemon` 已通过。需要使用新 JAR 复测 RS 单网络：侧边栏同步后关闭，从 JEI 下单橡木楼梯并确认 `[RSI-ExecAvail] endpoint=refinedstorage`；再验证 RS+BD 显式选择和 BD 单网络，确保没有跨后端回退。
+
+### 17.25：RS 坐标不再作为长期授权
+
+本轮审计发现，旧的 `StorageReference(refinedstorage, v1|...)` 即使玩家已经丢弃无线终端，只要控制器坐标仍加载，仍可能被坐标解析器重新打开。这会让玩家已经切换到 BD 后，递归合成继续写入 RS。
+
+修复后的规则：
+
+- RS 默认后端只接受当前存在的 RS 凭据：玩家背包/Curios 中的 NetworkItem、当前 RS 容器、活动的侧边栏监听器，或明确绑定到机器的 RS 网络；解析缓存和侧边栏的 last-known 网络不算凭据。
+- 计划携带的 RS 坐标必须与当前凭据解析出的同一个网络匹配；仅凭坐标不能授权。
+- 无当前 RS 凭据时，递归合成会继续走后端注册表，允许 BD 成为默认存储；RS 坐标只保留为历史计划信息。
+- 为避免附近控制器或旧缓存再次抢占 BD，递归合成的通用 RS 解析不再自动采用附近 RS 节点。
+- 侧边栏重新刷新也必须重新取得当前 RS 凭据；关闭面板后保留的 last-known 网络不会被用来重新认证。
+
+因此，RS 与 BD 同时安装时，选择结果由当前可用凭据和计划中的明确 BD 引用决定；丢弃 RS 凭据后不会因旧坐标残留继续使用 RS。
+
+### 17.26：范围绑定后端无关化
+
+范围绑定原先在 `NearbyBindingService` 内直接调用 RS `NetworkItem` 和 `RSBindingHook`，即使 BD 终端已经支持普通机器绑定，范围扫描仍只能绑定 RS。
+
+本轮调整：
+
+- 范围绑定现在通过 `AltarBindingRegistry.findHook` 选择当前手持/装备的存储终端，并调用对应 `IBindingHook.createBinding`；RS、BD 以及后续存储后端共用同一套扫描、权限、去重和持久化流程。
+- 移除了范围绑定服务对 RS 原生 `NetworkItem` 的直接引用，RS 缺失时不会因为该服务加载失败而影响 BD 单独启动。
+
+### 17.27：双网络显式选择与规划快照一致性修复（2026-08-24）
+
+植物科技实例日志进一步确认了一个选择状态漏洞：用户点击过 RS 后，异步纯规划或 typed 规划回调没有携带原始 `StorageReference`，回调重新按默认顺序解析，导致后续请求重新锁回 RS。执行阶段还存在“显式引用解析失败后复用 live RS session”的兜底，这会让旧 RS 引用越过当前选择继续生效。
+
+本轮修复：
+
+- 显式 `StorageReference` 现在是严格目标。计划或执行解析失败时直接返回网络不可用，不再复用旧 RS session、RS 默认网络或其他后端默认网络。
+- 异步纯规划、同步回退、typed 预览队列和最大可合成数量探测全部传递同一个 `StorageReference`；计划和执行不会因为跨线程/跨阶段丢失后端选择。
+- 执行缓存校验按选定引用重新获取同一后端快照；BD 计划不会再用 RS 当前网络计算 fingerprint，RS 计划也不会借用 BD 快照。
+- 计划界面刷新以服务端引用和网络列表为准，服务端返回空引用时清除旧选择，避免 UI 残留网络。
+
+日志中的 `storedItems`/`availableKeys` 不代表同一层级：前者是后端快照条目数，后者是叠加玩家背包后的去重键数；侧边栏 `panel entries` 还是独立的 UI 索引条目数，不能直接互相比较。真正的快照一致性以 `StorageReference` 后端身份和材料 fingerprint 同时匹配为准。
+
+`compileJava --no-daemon` 已通过。新 JAR 需要回归：RS 单网络、BD 单网络、RS+BD 双网络先选 BD 再选 RS、切换后连续下单，以及异步多步合成。验证日志中不应再出现 `execution reused live RS session`；每次 `[RSI-ExecAvail]` 的 `endpoint` 必须与界面最后选择的 backend 一致。
+
+### 17.28：RS 旧引用兼容与 BD 计划库存快照修复（2026-08-24）
+
+本轮确认的两个现象相互独立：RS 无法使用来自旧版过渡 endpoint 生成了不可解析的 `dimension@BlockPos{...}` 引用；BD 存档中的递归树数量不更新来自预览缓存复用了库存已变化的完整 `PlanResponse`。
+
+- `LegacyRsCraftStorageEndpoint` 现在统一生成 `v1|dimension@x,y,z`，与 typed RS backend 使用同一引用格式。
+- 收到旧引用或暂时失效的 RS 引用时，只允许用玩家当前已认证的 RS 终端/容器/绑定网络刷新；不会使用侧栏 retained session，也不会跨到 BD。刷新后的 canonical reference 会回写规划快照和异步请求。
+- 递归树计划缓存命中改为完整 `PlanningStateValidator.sameState`，库存种类或数量发生变化都会重新读取后端快照并生成计划，不再把旧 `materials.available()` 返回给 BD 界面。
+
+本轮完成 `compileJava`、`jar` 和 `git diff --check` 后，仍需用最新 JAR 分别验证 RS-only、BD-only，以及 RS+BD 下切换后连续下单；BD 重点确认合成一次后再次打开递归树时可用数量即时减少。
+
+### 17.29：产物去向隐藏内部引用（2026-08-24）
+
+RS 默认发现描述曾直接把内部 `v1|维度@x,y,z` 引用作为网络显示名，导致配方树“产物去向”显示协议字符串。现在客户端显示层会将 RS 规范引用渲染为本地化的“RS 网络”，BD 数字 network ID 渲染为“BD 网络 #ID”；真实 `StorageReference` 仍原样保留在网络包、计划快照和执行链中，不影响后端选择与权限校验。
+
+### 17.30：RS 持有时 BD 候选可见性审计（2026-08-24）
+
+植物科技实例日志中 `BD discovery networks=1 refs=[0]` 已证明持有 RS 终端时 BD 网络仍能被发现；同一请求的 `endpoint=refinedstorage` 只表示当前计划默认选中了 RS，并不表示 BD 被屏蔽。计划生成现在额外记录合并后的候选列表，例如 `choices=[refinedstorage@..., beyonddimensions@0]`，用于确认网络选择包是否完整到达客户端。
+- `rsi.binding.nearby.no_connector`、`multiple_connectors`、`invalid_connector` 重命名为后端无关的 `no_terminal`、`multiple_terminals`、`invalid_terminal`，中英文文案同步改为“存储网络终端”。

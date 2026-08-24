@@ -67,7 +67,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
         targets.clear();
         Arrays.stream(OFFSETS).map(pos::offset).filter(level::isEmptyBlock).forEach(targets::add);
-        return network != null && !targets.isEmpty() && !expected.isEmpty();
+        return (network != null || hasStorageAccess()) && !targets.isEmpty() && !expected.isEmpty();
     }
 
     @Override
@@ -107,7 +107,9 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
 
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(network, getRequiredMaterials());
+        List<ItemStack> materials = storageEndpoint() != null
+                ? BotaniaDelegateSupport.extractAtomically(storageEndpoint(), player, getRequiredMaterials())
+                : BotaniaDelegateSupport.extractAtomically(network, getRequiredMaterials());
         return !materials.isEmpty() && start(materials.get(0));
     }
 
@@ -119,6 +121,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     @Override
     public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger ledger) {
+        useSharedLedger(ledger);
         return materials.size() == 1 && start(materials.get(0));
     }
 

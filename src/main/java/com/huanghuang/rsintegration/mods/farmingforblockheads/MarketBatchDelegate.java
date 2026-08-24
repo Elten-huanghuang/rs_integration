@@ -68,14 +68,19 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
-        if (network == null || wrapper == null) return false;
+        if (wrapper == null) return false;
+        if (storageEndpoint() == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, null, null);
+        }
+        if (!hasStorageAccess()) return false;
 
-        // Extract payment from RS network.
+        // Extract payment through the selected backend. The endpoint bridge
+        // keeps the legacy RS network path intact while allowing BD trades.
         ItemStack cost = wrapper.costItem();
         if (!cost.isEmpty()) {
-            ItemStack extracted = RSIntegrationNetwork.extractFromNetwork(
-                    network, Ingredient.of(cost), cost.getCount(), player);
+            ItemStack extracted = extractExactFromStorage(player, cost, cost.getCount(), false);
             if (extracted.isEmpty() || extracted.getCount() < cost.getCount()) {
+                if (!extracted.isEmpty()) insertIntoStorage(player, extracted, false);
                 RSIntegrationMod.LOGGER.warn("[RSI-Market] Failed to extract payment: {}x {}",
                         cost.getCount(), cost.getHoverName().getString());
                 return false;
@@ -86,7 +91,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         // ledger-overloaded tryStartSingleCraft + collectResult instead.
         ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
         if (!result.isEmpty()) {
-            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, result);
+            ItemStack remainder = insertIntoStorage(player, result, false);
             if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
             resultInserted = true;
         }
@@ -98,10 +103,9 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
         this.player = player;
-        this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
+        useSharedLedger(sharedLedger);
 
-        if (network == null || wrapper == null) return false;
+        if (!hasStorageAccess() || wrapper == null) return false;
 
         sharedLedger.commit(network, player);
         done = true;
@@ -147,10 +151,13 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         }
         this.wrapper = mrw;
 
-        // Get RS network
-        network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no RS network for player {}", player.getGameProfile().getName());
+        // Keep a pre-selected backend endpoint authoritative. RS is only a
+        // fallback for legacy callers that did not select an endpoint.
+        if (storageEndpoint() == null) {
+            network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        }
+        if (!hasStorageAccess()) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no storage backend for player {}", player.getGameProfile().getName());
             return false;
         }
 
@@ -253,10 +260,9 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
-        this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
+        useSharedLedger(sharedLedger);
 
-        if (wrapper == null || materials.isEmpty()) return false;
+        if (!hasStorageAccess() || wrapper == null || materials.isEmpty()) return false;
 
         // Materials already committed by chain.  Result is delivered by
         // collectResult — do NOT insert here or the chain flushes it twice.

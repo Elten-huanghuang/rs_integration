@@ -240,6 +240,11 @@ public final class RSIntegrationMod {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> com.huanghuang.rsintegration.sidepanel.client.WorldPickClient::init);
         }
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded("beyonddimensions")) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> com.huanghuang.rsintegration.client.StorageClientBootstrap::register);
+        }
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
@@ -301,6 +306,17 @@ public final class RSIntegrationMod {
         } else {
             LOGGER.warn("[RSI-Storage] Backend {} was not registered: {}",
                     rsBackend.backendId(), rsBackend.status());
+        }
+        StorageBackendLoadResult bdBackend = STORAGE_BACKENDS.load(
+                StorageBackendDescriptors.BEYOND_DIMENSIONS);
+        if (bdBackend.loaded()) {
+            LOGGER.info("[RSI-Storage] Registered backend {}", bdBackend.backendId());
+            AltarBindingRegistry.registerHook(
+                    com.huanghuang.rsintegration.network.binding.AltarBinding.BD_NETWORK,
+                    com.huanghuang.rsintegration.network.binding.BeyondDimensionsBindingHook.INSTANCE);
+        } else {
+            LOGGER.info("[RSI-Storage] Optional backend {} was not registered: {}",
+                    bdBackend.backendId(), bdBackend.status());
         }
         if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             LOGGER.info("[RSI-Storage] Refined Storage is absent; storage operations stay disabled, but cross-mod recipe and JEI metadata remain registered.");
@@ -547,6 +563,7 @@ public final class RSIntegrationMod {
 
         // Binding tooltip handler
         com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket.register();
+        com.huanghuang.rsintegration.network.binding.ExplicitMachineBindingPacket.register();
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
@@ -566,7 +583,8 @@ public final class RSIntegrationMod {
         ConfigSyncPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)
-        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded("beyonddimensions")) {
             MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
         }
 

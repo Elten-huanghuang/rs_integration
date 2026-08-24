@@ -25,10 +25,6 @@ public final class ClientEventBootstrap {
 
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.network.binding.BindingTooltipHandler.class);
-        MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.network.binding.BindingHintOverlay.class);
-        MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class);

@@ -226,12 +226,13 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         // On the first operation, clear every pedestal scanned by the chamber.
         // Later operations keep this batch's reusable catalysts installed.
         if (!pedestalCatalystsInstalled && pedestalLayout != null) {
-            if (network == null) {
+            if (!hasStorageAccess()) {
                 network = CraftPacketUtils.resolveNetworkForCraft(
                         player, level.dimension(), machinePos);
             }
-            int recovered = ArsPedestalRecovery.recover(
-                    level, pedestalLayout.pedestalPositions(), player, network);
+            int recovered = storageEndpoint() != null
+                    ? ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, storageEndpoint())
+                    : ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, network);
             if (recovered > 0) {
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-ArsImbuement] Recovered {} occupied pedestal stack(s) into RS",
@@ -539,7 +540,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
 
     private void refundRejectedStart(ServerPlayer player, ServerLevel level,
                                      List<ItemStack> materials) {
-        if (network == null) {
+        if (!hasStorageAccess()) {
             network = CraftPacketUtils.resolveNetworkForCraft(
                     player, level.dimension(), machinePos);
         }
@@ -556,7 +557,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void returnCatalyst(ServerPlayer player, ServerLevel level, ItemStack catalyst) {
-        if (network == null) {
+        if (!hasStorageAccess()) {
             network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
         }
         ItemStack remainder = insertIntoStorage(player, catalyst, false);

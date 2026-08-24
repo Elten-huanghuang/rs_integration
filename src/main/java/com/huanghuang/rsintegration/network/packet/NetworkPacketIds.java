@@ -107,4 +107,5 @@ public final class NetworkPacketIds {
     public static final int VILLAGER_TRADE_LOCK_SNAPSHOT = 127;
     public static final int ENCHANTING_RESTOCK_REQUEST = 128;
     public static final int ENCHANTING_RESTOCK_RESULT = 129;
+    public static final int EXPLICIT_MACHINE_BINDING = 130;
 }

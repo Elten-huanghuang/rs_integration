@@ -102,7 +102,9 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         this.poolPos = assessment.poolPos();
         this.recipe = r;
         this.expected = result.copy();
-        this.rsNetwork = resolveNetwork(player);
+        if (storageEndpoint() == null) {
+            this.rsNetwork = resolveNetwork(player);
+        }
         return PreparationResult.ready();
     }
 
@@ -157,11 +159,12 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null) return false;
-        if (rsNetwork == null) rsNetwork = resolveNetwork(player);
-        if (rsNetwork == null) return false;
-        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
-        if (extracted.isEmpty()) return false;
-        ItemStack input = extracted.get(0);
+        if (storageEndpoint() == null) {
+            if (rsNetwork == null) rsNetwork = resolveNetwork(player);
+            if (rsNetwork == null) return false;
+        }
+        ItemStack input = extractInput(player);
+        if (input.isEmpty()) return false;
         requestedBatch = Math.max(1, input.getCount());
         if (startEntities(input)) return true;
         refundStandalone(player, input);
@@ -174,8 +177,26 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
+        useSharedLedger(sharedLedger);
         return materials.size() == 1 && !materials.get(0).isEmpty()
                 && startEntities(materials.get(0).copy());
+    }
+
+    /** Extract the infusion input through the selected backend. */
+    private ItemStack extractInput(ServerPlayer player) {
+        if (storageEndpoint() != null) {
+            var result = storageEndpoint().extractMatching(player,
+                    recipe.getIngredients().get(0), 1, false);
+            ItemStack combined = ItemStack.EMPTY;
+            for (ItemStack stack : result.extractedStacks()) {
+                if (stack == null || stack.isEmpty()) continue;
+                if (combined.isEmpty()) combined = stack.copy();
+                else if (ItemStack.isSameItemSameTags(combined, stack)) combined.grow(stack.getCount());
+            }
+            return combined;
+        }
+        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
+        return extracted.isEmpty() ? ItemStack.EMPTY : extracted.get(0);
     }
 
     private boolean startEntities(ItemStack input) {
@@ -275,7 +296,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        this.network = rsNetwork;
+        if (storageEndpoint() == null) this.network = rsNetwork;
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {

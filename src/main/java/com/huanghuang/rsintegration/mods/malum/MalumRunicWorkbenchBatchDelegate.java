@@ -111,7 +111,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         this.craftDone = false;
 
         List<IngredientSpec> specs = getRequiredMaterials();
@@ -185,7 +184,9 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         this.player = player;
         this.ledger = sharedLedger;
         this.usingSharedLedger = true;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.craftDone = false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);

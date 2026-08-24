@@ -445,8 +445,10 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private void resolveNetwork(ServerPlayer player) {
         this.player = player;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
-        if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        }
     }
 
     private int physicalBatchCapacity() {
@@ -487,10 +489,14 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             return true;
         }
 
-        if (network == null) return false;
         List<ItemStack> candidates = new ArrayList<>();
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            candidates.add(entry.getStack());
+        if (storageEndpoint() != null) {
+            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            if (snapshot == null) return false;
+            for (var entry : snapshot.items()) candidates.add(entry.stack());
+        } else {
+            if (network == null) return false;
+            for (var entry : network.getItemStorageCache().getList().getStacks()) candidates.add(entry.getStack());
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
