@@ -27,7 +27,8 @@ public final class FtbQuestSubmissionPlanner {
     public static QuestSubmissionPlan plan(ServerPlayer player,
                                             QuestSubmissionSnapshot snapshot,
                                             INetwork network) {
-        return plan(player, snapshot, CraftStorageEndpoints.fromLegacyNetwork(network), network);
+        return plan(player, snapshot,
+                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network), network);
     }
 
     public static QuestSubmissionPlan plan(ServerPlayer player,
@@ -35,6 +36,7 @@ public final class FtbQuestSubmissionPlanner {
                                             CraftStorageEndpoint endpoint,
                                             INetwork network) {
         List<IngredientSpec> specs = new ArrayList<>();
+        List<ItemStack> displays = new ArrayList<>();
         List<String> overflow = new ArrayList<>();
         for (QuestItemRequirement requirement : snapshot.requirements()) {
             // descriptionId, not a rendered name: `missing` is a translation-key
@@ -46,6 +48,7 @@ public final class FtbQuestSubmissionPlanner {
                     ? Ingredient.of(requirement.displayStack())
                     : Ingredient.of(requirement.validDisplayItems().stream());
             specs.add(new IngredientSpec(ingredient, remaining));
+            displays.add(requirement.displayStack());
         }
 
         Map<CraftingResolver.StackKey, Integer> available =
@@ -57,7 +60,7 @@ public final class FtbQuestSubmissionPlanner {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
-            ItemStack display = snapshot.requirements().get(i).displayStack().copyWithCount(1);
+            ItemStack display = displays.get(i).copyWithCount(1);
             int have = available.entrySet().stream()
                     .filter(entry -> spec.ingredient().test(entry.getKey().toStack()))
                     .mapToInt(Map.Entry::getValue).sum();
