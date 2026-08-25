@@ -3,15 +3,7 @@ package com.huanghuang.rsintegration.autoeat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
-import com.refinedmods.refinedstorage.api.network.grid.GridType;
-import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.util.Action;
-import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -221,32 +213,12 @@ public final class AutoEatEngine {
     // ── Inner execution ─────────────────────────────────────────
 
     private static void executeInner(ServerPlayer player, AutoEatMode mode, ResourceLocation selectedItem) {
-        if (!(player.containerMenu instanceof GridContainerMenu gridMenu)) {
-            failState(player, mode, "rsi.autoeat.error.not_grid", "not_grid_menu");
+        Optional<AutoEatStorage> resolved = AutoEatStorage.resolve(player);
+        if (resolved.isEmpty()) {
+            failState(player, mode, "rsi.autoeat.error.network_unavailable", "storage_unavailable");
             return;
         }
-        if (gridMenu.getGrid().getGridType() != GridType.CRAFTING) {
-            failState(player, mode, "rsi.autoeat.error.not_crafting_grid", "not_crafting_grid");
-            return;
-        }
-        if (!(gridMenu.getGrid() instanceof INetworkAwareGrid awareGrid)) {
-            failState(player, mode, "rsi.autoeat.error.network_unavailable", "not_network_aware");
-            return;
-        }
-        if (!gridMenu.getGrid().isGridActive()) {
-            failState(player, mode, "rsi.autoeat.error.grid_inactive", "grid_inactive");
-            return;
-        }
-        INetwork network = awareGrid.getNetwork();
-        if (network == null) {
-            failState(player, mode, "rsi.autoeat.error.network_unavailable", "network_missing");
-            return;
-        }
-        IStorageCache<ItemStack> cache = network.getItemStorageCache();
-        if (mode != AutoEatMode.STACK && cache == null) {
-            failState(player, mode, "rsi.autoeat.error.network_unavailable", "cache_missing");
-            return;
-        }
+        AutoEatStorage storage = resolved.orElseThrow();
 
         // Cost check
         String requiredEffect = RSIntegrationConfig.AUTO_EAT_REQUIRED_EFFECT.get();
@@ -271,16 +243,15 @@ public final class AutoEatEngine {
         }
 
         switch (mode) {
-            case DIVERSITY -> executeDiversity(player, network, cache);
-            case STACK -> executeStack(player, network, cache, selectedItem);
-            case DIET -> executeDiet(player, network, cache);
+            case DIVERSITY -> executeDiversity(player, storage);
+            case STACK -> executeStack(player, storage, selectedItem);
+            case DIET -> executeDiet(player, storage);
         }
     }
 
     // ── Mode 1: Diversity ───────────────────────────────────────
 
-    private static void executeDiversity(ServerPlayer player, INetwork network,
-                                         IStorageCache<ItemStack> cache) {
+    private static void executeDiversity(ServerPlayer player, AutoEatStorage storage) {
         if (foodList_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
@@ -301,9 +272,7 @@ public final class AutoEatEngine {
 
         // Collect stacks first (avoid concurrent mod during iteration)
         List<ItemStack> stacks = new ArrayList<>();
-        for (var entry : cache.getList().getStacks()) {
-            stacks.add(entry.getStack());
-        }
+        for (var entry : storage.items()) stacks.add(entry.stack());
 
         for (ItemStack stack : stacks) {
             if (!runningTasks.contains(player.getUUID())) break;
@@ -322,11 +291,11 @@ public final class AutoEatEngine {
             if (key != null && blacklist.contains(key)) continue;
             if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
-            ItemStack taken = extract(network, player, stack, 1, false);
+            ItemStack taken = storage.extract(player, stack, 1, false);
             if (taken.isEmpty()) continue;
 
-            if (!payCost(network, player, AutoEatMode.DIVERSITY)) {
-                insert(network, player, taken, false);
+            if (!payCost(storage, player, AutoEatMode.DIVERSITY)) {
+                storage.insert(player, taken, false);
                 break;
             }
 
@@ -335,7 +304,7 @@ public final class AutoEatEngine {
             remainder = fireEatEvent(player, beforeEat, remainder);
             // Recover container items (bowls, bottles, etc.) returned by eat()
             if (!remainder.isEmpty()) {
-                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
+                ItemStack leftover = storage.insert(player, remainder, false);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);
@@ -363,19 +332,9 @@ public final class AutoEatEngine {
         }
     }
 
-    private static ItemStack extract(INetwork network, ServerPlayer player,
-                                     ItemStack template, int amount, boolean simulate) {
-        return CraftStorageEndpoints.extractExactLegacy(network, player, template, amount, simulate);
-    }
-
-    private static ItemStack insert(INetwork network, ServerPlayer player,
-                                    ItemStack stack, boolean simulate) {
-        return CraftStorageEndpoints.insertLegacy(network, player, stack, simulate);
-    }
-
     // ── Cost deduction ────────────────────────────────────────────
 
-    private static boolean payCost(INetwork network, ServerPlayer player, AutoEatMode mode) {
+    private static boolean payCost(AutoEatStorage storage, ServerPlayer player, AutoEatMode mode) {
         int perItem = RSIntegrationConfig.AUTO_EAT_COST_PER_ITEM.get();
         if (perItem <= 0) return true;
         String costStr = RSIntegrationConfig.AUTO_EAT_COST_ITEM.get();
@@ -385,10 +344,10 @@ public final class AutoEatEngine {
         if (costItem == null) return true;
 
         ItemStack template = new ItemStack(costItem, perItem);
-        ItemStack extracted = extract(network, player, template, perItem, false);
+        ItemStack extracted = storage.extract(player, template, perItem, false);
         if (extracted.getCount() < perItem) {
             if (!extracted.isEmpty()) {
-                insert(network, player, extracted, false);
+                storage.insert(player, extracted, false);
             }
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(mode, 0,
@@ -400,8 +359,8 @@ public final class AutoEatEngine {
 
     // ── Mode 2: Stack ───────────────────────────────────────────
 
-    private static void executeStack(ServerPlayer player, INetwork network,
-                                     IStorageCache<ItemStack> cache, ResourceLocation selectedItem) {
+    private static void executeStack(ServerPlayer player, AutoEatStorage storage,
+                                     ResourceLocation selectedItem) {
         if (selectedItem == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -420,21 +379,19 @@ public final class AutoEatEngine {
         int maxPerBatch = RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get();
         int toExtract = Math.min(maxStackSize, maxPerBatch);
         ItemStack template = new ItemStack(targetItem, toExtract);
-        if (cache != null) {
-            for (var entry : cache.getList().getStacks()) {
-                ItemStack stored = entry.getStack();
+        for (var entry : storage.items()) {
+                ItemStack stored = entry.stack();
                 if (!stored.isEmpty() && stored.is(targetItem)) {
                     template = stored.copy();
                     template.setCount(toExtract);
                     break;
                 }
-            }
         }
         if (hasBlacklistedEffect(template, player, getEffectBlacklist(player))) {
             sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.effect_blacklisted");
             return;
         }
-        ItemStack extracted = extract(network, player, template, toExtract, false);
+        ItemStack extracted = storage.extract(player, template, toExtract, false);
         if (extracted.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -466,14 +423,14 @@ public final class AutoEatEngine {
             boolean ignoreFullHunger = AutoEatHungerPolicy.canIgnoreFullHunger(alwaysEat, hasGnawsGift);
             if (!player.canEat(ignoreFullHunger)) {
                 if (!extracted.isEmpty()) {
-                    insert(network, player, extracted, false);
+                    storage.insert(player, extracted, false);
                 }
                 sendFailure(player, AutoEatMode.STACK, "rsi.autoeat.full");
                 return;
             }
-            if (!payCost(network, player, AutoEatMode.STACK)) {
+            if (!payCost(storage, player, AutoEatMode.STACK)) {
                 if (!extracted.isEmpty()) {
-                    insert(network, player, extracted, false);
+                    storage.insert(player, extracted, false);
                 }
                 break;
             }
@@ -495,7 +452,7 @@ public final class AutoEatEngine {
                 } catch (Throwable ignored) {}
             }
             if (!remainder.isEmpty()) {
-                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
+                ItemStack leftover = storage.insert(player, remainder, false);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);
@@ -504,7 +461,7 @@ public final class AutoEatEngine {
             }
         }
         if (!extracted.isEmpty()) {
-            ItemStack leftover = insert(network, player, extracted, false);
+            ItemStack leftover = storage.insert(player, extracted, false);
             if (!leftover.isEmpty()) {
                 if (!player.getInventory().add(leftover)) {
                     player.drop(leftover, false);
@@ -526,8 +483,7 @@ public final class AutoEatEngine {
 
     // ── Mode 3: Diet ────────────────────────────────────────────
 
-    private static void executeDiet(ServerPlayer player, INetwork network,
-                                    IStorageCache<ItemStack> cache) {
+    private static void executeDiet(ServerPlayer player, AutoEatStorage storage) {
         if (dietCapability_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
@@ -572,9 +528,7 @@ public final class AutoEatEngine {
         int eaten = 0;
 
         List<ItemStack> stacks = new ArrayList<>();
-        for (var entry : cache.getList().getStacks()) {
-            stacks.add(entry.getStack());
-        }
+        for (var entry : storage.items()) stacks.add(entry.stack());
 
         while (eaten < maxPerBatch && runningTasks.contains(player.getUUID())) {
             String lowestGroup = null;
@@ -615,14 +569,14 @@ public final class AutoEatEngine {
                 continue;
             }
 
-            ItemStack taken = extract(network, player, foodToEat, 1, false);
+            ItemStack taken = storage.extract(player, foodToEat, 1, false);
             if (taken.isEmpty()) {
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
 
-            if (!payCost(network, player, AutoEatMode.DIET)) {
-                insert(network, player, taken, false);
+            if (!payCost(storage, player, AutoEatMode.DIET)) {
+                storage.insert(player, taken, false);
                 break;
             }
 
@@ -648,7 +602,7 @@ public final class AutoEatEngine {
             } catch (Throwable ignored) {}
 
             if (!remainder.isEmpty()) {
-                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, remainder);
+                ItemStack leftover = storage.insert(player, remainder, false);
                 if (!leftover.isEmpty()) {
                     if (!player.getInventory().add(leftover)) {
                         player.drop(leftover, false);

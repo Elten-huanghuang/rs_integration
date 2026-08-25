@@ -1467,6 +1467,7 @@ public final class AsyncCraftChain {
         boolean terminalCleanupInvoked = false;
         try {
             delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
+            delegate.prepareOperationCount(Math.max(1, prepared.step().executions()));
             if (prepared.parallelGroup()) {
                 List<BoundMachine> workers = new ArrayList<>(
                         prepared.machines().subList(0, prepared.operationCost()));

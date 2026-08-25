@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.transfer;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -30,6 +31,7 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
@@ -45,6 +47,7 @@ public final class ContainerTransferClient {
     // Mode constants
     private static final byte MODE_RS = 0;
     private static final byte MODE_BACKPACK = 1;
+    private static final byte MODE_BD = 2;
 
     private static byte currentMode = MODE_BACKPACK;
     private static Component modeMessage;
@@ -78,6 +81,33 @@ public final class ContainerTransferClient {
      * added before {@code RegisterKeyMappingsEvent} fires.
      */
     private static volatile boolean keyMappingsRegistered;
+
+    private static boolean isRsAvailable() {
+        return ModList.get().isLoaded(ModIds.REFINED_STORAGE);
+    }
+
+    private static boolean isBackpackAvailable() {
+        return ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS);
+    }
+
+    private static boolean isBdAvailable() {
+        return ModList.get().isLoaded("beyonddimensions");
+    }
+
+    private static boolean hasTransferTarget() {
+        return isRsAvailable() || isBackpackAvailable() || isBdAvailable();
+    }
+
+    /** Keep persisted/client state on a mode that can actually be executed. */
+    private static byte normalizeMode(byte mode) {
+        if (mode == MODE_RS && isRsAvailable()) return MODE_RS;
+        if (mode == MODE_BACKPACK && isBackpackAvailable()) return MODE_BACKPACK;
+        if (mode == MODE_BD && isBdAvailable()) return MODE_BD;
+        if (isRsAvailable()) return MODE_RS;
+        if (isBackpackAvailable()) return MODE_BACKPACK;
+        if (isBdAvailable()) return MODE_BD;
+        return MODE_BACKPACK;
+    }
 
     public static void registerKeyMappings() {
         if (keyMappingsRegistered) return;
@@ -122,19 +152,25 @@ public final class ContainerTransferClient {
                 String content = Files.readString(MODE_FILE).trim();
                 if ("RS_NETWORK".equals(content)) {
                     currentMode = MODE_RS;
+                } else if ("BEYOND_DIMENSIONS".equals(content)) {
+                    currentMode = MODE_BD;
                 } else {
                     currentMode = MODE_BACKPACK;
                 }
             }
+            currentMode = normalizeMode(currentMode);
         } catch (IOException e) {
             RSIntegrationMod.LOGGER.warn("[RSI] Failed to read transfer mode file", e);
+            currentMode = normalizeMode(currentMode);
         }
     }
 
     private static void saveMode() {
         try {
             Files.createDirectories(MODE_FILE.getParent());
-            Files.writeString(MODE_FILE, currentMode == MODE_RS ? "RS_NETWORK" : "BACKPACK");
+            String value = currentMode == MODE_RS ? "RS_NETWORK"
+                    : currentMode == MODE_BD ? "BEYOND_DIMENSIONS" : "BACKPACK";
+            Files.writeString(MODE_FILE, value);
         } catch (IOException e) {
             RSIntegrationMod.LOGGER.warn("[RSI] Failed to write transfer mode file", e);
         }
@@ -154,11 +190,20 @@ public final class ContainerTransferClient {
         if (KEY_TOGGLE_MODE.isActiveAndMatches(
                 InputConstants.getKey(event.getKey(), event.getScanCode()))) {
 
-            currentMode = (currentMode == MODE_RS) ? MODE_BACKPACK : MODE_RS;
+            if (!hasTransferTarget()) return;
+
+            byte[] modes = availableModes();
+            if (modes.length == 1) currentMode = modes[0];
+            else {
+                int index = 0;
+                for (int i = 0; i < modes.length; i++) if (modes[i] == currentMode) index = i;
+                currentMode = modes[(index + 1) % modes.length];
+            }
+            currentMode = normalizeMode(currentMode);
             saveMode();
 
-            String key = (currentMode == MODE_RS)
-                    ? "rsi.transfer.mode.rs"
+            String key = currentMode == MODE_RS ? "rsi.transfer.mode.rs"
+                    : currentMode == MODE_BD ? "rsi.transfer.mode.bd"
                     : "rsi.transfer.mode.backpack";
             modeMessage = Component.translatable(key);
             modeMessageUntil = System.currentTimeMillis() + 1800L;
@@ -209,11 +254,22 @@ public final class ContainerTransferClient {
     }
 
     private static ItemStack modeIcon() {
-        String id = currentMode == MODE_RS
-                ? "refinedstorage:grid"
+        currentMode = normalizeMode(currentMode);
+        String id = currentMode == MODE_RS ? "refinedstorage:grid"
+                : currentMode == MODE_BD ? "beyonddimensions:net_terminal_item"
                 : "sophisticatedbackpacks:backpack";
         var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(id));
         return item == null ? ItemStack.EMPTY : new ItemStack(item);
+    }
+
+    private static byte[] availableModes() {
+        java.util.ArrayList<Byte> modes = new java.util.ArrayList<>(3);
+        if (isRsAvailable()) modes.add(MODE_RS);
+        if (isBackpackAvailable()) modes.add(MODE_BACKPACK);
+        if (isBdAvailable()) modes.add(MODE_BD);
+        byte[] result = new byte[modes.size()];
+        for (int i = 0; i < modes.size(); i++) result[i] = modes.get(i);
+        return result;
     }
 
     /**

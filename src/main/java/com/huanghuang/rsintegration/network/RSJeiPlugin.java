@@ -58,7 +58,11 @@ public final class RSJeiPlugin implements IModPlugin {
         cachedRuntime = jeiRuntime;
         com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
                 .onRuntimeAvailable();
-        RSGridSearchCache.onJeiRuntimeAvailable();
+        // RSGridSearchCache contains RS Grid types and is only registered in
+        // RSOptionalBootstrap.  Keep BD-only JEI startup free of that class.
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            RSGridSearchCache.onJeiRuntimeAvailable();
+        }
         if (ClientSyncedConfig.isSynced() ? !ClientSyncedConfig.ENABLE_JEI : !RSIntegrationConfig.ENABLE_JEI.get()) return;
         JeiMarqueeSelector.register();
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
@@ -79,7 +83,9 @@ public final class RSJeiPlugin implements IModPlugin {
         cachedRuntime = null;
         com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
                 .onRuntimeUnavailable();
-        RSGridSearchCache.onJeiRuntimeUnavailable();
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            RSGridSearchCache.onJeiRuntimeUnavailable();
+        }
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             FtbQuestJeiRuntime
                     .onRuntimeUnavailable();

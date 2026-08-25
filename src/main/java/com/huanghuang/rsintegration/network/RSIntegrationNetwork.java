@@ -3,8 +3,10 @@ package com.huanghuang.rsintegration.network;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -23,6 +25,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -54,6 +57,7 @@ public final class RSIntegrationNetwork {
 
     @Nullable
     public static INetwork resolveNetworkFromPlayer(ServerPlayer player) {
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
         UUID playerId = player.getUUID();
         MinecraftServer server = player.server;
         Object dimension = player.level().dimension();
@@ -107,7 +111,7 @@ public final class RSIntegrationNetwork {
      */
     @Nullable
     public static INetwork resolveCurrentNetworkFromPlayer(ServerPlayer player) {
-        if (player == null) return null;
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
 
         if (player.containerMenu instanceof ResonanceBackpackContainer backpack) {
             INetwork network = backpack.getOwnerNetwork();
@@ -130,7 +134,7 @@ public final class RSIntegrationNetwork {
 
         // A machine binding is an explicit, player-owned RS access path and
         // remains valid even when no terminal is held.
-        return AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
+        return RSAltarBindingResolver.resolveNetworkFromAnyBinding(player);
     }
 
     /** Returns whether the supplied RS reference is backed by a current access context. */
@@ -179,7 +183,7 @@ public final class RSIntegrationNetwork {
             return net;
         }
 
-        net = AltarBindingRegistry.resolveNetworkFromAnyBinding(player);
+        net = RSAltarBindingResolver.resolveNetworkFromAnyBinding(player);
         if (net != null) return net;
 
         // Do not guess a network from spatial proximity.  A nearby node may
@@ -260,6 +264,7 @@ public final class RSIntegrationNetwork {
     public static INetwork resolveNetwork(MinecraftServer server,
                                           ResourceKey<Level> dimension,
                                           BlockPos controllerPos) {
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
         try {
             return resolveNetworkStrict(server, dimension, controllerPos);
         } catch (Exception e) {
@@ -277,6 +282,7 @@ public final class RSIntegrationNetwork {
      */
     @Nullable
     public static INetwork resolveNearbyNetworkForCraft(ServerPlayer player) {
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
         INetwork network = resolveFromNearbyNode(player);
         if (network == null) return null;
         try {
@@ -303,6 +309,7 @@ public final class RSIntegrationNetwork {
     public static INetwork resolveNetworkStrict(MinecraftServer server,
                                                 ResourceKey<Level> dimension,
                                                 BlockPos controllerPos) {
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
         if (server == null || dimension == null || controllerPos == null) return null;
         ServerLevel level = server.getLevel(dimension);
         if (level == null) {
@@ -341,7 +348,8 @@ public final class RSIntegrationNetwork {
     }
 
     private static INetwork resolveFromNetworkItem(ServerPlayer player, ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return null;
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || stack == null || stack.isEmpty()) return null;
 
         // Let RS resolve the item through its own provider first.  This is
         // important for wireless grid/crafting-monitor variants and keeps us
@@ -558,6 +566,12 @@ public final class RSIntegrationNetwork {
 
     public static ItemStack extractFromNetwork(INetwork network, Ingredient ingredient, int count,
                                                @Nullable ServerPlayer player) {
+        return extractFromNetwork(network, ingredient, count, player, false);
+    }
+
+    /** Extract matching items, optionally without mutating the network. */
+    public static ItemStack extractFromNetwork(INetwork network, Ingredient ingredient, int count,
+                                               @Nullable ServerPlayer player, boolean simulate) {
         try {
             if (player != null) {
                 var sec = network.getSecurityManager();
@@ -581,8 +595,7 @@ public final class RSIntegrationNetwork {
                 }
             }
 
-            // Single-phase PERFORM extraction — avoids TOCTOU race between
-            // SIMULATE and PERFORM. If we get less than requested, refund.
+            Action action = simulate ? Action.SIMULATE : Action.PERFORM;
             int remaining = count;
             ItemStack result = ItemStack.EMPTY;
 
@@ -591,7 +604,7 @@ public final class RSIntegrationNetwork {
                 int take = Math.min(remaining, template.getCount());
                 ItemStack extractTemplate = template.copy();
                 extractTemplate.setCount(1);
-                ItemStack extracted = network.extractItem(extractTemplate, take, Action.PERFORM);
+                ItemStack extracted = network.extractItem(extractTemplate, take, action);
                 if (!extracted.isEmpty()) {
                     remaining -= extracted.getCount();
                     if (result.isEmpty()) {
@@ -606,7 +619,7 @@ public final class RSIntegrationNetwork {
                 return result;
             }
 
-            if (!result.isEmpty()) {
+            if (!result.isEmpty() && !simulate) {
                 RSIntegrationMod.LOGGER.warn("[RSI] extractFromNetwork: partial extraction — "
                         + "requested {} but only got {}", count, result.getCount());
                 // A ledger reservation is atomic from the caller's point of
@@ -630,6 +643,16 @@ public final class RSIntegrationNetwork {
     /** Extract one exact item/NBT identity from the network. */
     public static ItemStack extractExactFromNetwork(INetwork network, ItemStack template, int count,
                                                     @Nullable ServerPlayer player) {
+        return extractExactFromNetwork(network, template, count, player, false);
+    }
+
+    /**
+     * Extract one exact item/NBT identity from the network, optionally only
+     * simulating the operation. The legacy bridge performs a SIMULATE pass
+     * before the real extraction, so that validation must not consume storage.
+     */
+    public static ItemStack extractExactFromNetwork(INetwork network, ItemStack template, int count,
+                                                    @Nullable ServerPlayer player, boolean simulate) {
         if (template.isEmpty() || count <= 0) return ItemStack.EMPTY;
         try {
             if (player != null) {
@@ -641,7 +664,8 @@ public final class RSIntegrationNetwork {
                 }
             }
             ItemStack request = template.copyWithCount(1);
-            ItemStack extracted = network.extractItem(request, count, Action.PERFORM);
+            Action action = simulate ? Action.SIMULATE : Action.PERFORM;
+            ItemStack extracted = network.extractItem(request, count, action);
             if (extracted.isEmpty()) {
                 return extracted;
             }
@@ -652,11 +676,18 @@ public final class RSIntegrationNetwork {
             if (ItemStack.isSameItemSameTags(extracted, template)) {
                 RSIntegrationMod.LOGGER.warn("[RSI] extractExactFromNetwork: partial extraction — requested {} but only got {}",
                         count, extracted.getCount());
-                ItemStack partialRefund = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
-                if (!partialRefund.isEmpty()) {
-                    RSIntegrationMod.LOGGER.error("[RSI] partial exact extraction refund was rejected: {} x{}",
-                            partialRefund.getHoverName().getString(), partialRefund.getCount());
+                if (!simulate) {
+                    ItemStack partialRefund = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
+                    if (!partialRefund.isEmpty()) {
+                        RSIntegrationMod.LOGGER.error("[RSI] partial exact extraction refund was rejected: {} x{}",
+                                partialRefund.getHoverName().getString(), partialRefund.getCount());
+                    }
                 }
+                return ItemStack.EMPTY;
+            }
+            if (simulate) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Simulated exact extraction returned the wrong identity: {} x{}",
+                        extracted.getDisplayName().getString(), extracted.getCount());
                 return ItemStack.EMPTY;
             }
             RSIntegrationMod.LOGGER.error("[RSI] Exact extraction returned the wrong identity; refunding {} x{}",
@@ -695,12 +726,14 @@ public final class RSIntegrationNetwork {
     }
 
     public static ItemStack tryExtractFromPlayerRS(ServerPlayer player, Ingredient ingredient, int count) {
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return ItemStack.EMPTY;
         INetwork network = resolveNetworkFromPlayer(player);
         if (network == null) return ItemStack.EMPTY;
         return extractFromNetwork(network, ingredient, count, player);
     }
 
     public static boolean hasItemInPlayerRS(ServerPlayer player, Ingredient ingredient) {
+        if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return false;
         INetwork network = resolveNetworkFromPlayer(player);
         if (network == null) return false;
         return hasItemInNetwork(network, ingredient);

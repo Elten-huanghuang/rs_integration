@@ -12,6 +12,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
@@ -117,14 +119,15 @@ public final class WRWandCraftPacket {
                 return;
             }
 
+            CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
             if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
-                handleWissenCrystallizer(player, be, recipe);
+                handleWissenCrystallizer(player, be, recipe, endpoint);
             } else if (WRReflection.arcaneIteratorBEClass != null && WRReflection.arcaneIteratorBEClass.isInstance(be)) {
-                handleArcaneIterator(player, be, recipe);
+                handleArcaneIterator(player, be, recipe, endpoint);
             } else if (WRReflection.arcaneWorkbenchBEClass != null && WRReflection.arcaneWorkbenchBEClass.isInstance(be)) {
-                handleArcaneWorkbench(player, be, recipe);
+                handleArcaneWorkbench(player, be, recipe, endpoint);
             } else if (WRReflection.crystalRitualBEClass != null && WRReflection.crystalRitualBEClass.isInstance(be)) {
-                handleCrystalRitual(player, be, recipe);
+                handleCrystalRitual(player, be, recipe, endpoint);
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-WR] Unsupported BE type for recipe {}: {}",
                         packet.recipeId, be.getClass().getName());
@@ -138,7 +141,8 @@ public final class WRWandCraftPacket {
         context.setPacketHandled(true);
     }
 
-    private static boolean handleWissenCrystallizer(ServerPlayer player, BlockEntity be, Recipe<?> recipe) {
+    private static boolean handleWissenCrystallizer(ServerPlayer player, BlockEntity be, Recipe<?> recipe,
+                                                    @Nullable CraftStorageEndpoint endpoint) {
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("Failed to get ingredients from WR recipe: {}", recipe.getId());
@@ -156,12 +160,13 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
+        if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
+        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients + validate slots
             for (int i = 0; i < ingredients.size() && i < totalSlots; i++) {
                 Ingredient ing = ingredients.get(i);
@@ -176,7 +181,7 @@ public final class WRWandCraftPacket {
                     return false;
                 }
 
-                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger, endpoint);
                 if (taken.isEmpty()) {
                     player.displayClientMessage(
                             Component.translatable("rsi.generic.error.missing_materials",
@@ -210,7 +215,7 @@ public final class WRWandCraftPacket {
                         try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback setContainerItem failed", ex); }
                     }
                 }
-                refundTemplates(network, player, templates);
+                refundTemplates(network, endpoint, player, templates);
                 return false;
             }
 
@@ -226,7 +231,7 @@ public final class WRWandCraftPacket {
                         rsi$setContainerItem(be, i, ItemStack.EMPTY);
                     }
                 }
-                refundTemplates(network, player, templates);
+                refundTemplates(network, endpoint, player, templates);
                 return false;
             }
         }
@@ -236,7 +241,8 @@ public final class WRWandCraftPacket {
         return true;
     }
 
-    private static boolean handleArcaneIterator(ServerPlayer player, BlockEntity be, Recipe<?> recipe) {
+    private static boolean handleArcaneIterator(ServerPlayer player, BlockEntity be, Recipe<?> recipe,
+                                                @Nullable CraftStorageEndpoint endpoint) {
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("Failed to get ingredients from WR recipe: {}", recipe.getId());
@@ -262,16 +268,17 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
+        if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
+        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients
             for (int i = 0; i < ingredients.size(); i++) {
                 Ingredient ing = ingredients.get(i);
-                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger, endpoint);
                 if (taken.isEmpty()) {
                     player.displayClientMessage(
                             Component.translatable("rsi.generic.error.missing_materials",
@@ -306,7 +313,7 @@ public final class WRWandCraftPacket {
                     for (int j = 0; j < i; j++) {
                         try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", ex); }
                     }
-                    refundTemplates(network, player, templates);
+                    refundTemplates(network, endpoint, player, templates);
                     return false;
                 }
             }
@@ -320,7 +327,7 @@ public final class WRWandCraftPacket {
                 for (int i = 0; i < templates.size(); i++) {
                     try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception exc) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", exc); }
                 }
-                refundTemplates(network, player, templates);
+                refundTemplates(network, endpoint, player, templates);
                 return false;
             }
         }
@@ -330,7 +337,8 @@ public final class WRWandCraftPacket {
         return true;
     }
 
-    private static boolean handleArcaneWorkbench(ServerPlayer player, BlockEntity be, Recipe<?> recipe) {
+    private static boolean handleArcaneWorkbench(ServerPlayer player, BlockEntity be, Recipe<?> recipe,
+                                                 @Nullable CraftStorageEndpoint endpoint) {
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("Failed to get ingredients from WR recipe: {}", recipe.getId());
@@ -361,12 +369,13 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
+        if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
+        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients + validate slots
             for (int i = 0; i < ingredients.size(); i++) {
                 Ingredient ing = ingredients.get(i);
@@ -385,7 +394,7 @@ public final class WRWandCraftPacket {
                     return false;
                 }
 
-                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger, endpoint);
                 if (taken.isEmpty()) {
                     player.displayClientMessage(
                             Component.translatable("rsi.generic.error.missing_materials",
@@ -424,7 +433,7 @@ public final class WRWandCraftPacket {
                         itemHandler.setStackInSlot(i, ItemStack.EMPTY);
                     }
                 }
-                refundTemplates(network, player, templates);
+                refundTemplates(network, endpoint, player, templates);
                 return false;
             }
         }
@@ -434,7 +443,8 @@ public final class WRWandCraftPacket {
         return true;
     }
 
-    private static boolean handleCrystalRitual(ServerPlayer player, BlockEntity be, Recipe<?> recipe) {
+    private static boolean handleCrystalRitual(ServerPlayer player, BlockEntity be, Recipe<?> recipe,
+                                               @Nullable CraftStorageEndpoint endpoint) {
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
         if (ingredients == null || ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("Failed to get ingredients from crystal ritual/infusion recipe: {}", recipe.getId());
@@ -498,12 +508,13 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!tryAutoCraftMissing(player, ingredients, dim, pos)) return false;
+        if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
+        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients
             for (int i = 0; i < ingredients.size(); i++) {
                 Ingredient ing = ingredients.get(i);
@@ -519,7 +530,7 @@ public final class WRWandCraftPacket {
                     continue;
                 }
 
-                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger);
+                ItemStack taken = ensureMaterialAvailable(player, dim, pos, ing, 1, ledger, endpoint);
                 if (taken.isEmpty()) {
                     player.displayClientMessage(
                             Component.translatable("rsi.generic.error.missing_materials",
@@ -559,7 +570,7 @@ public final class WRWandCraftPacket {
                             try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                         }
                     }
-                    refundTemplates(network, player, templates);
+                    refundTemplates(network, endpoint, player, templates);
                     return false;
                 }
             }
@@ -576,7 +587,7 @@ public final class WRWandCraftPacket {
                         try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                     }
                 }
-                refundTemplates(network, player, templates);
+                refundTemplates(network, endpoint, player, templates);
                 player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_start"));
                 return false;
             }
@@ -605,15 +616,22 @@ public final class WRWandCraftPacket {
 
     private static ItemStack ensureMaterialAvailable(ServerPlayer player, ResourceKey<Level> altarDim,
                                                       BlockPos altarPos, Ingredient ingredient, int count,
-                                                      ExtractionLedger ledger) {
-        return CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
+                                                      ExtractionLedger ledger,
+                                                      @Nullable CraftStorageEndpoint endpoint) {
+        return endpoint != null
+                ? ledger.reserveFromEndpoint(ingredient, count, endpoint, player)
+                : CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
     }
 
-    private static void refundTemplates(INetwork network, ServerPlayer player, List<ItemStack> templates) {
+    private static void refundTemplates(INetwork network, @Nullable CraftStorageEndpoint endpoint,
+                                        ServerPlayer player, List<ItemStack> templates) {
         for (ItemStack t : templates) {
             if (t.isEmpty()) continue;
             ItemStack refund = t.copy();
-            if (network != null) {
+            if (endpoint != null) {
+                ItemStack leftover = endpoint.insert(player, refund, false).remainder().orElse(ItemStack.EMPTY);
+                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            } else if (network != null) {
                 ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                         .insertLegacy(network, player, refund, false);
                 if (!leftover.isEmpty()) {
@@ -630,7 +648,8 @@ public final class WRWandCraftPacket {
     }
 
     private static boolean tryAutoCraftMissing(ServerPlayer player, List<Ingredient> ingredients,
-                                                ResourceKey<Level> dim, BlockPos pos) {
+                                                ResourceKey<Level> dim, BlockPos pos,
+                                                @Nullable CraftStorageEndpoint endpoint) {
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return true;
 
         // Filter to ingredients with non-empty item options
@@ -643,8 +662,10 @@ public final class WRWandCraftPacket {
         }
         if (filtered.isEmpty()) return true;
 
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dim, pos);
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
+        Map<StackKey, Integer> available = endpoint != null
+                ? MaterialSources.listAllAvailable(player, endpoint)
+                : MaterialSources.listAllAvailable(player, network);
 
         List<String> missing = new ArrayList<>();
         List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForIngredients(
@@ -665,7 +686,7 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!autoSteps.isEmpty() && network != null) {
+        if (!autoSteps.isEmpty() && (network != null || endpoint != null)) {
             player.displayClientMessage(
                     Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()), true);
             List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
@@ -673,7 +694,7 @@ public final class WRWandCraftPacket {
                 wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
             }
-            if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network)) {
+            if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network, endpoint)) {
                 player.displayClientMessage(
                         Component.translatable("rsi.generic.error.auto_craft_failed"), true);
                 return false;

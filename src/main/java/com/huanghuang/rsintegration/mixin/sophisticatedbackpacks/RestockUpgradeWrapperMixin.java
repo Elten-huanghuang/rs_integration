@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
-import com.huanghuang.rsintegration.util.BackpackRSUtils;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -31,16 +30,7 @@ public abstract class RestockUpgradeWrapperMixin
         extends UpgradeWrapperBase<RestockUpgradeWrapper, RestockUpgradeItem> {
 
     @Unique
-    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
-    @Unique
-    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
-
-    @Unique
-    private boolean rsi$isRs;
-    @Unique
-    private BlockPos rsi$rsBlockPos;
-    @Unique
-    private ResourceKey<Level> rsi$rsDimensionKey;
+    private StorageReference rsi$storageReference;
 
     @Unique
     private static volatile boolean rsi$bcChecked;
@@ -61,26 +51,22 @@ public abstract class RestockUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
-        if (tag != null && tag.contains(RS_BLOCK_POS_TAG) && tag.contains(RS_BLOCK_DIMENSION_TAG)) {
-            this.rsi$isRs = true;
-            this.rsi$rsBlockPos = BlockPos.of(tag.getLong(RS_BLOCK_POS_TAG));
-            this.rsi$rsDimensionKey = ResourceKey.create(Registries.DIMENSION,
-                    ResourceLocation.parse(tag.getString(RS_BLOCK_DIMENSION_TAG)));
-        }
+        this.rsi$storageReference = StorageBackpackUtils.readReference(tag);
     }
 
     @Inject(method = "onHandlerInteract", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void onHandlerInteract(IItemHandler handler, Player player, CallbackInfo ci) {
-        if (!this.rsi$isRs) {
+        if (this.rsi$storageReference == null) {
             if (rsi$checkTwoHanded(player)) {
                 ci.cancel();
             }
             return;
         }
 
-        List<ItemStack> restocked = BackpackRSUtils.handleRSRestock(
-                getFilterLogic(), this.storageWrapper,
-                this.rsi$rsBlockPos, this.rsi$rsDimensionKey, player.level());
+        List<ItemStack> restocked = player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
+                ? StorageBackpackUtils.handleRestock(getFilterLogic(), this.storageWrapper,
+                serverPlayer, this.rsi$storageReference)
+                : List.of();
 
         String key = restocked.isEmpty()
                 ? "gui.sophisticatedbackpacks.status.nothing_to_restock"

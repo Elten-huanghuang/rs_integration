@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.anvilmemory;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.refinedmods.refinedstorage.api.network.security.Permission;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -114,11 +113,10 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
             needed -= inventory;
         }
         int fromRs = 0;
-        var network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        boolean denied = network != null && network.getSecurityManager() != null
-                && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player);
-        if (needed > 0 && network != null && !denied) {
-            ItemStack extracted = RSIntegrationNetwork.extractExactFromNetwork(network, wanted, needed, player);
+        var endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        boolean denied = endpoint != null && !StorageRestockSupport.canExtract(endpoint, player);
+        if (needed > 0 && endpoint != null && !denied) {
+            ItemStack extracted = StorageRestockSupport.extract(endpoint, player, wanted, needed);
             fromRs = extracted.getCount();
             if (fromRs > 0) {
                 if (slot.getItem().isEmpty()) slot.set(extracted.copy()); else slot.getItem().grow(fromRs);
@@ -137,7 +135,7 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
         player.containerMenu.broadcastChanges();
         AnvilMemorySyncPacket.Status status = needed == 0 ? AnvilMemorySyncPacket.Status.COMPLETE
                 : denied ? AnvilMemorySyncPacket.Status.NO_PERMISSION
-                : network == null ? AnvilMemorySyncPacket.Status.NO_NETWORK
+                : endpoint == null ? AnvilMemorySyncPacket.Status.NO_NETWORK
                 : AnvilMemorySyncPacket.Status.PARTIAL;
         ItemStack missingStack = needed > 0 && RSIntegrationConfig.ANVIL_MEMORY_BOOKMARK_MISSING.get()
                 ? wanted : ItemStack.EMPTY;

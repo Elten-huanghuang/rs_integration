@@ -156,7 +156,8 @@ public final class SophisticatedBackpacksItems {
             event.register((stack, tintIndex) -> {
                 if (tintIndex != 0) return 0xFFFFFFFF;
                 var tag = stack.getTag();
-                if (tag == null || !tag.contains("RSBlockPos") || !tag.contains("RSBlockDimension"))
+                if (com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils
+                        .readReference(tag) == null)
                     return 0xFFFFFFFF;
                 return hslToRgb(((System.currentTimeMillis() % 3000L) / 3000.0f), 0.7f, 0.65f);
             }, RS_MAGNET_UPGRADE.get(), RS_PICKUP_UPGRADE.get(),

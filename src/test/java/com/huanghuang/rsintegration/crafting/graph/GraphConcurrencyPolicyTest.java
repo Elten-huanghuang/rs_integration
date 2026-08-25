@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.vanilla.CookingMachineBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -90,6 +91,16 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     void vanillaMachineDelegateHasStructuredConcurrencyContract() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
                 "vanilla_stonecutter", new VanillaMachineBatchDelegate(), List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
+    }
+
+    @Test
+    void cookingWrapperCanBeProbedBeforeSelectingTheBoundFurnace() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                "vanilla_furnace", new CookingMachineBatchDelegate(), List.of(), List.of());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,

@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
@@ -92,9 +93,15 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network != null) {
-            this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(this.network));
+        // The chain may have already selected a BD endpoint.  Only resolve the
+        // legacy RS handle when no backend-neutral endpoint was injected.
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network != null) {
+                this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(this.network));
+            }
+        } else {
+            this.ledger.setStorageEndpoint(storageEndpoint());
         }
         this.craftDone = false;
         this.pendingSecondary.clear();
@@ -148,7 +155,21 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         // items.  getResultItem() (used in the Phase-1 pre-check above) returns
         // a bare template — any NBT from inputs (backpack contents, blade stats,
         // enchantments) would be silently discarded.
-        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            // SmithingTransformRecipe is not a CraftingRecipe, but its output
+            // carries the base tool's NBT (durability, enchantments, custom
+            // data).  The indexed result is only a bare template, so assemble
+            // from the actual extracted stacks before discarding them.
+            ItemStack assembled = SmithingRecipeHandler.assembleTransform(
+                    smithing, templates, player.serverLevel().registryAccess());
+            if (assembled.isEmpty()) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-Batch-Generic] Smithing assembly failed for recipe {}", recipe.getId());
+                this.pendingResult = ItemStack.EMPTY;
+                return false;
+            }
+            this.pendingResult = assembled;
+        } else if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
             captureActualCraftingOutputs(cr, templates, player);
         }
 
@@ -162,8 +183,18 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack computeResult(ServerPlayer player) {
-        return RecipeIndex
+        ItemStack indexed = RecipeIndex
                 .tryGetResultItem(recipe, player.serverLevel().registryAccess()).copy();
+        if (!indexed.isEmpty()) return indexed;
+        // Vanilla smithing recipes expose a stable registry-aware result even
+        // when a third-party result cache has recorded a transient empty value.
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            return smithing.getResultItem(player.serverLevel().registryAccess()).copy();
+        }
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe smithing) {
+            return smithing.getResultItem(player.serverLevel().registryAccess()).copy();
+        }
+        return ItemStack.EMPTY;
     }
 
     // ── shared-ledger path for AsyncCraftChain ───────────────────────
@@ -187,7 +218,11 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = sharedLedger;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        // Shared-ledger graph dispatch owns the selected storage session. Do
+        // not replace a BD endpoint with a fresh RS lookup here.
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         this.craftDone = false;
         this.pendingSecondary.clear();
 
@@ -203,6 +238,25 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (player != null) {
             if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
                 if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
+            } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+                List<ItemStack> operationMaterials = new ArrayList<>();
+                List<IngredientSpec> specs = getRequiredMaterials();
+                for (int i = 0; i < specs.size() && i < materials.size(); i++) {
+                    IngredientSpec spec = specs.get(i);
+                    operationMaterials.add(spec.isEmpty() || materials.get(i) == null
+                            ? ItemStack.EMPTY : materials.get(i).copyWithCount(spec.count()));
+                }
+                ItemStack assembled = SmithingRecipeHandler.assembleTransform(
+                        smithing, operationMaterials, player.serverLevel().registryAccess());
+                if (assembled.isEmpty()) return false;
+                int executions = materialExecutions(
+                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        preparedGraphExecutions);
+                if (executions <= 0) return false;
+                assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
+                pendingResult = assembled;
+                this.pendingSecondary.addAll(ModRecipeHandlers.tryGetSecondaryOutputs(
+                        recipe, player.serverLevel().registryAccess()));
             } else {
                 int executions = materialExecutions(
                         getRequiredMaterials(), getMaterialReservationScopes(), materials,
@@ -396,6 +450,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public List<ItemStack> collectAllResults(ServerPlayer player) {
+        // A non-CraftingRecipe (notably SmithingTransformRecipe) is resolved
+        // from its declared result during dispatch rather than assembled from
+        // a grid.  If a graph retry/cleanup cleared the transient result
+        // before collection, recover it from the authoritative recipe instead
+        // of publishing an empty output after materials were committed.
+        if (pendingResult.isEmpty() && recipe != null && player != null) {
+            ItemStack recovered = computeResult(player);
+            if (!recovered.isEmpty()) {
+                pendingResult = recovered;
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Generic] Recovered missing collected output recipe={} output={}x{}",
+                        recipe.getId(), recovered.getHoverName().getString(), recovered.getCount());
+            }
+        }
         List<ItemStack> results = new ArrayList<>(pendingSecondary.size() + 1);
         if (!pendingResult.isEmpty()) results.add(pendingResult.copy());
         for (ItemStack secondary : pendingSecondary) {

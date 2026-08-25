@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class CraftStorageEndpointTest extends BootstrapTest {
@@ -33,9 +34,30 @@ class CraftStorageEndpointTest extends BootstrapTest {
                 endpoint.insert(null, new ItemStack(Items.STONE), true).status());
     }
 
+    @Test
+    void backendNeutralEndpointDoesNotExposeAnRsNetwork() throws Exception {
+        StorageReference reference = new StorageReference(
+                new StorageBackendId("beyonddimensions"), "bd-network");
+        StorageSession session = new RecordingSession(reference);
+        CraftStorageEndpoint endpoint = new SessionCraftStorageEndpoint(session);
+
+        Object legacyNetwork = CraftStorageEndpoints.class
+                .getMethod("legacyNetwork", CraftStorageEndpoint.class)
+                .invoke(null, endpoint);
+        assertNull(legacyNetwork,
+                "BD endpoint must not be reinterpreted as an RS INetwork");
+    }
+
     private static final class RecordingSession implements StorageSession {
-        private final StorageReference reference = new StorageReference(
-                new StorageBackendId("test"), "test-network");
+        private final StorageReference reference;
+
+        private RecordingSession() {
+            this(new StorageReference(new StorageBackendId("test"), "test-network"));
+        }
+
+        private RecordingSession(StorageReference reference) {
+            this.reference = reference;
+        }
 
         @Override public StorageReference reference() { return reference; }
         @Override public StorageSnapshotResult snapshotItems(ServerPlayer player) { return StorageSnapshotResult.failure(com.huanghuang.rsintegration.storage.StorageSnapshotStatus.UNAVAILABLE); }

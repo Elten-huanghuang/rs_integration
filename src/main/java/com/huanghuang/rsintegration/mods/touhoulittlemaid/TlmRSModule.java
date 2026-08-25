@@ -47,7 +47,7 @@ public final class TlmRSModule implements IModIntegration {
                 "touhou_little_maid", ModType.byId("touhou_little_maid"),
                 RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID, List.of(
                 "com.github.tartaricacid.touhoulittlemaid.block.BlockAltar"
-        ), "touhou_little_maid", false));
+        ), List.of("touhou_little_maid:altar"), "touhou_little_maid", false));
     }
 
     @Override

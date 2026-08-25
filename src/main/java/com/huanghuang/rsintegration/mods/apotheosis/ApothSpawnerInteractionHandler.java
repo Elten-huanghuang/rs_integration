@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerStatePacket;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.refinedmods.refinedstorage.item.NetworkItem;
 import dev.shadowsoffire.apotheosis.spawn.spawner.ApothSpawnerTile;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -21,7 +21,10 @@ public final class ApothSpawnerInteractionHandler {
         if (event.getLevel().isClientSide() || !event.getEntity().isShiftKeyDown()) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         ItemStack held = event.getItemStack();
-        if (held.isEmpty() || !NetworkItem.isValid(held)) return;
+        // Apotheosis is also loaded in BD-only profiles.  Resolve the held
+        // terminal through the backend-neutral binding registry instead of
+        // linking RS NetworkItem into this common event handler.
+        if (held.isEmpty() || AltarBindingRegistry.findHook(held).isEmpty()) return;
         if (!(event.getLevel().getBlockEntity(event.getPos()) instanceof ApothSpawnerTile)) return;
 
         var snapshot = ApothSpawnerUpgradeService.scan(player,

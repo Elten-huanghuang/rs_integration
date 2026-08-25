@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.lychee;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -46,9 +47,29 @@ public final class LycheeVirtualCatalysts {
 
     public static boolean hasCatalyst(@Nullable ServerPlayer player, int requiredMask) {
         if (player == null || requiredMask == 0) return false;
+        // Lychee substrates are explicitly stored in the RS Resonance Disk.
+        // Do not use the generic default backend here: when Beyond Dimensions
+        // is selected as the default, its ordinary snapshot can hide a valid
+        // RS disk and make this condition fail incorrectly.
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        return network != null && hasCatalyst(
-                catalystMask(PassiveEffectEngine.findResonanceDisk(network)), requiredMask);
+        if (network == null) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Lychee] no current RS network for player={} requiredMask={}",
+                    player.getGameProfile().getName(), requiredMask);
+            return false;
+        }
+        ResonanceDiskWrapper disk = PassiveEffectEngine.findResonanceDisk(network);
+        int availableMask = catalystMask(disk);
+        if (disk == null) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Lychee] no Resonance Disk for player={} requiredMask={}",
+                    player.getGameProfile().getName(), requiredMask);
+        } else {
+            RSIntegrationMod.LOGGER.debug("[RSI-Lychee] catalyst check player={} requiredMask={} availableMask={} stacks={}",
+                    player.getGameProfile().getName(), requiredMask, availableMask,
+                    disk.getInternalStacks().stream()
+                            .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
+                            .toList());
+        }
+        return hasCatalyst(availableMask, requiredMask);
     }
 
     public static boolean hasCatalyst(int availableMask, int requiredMask) {

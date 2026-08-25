@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -32,16 +33,7 @@ public abstract class PickupUpgradeWrapperMixin
         extends UpgradeWrapperBase<PickupUpgradeWrapper, PickupUpgradeItem> {
 
     @Unique
-    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
-    @Unique
-    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
-
-    @Unique
-    private boolean rsi$isRS;
-    @Unique
-    private BlockPos rsi$rsBlockPos;
-    @Unique
-    private ResourceKey<Level> rsi$rsDimensionKey;
+    private StorageReference rsi$storageReference;
     @Unique
     private boolean rsi$voidUpgrade = false;
 
@@ -57,11 +49,8 @@ public abstract class PickupUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
-        if (tag != null && tag.contains(RS_BLOCK_POS_TAG) && tag.contains(RS_BLOCK_DIMENSION_TAG)) {
-            this.rsi$isRS = true;
-            this.rsi$rsBlockPos = BlockPos.of(tag.getLong(RS_BLOCK_POS_TAG));
-            this.rsi$rsDimensionKey = ResourceKey.create(Registries.DIMENSION,
-                    ResourceLocation.parse(tag.getString(RS_BLOCK_DIMENSION_TAG)));
+        this.rsi$storageReference = StorageBackpackUtils.readReference(tag);
+        if (this.rsi$storageReference != null) {
             if (!tag.contains("disabled")) {
                 this.rsi$voidUpgrade = true;
             }
@@ -71,9 +60,9 @@ public abstract class PickupUpgradeWrapperMixin
     @Inject(method = "pickup", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void pickupHook(Level world, ItemStack stack, boolean simulate,
                             CallbackInfoReturnable<ItemStack> cir) {
-        if (!this.rsi$isRS) return;
+        if (this.rsi$storageReference == null) return;
         cir.setReturnValue(StorageBackpackUtils.pickupItem(this.getFilterLogic(), world, stack, simulate,
-                this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
+                this.rsi$storageReference,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
         cir.cancel();
     }

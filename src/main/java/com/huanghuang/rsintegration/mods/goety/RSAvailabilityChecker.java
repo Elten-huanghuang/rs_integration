@@ -2,8 +2,11 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -35,8 +38,13 @@ public final class RSAvailabilityChecker {
         Recipe<?> recipe = player.level().getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) return null;
 
-        INetwork network = resolveNetwork(player, altarDim, pos);
-        if (network == null) return null;
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (endpoint == null) network = resolveNetwork(player, altarDim, pos);
+        if (network == null && endpoint == null) return null;
+        var endpointSnapshot = endpoint == null || network != null
+                ? null : endpoint.snapshot(player).snapshot().orElse(null);
+        if (endpoint != null && network == null && endpointSnapshot == null) return null;
 
         List<Ingredient> ingredients = new ArrayList<>();
         if (GoetyReflection.ritualRecipeClass != null && GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
@@ -71,7 +79,10 @@ public final class RSAvailabilityChecker {
 
         boolean[] results = new boolean[ingredients.size()];
         for (int i = 0; i < ingredients.size(); i++) {
-            results[i] = RSIntegrationNetwork.hasItemInNetwork(network, ingredients.get(i));
+            results[i] = network != null
+                    ? RSIntegrationNetwork.hasItemInNetwork(network, ingredients.get(i))
+                    : endpointSnapshot.match(ingredients.get(i)).items().stream()
+                    .anyMatch(item -> item.amount() > 0);
             if (!results[i]) {
                 results[i] = rsi$matchesPedestalItem(pedestalItems, ingredients.get(i));
             }
@@ -172,7 +183,7 @@ public final class RSAvailabilityChecker {
         ResourceKey<Level> lookupDim = altarDimId != null
                 ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, altarDimId)
                 : player.level().dimension();
-        INetwork bound = AltarBindingRegistry.resolveNetworkForAltar(player, lookupDim, pos);
+        INetwork bound = RSAltarBindingResolver.resolveNetworkForAltar(player, lookupDim, pos);
         return bound != null ? bound : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
     }
 }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
@@ -81,7 +82,14 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() != null) {
+            // The endpoint is authoritative.  Do not re-resolve a native RS
+            // network here, otherwise a BD selection can silently switch back.
+            this.network = null;
+        } else {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            if (this.network != null) this.storageEndpoint = CraftStorageEndpoints.fromLegacyNetwork(this.network);
+        }
         if (!acquireStaff(player)) return false;
         if (RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()
                 && !fuelHelper.findAndLock(level, pos)) {
@@ -89,6 +97,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.ledger = new ExtractionLedger();
+        this.ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : definition.allMaterials()) {
             ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, dimension, pos,

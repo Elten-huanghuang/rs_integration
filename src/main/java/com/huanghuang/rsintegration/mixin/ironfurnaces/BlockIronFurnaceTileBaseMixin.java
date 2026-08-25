@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceBindingUpdater;
 import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraftforge.fml.ModList;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -23,6 +24,9 @@ public abstract class BlockIronFurnaceTileBaseMixin {
 
     @Inject(method = "checkRecipeType", at = @At("RETURN"))
     private void rsi$updateBindingMode(CallbackInfo ci) {
+        // Binding migration uses RS side-panel/cache classes. Never resolve
+        // that optional path in BD-only or no-RS installations.
+        if (!ModList.get().isLoaded("refinedstorage")) return;
         BlockIronFurnaceTileBase furnace = (BlockIronFurnaceTileBase) (Object) this;
         IronFurnaceBindingUpdater.onRecipeTypeChanged(
                 furnace, rsi$previousRecipeType, furnace.recipeType);

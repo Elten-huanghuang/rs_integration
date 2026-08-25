@@ -14,10 +14,13 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
@@ -402,6 +405,8 @@ public class RecipeGuiLayoutsMixin {
             // when the bound machine supports remote GUI.
             if (!isGeneric && !isVirtual && bindingDim != null && machinePos != null
                     && modType != null
+                    && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                        || BindingBackendResolver.isBeyondDimensionsBinding(bindingDim, machinePos))
                     && supportsGuiWithRegCheck(boundBlockKey, boundBlockRegKey)) {
                 ResourceLocation guiDim = bindingDim;
                 BlockPos guiPos = machinePos;
@@ -409,9 +414,14 @@ public class RecipeGuiLayoutsMixin {
                 ItemStack capturedBaseForMachine = faSmithingBase;
                 AltarCraftButtons.addMachineGui(0, 0, 10, 10, () -> {
                     GuiNavStack.pushCurrent();
-                    RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                            new OpenBoundMachineGuiPacket(
-                                    guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId, capturedBaseForMachine));
+                    if (BindingBackendResolver.isBeyondDimensionsBinding(guiDim, guiPos)) {
+                        NetworkHandler.CHANNEL.sendToServer(
+                                new BeyondDimensionsOpenBoundMachineGuiPacket(guiDim, guiPos));
+                    } else {
+                        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                                new OpenBoundMachineGuiPacket(
+                                        guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId, capturedBaseForMachine));
+                    }
                 });
                 rsi$hasMachineGui.add(true);
             } else {
@@ -1555,9 +1565,14 @@ public class RecipeGuiLayoutsMixin {
             ResourceLocation anvilRecipeId = recipeId;
             return () -> {
                 GuiNavStack.pushCurrent();
-                RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                        new OpenBoundMachineGuiPacket(anvilDim, anvilPos,
-                                anvilRecipeId.toString(), anvilRecipeId));
+                if (BindingBackendResolver.isBeyondDimensionsBinding(anvilDim, anvilPos)) {
+                    NetworkHandler.CHANNEL.sendToServer(
+                            new BeyondDimensionsOpenBoundMachineGuiPacket(anvilDim, anvilPos));
+                } else {
+                    RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                            new OpenBoundMachineGuiPacket(anvilDim, anvilPos,
+                                    anvilRecipeId.toString(), anvilRecipeId));
+                }
             };
         }
         // All mod recipes (including Aether) route through the plan-preview flow.

@@ -224,13 +224,16 @@ public final class RSIntegrationMod {
             RSOptionalBootstrap.registerBindings();
         }
 
-        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded("beyonddimensions")) {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> ContainerTransferClient::registerKeyMappings);
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                    () -> RSOptionalBootstrap::registerClientKeyMappings);
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> com.huanghuang.rsintegration.client.ClientEventBootstrap::register);
+        }
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> RSOptionalBootstrap::registerClientKeyMappings);
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient::init);
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
@@ -548,7 +551,10 @@ public final class RSIntegrationMod {
         }
 
         // Subsystems
-        if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) {
+        if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()
+                && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)
+                || ModList.get().isLoaded("beyonddimensions"))) {
             ContainerTransferNetworkHandler.register();
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> ContainerTransferClient::init);
@@ -564,6 +570,9 @@ public final class RSIntegrationMod {
         // Binding tooltip handler
         com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket.register();
         com.huanghuang.rsintegration.network.binding.ExplicitMachineBindingPacket.register();
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            com.huanghuang.rsintegration.machine.BeyondDimensionsMachineNetworkHandler.register();
+        }
         // Crafting
         BatchCraftNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();

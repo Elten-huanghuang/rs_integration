@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
@@ -14,10 +16,8 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerModels.Entry;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerStatePacket;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
 import dev.shadowsoffire.apotheosis.Apoth;
 import dev.shadowsoffire.apotheosis.spawn.modifiers.SpawnerModifier;
@@ -54,8 +54,9 @@ public final class ApothSpawnerUpgradeService {
         long now = System.currentTimeMillis();
         PENDING.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
         Context context = context(player, dimension, pos);
-        INetwork network = network(player);
-        if (context == null || network == null) {
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (context == null || endpoint == null) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.apotheosis.spawner.context_changed"));
             return;
@@ -66,14 +67,14 @@ public final class ApothSpawnerUpgradeService {
         for (Map.Entry<ResourceLocation, Integer> request : selected.entrySet()) {
             SpawnerModifier modifier = recipes.get(request.getKey());
             if (modifier == null || request.getValue() <= 0) continue;
-            Entry state = describe(modifier, context.tile, network);
+            Entry state = describe(modifier, context.tile, endpoint, player);
             if (state == null || !state.supported() || state.complete()) continue;
             int required = Math.min(state.applications(), request.getValue());
             if (required > state.available()) specs.add(new IngredientSpec(modifier.getMainhandInput(), required));
         }
         List<String> missing = new ArrayList<>();
         var graph = specs.isEmpty() ? null : CraftingResolver.resolveGraphForSpecsWithTypes(specs,
-                MaterialSources.listAllAvailable(player, network), context.level, player, network,
+                MaterialSources.listAllAvailable(player, endpoint), context.level, player, network,
                 missing, null, false);
         PENDING.put(player.getUUID(), new PendingPlan(dimension, pos, Map.copyOf(selected),
                 now + PREVIEW_TTL_MS));
@@ -112,11 +113,11 @@ public final class ApothSpawnerUpgradeService {
     public static Snapshot scan(ServerPlayer player, ResourceLocation dimension, BlockPos pos, String message) {
         Context context = context(player, dimension, pos);
         if (context == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.context_changed");
-        INetwork network = network(player);
-        if (network == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.no_network");
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        if (endpoint == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.no_network");
         List<Entry> entries = new ArrayList<>();
         for (SpawnerModifier modifier : modifiers(context.level)) {
-            Entry entry = describe(modifier, context.tile, network);
+            Entry entry = describe(modifier, context.tile, endpoint, player);
             if (entry != null) entries.add(entry);
         }
         entries.sort(Comparator.comparingInt((Entry e) -> order(e.statId()))
@@ -133,8 +134,9 @@ public final class ApothSpawnerUpgradeService {
     public static Snapshot executeOrQueueRecursive(ServerPlayer player, ResourceLocation dimension,
                                                    BlockPos pos, Map<ResourceLocation, Integer> selected) {
         Context context = context(player, dimension, pos);
-        INetwork network = network(player);
-        if (context == null || network == null) return execute(player, dimension, pos, selected, false);
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (context == null || endpoint == null) return execute(player, dimension, pos, selected, false);
         if (AsyncCraftManager.getInstance().getChain(player) != null) {
             return scan(player, dimension, pos, "rsi.apotheosis.spawner.craft_busy");
         }
@@ -145,7 +147,7 @@ public final class ApothSpawnerUpgradeService {
         for (Map.Entry<ResourceLocation, Integer> request : orderedRequests) {
             SpawnerModifier modifier = recipes.get(request.getKey());
             if (modifier == null || request.getValue() <= 0) continue;
-            Entry state = describe(modifier, context.tile, network);
+            Entry state = describe(modifier, context.tile, endpoint, player);
             if (state == null || !state.supported() || state.complete()) continue;
             int required = Math.min(state.applications(), request.getValue());
             if (state.available() >= required) continue;
@@ -153,12 +155,13 @@ public final class ApothSpawnerUpgradeService {
             List<String> missing = new ArrayList<>();
             var graph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     List.of(new IngredientSpec(modifier.getMainhandInput(), required)),
-                    MaterialSources.listAllAvailable(player, network), context.level, player, network,
+                    MaterialSources.listAllAvailable(player, endpoint), context.level, player, network,
                     missing, null, false);
             // An unresolved root is isolated to this upgrade. Continue scanning
             // so another selected upgrade can still recurse successfully.
             if (!graph.unresolvedDemands().isEmpty() || graph.nodes().isEmpty()) continue;
-            AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network, graph);
+            AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
+                    endpoint, graph);
             AsyncCraftManager.getInstance().submit(chain);
             chain.onDone(() -> {
                 if (chain.state() == AsyncCraftChain.State.COMPLETED) {
@@ -182,8 +185,9 @@ public final class ApothSpawnerUpgradeService {
                                     Map<ResourceLocation, Integer> selected, boolean allowRecursive) {
         Context context = context(player, dimension, pos);
         if (context == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.context_changed");
-        INetwork network = network(player);
-        if (network == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.no_network");
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (endpoint == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.no_network");
 
         int completed = 0;
         int skipped = 0;
@@ -194,18 +198,20 @@ public final class ApothSpawnerUpgradeService {
         for (ResourceLocation id : ordered) {
             SpawnerModifier modifier = recipes.get(id);
             if (modifier == null || !isPositive(modifier)) { skipped++; continue; }
-            Entry state = describe(modifier, context.tile, network);
+            Entry state = describe(modifier, context.tile, endpoint, player);
             if (state == null || state.complete() || !state.supported()) { skipped++; continue; }
             int requested = Math.min(state.applications(), Math.max(0, selected.getOrDefault(id, 0)));
             for (int i = 0; i < requested; i++) {
-                Entry fresh = describe(modifier, context.tile, network);
+                Entry fresh = describe(modifier, context.tile, endpoint, player);
                 if (fresh == null || fresh.complete()) break;
                 try (ExtractionLedger ledger = new ExtractionLedger()) {
-                    ItemStack reserved = ledger.reserveFromNetwork(modifier.getMainhandInput(), 1, network);
+                    ledger.setStorageEndpoint(endpoint);
+                    ItemStack reserved = ledger.reserveFromEndpoint(
+                            modifier.getMainhandInput(), 1, endpoint, player);
                     if (reserved.isEmpty() || !ledger.commit(network, player)) { skipped++; break; }
                     if (!modifier.apply(context.tile)) {
-                        ItemStack remaining = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                                .insertLegacy(network, player, reserved, false);
+                        ItemStack remaining = endpoint.insert(player, reserved, false)
+                                .remainder().orElse(ItemStack.EMPTY);
                         if (!remaining.isEmpty()) player.drop(remaining, false);
                         skipped++;
                         break;
@@ -231,8 +237,9 @@ public final class ApothSpawnerUpgradeService {
     }
 
     @Nullable
-    private static Entry describe(SpawnerModifier modifier, ApothSpawnerTile tile, INetwork network) {
-        if (modifier.getStatModifiers().size() != 1) return unsupported(modifier, network);
+    private static Entry describe(SpawnerModifier modifier, ApothSpawnerTile tile,
+                                  CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (modifier.getStatModifiers().size() != 1) return unsupported(modifier, endpoint, player);
         StatModifier<?> change = modifier.getStatModifiers().get(0);
         String statId = change.stat().getId();
         Object current = change.stat().getValue(tile);
@@ -259,54 +266,64 @@ public final class ApothSpawnerUpgradeService {
                 applications = Math.max(0, (Math.abs(value - targetValue) + Math.abs(step) - 1) / Math.abs(step));
             }
         } else {
-            return unsupported(modifier, network);
+            return unsupported(modifier, endpoint, player);
         }
-        ItemStack material = bestMaterial(modifier.getMainhandInput(), network);
-        int available = countAvailable(modifier.getMainhandInput(), network);
+        ItemStack material = bestMaterial(modifier.getMainhandInput(), endpoint, player);
+        int available = countAvailable(modifier.getMainhandInput(), endpoint, player);
         return new Entry(modifier.getId(), statId, material, currentValue, targetValue,
                 applications, available, applications == 0 && supported, supported);
     }
 
-    private static Entry unsupported(SpawnerModifier modifier, INetwork network) {
+    private static Entry unsupported(SpawnerModifier modifier, CraftStorageEndpoint endpoint,
+                                     ServerPlayer player) {
         String stat = modifier.getStatModifiers().isEmpty() ? "unknown" : modifier.getStatModifiers().get(0).stat().getId();
-        return new Entry(modifier.getId(), stat, bestMaterial(modifier.getMainhandInput(), network),
-                0, 0, 0, countAvailable(modifier.getMainhandInput(), network), false, false);
+        return new Entry(modifier.getId(), stat, bestMaterial(modifier.getMainhandInput(), endpoint, player),
+                0, 0, 0, countAvailable(modifier.getMainhandInput(), endpoint, player), false, false);
     }
 
-    private static ItemStack bestMaterial(Ingredient ingredient, INetwork network) {
+    private static ItemStack bestMaterial(Ingredient ingredient, CraftStorageEndpoint endpoint,
+                                          ServerPlayer player) {
         ItemStack best = ItemStack.EMPTY;
         int bestCount = -1;
         for (ItemStack candidate : ingredient.getItems()) {
-            int count = countExact(candidate, network);
+            int count = countExact(candidate, endpoint, player);
             if (count > bestCount) { best = candidate.copyWithCount(1); bestCount = count; }
         }
         return best;
     }
 
-    private static int countAvailable(Ingredient ingredient, INetwork network) {
+    private static int countAvailable(Ingredient ingredient, CraftStorageEndpoint endpoint,
+                                      ServerPlayer player) {
         int total = 0;
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (ingredient.test(stack)) total += stack.getCount();
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return 0;
+        for (var entry : snapshot.items()) {
+            if (ingredient.test(entry.stack())) {
+                total += (int) Math.min(Integer.MAX_VALUE, entry.amount());
+            }
         }
         return total;
     }
 
-    private static int countExact(ItemStack template, INetwork network) {
+    private static int countExact(ItemStack template, CraftStorageEndpoint endpoint,
+                                  ServerPlayer player) {
         int total = 0;
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (ItemStack.isSameItemSameTags(stack, template)) total += stack.getCount();
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return 0;
+        for (var entry : snapshot.items()) {
+            if (ItemStack.isSameItemSameTags(entry.stack(), template)) {
+                total += (int) Math.min(Integer.MAX_VALUE, entry.amount());
+            }
         }
         return total;
     }
 
     @Nullable
-    private static INetwork network(ServerPlayer player) {
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) return null;
-        var security = network.getSecurityManager();
-        return security == null || security.hasPermission(Permission.EXTRACT, player) ? network : null;
+    private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        if (endpoint == null || !endpoint.session().hasPermission(player,
+                com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
+        return endpoint;
     }
 
     @Nullable

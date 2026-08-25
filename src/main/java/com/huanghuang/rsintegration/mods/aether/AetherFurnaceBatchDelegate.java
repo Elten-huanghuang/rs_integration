@@ -136,7 +136,11 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (storageEndpoint() == null) {
+                this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            } else {
+                this.network = null;
+            }
             if (this.network == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 

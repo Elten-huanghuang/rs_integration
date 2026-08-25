@@ -232,6 +232,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Resolve network early so validateIdle can access it for crystal rituals
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        } else {
+            this.network = null;
         }
 
         // Validate idle state per machine type
@@ -655,7 +657,12 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        } else {
+            this.network = null;
+        }
+        this.ledger.setStorageEndpoint(storageEndpoint());
         this.filledSlotIndices = new ArrayList<>();
         this.filledPedestals = new ArrayList<>();
         this.waitTicks = 0;
@@ -1735,8 +1742,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         } else {
                             // Distinct by-products are not representable in the
                             // delegate's single-stack return value.
-                            if (network != null) {
-                                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack);
+                            if (storageEndpoint() != null || network != null) {
+                                ItemStack leftover = insertIntoStorage(player, stack, false);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                 }
@@ -1793,8 +1800,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         if (fromMachine.isEmpty()) {
                             fromMachine = stack;
                         } else {
-                            if (network != null) {
-                                ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack);
+                            if (storageEndpoint() != null || network != null) {
+                                ItemStack leftover = insertIntoStorage(player, stack, false);
                                 if (!leftover.isEmpty())
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                             } else {
@@ -1818,8 +1825,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                     if (fromMachine.isEmpty()) {
                                         fromMachine = r;
                                     } else {
-                                        if (network != null) {
-                                            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, r);
+                                        if (storageEndpoint() != null || network != null) {
+                                            ItemStack leftover = insertIntoStorage(player, r, false);
                                             if (!leftover.isEmpty())
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                         } else {
@@ -1874,8 +1881,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                     if (fromMachine.isEmpty()) {
                                         fromMachine = taken;
                                     } else {
-                                        if (network != null) {
-                                            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, taken);
+                                        if (storageEndpoint() != null || network != null) {
+                                            ItemStack leftover = insertIntoStorage(player, taken, false);
                                             if (!leftover.isEmpty()) {
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
                                             }
@@ -2100,7 +2107,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network != null) {
+        if (storageEndpoint() != null || network != null) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             // The player may be offline (server stop / disconnect abort), so this
             // must not assume one is present the way the branch below does.

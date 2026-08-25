@@ -11,6 +11,8 @@ import com.huanghuang.rsintegration.storage.StorageResolutionStatus;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -24,6 +26,7 @@ import java.util.Set;
 final class BeyondDimensionsReflection {
     private static final String NET = "com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet";
     private static final String KEY = "com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey";
+    private static final String FLUID_KEY = "com.wintercogs.beyonddimensions.api.storage.key.impl.FluidStackKey";
     static StorageResolutionResult resolvePrimary(ServerPlayer player, StorageBackendId id) {
         StorageResolutionResult primary;
         try {
@@ -190,8 +193,39 @@ final class BeyondDimensionsReflection {
         return constructor.newInstance(stack.copyWithCount(1));
     }
 
+    static Object fluidKey(Fluid fluid, long amount) throws Exception {
+        Class<?> type = Class.forName(FLUID_KEY, false, BeyondDimensionsReflection.class.getClassLoader());
+        Constructor<?> constructor = type.getConstructor(FluidStack.class);
+        return constructor.newInstance(new FluidStack(fluid, Math.toIntExact(amount)));
+    }
+
+    static FluidStack fluidStack(Object key) throws Exception {
+        return ((FluidStack) key.getClass().getMethod("getReadOnlyStack").invoke(key)).copy();
+    }
+
     static ItemStack keyStack(Object key) throws Exception {
         return ((ItemStack) key.getClass().getMethod("getReadOnlyStack").invoke(key)).copy();
+    }
+
+    /** UnifiedStorage can contain fluids, mana and other typed keys. */
+    static boolean isItemKey(Object key) {
+        if (key == null) return false;
+        try {
+            Object stackClass = key.getClass().getMethod("getStackClass").invoke(key);
+            return stackClass == ItemStack.class;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    static boolean isFluidKey(Object key) {
+        if (key == null) return false;
+        try {
+            Object stackClass = key.getClass().getMethod("getStackClass").invoke(key);
+            return stackClass == FluidStack.class;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            return false;
+        }
     }
 
     static long amount(Object keyAmount) throws Exception {

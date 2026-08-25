@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate;
@@ -116,6 +117,17 @@ public final class PlanWarnings {
      */
     public static Result collectResult(String typeId, ServerPlayer player, Recipe<?> recipe,
                                        @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
+        return collectResult(typeId, player, recipe, dim, pos, null);
+    }
+
+    /**
+     * Collect warnings using the endpoint already selected by the plan.
+     * Mod-specific checks may otherwise resolve the first backend again and
+     * report availability from a different network than execution will use.
+     */
+    public static Result collectResult(String typeId, ServerPlayer player, Recipe<?> recipe,
+                                       @Nullable ResourceLocation dim, @Nullable BlockPos pos,
+                                       @Nullable CraftStorageEndpoint endpoint) {
         List<Component> warnings = new ArrayList<>();
         boolean blocksExecution = false;
         switch (typeId) {
@@ -172,7 +184,8 @@ public final class PlanWarnings {
                 warnings.addAll(MarketBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.TOUHOU_LITTLE_MAID:
-                warnings.addAll(TlmAltarBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                warnings.addAll(TlmAltarBatchDelegate.getPlanWarnings(
+                        player, recipe, dim, pos, endpoint));
                 break;
             case ModIds.IMMORTERS_DELIGHT:
                 warnings.addAll(EnchantalCoolerBatchDelegate.getPlanWarnings(player, recipe, dim, pos));

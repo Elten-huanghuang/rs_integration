@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.fml.ModList;
 
 public final class IronFurnaceBindingUpdater {
 
@@ -33,7 +34,12 @@ public final class IronFurnaceBindingUpdater {
         if (anyChanged) {
             AltarBindingRegistry.invalidateScanCache();
             for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
-                RSSidePanelNetworkHandler.sendBindingSync(player);
+                if (ModList.get().isLoaded("beyonddimensions")) {
+                    com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations
+                            .sendBindingSync(player);
+                } else if (ModList.get().isLoaded("refinedstorage")) {
+                    RSSidePanelNetworkHandler.sendBindingSync(player);
+                }
             }
             RSIntegrationMod.LOGGER.debug("[RSI-IronFurnaces] Migrated binding at {} {} to {}",
                     dimension, furnace.getBlockPos(), replacementPrefix);

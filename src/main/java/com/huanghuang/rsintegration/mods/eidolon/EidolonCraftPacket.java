@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -123,10 +125,9 @@ public final class EidolonCraftPacket {
             return;
         }
         if (!EidolonReflection.crucibleRecipeClass.isInstance(recipe)) {
-            player.sendSystemMessage(Component.literal("§c")
-                    .append(Component.translatable("rsi.generic.error.wrong_recipe_type"))
-                    .append(" [" + recipeId + " expected=CrucibleRecipe got="
-                            + recipe.getClass().getSimpleName() + "]"));
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.wrong_recipe_type_detail",
+                    recipeId, "CrucibleRecipe", recipe.getClass().getSimpleName()));
             return;
         }
 
@@ -207,9 +208,14 @@ public final class EidolonCraftPacket {
             allIngredients.addAll(si.ingredients);
         }
 
-        // Count available
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        // Resolve one authoritative backend for this packet.  BD must not be
+        // replaced by a later RS lookup merely because an RS API is available.
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        INetwork network = endpoint == null
+                ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
+        Map<StackKey, Integer> available = endpoint != null
+                ? MaterialSources.listAllAvailable(player, endpoint)
+                : MaterialSources.listAllAvailable(player, network);
 
         // Auto-craft missing intermediates
         if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
@@ -231,14 +237,14 @@ public final class EidolonCraftPacket {
                 return;
             }
 
-            if (!autoSteps.isEmpty() && network != null) {
+            if (!autoSteps.isEmpty() && (network != null || endpoint != null)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()));
                 List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
                 for (ResourceLocation id : autoSteps) {
                     wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
                 }
-                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network)) {
+                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network, endpoint)) {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
                     return;
                 }
@@ -248,18 +254,21 @@ public final class EidolonCraftPacket {
         // Phase 1: reserve all ingredients via ledger (no physical extraction yet)
         // Preserve the binding-resolved network from earlier; only fall back
         // to player-inventory scan if no binding was found.
-        if (network == null) {
+        if (endpoint == null && network == null) {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         List<Object> crucibleSteps = new ArrayList<>();
         List<ItemStack> allExtracted = new ArrayList<>(); // actual items extracted, for refund
 
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             for (CrucibleStepInput si : stepInputs) {
                 List<ItemStack> stepItems = new ArrayList<>();
                 for (Ingredient ing : si.ingredients) {
                     if (ing.isEmpty()) continue;
-                    ItemStack stack = ensureMaterialAvailable(player, altarDim, pos, ing, 1, ledger);
+                    ItemStack stack = endpoint != null
+                            ? ledger.reserveFromEndpoint(ing, 1, endpoint, player)
+                            : ensureMaterialAvailable(player, altarDim, pos, ing, 1, ledger);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials", CraftPacketUtils.describeIngredient(ing)));
                         return;
@@ -321,7 +330,11 @@ public final class EidolonCraftPacket {
             // Refund committed items — use actual extracted items, not ingredient.getItems()[0]
             for (ItemStack refundStack : allExtracted) {
                 if (refundStack.isEmpty()) continue;
-                if (network != null) {
+                if (endpoint != null) {
+                    ItemStack leftover = endpoint.insert(player, refundStack, false)
+                            .remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                } else if (network != null) {
                     ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                             .insertLegacy(network, player, refundStack, false);
                     if (!leftover.isEmpty()) {

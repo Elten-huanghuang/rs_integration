@@ -83,7 +83,11 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         this.expectedOutput = clibanoRecipe.getResultItem(resolved.registryAccess()).copy();
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        } else {
+            this.network = null;
+        }
         if ((network == null && !hasStorageAccess()) || expectedOutput.isEmpty()) {
             resetState();
             resetOperationState();

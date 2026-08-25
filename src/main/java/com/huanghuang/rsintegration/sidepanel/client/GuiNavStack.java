@@ -20,6 +20,7 @@ import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 
 /**
  * Manages the "return to RS Grid after closing machine GUI" flow.
@@ -50,6 +51,11 @@ public final class GuiNavStack {
      * position instead of restoring a dead client-side Screen.
      */
     public static void pushCurrent() {
+        if (!ModList.get().isLoaded("refinedstorage")) {
+            // The return-to-grid flow is RS-specific.  BD machine GUI paths
+            // must not initialize or inspect RS client classes.
+            return;
+        }
         Screen current = Minecraft.getInstance().screen;
         if (current != null && cachedGridPos == null) {
             extractGridPosition(current);
@@ -142,6 +148,11 @@ public final class GuiNavStack {
 
         if (pendingRestores > 0) return null;
 
+        if (!ModList.get().isLoaded("refinedstorage")) {
+            clearPending();
+            return null;
+        }
+
         // Send packet to server to re-open RS Grid (if we have a position)
         if (cachedGridPos != null && cachedGridDim != null) {
             RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Requesting return to RS Grid at {} dim={}",
@@ -197,9 +208,22 @@ public final class GuiNavStack {
         if (!MachineHub.isVisible()) return;
         Screen screen = event.getScreen();
         if (!(screen instanceof AbstractContainerScreen<?> acs)) return;
-        if (!(screen instanceof com.refinedmods.refinedstorage.screen.grid.GridScreen)) return;
+        if (!isRefinedStorageGrid(screen)) return;
 
         MachineHubRenderer.render(event.getGuiGraphics(), acs.getGuiLeft(), acs.getGuiTop(),
                 acs.getXSize(), event.getMouseX(), event.getMouseY());
+    }
+
+    /** Resolve the optional RS screen by name so BD-only clients can load this class. */
+    private static boolean isRefinedStorageGrid(Screen screen) {
+        if (!ModList.get().isLoaded("refinedstorage") || screen == null) return false;
+        Class<?> type = screen.getClass();
+        while (type != null) {
+            if ("com.refinedmods.refinedstorage.screen.grid.GridScreen".equals(type.getName())) {
+                return true;
+            }
+            type = type.getSuperclass();
+        }
+        return false;
     }
 }

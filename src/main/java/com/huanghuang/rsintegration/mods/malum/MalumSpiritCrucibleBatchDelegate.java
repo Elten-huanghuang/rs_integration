@@ -161,9 +161,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
-        // Resolve network early for stray item recovery
-        this.network = CraftPacketUtils
-                .resolveNetworkForCraft(player, level.dimension(), pos);
+        // Resolve the selected backend early for stray item recovery.  A BD
+        // endpoint must remain authoritative and must never be replaced by an
+        // RS lookup during preparation.
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils
+                    .resolveNetworkForCraft(player, level.dimension(), pos);
+        }
 
         // Check crucible is idle (no active recipe)
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
@@ -231,6 +235,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
+        if (storageEndpoint() == null && network == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, myLevel.dimension(), myPos);
+        }
         return tryStartWithExtraction(player, false, null);
     }
 
@@ -246,6 +253,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                                          ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
+        if (sharedLedger != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         return tryStartWithMaterialsImpl(player, materials);
     }
 
@@ -779,12 +787,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     private void returnCrucibleItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network == null) {
+        if (storageEndpoint() == null && network == null) {
             network = CraftPacketUtils
                     .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
         }
-        if (network != null) {
-            ItemStack leftover = TrackedNetworkInsertion.insert(network, player, stack.copy());
+        if (storageEndpoint() != null || network != null) {
+            ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
             if (!leftover.isEmpty() && player != null) {
                 net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
@@ -795,6 +803,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     private ItemStack extractFromRS(ServerPlayer player, net.minecraft.world.item.crafting.Ingredient ingredient,
                                     int count, ExtractionLedger ledger, boolean useShared) {
+        if (storageEndpoint() != null) {
+            return ledger.reserveFromEndpoint(ingredient, count, storageEndpoint(), player);
+        }
         if (this.network == null) {
             this.network = CraftPacketUtils
                     .resolveNetworkForCraft(player, myLevel.dimension(), myPos);

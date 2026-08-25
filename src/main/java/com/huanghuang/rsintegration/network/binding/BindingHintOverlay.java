@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
@@ -32,12 +33,32 @@ public final class BindingHintOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || mc.screen != null) return;
         ItemStack held = mc.player.getMainHandItem();
+        if (AltarBindingRegistry.findHook(held).isEmpty()) {
+            held = mc.player.getOffhandItem();
+        }
         if (AltarBindingRegistry.findHook(held).isEmpty()) return;
         if (!(mc.hitResult instanceof BlockHitResult hit)) return;
 
         var target = BindingEventHandler.bindingTargetPos(mc.level, hit.getBlockPos());
         if (target == null) return;
-        boolean bound = BindingStorage.hasBinding(held, mc.level.dimension().location(), target);
+        // Multiblock/代理方块 targets can resolve to a root position on the
+        // server while the client ray trace still points at a visible part.
+        // Check the exact root first, then the clicked position and a small
+        // neighboring fallback so the HUD flips immediately after binding.
+        var dimension = mc.level.dimension().location();
+        boolean bound = BindingStorage.hasBinding(held, dimension, target)
+                || BindingStorage.hasBinding(held, dimension, hit.getBlockPos());
+        if (!bound) {
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(held)) {
+                if (!dimension.equals(entry.dim())) continue;
+                // A multiblock may expose a different visible part on the
+                // client than the one that was hit when it was bound. Resolve
+                // the stored position through the same target resolver so the
+                // HUD still recognizes the existing binding.
+                BlockPos storedTarget = BindingEventHandler.bindingTargetPos(mc.level, entry.pos());
+                if (target.equals(storedTarget)) { bound = true; break; }
+            }
+        }
         var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
         boolean bdTerminal = itemId != null
                 && "beyonddimensions".equals(itemId.getNamespace())

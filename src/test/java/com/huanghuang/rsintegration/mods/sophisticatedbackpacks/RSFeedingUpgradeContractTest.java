@@ -17,10 +17,10 @@ class RSFeedingUpgradeContractTest {
         String english = Files.readString(Path.of(
                 "src/main/resources/assets/rs_integration/lang/en_us.json"));
 
-        assertTrue(chinese.contains("\"upgrade.rs_integration.rs_feeding\": \"次元喂食\""));
-        assertTrue(chinese.contains("\"upgrade.rs_integration.rs_feeding.tooltip\": \"次元喂食设置\""));
-        assertTrue(english.contains("\"upgrade.rs_integration.rs_feeding\": \"RS Feeding\""));
-        assertTrue(english.contains("\"upgrade.rs_integration.rs_feeding.tooltip\": \"RS Feeding Settings\""));
+        assertTrue(chinese.contains("\"upgrade.rs_integration.rs_feeding\": \"\u6b21\u5143\u5582\u98df\""));
+        assertTrue(chinese.contains("\"upgrade.rs_integration.rs_feeding.tooltip\": \"\u6b21\u5143\u5582\u98df\u8bbe\u7f6e\""));
+        assertTrue(english.contains("\"upgrade.rs_integration.rs_feeding\": \"Dimensional Feeding\""));
+        assertTrue(english.contains("\"upgrade.rs_integration.rs_feeding.tooltip\": \"Dimensional Feeding Settings\""));
     }
 
     @Test

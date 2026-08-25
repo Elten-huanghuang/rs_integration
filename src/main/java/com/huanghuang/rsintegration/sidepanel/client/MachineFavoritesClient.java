@@ -61,6 +61,21 @@ public final class MachineFavoritesClient {
         return favorites.contains(candidate);
     }
 
+    /** Resolve synchronized favorites against the currently bound machines. */
+    public static List<BindingInfo> getFavoriteMachines() {
+        List<BindingInfo> result = new ArrayList<>(favorites.size());
+        List<BindingInfo> available = MachineTabHandler.getAllMachines();
+        for (MachineFavoriteKey favorite : favorites) {
+            for (BindingInfo info : available) {
+                if (favorite.matches(info)) {
+                    result.add(info);
+                    break;
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+
     public static void requestToggle(BindingInfo info) {
         MachineFavoriteKey key = MachineFavoriteKey.from(info);
         List<MachineFavoriteKey> optimistic = new ArrayList<>(favorites);
@@ -157,17 +172,7 @@ public final class MachineFavoritesClient {
     }
 
     private static List<BindingInfo> favoriteBindings() {
-        List<BindingInfo> result = new ArrayList<>(favorites.size());
-        List<BindingInfo> available = MachineTabHandler.getAllMachines();
-        for (MachineFavoriteKey favorite : favorites) {
-            for (BindingInfo info : available) {
-                if (favorite.matches(info)) {
-                    result.add(info);
-                    break;
-                }
-            }
-        }
-        return result;
+        return getFavoriteMachines();
     }
 
     private static boolean machineTabsEnabled() {

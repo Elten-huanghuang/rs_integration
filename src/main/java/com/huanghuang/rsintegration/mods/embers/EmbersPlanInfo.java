@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
@@ -40,6 +41,17 @@ public record EmbersPlanInfo(
                                        @Nullable String recipeModTypeId,
                                        @Nullable ResourceLocation dim,
                                        @Nullable net.minecraft.core.BlockPos pos) {
+        return build(player, recipe, network, null, recipeId, recipeModTypeId, dim, pos);
+    }
+
+    /** Endpoint-aware overload used by backend-neutral planning. */
+    public static EmbersPlanInfo build(@Nullable ServerPlayer player, Recipe<?> recipe,
+                                       @Nullable INetwork network,
+                                       @Nullable CraftStorageEndpoint endpoint,
+                                       ResourceLocation recipeId,
+                                       @Nullable String recipeModTypeId,
+                                       @Nullable ResourceLocation dim,
+                                       @Nullable net.minecraft.core.BlockPos pos) {
         if (!ModIds.ID_EMBERS_ALCHEMY.equals(recipeModTypeId)) {
             return new EmbersPlanInfo(null, null, null, 0, false, false);
         }
@@ -50,7 +62,7 @@ public record EmbersPlanInfo(
         long seed = 0;
         boolean codeFromCache = false;
 
-        if (network == null) {
+        if (network == null && endpoint == null) {
             return new EmbersPlanInfo(null, null, null, 0,
                     dim != null && pos != null, false);
         }

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -45,16 +46,7 @@ public abstract class MagnetUpgradeWrapperMixin
         extends UpgradeWrapperBase<MagnetUpgradeWrapper, MagnetUpgradeItem> {
 
     @Unique
-    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
-    @Unique
-    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
-
-    @Unique
-    private boolean rsi$isRs;
-    @Unique
-    private BlockPos rsi$rsBlockPos;
-    @Unique
-    private ResourceKey<Level> rsi$rsDimensionKey;
+    private StorageReference rsi$storageReference;
     @Unique
     private boolean rsi$voidUpgrade = false;
 
@@ -94,11 +86,8 @@ public abstract class MagnetUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
-        if (tag != null && tag.contains(RS_BLOCK_POS_TAG) && tag.contains(RS_BLOCK_DIMENSION_TAG)) {
-            this.rsi$isRs = true;
-            this.rsi$rsBlockPos = BlockPos.of(tag.getLong(RS_BLOCK_POS_TAG));
-            this.rsi$rsDimensionKey = ResourceKey.create(Registries.DIMENSION,
-                    ResourceLocation.parse(tag.getString(RS_BLOCK_DIMENSION_TAG)));
+        this.rsi$storageReference = com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils.readReference(tag);
+        if (this.rsi$storageReference != null) {
             if (!tag.contains("disabled")) {
                 this.rsi$voidUpgrade = true;
             }
@@ -114,9 +103,9 @@ public abstract class MagnetUpgradeWrapperMixin
         }
         rsi$magnetInput = itemEntity.getItem().copy();
         ExternalItemProgressSuppression.beginOperation();
-        if (!this.rsi$isRs) return;
+        if (this.rsi$storageReference == null) return;
         boolean inserted = StorageBackpackUtils.insertItem(this.getFilterLogic(), itemEntity,
-                this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
+                this.rsi$storageReference,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade);
         ItemStack input = rsi$magnetInput;
         rsi$magnetInput = ItemStack.EMPTY;
@@ -160,9 +149,9 @@ public abstract class MagnetUpgradeWrapperMixin
     @Inject(method = "pickup", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void pickup(Level world, ItemStack stack, boolean simulate,
                         CallbackInfoReturnable<ItemStack> cir) {
-        if (!this.rsi$isRs) return;
+        if (this.rsi$storageReference == null) return;
         cir.setReturnValue(StorageBackpackUtils.pickupItem(this.getFilterLogic(), world, stack, simulate,
-                this.rsi$rsBlockPos, this.rsi$rsDimensionKey,
+                this.rsi$storageReference,
                 rsi$getUpgradesOfType(VoidUpgradeWrapper.class), this.rsi$voidUpgrade));
         cir.cancel();
     }

@@ -174,10 +174,11 @@ public final class RSSidePanelClickPacket {
 
     private static OperationResult executeSingleClick(ServerPlayer player, ItemStack targetItem,
                                                        byte action, boolean isShift, UUID panelId) {
-        int before = storedCount(player, panelId, targetItem);
-        handleSingleClick(player, targetItem, action, isShift, panelId);
-        int after = storedCount(player, panelId, targetItem);
-        int actual = Math.max(0, before - after);
+        ItemStack extracted = handleSingleClick(player, targetItem, action, isShift, panelId);
+        // Do not infer the result from the storage cache here.  RS updates its
+        // cache/listener asynchronously, so a successful extraction can still
+        // report the old count in this tick and look like a failed operation.
+        int actual = extracted.isEmpty() ? 0 : extracted.getCount();
         if (action == ACTION_PICK_BLOCK && actual > 0) {
             player.displayClientMessage(Component.translatable(
                     "rsi.world_pick.extracted", targetItem.getHoverName(), actual), true);
@@ -238,38 +239,39 @@ public final class RSSidePanelClickPacket {
         }
     }
 
-    private static void handleSingleClick(ServerPlayer player, ItemStack targetItem,
-                                           byte action, boolean isShift, UUID panelId) {
+    private static ItemStack handleSingleClick(ServerPlayer player, ItemStack targetItem,
+                                                byte action, boolean isShift, UUID panelId) {
         try {
-            handleSingleClickImpl(player, targetItem, action, isShift, panelId);
+            return handleSingleClickImpl(player, targetItem, action, isShift, panelId);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI] handleSingleClick failed for {}", player.getGameProfile().getName(), e);
+            return ItemStack.EMPTY;
         } finally {
             syncCursorSlot(player);
         }
     }
 
-    private static void handleSingleClickImpl(ServerPlayer player, ItemStack targetItem,
-                                               byte action, boolean isShift, UUID panelId) {
+    private static ItemStack handleSingleClickImpl(ServerPlayer player, ItemStack targetItem,
+                                                    byte action, boolean isShift, UUID panelId) {
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null || targetItem.isEmpty()) return;
+        if (network == null || targetItem.isEmpty()) return ItemStack.EMPTY;
 
         if (action == ACTION_PICK_BLOCK
                 && (player.isCreative() || !player.getMainHandItem().isEmpty())) {
-            return;
+            return ItemStack.EMPTY;
         }
 
         if (network.getSecurityManager() != null
                 && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player)) {
             RSIntegrationMod.LOGGER.debug("[RSI] Extract blocked by security manager for {}", player.getGameProfile().getName());
-            return;
+            return ItemStack.EMPTY;
         }
-        if (!network.canRun()) return;
+        if (!network.canRun()) return ItemStack.EMPTY;
 
         var cache = network.getItemStorageCache();
-        if (cache == null) return;
+        if (cache == null) return ItemStack.EMPTY;
         var list = cache.getList();
-        if (list == null) return;
+        if (list == null) return ItemStack.EMPTY;
 
         // Use the client-supplied UUID first (matches RS onExtract(player, UUID, ...))
         // falling back to ItemStack lookup for older/unknown clients.
@@ -285,14 +287,14 @@ public final class RSSidePanelClickPacket {
             var entry = list.getEntry(targetItem, 1);
             if (entry == null) {
                 forceSyncZero(player, targetItem, panelId);
-                return;
+                return ItemStack.EMPTY;
             }
             stackId = entry.getId();
             stored = list.get(stackId);
         }
         if (stored == null || stored.isEmpty()) {
             forceSyncZero(player, targetItem, stackId);
-            return;
+            return ItemStack.EMPTY;
         }
 
         int available = stored.getCount();
@@ -313,10 +315,10 @@ public final class RSSidePanelClickPacket {
                 count = maxStack;
                 break;
             default:
-                return;
+                return ItemStack.EMPTY;
         }
         count = Math.min(count, available);
-        if (count <= 0) return;
+        if (count <= 0) return ItemStack.EMPTY;
 
         // Cursor-merging check — matches RS ItemGridHandler.onExtract.
         // Creative mode: Mojang's ClientPacketListener.handleContainerSetSlot drops
@@ -328,10 +330,10 @@ public final class RSSidePanelClickPacket {
         if (action != ACTION_PICK_BLOCK && !isShift && !player.isCreative()) {
             if (!cursor.isEmpty()) {
                 if (!ItemHandlerHelper.canItemStacksStack(cursor, stored)) {
-                    return; // cursor holds a different item — deny extraction
+                    return ItemStack.EMPTY; // cursor holds a different item — deny extraction
                 }
                 int room = cursor.getMaxStackSize() - cursor.getCount();
-                if (room <= 0) return; // cursor is full
+                if (room <= 0) return ItemStack.EMPTY; // cursor is full
                 count = Math.min(count, room);
             }
         }
@@ -344,7 +346,7 @@ public final class RSSidePanelClickPacket {
                 .extractExactLegacy(network, player, extractTemplate, count, true);
         if (simulated.isEmpty()) {
             forceSyncZero(player, targetItem, stackId);
-            return;
+            return ItemStack.EMPTY;
         }
 
         // Record modification time — matches RS tracker.changed() before extract
@@ -356,13 +358,22 @@ public final class RSSidePanelClickPacket {
         // PERFORM extract
         ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                 .extractExactLegacy(network, player, extractTemplate, count, false);
-        if (extracted.isEmpty()) return;
+        if (extracted.isEmpty()) return ItemStack.EMPTY;
 
         if (action == ACTION_PICK_BLOCK) {
-            player.getInventory().setItem(player.getInventory().selected, extracted);
+            int selectedSlot = player.getInventory().selected;
+            // Re-check the destination after the server-side extraction.  If
+            // the client and server disagreed about the selected slot, refund
+            // rather than overwriting an item or silently losing the result.
+            if (!player.getInventory().getItem(selectedSlot).isEmpty()) {
+                refundExtracted(network, player, extracted);
+                return ItemStack.EMPTY;
+            }
+            player.getInventory().setItem(selectedSlot, extracted);
             player.getInventory().setChanged();
             player.inventoryMenu.broadcastChanges();
             player.containerMenu.broadcastChanges();
+            syncPlayerInventorySlot(player, selectedSlot);
         } else if (isShift || (player.isCreative() && action == ACTION_EXTRACT_MAX)) {
             ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                     playerFullInv(player), extracted, false);
@@ -393,6 +404,7 @@ public final class RSSidePanelClickPacket {
         // Delta is handled by the storage-cache listener registered in
         // RSSidePanelNetworkHandler — matches RS native pattern where
         // GridItemDeltaMessage is sent by the listener, not the handler.
+        return extracted;
     }
 
     private static void handleInsert(ServerPlayer player, boolean isRightClick, ItemStack clientCarried) {
@@ -517,6 +529,24 @@ public final class RSSidePanelClickPacket {
         RSSidePanelNetworkHandler.sendDeltaImmediate(player,
                 panelId != null ? panelId : UUID.randomUUID(),
                 zeroStack, System.currentTimeMillis(), false);
+    }
+
+    /** Explicitly update a player-inventory slot even while another menu is open. */
+    private static void syncPlayerInventorySlot(ServerPlayer player, int slot) {
+        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+                net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+                0, slot, player.getInventory().getItem(slot)));
+    }
+
+    /** Return an extracted stack to RS if its destination became invalid. */
+    private static void refundExtracted(INetwork network, ServerPlayer player, ItemStack extracted) {
+        ItemStack remainder = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                .insertLegacy(network, player, extracted, false);
+        if (!remainder.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI] Pick-block refund left {} x{}; dropping remainder",
+                    remainder.getHoverName().getString(), remainder.getCount());
+            player.drop(remainder, false);
+        }
     }
 
     /** Sync the cursor slot to the client.  The client optimistically clears

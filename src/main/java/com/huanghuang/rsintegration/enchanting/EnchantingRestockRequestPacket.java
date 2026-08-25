@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.enchanting;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.refinedmods.refinedstorage.api.network.security.Permission;
-import com.refinedmods.refinedstorage.api.util.Action;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.EnchantmentMenu;
@@ -52,21 +51,20 @@ public final class EnchantingRestockRequestPacket {
             return;
         }
 
-        var network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
+        var endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        if (endpoint == null) {
             send(player, new EnchantingRestockResultPacket(
                     EnchantingRestockResultPacket.Status.NO_NETWORK, 0, missing));
             return;
         }
-        if (network.getSecurityManager() != null
-                && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player)) {
+        if (!StorageRestockSupport.canExtract(endpoint, player)) {
             send(player, new EnchantingRestockResultPacket(
                     EnchantingRestockResultPacket.Status.NO_PERMISSION, 0, missing));
             return;
         }
 
-        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                .extractExactLegacy(network, player, new ItemStack(Items.LAPIS_LAZULI), missing, false);
+        ItemStack extracted = StorageRestockSupport.extract(endpoint, player,
+                new ItemStack(Items.LAPIS_LAZULI), missing);
         int inserted = extracted.getCount();
         if (inserted > 0) {
             if (existing.isEmpty()) lapisSlot.set(extracted.copy());
