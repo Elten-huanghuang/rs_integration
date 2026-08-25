@@ -51,6 +51,7 @@ import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
@@ -82,6 +83,7 @@ import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageReferenceCodec;
 import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StorageResolutionResult;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -1159,9 +1161,12 @@ public final class GenericCraftPacket {
         // reserved from the resolved RS/backend network.
         // RS is an optional storage backend. Standalone inventory crafting must
         // never link or invoke its NetworkItem classes when RS is absent.
+        CraftStorageEndpoint contextEndpoint = StorageRestockSupport.resolve(player).orElse(null);
         INetwork network = hasRefinedStorage()
                 && (storageReference == null
                 || "refinedstorage".equals(storageReference.backendId().value()))
+                && (contextEndpoint == null
+                || !"beyonddimensions".equals(contextEndpoint.session().reference().backendId().value()))
                 ? resolveNetworkForRecipe(player, dim, pos, modType) : null;
         CraftStorageEndpoint storageEndpoint = null;
         // A backend-qualified reference is authoritative for non-RS backends.
@@ -1189,7 +1194,9 @@ public final class GenericCraftPacket {
             // Keep execution and planning symmetric when the terminal context
             // is absent from the packet. The registry resolver still applies
             // backend order and permissions; it does not blindly select BD.
-            var fallback = CraftStorageEndpoints.resolveDefault(player);
+            var fallback = contextEndpoint != null
+                    ? java.util.Optional.of(contextEndpoint)
+                    : CraftStorageEndpoints.resolveDefault(player);
             if (fallback.isPresent()) {
                 storageEndpoint = fallback.orElseThrow();
                 RSIntegrationMod.LOGGER.debug(
@@ -1224,7 +1231,7 @@ public final class GenericCraftPacket {
                     continue;
                 effectiveDim = m.dim();
                 effectivePos = m.pos();
-                if (network == null && (storageReference == null
+                if (storageEndpoint == null && network == null && (storageReference == null
                         || "refinedstorage".equals(storageReference.backendId().value()))) {
                     if (hasRefinedStorage()) {
                         network = resolveNetworkForRecipe(player, effectiveDim, effectivePos, modType);
@@ -1534,7 +1541,7 @@ public final class GenericCraftPacket {
         // Re-resolve network in case the top-level resolution failed but
         // ensureMaterialAvailable succeeded via binding/NBT fallback internally.
         // The ledger's NETWORK entries need a valid network for commit extraction.
-        if (network == null && hasRefinedStorage()
+        if (storageEndpoint == null && network == null && hasRefinedStorage()
                 && (storageReference == null
                 || "refinedstorage".equals(storageReference.backendId().value()))) {
             network = CraftPacketUtils.resolveNetworkForCraft(player,
@@ -1821,7 +1828,7 @@ public final class GenericCraftPacket {
                     AltarBindingRegistry.getBoundMachinesForType(player, modType)) {
                 if (m.dim().equals(dim) && m.pos().equals(pos)) continue;
                 ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, m.dim());
-                network = AltarBindingRegistry.resolveNetworkForAltar(player, key, m.pos());
+                network = RSAltarBindingResolver.resolveNetworkForAltar(player, key, m.pos());
                 if (network != null) return network;
             }
         }
@@ -2306,13 +2313,20 @@ public final class GenericCraftPacket {
                         ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
                         : player.serverLevel().dimension();
                 net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
-                INetwork cpNetwork = (storageReference == null
+                CraftStorageEndpoint cpEndpoint = storageReference != null
+                        ? CraftStorageEndpoints.resolve(storageReference, player).orElse(null)
+                        : CraftStorageEndpoints.resolveDefault(player).orElse(null);
+                INetwork cpNetwork = cpEndpoint == null
+                        && (storageReference == null
                         || "refinedstorage".equals(storageReference.backendId().value()))
                         && net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                         ? CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos)
                         : null;
-                specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                        recipe, cpNetwork, player.serverLevel(), cpPos);
+                specs = cpEndpoint != null
+                        ? CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                                recipe, cpEndpoint, player, player.serverLevel(), cpPos)
+                        : CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                                recipe, cpNetwork, player.serverLevel(), cpPos);
                 if (specs == null || specs.isEmpty()) {
                     sink.error(Component.translatable("rsi.crockpot.error.food_values"));
                     return;
@@ -2418,9 +2432,12 @@ public final class GenericCraftPacket {
         // Resolve an explicit backend-qualified target first. With no explicit
         // target, preserve RS terminal discovery for existing installations,
         // then fall back to the first registered optional backend (BD-only).
+        CraftStorageEndpoint contextEndpoint = StorageRestockSupport.resolve(player).orElse(null);
         INetwork network = hasRefinedStorage()
                 && (storageReference == null
                 || "refinedstorage".equals(storageReference.backendId().value()))
+                && (contextEndpoint == null
+                || !"beyonddimensions".equals(contextEndpoint.session().reference().backendId().value()))
                 ? CraftPacketUtils.resolveNetworkForCraft(player, planDimKey, planLookupPos)
                 : null;
         CraftStorageEndpoint planningEndpoint = null;
@@ -2449,7 +2466,9 @@ public final class GenericCraftPacket {
             planningEndpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
             selectedStorageReference = planningEndpoint.session().reference();
         } else {
-            var defaults = RSIntegrationMod.STORAGE_BACKENDS.registry()
+            var defaults = contextEndpoint != null
+                    ? java.util.List.of(contextEndpoint.session())
+                    : RSIntegrationMod.STORAGE_BACKENDS.registry()
                     .resolveDefaultSessionsForPlayer(player);
             if (!defaults.isEmpty()) {
                 planningEndpoint = new com.huanghuang.rsintegration.crafting.SessionCraftStorageEndpoint(defaults.get(0));
@@ -3237,7 +3256,7 @@ public final class GenericCraftPacket {
             // These render in the "unavailable" area, not inside step cards.
             if (recipeModType != null) {
                 PlanWarnings.Result warningResult = PlanWarnings.collectResult(
-                        recipeModType.id(), player, recipe, dim, pos);
+                        recipeModType.id(), player, recipe, dim, pos, planningEndpoint);
                 modWarnings.addAll(warningResult.warnings());
                 blockingPrerequisiteFailure |= warningResult.blocksExecution();
             }
@@ -3428,7 +3447,7 @@ public final class GenericCraftPacket {
 
         // ── Embers Alchemy: lookup cached codes from prior inference ──
         EmbersPlanInfo embersInfo = EmbersPlanInfo.build(
-                player, recipe, network, recipeId,
+                player, recipe, network, planningEndpoint, recipeId,
                 recipeModType != null ? recipeModType.id() : null,
                 dim, pos);
 
@@ -3976,6 +3995,7 @@ public final class GenericCraftPacket {
 
     static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
         ModType type = ModType.classifyRecipe(recipe);
+        if (recipe instanceof CraftingRecipe && type == ModType.CUSTOM_GUI) return false;
         return isPhysicalMachineRecipe(recipe, type) && recipe.getType() != null;
     }
 
@@ -3984,6 +4004,11 @@ public final class GenericCraftPacket {
     }
 
     static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
+        // Config-classified custom GUI recipes can still be ordinary vanilla
+        // CraftingRecipe instances (for example a mod's helper recipe).  They
+        // must remain logical crafting; only the actual custom machine recipe
+        // needs a binding context.
+        if (recipe instanceof CraftingRecipe && modType == ModType.CUSTOM_GUI) return false;
         if (recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)) return false;
         return recipe instanceof SmithingTransformRecipe
                 || recipe instanceof SmithingTrimRecipe

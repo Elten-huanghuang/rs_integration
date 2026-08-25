@@ -91,6 +91,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private final boolean[] ownedFactoryLanes = new boolean[FACTORY_INPUT.length];
     private final int[] initialFactoryInputCounts = new int[FACTORY_INPUT.length];
     private final int[] expectedFactoryOutputCounts = new int[FACTORY_INPUT.length];
+    private final int[] capturedFactoryOutputCounts = new int[FACTORY_INPUT.length];
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
@@ -171,7 +172,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("Iron Furnace factory has no energy",
                     Component.translatable("rsi.ironfurnaces.error.factory_no_energy"));
         }
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, target.dimension(), pos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, target.dimension(), pos);
+        } else {
+            this.network = null;
+        }
         this.factoryMode = ironFurnace.isFactory();
         this.rainbowMode = ironFurnace.isRainbowFurnace();
         this.plannedOperations = 1;
@@ -263,6 +268,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private boolean reserveAndStart(ServerPlayer player, ExtractionLedger activeLedger,
                                     boolean commit) {
         if (recipe == null || recipe.getIngredients().isEmpty()) return false;
+        activeLedger.setStorageEndpoint(storageEndpoint());
         resolveNetwork(player);
         Ingredient input = recipe.getIngredients().get(0);
         ItemStack material = CraftPacketUtils.ensureMaterialAvailable(
@@ -272,7 +278,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     CraftPacketUtils.describeIngredient(input)));
             return false;
         }
-        if (commit && (network == null || !activeLedger.commit(network, player))) return false;
+        if (commit && !activeLedger.commit(network, player)) return false;
         return startQueuedMaterials(List.of(material));
     }
 
@@ -448,6 +454,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
             if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        } else {
+            this.network = null;
         }
     }
 
@@ -530,8 +538,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         }
         furnace = current;
         if (factoryMode) {
+            captureFactoryOutputs(current, completedBatchResults);
             boolean anyWorking = false;
             boolean allDone = true;
+            int expectedTotal = expectedOutputCount(activePhysicalOperations);
+            int capturedTotal = 0;
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
                 if (!ownedFactoryLanes[lane] || expectedFactoryOutputCounts[lane] <= 0) continue;
                 int inputSlot = FACTORY_INPUT[lane];
@@ -539,13 +550,27 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                 ItemStack output = current.getItem(inputSlot + 6);
                 boolean consumed = input.getCount() < initialFactoryInputCounts[lane];
                 anyWorking |= current.factoryCookTime[lane] > 0 || consumed || !output.isEmpty();
-                boolean finishedWithoutOutput = consumed && input.isEmpty()
-                        && current.factoryCookTime[lane] == 0;
-                allDone &= output.getCount() >= expectedFactoryOutputCounts[lane]
-                        || finishedWithoutOutput;
+                // A consumed input with an empty output slot is not a
+                // successful lane completion.  In factory/rainbow mode the
+                // output may be produced on a later tick; treating this state
+                // as done allowed the first completed lanes to finish the
+                // worker while the remaining lanes were still cooking.
+                allDone &= capturedFactoryOutputCounts[lane]
+                        >= expectedFactoryOutputCounts[lane];
+                capturedTotal += capturedFactoryOutputCounts[lane];
             }
             observedWorking |= anyWorking;
-            if (!observedWorking || !allDone) return workingObservation();
+            // Iron Furnaces can move a finished lane's output on a later tick,
+            // and factory/rainbow implementations are not consistent about
+            // which lane is flushed first. The aggregate count is the actual
+            // completion contract for this physical batch; the per-lane check
+            // remains useful for diagnostics but must not strand a completed
+            // batch when slot timing differs.
+            boolean aggregateDone = expectedTotal > 0 && capturedTotal >= expectedTotal;
+            RSIntegrationMod.debug(
+                    "[RSI-IronFurnaces] factory observation pos={} expectedTotal={} capturedTotal={} allLanesDone={} working={} queued={}",
+                    pos, expectedTotal, capturedTotal, allDone, observedWorking, queuedOperations);
+            if (!observedWorking || (!allDone && !aggregateDone)) return workingObservation();
             if (queuedOperations <= 0) return doneObservation();
             drainActivePhysicalResults(current, completedBatchResults);
             clearActivePhysicalState();
@@ -561,8 +586,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (inputConsumed) inputPlaced = false;
         if (current.isBurning() || inputConsumed) observedWorking = true;
         if (!observedWorking) return workingObservation();
-        boolean physicalDone = output.getCount() >= expectedOutputCount(activePhysicalOperations)
-                || (inputConsumed && input.isEmpty() && current.cookTime == 0);
+        // Input consumption is not a completion signal for high-speed Iron
+        // Furnaces: the machine can clear the input and publish the result on
+        // the following tick. Require the actual output stack so the progress
+        // panel cannot finish and collect before the product exists.
+        boolean physicalDone = output.getCount() >= expectedOutputCount(activePhysicalOperations);
         if (!physicalDone) return workingObservation();
         if (queuedOperations <= 0) return doneObservation();
         drainActivePhysicalResults(current, completedBatchResults);
@@ -607,22 +635,57 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                                             List<ItemStack> destination) {
         boolean changed = false;
         if (factoryMode) {
+            captureFactoryOutputs(current, destination);
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
-                if (!ownedFactoryLanes[lane] || expectedFactoryOutputCounts[lane] <= 0) continue;
+                // Lane ownership is the authoritative boundary. Do not gate
+                // collection on expectedFactoryOutputCounts: that counter is
+                // preparation state and may already be cleared after a lane
+                // completed, while Iron Furnaces still has its real output in
+                // the corresponding slot.
                 int inputSlot = FACTORY_INPUT[lane];
                 ItemStack result = current.getItem(inputSlot + 6).copy();
-                if (!result.isEmpty()) destination.add(result);
-                if (!current.getItem(inputSlot).isEmpty()) current.setItem(inputSlot, ItemStack.EMPTY);
+                if (!result.isEmpty()) {
+                    destination.add(result);
+                    RSIntegrationMod.debug("[RSI-IronFurnaces] collected factory output lane={} slot={} count={}",
+                            lane, inputSlot + 6, result.getCount());
+                }
+                if (!current.getItem(inputSlot).isEmpty()) {
+                    current.setItem(inputSlot, ItemStack.EMPTY);
+                    changed = true;
+                }
                 if (!current.getItem(inputSlot + 6).isEmpty()) {
                     current.setItem(inputSlot + 6, ItemStack.EMPTY);
+                    changed = true;
                 }
-                changed = true;
             }
         } else {
             ItemStack result = current.getItem(OUTPUT).copy();
             if (!result.isEmpty()) destination.add(result);
             if (!current.getItem(INPUT).isEmpty()) current.setItem(INPUT, ItemStack.EMPTY);
             if (!current.getItem(OUTPUT).isEmpty()) current.setItem(OUTPUT, ItemStack.EMPTY);
+            changed = true;
+        }
+        if (changed) {
+            current.setChanged();
+            if (level != null && pos != null) {
+                level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
+            }
+        }
+    }
+
+    private void captureFactoryOutputs(BlockIronFurnaceTileBase current,
+                                       List<ItemStack> destination) {
+        boolean changed = false;
+        for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
+            int outputSlot = FACTORY_INPUT[lane] + 6;
+            ItemStack output = current.getItem(outputSlot);
+            if (output.isEmpty()) continue;
+            ItemStack captured = output.copy();
+            destination.add(captured);
+            if (ownedFactoryLanes[lane]) capturedFactoryOutputCounts[lane] += captured.getCount();
+            RSIntegrationMod.debug("[RSI-IronFurnaces] captured factory output lane={} slot={} count={}",
+                    lane, outputSlot, captured.getCount());
+            current.setItem(outputSlot, ItemStack.EMPTY);
             changed = true;
         }
         if (changed) {
@@ -777,10 +840,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private int effectiveFuelTicks(ItemStack fuel, int cookTicks) {
         int rawBurn = BlockIronFurnaceTileBase.getBurnTime(fuel, furnace.recipeType);
-        ItemStack augment = furnace.getItem(4);
-        int multiplier = augment.getItem() instanceof ItemAugmentFuel ? 2 : 1;
-        int divisor = augment.getItem() instanceof ItemAugmentSpeed ? 2 : 1;
-        return effectiveFuelTicks(rawBurn, cookTicks, multiplier, divisor);
+        // getCookTime() already includes the machine's speed/fuel augment
+        // modifiers. Applying another speed divisor here makes every fuel
+        // stack appear to cover fewer furnace ticks than it really does,
+        // causing multi-item requests to over-consume fuel and stall.
+        return effectiveFuelTicks(rawBurn, cookTicks, 1, 1);
     }
 
     static int effectiveFuelTicks(int rawBurn, int cookTicks, int multiplier, int divisor) {
@@ -841,6 +905,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         factorySlot = -1;
         java.util.Arrays.fill(initialFactoryInputCounts, 0);
         java.util.Arrays.fill(expectedFactoryOutputCounts, 0);
+        java.util.Arrays.fill(capturedFactoryOutputCounts, 0);
     }
 
     private void rollbackActiveFactoryPlacement(BlockIronFurnaceTileBase f) {
@@ -860,6 +925,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         factorySlot = -1;
         java.util.Arrays.fill(initialFactoryInputCounts, 0);
         java.util.Arrays.fill(expectedFactoryOutputCounts, 0);
+        java.util.Arrays.fill(capturedFactoryOutputCounts, 0);
     }
 
     private void clearInternalBatchState() {

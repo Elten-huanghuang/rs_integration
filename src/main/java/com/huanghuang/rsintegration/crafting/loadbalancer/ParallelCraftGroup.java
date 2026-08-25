@@ -374,6 +374,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             batchSize = compatibleBatchSize(operationId,
                     Math.min(requestedBatch, operations.queuedOperations()));
             delegate.prepareGraphBatch(batchSize);
+            delegate.prepareOperationCount(operations.totalOperations());
         } catch (RuntimeException exception) {
             if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
             beginDraining("worker batch preparation threw at " + worker.machine.pos());

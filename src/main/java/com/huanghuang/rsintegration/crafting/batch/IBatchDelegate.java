@@ -97,6 +97,10 @@ public interface IBatchDelegate {
     default void prepareGraphBatch(int executions) {
     }
 
+    /** Announces the total number of operations in the surrounding graph node. */
+    default void prepareOperationCount(int totalOperations) {
+    }
+
     /**
      * Preferred number of recipe executions assigned to one physical worker start.
      * The default preserves the one-operation transaction used by ordinary machines.

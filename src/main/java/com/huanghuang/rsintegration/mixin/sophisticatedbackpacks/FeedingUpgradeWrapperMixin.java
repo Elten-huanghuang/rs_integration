@@ -4,14 +4,11 @@ import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackU
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.RSFeedingPolicy;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -41,16 +38,7 @@ public abstract class FeedingUpgradeWrapperMixin
         extends UpgradeWrapperBase<FeedingUpgradeWrapper, FeedingUpgradeItem> {
 
     @Unique
-    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
-    @Unique
-    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
-
-    @Unique
-    private boolean rsi$isRs;
-    @Unique
-    private BlockPos rsi$rsBlockPos;
-    @Unique
-    private ResourceKey<Level> rsi$rsDimensionKey;
+    private StorageReference rsi$storageReference;
 
     protected FeedingUpgradeWrapperMixin(IStorageWrapper storageWrapper, ItemStack upgrade,
                                          Consumer<ItemStack> upgradeSaveHandler) {
@@ -70,26 +58,21 @@ public abstract class FeedingUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
-        if (tag != null && tag.contains(RS_BLOCK_POS_TAG) && tag.contains(RS_BLOCK_DIMENSION_TAG)) {
-            this.rsi$isRs = true;
-            this.rsi$rsBlockPos = BlockPos.of(tag.getLong(RS_BLOCK_POS_TAG));
-            this.rsi$rsDimensionKey = ResourceKey.create(Registries.DIMENSION,
-                    ResourceLocation.parse(tag.getString(RS_BLOCK_DIMENSION_TAG)));
-        }
+        this.rsi$storageReference = StorageBackpackUtils.readReference(tag);
     }
 
     @Inject(method = "tryFeedingFoodFromStorage", at = @At(value = "HEAD"),
             remap = false, cancellable = true)
     private void onTryFeedingFoodFromStorage(Level level, int missingFood, Player player,
                                              CallbackInfoReturnable<Boolean> cir) {
-        if (!this.rsi$isRs) return;
+        if (this.rsi$storageReference == null) return;
 
         if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
             cir.setReturnValue(false);
             cir.cancel();
             return;
         }
-        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$storageReference);
         if (session == null) {
             cir.setReturnValue(false);
             cir.cancel();
@@ -139,11 +122,20 @@ public abstract class FeedingUpgradeWrapperMixin
             try {
                 player.getInventory().items.set(player.getInventory().selected, extracted);
                 if (food.use(level, player, InteractionHand.MAIN_HAND).getResult() == InteractionResult.CONSUME) {
+                    // From this point the food-use operation owns the item.
+                    // If finishUsingItem throws, food's current count is the
+                    // only safe amount that can still be returned.
+                    consumed = true;
                     ItemStack consumedSnapshot = food.copy();
                     ItemStack finished = food.getItem().finishUsingItem(food, level, player);
                     remainder = ForgeEventFactory.onItemUseFinish(player, consumedSnapshot, 0, finished);
-                    consumed = true;
                 }
+            } catch (RuntimeException ex) {
+                ItemStack recovery = consumed
+                        ? food.copy()
+                        : player.getInventory().items.get(player.getInventory().selected).copy();
+                StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, recovery);
+                continue;
             } finally {
                 player.getInventory().items.set(player.getInventory().selected, previousMainHand);
             }

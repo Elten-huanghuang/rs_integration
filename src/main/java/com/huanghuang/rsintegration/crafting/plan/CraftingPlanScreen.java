@@ -28,7 +28,9 @@ import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.client.Minecraft;
@@ -865,8 +867,13 @@ public final class CraftingPlanScreen extends Screen {
                 plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
         ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
         GuiNavStack.pushCurrent();
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId, plan.baseItem()));
+        if (BindingBackendResolver.isBeyondDimensionsBinding(dim, pos)) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsOpenBoundMachineGuiPacket(dim, pos));
+        } else {
+            RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                    new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId, plan.baseItem()));
+        }
     }
 
     private void requestPlanRefresh() {
@@ -2650,6 +2657,19 @@ public final class CraftingPlanScreen extends Screen {
                 return true;
             }
         }
+        // Middle-clicking a missing material is the quick restock/bookmark
+        // action. Keep it available in both RS and BD plans; the actual
+        // storage selection remains server-side and JEI is only the fallback
+        // destination for what cannot be supplied.
+        if (button == 2) {
+            for (BookmarkHit hit : bookmarkHits) {
+                if (mx >= hit.x() && mx < hit.x() + hit.w()
+                        && my >= hit.y() && my < hit.y() + hit.h()) {
+                    bookmarkMissingMaterial(hit);
+                    return true;
+                }
+            }
+        }
         if ((button == 0 || button == 1) && outputSelectorH > 0
                 && mx >= outputSelectorX && mx < outputSelectorX + outputSegmentW
                 && my >= outputSelectorY && my < outputSelectorY + outputSelectorH) {
@@ -2993,7 +3013,9 @@ public final class CraftingPlanScreen extends Screen {
             gfx.renderComponentTooltip(font, List.of(
                     hoveredBookmark.stack().getHoverName(),
                     Component.translatable("rsi.plan.bookmark_missing",
-                            hoveredBookmark.missingCount()).withStyle(ChatFormatting.GREEN)),
+                            hoveredBookmark.missingCount()).withStyle(ChatFormatting.GREEN),
+                    Component.translatable("rsi.plan.bookmark_middle_hint")
+                            .withStyle(ChatFormatting.GRAY)),
                     mouseX, mouseY);
             return;
         }

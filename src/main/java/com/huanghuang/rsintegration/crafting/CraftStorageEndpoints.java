@@ -10,6 +10,7 @@ import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.Optional;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import javax.annotation.Nullable;
 
 /** Resolves the backend-selected storage endpoint for recursive crafting. */
 public final class CraftStorageEndpoints {
@@ -18,6 +19,17 @@ public final class CraftStorageEndpoints {
     /** Transitional bridge for legacy call sites; native RS stays isolated here. */
     public static CraftStorageEndpoint fromLegacyNetwork(@Nonnull INetwork network) {
         return new LegacyRsCraftStorageEndpoint(network);
+    }
+
+    /**
+     * Returns the native RS handle only when this endpoint is the RS bridge.
+     * Backend-neutral callers may use this for legacy recipe APIs while BD
+     * endpoints correctly return {@code null} instead of being re-resolved.
+     */
+    @Nullable
+    public static INetwork legacyNetwork(@Nullable CraftStorageEndpoint endpoint) {
+        return endpoint instanceof LegacyRsCraftStorageEndpoint legacy
+                ? legacy.network() : null;
     }
 
     /** Transitional insert bridge for non-delegate compatibility services. */

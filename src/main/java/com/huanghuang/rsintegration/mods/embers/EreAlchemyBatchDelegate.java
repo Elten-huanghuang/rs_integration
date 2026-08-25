@@ -104,13 +104,15 @@ extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestals_insufficient", this.code.size(), this.pedestals.size()));
             return false;
         }
-        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+        if (storageEndpoint() == null) {
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+        }
         this.lockLease = EreAlchemyLock.tryAcquire(lvl.dimension(), (BlockPos)pos, player.getUUID());
         if (this.lockLease == null) {
             // Preparation is retried by the chain; do not mutate the machine or spam chat here.
             return false;
         }
-        EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player);
+        EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player, storageEndpoint());
         for (PedestalInfo p : this.pedestals) {
             Object bottomInv;
             Object topInv = Reflect.getField((Object)p.be(), "inventory").orElse(null);
@@ -124,7 +126,7 @@ extends AbstractBatchDelegate {
             }
             BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
             if (bottomBE == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
-                String reason = bottomBE == null ? "\u65e0BE" : "\u7c7b\u578b=" + bottomBE.getClass().getSimpleName();
+                String reason = bottomBE == null ? "missing block entity" : "type=" + bottomBE.getClass().getSimpleName();
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal bottom at {} missing or invalid: {}", (Object)p.pos().below(), (Object)reason);
                 player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestal_bottom_invalid", p.pos().below().toShortString(), reason));
                 return false;
@@ -433,9 +435,14 @@ extends AbstractBatchDelegate {
         return result;
     }
 
-    static void recycleBlockingItems(ServerLevel level, BlockPos tabletPos, List<PedestalInfo> pedestals, ServerPlayer player) {
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
-        if (network == null) {
+    static void recycleBlockingItems(ServerLevel level, BlockPos tabletPos, List<PedestalInfo> pedestals,
+                                     ServerPlayer player,
+                                     @Nullable com.huanghuang.rsintegration.crafting.CraftStorageEndpoint endpoint) {
+        INetwork network = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (endpoint == null && network == null) {
+            network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+        }
+        if (endpoint == null && network == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] No RS network for recycling, clearing pedestals anyway");
         }
         ArrayList<ItemStack> recycled = new ArrayList<ItemStack>();
@@ -479,17 +486,20 @@ extends AbstractBatchDelegate {
             }
         }
         if (!recycled.isEmpty()) {
-            if (network != null) {
+            if (endpoint != null || network != null) {
                 int totalRecycled = 0;
                 for (ItemStack s : recycled) {
                     ItemStack leftover;
                     if (s.isEmpty()) continue;
-                    IStorageTracker tracker = network.getItemStorageTracker();
+                    IStorageTracker tracker = network == null ? null : network.getItemStorageTracker();
                     if (tracker != null) {
                         tracker.changed(player, s.copy());
                     }
-                    if (!(leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                            .insertLegacy(network, player, s, false)).isEmpty()) {
+                    leftover = endpoint != null
+                            ? endpoint.insert(player, s, false).remainder().orElse(ItemStack.EMPTY)
+                            : com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            .insertLegacy(network, player, s, false);
+                    if (!leftover.isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Embers] Recycle partial: {} x{} \u2192 leftover {}", (Object)s.getHoverName().getString(), (Object)s.getCount(), (Object)leftover.getCount());
                         ItemHandlerHelper.giveItemToPlayer(player, (ItemStack)leftover);
                     }
@@ -557,11 +567,11 @@ extends AbstractBatchDelegate {
                 bottomBE.setChanged();
             }
         }
-        if (this.network != null && !toRefund.isEmpty()) {
+        if ((storageEndpoint() != null || this.network != null) && !toRefund.isEmpty()) {
             for (ItemStack stack : toRefund) {
                 ItemStack leftover;
                 if (stack.isEmpty()) continue;
-                IStorageTracker tracker = this.network.getItemStorageTracker();
+                IStorageTracker tracker = this.network == null ? null : this.network.getItemStorageTracker();
                 if (tracker != null && this.player != null) {
                     tracker.changed(this.player, (Object)stack.copy());
                 }

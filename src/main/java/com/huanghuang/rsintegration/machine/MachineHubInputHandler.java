@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -56,8 +57,15 @@ public final class MachineHubInputHandler {
         int favoriteIndex = MachineHub.getFavoriteHoveredIndex();
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
                 && favoriteIndex >= 0 && favoriteIndex < MachineHub.getMachines().size()) {
-            com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient.requestToggle(
-                    MachineHub.getMachines().get(favoriteIndex));
+            // Favorites are currently an RS Grid/side-panel feature. Do not
+            // load that client class on BD-only installations: it has a hard
+            // GridScreen reference and would crash with NoClassDefFoundError.
+            if (ModList.get().isLoaded("refinedstorage")) {
+                com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient.requestToggle(
+                        MachineHub.getMachines().get(favoriteIndex));
+            } else {
+                MachineHub.toggleLocalFavorite(MachineHub.getMachines().get(favoriteIndex));
+            }
             return true;
         }
 

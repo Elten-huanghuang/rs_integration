@@ -4,6 +4,10 @@ import com.huanghuang.rsintegration.storage.*;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,15 +39,99 @@ final class BeyondDimensionsSession implements StorageSession {
             Object list = storage().getClass().getMethod("getStorage").invoke(storage());
             if (list instanceof Iterable<?> values) for (Object value : values) {
                 Object key = BeyondDimensionsReflection.key(value);
+                if (!BeyondDimensionsReflection.isItemKey(key)) continue;
                 ItemStack stack = BeyondDimensionsReflection.keyStack(key);
                 long amount = BeyondDimensionsReflection.amount(value);
                 if (!stack.isEmpty() && amount > 0) items.add(new StoredItem(itemKey(stack), amount));
             }
             return StorageSnapshotResult.success(new StorageSnapshot(reference.backendId(), items));
         } catch (Exception | LinkageError e) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Storage] BD item snapshot failed player={} network={} cause={}",
+                    player.getGameProfile().getName(), reference.networkId(), e.toString());
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
+    }
+
+    @Override
+    public long countDerivedContainer(ServerPlayer player, ItemStack filledContainer) {
+        StorageThreadGuard.requireServerThread(player);
+        if (filledContainer.isEmpty()
+                || (filledContainer.getItem() != net.minecraft.world.item.Items.WATER_BUCKET
+                && filledContainer.getItem() != net.minecraft.world.item.Items.LAVA_BUCKET)) {
+            return 0L;
+        }
+        StoragePermissionResult permission = checkPermission(player, StoragePermission.VIEW);
+        if (!permission.allowedAccess()) return 0L;
+        try {
+            Object nativeStorage = storage();
+            Object values = nativeStorage.getClass().getMethod("getStorage").invoke(nativeStorage);
+            long emptyBuckets = 0L;
+            long ironForBuckets = 0L;
+            long fluidMilliBuckets = 0L;
+            ItemStack empty = new ItemStack(net.minecraft.world.item.Items.BUCKET);
+            Fluid wanted = filledContainer.getItem() == net.minecraft.world.item.Items.WATER_BUCKET
+                    ? Fluids.WATER : Fluids.LAVA;
+            if (values instanceof Iterable<?> entries) {
+                for (Object value : entries) {
+                    Object key = BeyondDimensionsReflection.key(value);
+                    long amount = Math.max(0L, BeyondDimensionsReflection.amount(value));
+                    if (amount <= 0L) continue;
+                    if (BeyondDimensionsReflection.isItemKey(key)) {
+                        ItemStack stack = BeyondDimensionsReflection.keyStack(key);
+                        if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, empty)) {
+                            emptyBuckets = saturatedAdd(emptyBuckets, amount);
+                        } else if (!stack.isEmpty() && stack.is(net.minecraft.world.item.Items.IRON_INGOT)) {
+                            ironForBuckets = saturatedAdd(ironForBuckets, amount);
+                        }
+                    } else {
+                        // Do not rely solely on getStackClass(): BD revisions
+                        // have returned the API interface class there while
+                        // still exposing a normal FluidStack read-only value.
+                        FluidStack fluidStack;
+                        try {
+                            fluidStack = BeyondDimensionsReflection.fluidStack(key);
+                        } catch (ReflectiveOperationException | ClassCastException ignored) {
+                            fluidStack = null;
+                        }
+                        if (fluidStack != null && !fluidStack.isEmpty()
+                                && net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
+                                != null
+                                && net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
+                                .equals(net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(wanted))) {
+                            // BD 0.7.x stores fluid entries as milliBuckets;
+                            // tolerate older key-count representations where
+                            // the entry count is the number of key stacks.
+                            long perKey = Math.max(1, fluidStack.getAmount());
+                            long contribution = amount >= perKey ? amount : saturatedMultiply(amount, perKey);
+                            fluidMilliBuckets = saturatedAdd(fluidMilliBuckets, contribution);
+                        }
+                    }
+                }
+            }
+            long derived = Math.min(saturatedAdd(emptyBuckets, ironForBuckets / 3L), fluidMilliBuckets / 1000L);
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Storage] BD derived container={} emptyBuckets={} ironForBuckets={} fluidMb={} derived={}",
+                    net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(filledContainer.getItem()),
+                    emptyBuckets, ironForBuckets / 3L, fluidMilliBuckets, derived);
+            return derived;
+        } catch (Exception | LinkageError e) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Storage] BD derived container count failed network={}",
+                    reference.networkId(), e);
+            return 0L;
+        }
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static long saturatedMultiply(long left, long right) {
+        return left == 0 || right == 0 || left > Long.MAX_VALUE / right
+                ? (left == 0 || right == 0 ? 0 : Long.MAX_VALUE)
+                : left * right;
     }
 
     @Override public StoragePermissionResult checkPermission(ServerPlayer player, StoragePermission permission) {
@@ -103,6 +191,74 @@ final class BeyondDimensionsSession implements StorageSession {
             }
         }
         return StorageOperationResult.extracted(mode(simulate), amount, result);
+    }
+
+    @Override
+    public StorageOperationResult extractContainerFluid(ServerPlayer player, ItemStack emptyContainer,
+                                                         ItemStack filledContainer, long amount,
+                                                         boolean simulate) {
+        StorageThreadGuard.requireServerThread(player);
+        if (amount < 0 || emptyContainer.isEmpty() || filledContainer.isEmpty()) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
+        }
+        if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
+        Fluid fluid = BuiltInRegistries.FLUID.get(new net.minecraft.resources.ResourceLocation("minecraft",
+                filledContainer.getItem() == net.minecraft.world.item.Items.WATER_BUCKET ? "water" : "lava"));
+        if (fluid == null || fluid == Fluids.EMPTY) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
+        }
+        StoragePermissionResult permission = checkPermission(player, StoragePermission.EXTRACT);
+        if (!permission.allowedAccess()) return permissionFailureExtraction(mode(simulate), amount, permission);
+        try {
+            Object nativeStorage = storage();
+            Class<?> keyType = Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey");
+            var extract = nativeStorage.getClass().getMethod("extract", keyType, long.class, boolean.class, boolean.class);
+            Object bucketKey = BeyondDimensionsReflection.itemKey(emptyContainer);
+            Object bucket = extract.invoke(nativeStorage, bucketKey, amount, simulate, false);
+            long bucketAmount = BeyondDimensionsReflection.amount(bucket);
+            long ironBuckets = amount - bucketAmount;
+            Object ironKey = null;
+            long ironExtracted = 0L;
+            if (ironBuckets > 0) {
+                ironKey = BeyondDimensionsReflection.itemKey(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT));
+                Object iron = extract.invoke(nativeStorage, ironKey, 3L * ironBuckets, simulate, false);
+                ironExtracted = BeyondDimensionsReflection.amount(iron);
+                if (ironExtracted < 3L * ironBuckets) {
+                    if (!simulate && bucketAmount > 0) {
+                        nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
+                                .invoke(nativeStorage, bucketKey, bucketAmount, false);
+                    }
+                    return StorageOperationResult.extracted(mode(simulate), amount, List.of());
+                }
+            }
+            Object fluidKey = BeyondDimensionsReflection.fluidKey(fluid, 1000L);
+            Object fluidResult = extract.invoke(nativeStorage, fluidKey, 1000L * amount, simulate, false);
+            long fluidAmount = BeyondDimensionsReflection.amount(fluidResult);
+            if (fluidAmount != 1000L * amount) {
+                if (!simulate) {
+                    Object remainder = nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
+                            .invoke(nativeStorage, bucketKey, bucketAmount, false);
+                    if (BeyondDimensionsReflection.amount(remainder) > 0) {
+                        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error("[RSI-Storage] BD container conversion rollback left buckets unrecovered");
+                    }
+                    if (ironExtracted > 0 && ironKey != null) {
+                        nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
+                                .invoke(nativeStorage, ironKey, ironExtracted, false);
+                    }
+                }
+                return StorageOperationResult.extracted(mode(simulate), amount, List.of());
+            }
+            return StorageOperationResult.extracted(mode(simulate), amount,
+                    List.of(filledContainer.copyWithCount(Math.toIntExact(amount))));
+        } catch (Exception | LinkageError e) {
+            return simulate
+                    ? StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.FAILED, List.of(), List.of(), StorageDiagnosticCode.BACKEND_EXCEPTION)
+                    : StorageOperationResult.indeterminateExtraction(amount, List.of(), List.of(),
+                    StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
+        }
     }
 
     private StorageOperationResult extractNative(ServerPlayer player, StorageItemKey key, long amount, boolean simulate, boolean fuzzy) {

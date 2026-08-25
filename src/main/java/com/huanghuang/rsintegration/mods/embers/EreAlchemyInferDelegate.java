@@ -166,8 +166,10 @@ extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestals_insufficient", this.inputsSize, this.pedestals.size()));
             return false;
         }
-        this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
-        EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player);
+        if (storageEndpoint() == null) {
+            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+        }
+        EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player, storageEndpoint());
         for (EreAlchemyBatchDelegate.PedestalInfo p : this.pedestals) {
             ItemStack bottomStack;
             Object bottomInv;
@@ -175,14 +177,18 @@ extends AbstractBatchDelegate {
             Object topInv = Reflect.getField((Object)p.be(), "inventory").orElse(null);
             if (topInv != null && !(topStack = Reflect.invoke(topInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Pedestal top at {} still occupied after recycle: {}", (Object)p.pos(), (Object)topStack.getHoverName().getString());
-                player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u9876\u90e8\u4ecd\u6709\u7269\u54c1: " + p.pos().toShortString() + " (" + topStack.getHoverName().getString() + ")"));
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.embers.error.pedestal_top_occupied",
+                        p.pos().toShortString(), topStack.getHoverName().getString()));
                 return false;
             }
             BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
             if (bottomBE == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
-                String reason = bottomBE == null ? "\u65e0BE" : "\u7c7b\u578b=" + bottomBE.getClass().getSimpleName();
+                String reason = bottomBE == null ? "missing block entity" : "type=" + bottomBE.getClass().getSimpleName();
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Pedestal bottom at {} missing or invalid ({})", (Object)p.pos().below(), (Object)reason);
-                player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u5e95\u90e8\u5f02\u5e38: " + p.pos().below().toShortString() + " (" + reason + ")"));
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.embers.error.pedestal_bottom_invalid",
+                        p.pos().below().toShortString(), reason));
                 return false;
             }
             if (bottomBE.isRemoved()) {
@@ -190,7 +196,9 @@ extends AbstractBatchDelegate {
             }
             if ((bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null || (bottomStack = Reflect.invoke(bottomInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Pedestal bottom at {} still occupied after recycle: {}", (Object)p.pos().below(), (Object)bottomStack.getHoverName().getString());
-            player.sendSystemMessage(Component.literal("\u00a7c\u57fa\u5ea7\u5e95\u90e8\u4ecd\u6709\u7269\u54c1: " + p.pos().below().toShortString() + " (" + bottomStack.getHoverName().getString() + ")"));
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.embers.error.pedestal_bottom_occupied",
+                    p.pos().below().toShortString(), bottomStack.getHoverName().getString()));
             return false;
         }
         InferenceProgress saved = EreAlchemyInferDelegate.takeProgress(player.getUUID(), recipeId.toString());
@@ -743,6 +751,11 @@ extends AbstractBatchDelegate {
         if (this.usingSharedLedger && this.sharedLedger != null) {
             return CraftPacketUtils.ensureMaterialAvailable((ServerPlayer)this.player, this.level.dimension(), (BlockPos)this.machinePos, (Ingredient)ing, (int)1, (ExtractionLedger)this.sharedLedger);
         }
+        if (storageEndpoint() != null) {
+            var result = storageEndpoint().extractExact(this.player, ing.getItems().length == 0
+                    ? ItemStack.EMPTY : ing.getItems()[0], 1, false);
+            return result.extractedStacks().stream().findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        }
         if (this.network == null) {
             return ItemStack.EMPTY;
         }
@@ -754,7 +767,7 @@ extends AbstractBatchDelegate {
             this.sharedLedger.rollback(this.player);
             return;
         }
-        if (this.network == null) {
+        if (storageEndpoint() == null && this.network == null) {
             for (ItemStack s : stacks) {
                 if (s.isEmpty() || this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, s.copy());
@@ -764,7 +777,7 @@ extends AbstractBatchDelegate {
         for (ItemStack s : stacks) {
             ItemStack leftover;
             if (s.isEmpty()) continue;
-            IStorageTracker tracker = this.network.getItemStorageTracker();
+            IStorageTracker tracker = this.network == null ? null : this.network.getItemStorageTracker();
             if (tracker != null && this.player != null) {
                 tracker.changed(this.player, s.copy());
             }
@@ -827,7 +840,7 @@ extends AbstractBatchDelegate {
                 }
             }
         }
-        if (this.network == null) {
+        if (storageEndpoint() == null && this.network == null) {
             for (ItemStack s2 : toRefund) {
                 if (s2.isEmpty() || this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)s2.copy());
@@ -838,7 +851,7 @@ extends AbstractBatchDelegate {
             for (ItemStack s2 : toRefund) {
                 ItemStack leftover;
                 if (s2.isEmpty()) continue;
-                IStorageTracker tracker = this.network.getItemStorageTracker();
+            IStorageTracker tracker = this.network == null ? null : this.network.getItemStorageTracker();
                 if (tracker != null && this.player != null) {
                     tracker.changed(this.player, (Object)s2.copy());
                 }

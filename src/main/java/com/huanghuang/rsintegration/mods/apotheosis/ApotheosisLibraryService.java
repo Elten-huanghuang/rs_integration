@@ -1,19 +1,15 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.EnchantmentInfo;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.Entry;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.EntryStatus;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.ImportStats;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.network.security.Permission;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.Registries;
@@ -139,10 +135,10 @@ public final class ApotheosisLibraryService {
         Context context = validateContext(player, dimension, pos, true);
         if (context == null) return failure("rsi.apotheosis.library.context_changed");
         if (!adapterReady()) return failure("rsi.apotheosis.library.unavailable");
-        INetwork network = resolveNetwork(player, context);
-        if (network == null) return failure("rsi.apotheosis.library.no_network");
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        if (endpoint == null) return failure("rsi.apotheosis.library.no_network");
 
-        List<Entry> entries = buildEntries(network, context.handler);
+        List<Entry> entries = buildEntries(endpoint, player, context.handler);
         long snapshotId = NEXT_SNAPSHOT_ID.getAndIncrement();
         SNAPSHOTS.put(player.getUUID(), new Snapshot(snapshotId, System.currentTimeMillis(),
                 dimension, pos.immutable(), copyEntries(entries)));
@@ -182,8 +178,8 @@ public final class ApotheosisLibraryService {
         if (!knownIds.containsAll(requestedIds)) {
             return importFailure("rsi.apotheosis.library.invalid_request");
         }
-        INetwork network = resolveNetwork(player, context);
-        if (network == null) return importFailure("rsi.apotheosis.library.no_network");
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        if (endpoint == null) return importFailure("rsi.apotheosis.library.no_network");
 
         GlobalPos key = GlobalPos.of(context.dimensionKey, pos);
         if (!ACTIVE_IMPORTS.add(key)) return importFailure("rsi.apotheosis.library.busy");
@@ -199,8 +195,8 @@ public final class ApotheosisLibraryService {
                 int attempts = Math.min(entry.count(), MAX_IMPORT_PER_REQUEST - processed);
                 for (int i = 0; i < attempts; i++) {
                     processed++;
-                    ItemStack extracted = RSIntegrationNetwork.extractExactFromNetwork(
-                            network, entry.stack(), 1, player);
+                    ItemStack extracted = merge(endpoint.extractExact(
+                            player, entry.stack(), 1, false).extractedStacks());
                     if (extracted.isEmpty()) {
                         skipped++;
                         break;
@@ -221,7 +217,7 @@ public final class ApotheosisLibraryService {
                     if (!inserted.isEmpty() || committedAfterFailure) imported++;
                     else skipped++;
                     if (!remainder.isEmpty()) {
-                        RefundOutcome outcome = refund(network, player, remainder);
+                        RefundOutcome outcome = refund(endpoint, player, remainder);
                         if (outcome == RefundOutcome.REFUNDED) refunded++;
                         else if (outcome == RefundOutcome.DROPPED) dropped++;
                     }
@@ -237,22 +233,24 @@ public final class ApotheosisLibraryService {
     private static ScanResult scanWithoutRateLimit(ServerPlayer player, ResourceLocation dimension, BlockPos pos) {
         Context context = validateContext(player, dimension, pos, true);
         if (context == null) return failure("rsi.apotheosis.library.context_changed");
-        INetwork network = resolveNetwork(player, context);
-        if (network == null) return failure("rsi.apotheosis.library.no_network");
-        List<Entry> entries = buildEntries(network, context.handler);
+        CraftStorageEndpoint endpoint = storageEndpoint(player);
+        if (endpoint == null) return failure("rsi.apotheosis.library.no_network");
+        List<Entry> entries = buildEntries(endpoint, player, context.handler);
         long id = NEXT_SNAPSHOT_ID.getAndIncrement();
         SNAPSHOTS.put(player.getUUID(), new Snapshot(id, System.currentTimeMillis(), dimension,
                 pos.immutable(), copyEntries(entries)));
         return new ScanResult(id, entries, null);
     }
 
-    private static List<Entry> buildEntries(INetwork network, IItemHandler handler) {
+    private static List<Entry> buildEntries(CraftStorageEndpoint endpoint,
+                                            ServerPlayer player, IItemHandler handler) {
         List<Entry> result = new ArrayList<>();
-        var cache = network.getItemStorageCache();
-        if (cache == null || cache.getList() == null) return result;
         Map<StackIdentity, MutableEntry> grouped = new HashMap<>();
-        for (var storedEntry : cache.getList().getStacks()) {
-            ItemStack stored = storedEntry.getStack();
+        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return result;
+        for (var storedEntry : snapshot.items()) {
+            ItemStack stored = storedEntry.stack().copyWithCount(
+                    (int) Math.min(Integer.MAX_VALUE, storedEntry.amount()));
             if (stored.isEmpty() || !stored.is(Items.ENCHANTED_BOOK)) continue;
             ItemStack display = stored.copyWithCount(1);
             StackIdentity identity = new StackIdentity(display);
@@ -353,22 +351,34 @@ public final class ApotheosisLibraryService {
     }
 
     @Nullable
-    private static INetwork resolveNetwork(ServerPlayer player, Context context) {
-        INetwork network = AltarBindingRegistry.resolveNetworkForAltar(
-                player, context.dimensionKey, menuPos(player.containerMenu));
-        if (network == null) return null;
-        var security = network.getSecurityManager();
-        return security == null || security.hasPermission(Permission.EXTRACT, player) ? network : null;
+    private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        if (endpoint == null || !endpoint.session().hasPermission(player,
+                com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
+        return endpoint;
     }
 
-    private static RefundOutcome refund(INetwork network, ServerPlayer player, ItemStack stack) {
-        ItemStack remaining = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                .insertLegacy(network, player, stack, false);
+    private static RefundOutcome refund(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack stack) {
+        ItemStack remaining = endpoint.insert(player, stack, false)
+                .remainder().orElse(ItemStack.EMPTY);
         if (remaining.isEmpty()) return RefundOutcome.REFUNDED;
         ItemStack inventoryCopy = remaining.copy();
         if (player.getInventory().add(inventoryCopy)) return RefundOutcome.REFUNDED;
         player.drop(inventoryCopy, false);
         return RefundOutcome.DROPPED;
+    }
+
+    private static ItemStack merge(List<ItemStack> stacks) {
+        ItemStack merged = ItemStack.EMPTY;
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            if (merged.isEmpty()) {
+                merged = stack.copy();
+            } else if (ItemStack.isSameItemSameTags(merged, stack)) {
+                merged.grow(stack.getCount());
+            }
+        }
+        return merged;
     }
 
     @Nullable

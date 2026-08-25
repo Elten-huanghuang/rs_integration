@@ -52,14 +52,17 @@ public final class WorldPickClient {
     public static void onOperationResult(long operationId, boolean success, int actualCount) {
         ItemStack target = pendingPicks.remove(operationId);
         if (target == null || success || actualCount > 0) return;
-        if (net.minecraftforge.fml.ModList.get().isLoaded("jei")) {
-            boolean bookmarked = WorldPickJeiClient.bookmark(target);
-            Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft.player != null) {
-                minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
-                        bookmarked ? "rsi.world_pick.bookmarked" : "rsi.world_pick.bookmark_unavailable",
-                        target.getHoverName()), true);
-            }
+        // Always report a failed pick.  Previously the whole feedback path was
+        // inside the JEI-loaded check, so a missing JEI runtime (or a JEI
+        // startup timing issue) silently dropped both the bookmark attempt and
+        // the user-facing explanation.
+        boolean bookmarked = net.minecraftforge.fml.ModList.get().isLoaded("jei")
+                && WorldPickJeiClient.bookmark(target);
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null) {
+            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+                    bookmarked ? "rsi.world_pick.bookmarked" : "rsi.world_pick.bookmark_unavailable",
+                    target.getHoverName()), true);
         }
     }
 }

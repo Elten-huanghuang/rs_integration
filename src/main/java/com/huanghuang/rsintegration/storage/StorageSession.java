@@ -51,5 +51,38 @@ public interface StorageSession {
 
     StorageOperationResult extractMatching(ServerPlayer player, Ingredient ingredient, long amount, boolean simulate);
 
+    /**
+     * Converts stored fluid plus empty containers into filled container items.
+     * Backends that do not expose typed fluid storage leave this unsupported.
+     */
+    default StorageOperationResult extractContainerFluid(ServerPlayer player,
+                                                          ItemStack emptyContainer,
+                                                          ItemStack filledContainer,
+                                                          long amount,
+                                                          boolean simulate) {
+        return StorageOperationResult.failedExtraction(
+                simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM,
+                amount, StorageOperationStatus.UNAVAILABLE, java.util.List.of(), java.util.List.of());
+    }
+
+    /** Reverses a previously committed container conversion during rollback. */
+    default StorageOperationResult restoreContainerFluid(ServerPlayer player,
+                                                          ItemStack emptyContainer,
+                                                          ItemStack filledContainer,
+                                                          long amount) {
+        return StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                filledContainer, StorageOperationStatus.UNAVAILABLE);
+    }
+
+    /**
+     * Returns how many filled containers can be derived from this backend's
+     * stored empty containers and typed fluid inventory.  This is a planning
+     * hint only; commit-time extraction must still use
+     * {@link #extractContainerFluid(ServerPlayer, ItemStack, ItemStack, long, boolean)}.
+     */
+    default long countDerivedContainer(ServerPlayer player, ItemStack filledContainer) {
+        return 0L;
+    }
+
     StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate);
 }

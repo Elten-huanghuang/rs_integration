@@ -112,6 +112,11 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
         this.craftDone = false;
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        this.ledger.setStorageEndpoint(storageEndpoint());
+        if (network == null && !hasStorageAccess()) return false;
 
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
@@ -184,6 +189,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         this.player = player;
         this.ledger = sharedLedger;
         this.usingSharedLedger = true;
+        if (sharedLedger != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         }
@@ -350,10 +356,10 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     private void returnStrayItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (network == null) {
+        if (storageEndpoint() == null && network == null) {
             network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         }
-        if (network != null) {
+        if (storageEndpoint() != null || network != null) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -365,7 +371,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     private void refundItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (ledger != null && ledger.isCommitted() && network != null) {
+        if (ledger != null && ledger.isCommitted() && (storageEndpoint() != null || network != null)) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);

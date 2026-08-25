@@ -70,7 +70,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     public StorageOperationResult extractExact(Player player, ItemStack template,
                                                long amount, boolean simulate) {
         ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
-                Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null);
+                Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null, simulate);
         return StorageOperationResult.extracted(
                 simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
                         : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
@@ -123,7 +123,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 com.huanghuang.rsintegration.storage.StorageItemKey key, long amount, boolean simulate) {
             ItemStack template = key.displayStack();
             ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
-                    Math.toIntExact(amount), player);
+                    Math.toIntExact(amount), player, simulate);
             return StorageOperationResult.extracted(
                     simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
                             : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
@@ -133,7 +133,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         @Override public StorageOperationResult extractMatching(ServerPlayer player, Ingredient ingredient,
                                                                  long amount, boolean simulate) {
             ItemStack result = RSIntegrationNetwork.extractFromNetwork(network, ingredient,
-                    Math.toIntExact(amount), player);
+                    Math.toIntExact(amount), player, simulate);
             return StorageOperationResult.extracted(
                     simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
                             : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,

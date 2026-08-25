@@ -1,16 +1,18 @@
 package com.huanghuang.rsintegration.transfer;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.fml.ModList;
 
 import java.util.function.Supplier;
 
 public final class StoreAllPacket {
 
-    // 0 = RS Network, 1 = Backpack
+    // 0 = RS Network, 1 = Backpack, 2 = Beyond Dimensions
     private final byte mode;
 
     public StoreAllPacket(byte mode) {
@@ -39,7 +41,10 @@ public final class StoreAllPacket {
         ctx.enqueueWork(() -> {
             if (!RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) return;
 
-            if (pkt.mode != 0 && pkt.mode != 1) return;
+            if (pkt.mode < 0 || pkt.mode > 2) return;
+            if (pkt.mode == 0 && !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return;
+            if (pkt.mode == 1 && !ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return;
+            if (pkt.mode == 2 && !ModList.get().isLoaded("beyonddimensions")) return;
 
             AbstractContainerMenu menu = player.containerMenu;
             if (menu == null) return;

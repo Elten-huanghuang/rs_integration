@@ -5,17 +5,13 @@ import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackU
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -39,16 +35,7 @@ public abstract class RefillUpgradeWrapperMixin
         extends UpgradeWrapperBase<RefillUpgradeWrapper, RefillUpgradeItem> {
 
     @Unique
-    private static final String RS_BLOCK_POS_TAG = "RSBlockPos";
-    @Unique
-    private static final String RS_BLOCK_DIMENSION_TAG = "RSBlockDimension";
-
-    @Unique
-    private boolean rsi$isRs;
-    @Unique
-    private BlockPos rsi$rsBlockPos;
-    @Unique
-    private ResourceKey<Level> rsi$rsDimensionKey;
+    private StorageReference rsi$storageReference;
 
     @Unique
     private static volatile boolean rsi$bcChecked;
@@ -74,17 +61,12 @@ public abstract class RefillUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
-        if (tag != null && tag.contains(RS_BLOCK_POS_TAG) && tag.contains(RS_BLOCK_DIMENSION_TAG)) {
-            this.rsi$isRs = true;
-            this.rsi$rsBlockPos = BlockPos.of(tag.getLong(RS_BLOCK_POS_TAG));
-            this.rsi$rsDimensionKey = ResourceKey.create(Registries.DIMENSION,
-                    ResourceLocation.parse(tag.getString(RS_BLOCK_DIMENSION_TAG)));
-        }
+        this.rsi$storageReference = StorageBackpackUtils.readReference(tag);
     }
 
     @Inject(method = "refillItemFor", at = @At(value = "HEAD"), remap = false, cancellable = true)
     private void onRefillItemFor(Entity entity, CallbackInfo ci) {
-        if (!this.rsi$isRs) {
+        if (this.rsi$storageReference == null) {
             if (entity instanceof Player player && rsi$checkTwoHanded(player)) {
                 ci.cancel();
             }
@@ -110,7 +92,7 @@ public abstract class RefillUpgradeWrapperMixin
     @Unique
     private void rsi$rsRefill(Player player, IItemHandler playerInv) {
         if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) return;
-        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$rsBlockPos, this.rsi$rsDimensionKey);
+        StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$storageReference);
         if (session == null) return;
         StorageSnapshotResult snapshotResult = session.snapshotItems(serverPlayer);
         if (!snapshotResult.successful()) return;
@@ -164,6 +146,9 @@ public abstract class RefillUpgradeWrapperMixin
                     Object filler = rsi$tsFillerField.get(targetSlot);
                     remainder = (ItemStack) rsi$fillerMethod.invoke(filler, player, playerInv, toFill);
                 } catch (Exception e) {
+                    // The filler receives a mutable stack. If it fails after
+                    // consuming part of it, return only the current remainder.
+                    StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, toFill);
                     continue;
                 }
 

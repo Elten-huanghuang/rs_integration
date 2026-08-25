@@ -122,7 +122,9 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            var network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (storageEndpoint() == null) {
+                this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            }
             if (network == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
@@ -284,15 +286,13 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             clearGrid(handler);
             return;
         }
-        var net = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
         for (int i = 0; i < handler.getSlots(); i++) {
             ItemStack extracted = handler.extractItem(i, 64, false);
             if (extracted.isEmpty()) continue;
-            ItemStack remainder = extracted;
-            if (net != null) {
-                remainder = net.insertItem(extracted, extracted.getCount(),
-                        com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            }
+            ItemStack remainder = insertIntoStorage(player, extracted, false);
             if (remainder != null && !remainder.isEmpty()
                     && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, remainder);

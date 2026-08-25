@@ -122,6 +122,18 @@ public final class MaterialSources {
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
                 available.merge(StackKey.of(item.stack(), true),
                         (int) Math.min(Integer.MAX_VALUE, item.amount()), Integer::sum)));
+        // A typed-fluid backend may be able to manufacture vanilla fluid
+        // containers from stored empty buckets + fluid.  Include this derived
+        // availability in the immutable planning view; the ledger performs
+        // the authoritative two-resource extraction during commit.
+        for (ItemStack filled : List.of(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET),
+                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+            long derived = endpoint.session().countDerivedContainer(player, filled);
+            if (derived > 0) {
+                available.merge(StackKey.of(filled, true),
+                        (int) Math.min(Integer.MAX_VALUE, derived), Integer::sum);
+            }
+        }
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             int exact = 0;
             for (var entry : available.entrySet()) {

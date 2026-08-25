@@ -35,6 +35,10 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         if (delegate != null) delegate.releasePreparationResources();
         delegate = selectDelegate(player, dim, pos);
         if (delegate == null) return PreparationResult.retry("unsupported cooking machine");
+        // The chain attaches the selected storage endpoint to this wrapper
+        // before preparation.  The actual furnace delegate is created lazily,
+        // so it must inherit the endpoint before it validates or prepares.
+        configureChild();
         PreparationResult result = delegate.prepare(player, recipeId, dim, pos);
         if (result.state() == PreparationState.READY) markCraftStarted();
         return result;
@@ -84,6 +88,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         if (machineDim != null) child.setMachineDim(machineDim);
         if (machineServer != null) child.setMachineServer(machineServer);
         if (targetOutput != null) child.setTargetOutput(targetOutput);
+        child.setStorageEndpoint(storageEndpoint());
     }
 
     @Override
@@ -94,6 +99,11 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void prepareGraphBatch(int executions) {
         active().prepareGraphBatch(executions);
+    }
+
+    @Override
+    public void prepareOperationCount(int totalOperations) {
+        active().prepareOperationCount(totalOperations);
     }
 
     @Override
@@ -177,12 +187,18 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
-        return delegate != null ? delegate.concurrencyCapabilities() : null;
+        // The graph preflight probes this wrapper before it knows which bound
+        // furnace will be selected. Vanilla and Iron Furnaces both isolate
+        // inputs/outputs in their own machine slots, so this is a safe
+        // capability for that probe; once prepared, preserve the child result.
+        return delegate != null
+                ? delegate.concurrencyCapabilities()
+                : BatchConcurrencyCapabilities.machineSlot();
     }
 
     @Override
     public boolean supportsConcurrentNodeExecution() {
-        return delegate != null && delegate.supportsConcurrentNodeExecution();
+        return delegate == null || delegate.supportsConcurrentNodeExecution();
     }
 
     @Override

@@ -64,7 +64,11 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         if (!(found instanceof PureDaisyRecipe pureDaisyRecipe)) return false;
         recipe = pureDaisyRecipe;
         expected = new ItemStack(recipe.getOutputState().getBlock());
-        network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        // The chain may already have selected a non-RS backend.  Only resolve
+        // the legacy RS network when no endpoint was supplied.
+        if (storageEndpoint() == null) {
+            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        }
         targets.clear();
         Arrays.stream(OFFSETS).map(pos::offset).filter(level::isEmptyBlock).forEach(targets::add);
         return (network != null || hasStorageAccess()) && !targets.isEmpty() && !expected.isEmpty();

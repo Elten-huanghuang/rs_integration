@@ -12,10 +12,15 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
 import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineCollectPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineInsertPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsUnbindMachinePacket;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraftforge.fml.ModList;
 
 /** Handles machine tab click events and dispatches GUI open requests. */
 public final class MachineTabHandler {
@@ -74,7 +79,7 @@ public final class MachineTabHandler {
     /** Open the Resonance Backpack GUI. Called when Resonance Backpack side button is clicked. */
     public static void toggleResonanceBackpack() {
         RSIntegrationMod.LOGGER.info("[RSI-Backpack] Button clicked, sending open packet to server");
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(new OpenResonanceBackpackPacket());
+        NetworkHandler.CHANNEL.sendToServer(new OpenResonanceBackpackPacket());
     }
 
     /** Handle a click on a machine tab. Sends the OpenBoundMachineGuiPacket to server. */
@@ -82,9 +87,17 @@ public final class MachineTabHandler {
         if (info == null) return;
         if (!checkCooldown()) return;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Clicked: {}", info.displayName());
-        GuiNavStack.pushCurrent();
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-            new OpenBoundMachineGuiPacket(info.dim(), info.pos(), info.itemKey()));
+        boolean beyondDimensions = isBeyondDimensions(info);
+        // GuiNavStack is an RS Grid return path. BD terminals have a different
+        // menu shape and must never be inspected or restored as an RS screen.
+        if (!beyondDimensions) GuiNavStack.pushCurrent();
+        if (beyondDimensions) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsOpenBoundMachineGuiPacket(info.dim(), info.pos()));
+        } else {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new OpenBoundMachineGuiPacket(info.dim(), info.pos(), info.itemKey()));
+        }
     }
 
     /** Send collect-output packet for a Quick-type machine. */
@@ -92,8 +105,13 @@ public final class MachineTabHandler {
         if (info == null) return;
         if (!checkCooldown()) return;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Collect: {} toRS={}", info.displayName(), toRS);
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-            new MachineCollectPacket(info.dim(), info.pos(), toRS));
+        if (isBeyondDimensions(info)) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsMachineCollectPacket(info.dim(), info.pos(), toRS));
+        } else {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new MachineCollectPacket(info.dim(), info.pos(), toRS));
+        }
     }
 
     /** Send insert-item packet for a Quick-type machine. */
@@ -101,8 +119,13 @@ public final class MachineTabHandler {
         if (info == null) return;
         if (!checkCooldown()) return;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Insert: {} slot={}", info.displayName(), slot);
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-            new MachineInsertPacket(info.dim(), info.pos(), slot));
+        if (isBeyondDimensions(info)) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsMachineInsertPacket(info.dim(), info.pos(), slot));
+        } else {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new MachineInsertPacket(info.dim(), info.pos(), slot));
+        }
     }
 
     /** Remove a machine from the connector that supplied this Hub entry. */
@@ -110,10 +133,22 @@ public final class MachineTabHandler {
         if (info == null) return false;
         if (!checkCooldown()) return false;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Unbind: {}", info.displayName());
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
-                new UnbindMachinePacket(info.dim(), info.pos()));
+        if (isBeyondDimensions(info)) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsUnbindMachinePacket(info.dim(), info.pos()));
+        } else {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new UnbindMachinePacket(info.dim(), info.pos()));
+        }
         return true;
     }
+
+    private static boolean isBeyondDimensions(BindingInfo info) {
+        return ModList.get().isLoaded("beyonddimensions")
+                && info.itemKey() != null
+                && info.itemKey().startsWith("beyonddimensions:");
+    }
+
 
     private static boolean checkCooldown() {
         long now = System.currentTimeMillis();

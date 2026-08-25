@@ -1,16 +1,13 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
@@ -70,7 +67,7 @@ public final class AltarBindingRegistry {
     /** Apply action to every stack-group: main, offhand, armor, and one
      *  call per Curios slot.  Eliminates the 4-tier iteration pattern
      *  that was duplicated across 7 methods (~150 lines). */
-    private static void forEachInventoryGroup(ServerPlayer player, Consumer<List<ItemStack>> action) {
+    static void forEachInventoryGroup(ServerPlayer player, Consumer<List<ItemStack>> action) {
         var inv = player.getInventory();
         action.accept(inv.items);
         action.accept(inv.offhand);
@@ -160,7 +157,10 @@ public final class AltarBindingRegistry {
             unbind(player.getUUID(), dimKey, pos, type);
         }
         invalidateScanCache();
-        RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                    .invalidateNetworkResolution(player.getUUID());
+        }
         return removed[0];
     }
 
@@ -189,9 +189,9 @@ public final class AltarBindingRegistry {
 
     /** Scan player inventory for a NetworkItem with a binding entry matching
      *  the given dim+pos, and if found, re-create the in-memory AltarBinding. */
-    private static boolean rebuildBindingFromNBT(ServerPlayer player,
-                                                 ResourceKey<Level> dim,
-                                                 BlockPos altarPos) {
+    static boolean rebuildBindingFromNBT(ServerPlayer player,
+                                         ResourceKey<Level> dim,
+                                         BlockPos altarPos) {
         ResourceLocation dimLoc = dim.location();
         boolean[] rebuilt = {false};
         forEachInventoryGroup(player, stacks -> {
@@ -303,44 +303,6 @@ public final class AltarBindingRegistry {
         }
     }
 
-    /**
-     * Resolve the RS network for an altar without extracting any items.
-     * Checks registered bindings first, then falls back to scanning the
-     * player's inventory for bound NetworkItems.
-     */
-    @Nullable
-    public static INetwork resolveNetworkForAltar(ServerPlayer player, ResourceKey<Level> dim,
-                                                   BlockPos altarPos) {
-        AltarBinding binding = BINDINGS.get(
-                GlobalPos.of(dim, altarPos), player.getUUID(), AltarBinding.RS_NETWORK);
-        if (binding == null && rebuildBindingFromNBT(player, dim, altarPos)) {
-            binding = BINDINGS.get(
-                    GlobalPos.of(dim, altarPos), player.getUUID(), AltarBinding.RS_NETWORK);
-        }
-        if (binding != null) {
-            INetwork network = resolveRsNetwork(player, binding);
-            if (network != null) return network;
-        }
-        return null;
-    }
-
-    @Nullable
-    private static INetwork resolveRsNetwork(ServerPlayer player, AltarBinding binding) {
-        try {
-            CompoundTag data = binding.data();
-            ResourceLocation dimId = ResourceLocation.tryParse(data.getString("dim"));
-            if (dimId == null) return null;
-            ResourceKey<Level> netDim = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, dimId);
-            BlockPos netPos = new BlockPos(
-                    data.getInt("x"), data.getInt("y"), data.getInt("z"));
-            return RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e);
-            return null;
-        }
-    }
-
     public static ItemStack tryExtractFromBindings(ServerPlayer player, ResourceKey<Level> dim,
                                                     BlockPos altarPos, Ingredient ingredient, int count) {
         GlobalPos key = GlobalPos.of(dim, altarPos);
@@ -358,41 +320,10 @@ public final class AltarBindingRegistry {
         return ItemStack.EMPTY;
     }
 
-    // ── network resolution via any binding ───────────────────────
-
-    /**
-     * Resolve the RS network by scanning all player inventory items that carry
-     * an altar binding and using the bound machine's recorded network info.
-     * This is the fallback when no RS terminal is open and no NetworkItem is
-     * in the inventory.
-     */
-    @Nullable
-    public static INetwork resolveNetworkFromAnyBinding(ServerPlayer player) {
-        return findInInventory(player, stacks -> resolveNetFromBindings(player, stacks));
-    }
-
-    private static INetwork resolveNetFromBindings(ServerPlayer player, List<ItemStack> stacks) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                ResourceKey<Level> altarDim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
-                BlockPos altarPos = entry.pos();
-                List<AltarBinding> altarBindings = BINDINGS.valuesFor(
-                        GlobalPos.of(altarDim, altarPos), player.getUUID());
-                if (altarBindings.isEmpty()) {
-                    rebuildBindingFromNBT(player, altarDim, altarPos);
-                    altarBindings = BINDINGS.valuesFor(
-                            GlobalPos.of(altarDim, altarPos), player.getUUID());
-                }
-                for (AltarBinding ab : altarBindings) {
-                    if (!ab.type().equals(AltarBinding.RS_NETWORK)) continue;
-                    INetwork net = resolveRsNetwork(player, ab);
-                    if (net != null) return net;
-                }
-            }
-        }
-        return null;
+    static List<AltarBinding> bindingsFor(ServerPlayer player,
+                                          ResourceKey<Level> dim,
+                                          BlockPos altarPos) {
+        return BINDINGS.valuesFor(GlobalPos.of(dim, altarPos), player.getUUID());
     }
 
     // ── multi-block machine query ───────────────────────────────
@@ -537,7 +468,10 @@ public final class AltarBindingRegistry {
     public static void onServerStopped(ServerStoppedEvent event) {
         BINDINGS.clear();
         SCAN_CACHE.clear();
-        RSIntegrationNetwork.clearNetworkResolutionCache();
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                    .clearNetworkResolutionCache();
+        }
     }
 
     @SubscribeEvent
@@ -576,8 +510,12 @@ public final class AltarBindingRegistry {
 
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                RSIntegrationNetwork.invalidateNetworkResolution(p.getUUID());
-                RSSidePanelNetworkHandler.sendBindingSync(p);
+                if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+                    com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                            .invalidateNetworkResolution(p.getUUID());
+                    com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                            .sendBindingSync(p);
+                }
             }
         }
     }
@@ -732,7 +670,10 @@ public final class AltarBindingRegistry {
         }
         for (AltarBinding binding : bindings) {
             if (AltarBinding.RS_NETWORK.equals(binding.type())) {
-                if (resolveRsNetwork(player, binding) != null) return true;
+                if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                        && RSAltarBindingResolver.resolveNetworkForBinding(player, binding) != null) {
+                    return true;
+                }
                 continue;
             }
             if (AltarBinding.BD_NETWORK.equals(binding.type())) {

@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -224,12 +226,16 @@ public final class FaCraftPacket {
         }
 
         // Count available materials
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
+        if (endpoint == null) network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
 
         // Pre-check essences per-type before material extraction
         if (!FaRitualHelper.checkEssences(player, ritual, be, ritualManager)) return;
 
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, network);
+        Map<StackKey, Integer> available = endpoint != null
+                ? MaterialSources.listAllAvailable(player, endpoint)
+                : MaterialSources.listAllAvailable(player, network);
 
         // Try auto-crafting if items are missing
         if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
@@ -250,14 +256,14 @@ public final class FaCraftPacket {
                 return;
             }
 
-            if (!autoSteps.isEmpty() && network != null) {
+            if (!autoSteps.isEmpty() && (network != null || endpoint != null)) {
                 player.displayClientMessage(Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()), true);
                 List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
                 for (ResourceLocation id : autoSteps) {
                     wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
                 }
-                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network)) {
+                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network, endpoint)) {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
                     return;
                 }
@@ -299,7 +305,7 @@ public final class FaCraftPacket {
         }
 
         // Phase 1: reserve all items via ledger
-        if (network == null) {
+        if (endpoint == null && network == null) {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
 
@@ -307,6 +313,7 @@ public final class FaCraftPacket {
         ItemStack mainTemplate = ItemStack.EMPTY;
         List<ItemStack> inputTemplates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
             if (mainIng != null && !mainIng.isEmpty()) {
                 mainTemplate = ensureMaterialAvailable(player, altarDim, pos, mainIng, 1, ledger);
                 if (mainTemplate.isEmpty()) {
@@ -352,7 +359,7 @@ public final class FaCraftPacket {
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Placement failed for ritual {}:", ritualId, e);
-                rollbackAll(player, be, filledPedestals, network);
+                rollbackAll(player, be, filledPedestals, network, endpoint);
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
                 return;
             }
@@ -378,21 +385,25 @@ public final class FaCraftPacket {
             }
 
             // Phase 3: require a RitualStarterItem
-            final FaRitualHelper.StarterResult starterResult = FaRitualHelper.findRitualStarterItem(player, network);
+            final FaRitualHelper.StarterResult starterResult = endpoint != null
+                    ? FaRitualHelper.findRitualStarterItem(player, endpoint)
+                    : FaRitualHelper.findRitualStarterItem(player, network);
             final ItemStack starterStack = starterResult.stack();
             final INetwork starterNetwork = starterResult.sourceNetwork();
+            final CraftStorageEndpoint starterEndpoint = starterResult.sourceEndpoint();
             if (starterStack.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] tryCraft: no usable RitualStarterItem in inventory or RS");
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
-                rollbackAll(player, be, filledPedestals, network);
+                rollbackAll(player, be, filledPedestals, network, endpoint);
                 return;
             }
 
             // Phase 4: commit ledger first
             if (!ledger.commit(network, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
-                rollbackAll(player, be, filledPedestals, network);
-                FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                rollbackAll(player, be, filledPedestals, network, endpoint);
+                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
@@ -413,21 +424,23 @@ public final class FaCraftPacket {
 
                 if (callback.rejected) {
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
-                    rollbackAll(player, be, filledPedestals, network);
-                    FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                    rollbackAll(player, be, filledPedestals, network, endpoint);
+                    if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                    else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                     player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                     return;
                 }
             } catch (java.lang.reflect.InvocationTargetException e) {
                 Throwable root = e.getCause() != null ? e.getCause() : e;
                 RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
-                rollbackAll(player, be, filledPedestals, network);
-                FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                rollbackAll(player, be, filledPedestals, network, endpoint);
+                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
-                rollbackAll(player, be, filledPedestals, network);
+                rollbackAll(player, be, filledPedestals, network, endpoint);
                 FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
@@ -492,16 +505,22 @@ public final class FaCraftPacket {
     // ── rollback ───────────────────────────────────────────────
 
     private static void rollbackAll(ServerPlayer player, Object forge,
-                                     List<Object> filledPedestals, INetwork network) {
+                                     List<Object> filledPedestals, INetwork network,
+                                     @Nullable CraftStorageEndpoint endpoint) {
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
-                    if (network != null) {
+                    if (endpoint != null || network != null) {
+                        if (endpoint != null) {
+                            ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        } else {
                         ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                                 .insertLegacy(network, player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                         }
                     } else {
                         ItemHandlerHelper.giveItemToPlayer(player, stack);
@@ -515,11 +534,16 @@ public final class FaCraftPacket {
             int mainSlot = FaRitualHelper.getMainSlot();
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
-                if (network != null) {
+                if (endpoint != null || network != null) {
+                    if (endpoint != null) {
+                        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+                        if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    } else {
                     ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                             .insertLegacy(network, player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    }
                     }
                 } else {
                     ItemHandlerHelper.giveItemToPlayer(player, stack);

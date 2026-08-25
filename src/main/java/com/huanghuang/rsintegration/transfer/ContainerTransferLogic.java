@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StorageSession;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -42,13 +45,55 @@ final class ContainerTransferLogic {
 
     private ContainerTransferLogic() {}
 
-    // 0 = RS Network, 1 = Backpack
+    // 0 = RS Network, 1 = Backpack, 2 = Beyond Dimensions
     static void transferAll(ServerPlayer player, AbstractContainerMenu menu, byte mode) {
         if (mode == 1) {
             transferToBackpack(player, menu);
         } else if (mode == 0) {
             transferToRS(player, menu);
+        } else if (mode == 2) {
+            transferToBeyondDimensions(player, menu);
         }
+    }
+
+    private static void transferToBeyondDimensions(ServerPlayer player, AbstractContainerMenu menu) {
+        StorageSession session = RSIntegrationMod.STORAGE_BACKENDS.registry()
+                .resolveDefaultSessionsForPlayer(player).stream()
+                .filter(s -> "beyonddimensions".equals(s.reference().backendId().value()))
+                .findFirst().orElse(null);
+        if (session == null || !session.hasPermission(player, StoragePermission.INSERT)) {
+            player.sendSystemMessage(Component.translatable("rsi.transfer.no_network"), false);
+            return;
+        }
+        int totalStacks = 0;
+        int totalItems = 0;
+        boolean hasCrafting = hasCraftingContainer(menu);
+        for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
+            Slot slot = menu.slots.get(slotIndex);
+            if (isPlayerInventorySlot(player, menu, slotIndex, slot) || isUpgradeSlot(slot)) continue;
+            if (hasCrafting && isResultSlot(slot)) continue;
+            if (slot.container instanceof CraftingContainer) continue;
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty() || !slot.mayPickup(player)) continue;
+            ItemStack input = stack.copy();
+            StorageOperationResult result = session.insert(player, input, false);
+            ItemStack remainder = result.remainder().orElse(input);
+            // Keep FTB Quests (and other external progress consumers) in sync
+            // with items accepted by the backend-neutral BD path. The RS path
+            // already reports this delta through TrackedNetworkInsertion;
+            // without this call, pressing F in a container silently bypasses
+            // quest detection even though the item is stored successfully.
+            InsertedStackDelta.report(player, input, remainder);
+            int inserted = input.getCount() - remainder.getCount();
+            if (inserted <= 0) continue;
+            slot.set(remainder.isEmpty() ? ItemStack.EMPTY : remainder);
+            totalItems += inserted;
+            totalStacks++;
+        }
+        menu.broadcastChanges();
+        player.sendSystemMessage(totalStacks > 0
+                ? Component.translatable("rsi.transfer.success", totalItems, totalStacks)
+                : Component.translatable("rsi.transfer.nothing"), false);
     }
 
     private static void transferToRS(ServerPlayer player, AbstractContainerMenu menu) {

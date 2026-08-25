@@ -53,6 +53,8 @@ public final class MachineHub {
     private float animProgress; // 0..1
     private final List<BindingInfo> machines = new ArrayList<>();
     private final List<BindingInfo> filteredMachines = new ArrayList<>();
+    /** Local fallback favorites used by non-RS storage terminals. */
+    private final java.util.Set<String> localFavorites = new java.util.HashSet<>();
     private int hoveredIndex = -1;
     private int favoriteHoveredIndex = -1;
     private boolean closeButtonHovered;
@@ -109,6 +111,25 @@ public final class MachineHub {
     }
     public static List<BindingInfo> getMachines() { return INSTANCE.filteredMachines; }
     public static List<BindingInfo> getAllMachines() { return INSTANCE.machines; }
+    public static boolean isLocalFavorite(BindingInfo info) {
+        return info != null && INSTANCE.localFavorites.contains(favoriteKey(info));
+    }
+    public static void toggleLocalFavorite(BindingInfo info) {
+        if (info == null) return;
+        String key = favoriteKey(info);
+        if (!INSTANCE.localFavorites.add(key)) INSTANCE.localFavorites.remove(key);
+    }
+    /** Local favorites used by the BD terminal quick-open strip. */
+    public static List<BindingInfo> getLocalFavoriteMachines() {
+        List<BindingInfo> result = new ArrayList<>();
+        for (BindingInfo info : INSTANCE.machines) {
+            if (isLocalFavorite(info)) result.add(info);
+        }
+        return List.copyOf(result);
+    }
+    private static String favoriteKey(BindingInfo info) {
+        return info.dim() + "|" + info.pos().asLong() + "|" + info.blockKey();
+    }
     public static String getFilterText() { return INSTANCE.filterText; }
     public static int getScrollOffset() { return INSTANCE.scrollOffset; }
     public static void setScrollOffset(int off) { INSTANCE.scrollOffset = off; }

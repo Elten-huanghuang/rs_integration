@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.reforging;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.refinedmods.refinedstorage.api.network.security.Permission;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -59,12 +58,11 @@ public final class ReforgingRestockRequestPacket {
         int fromInventory = takeFromInventory(player, template, needed);
         int remaining = needed - fromInventory;
         int fromNetwork = 0;
-        var network = remaining > 0 ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
-        boolean denied = remaining > 0 && network != null && network.getSecurityManager() != null
-                && !network.getSecurityManager().hasPermission(Permission.EXTRACT, player);
-        if (remaining > 0 && network != null && !denied) {
-            ItemStack extracted = RSIntegrationNetwork.extractExactFromNetwork(
-                    network, template, remaining, player);
+        var endpoint = remaining > 0 ? StorageRestockSupport.resolve(player).orElse(null) : null;
+        boolean denied = remaining > 0 && endpoint != null
+                && !StorageRestockSupport.canExtract(endpoint, player);
+        if (remaining > 0 && endpoint != null && !denied) {
+            ItemStack extracted = StorageRestockSupport.extract(endpoint, player, template, remaining);
             fromNetwork = extracted.getCount();
         }
         int inserted = fromInventory + fromNetwork;
@@ -77,7 +75,7 @@ public final class ReforgingRestockRequestPacket {
         ReforgingRestockResultPacket.Status status = missing == 0
                 ? ReforgingRestockResultPacket.Status.COMPLETE
                 : denied ? ReforgingRestockResultPacket.Status.NO_PERMISSION
-                : network == null ? ReforgingRestockResultPacket.Status.NO_NETWORK
+                : endpoint == null ? ReforgingRestockResultPacket.Status.NO_NETWORK
                 : ReforgingRestockResultPacket.Status.PARTIAL;
         send(player, new ReforgingRestockResultPacket(status, inserted, missing));
     }

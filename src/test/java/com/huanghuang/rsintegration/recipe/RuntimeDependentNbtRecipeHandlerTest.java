@@ -24,6 +24,11 @@ class RuntimeDependentNbtRecipeHandlerTest extends BootstrapTest {
     }
 
     @Test
+    void malumHandlerIsPreferredForMachineRecipesThatImplementCraftingRecipe() {
+        assertTrue(new MalumRecipeHandler().preferHandlerIngredients());
+    }
+
+    @Test
     void maidAltarRecognizesOnlyNonEmptyCopyInputs() {
         TlmAltarRecipeHandler handler = new TlmAltarRecipeHandler();
 

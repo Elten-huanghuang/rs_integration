@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -174,18 +176,21 @@ public final class MalumCraftPacket {
                 recipeId, centerCount, extraCount, spiritCount, emptyPedestalSlots);
 
         // -- Phase 2: reserve all items (deferred extraction via ledger) --
-        INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        INetwork network = endpoint == null
+                ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
         List<Integer> filledPedestalIndices = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (network != null) {
-                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-            }
+            ledger.setStorageEndpoint(endpoint);
+            if (endpoint == null && network != null) ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
             try {
                 // 1. Center item -> altar inventory slot 0
                 if (inputObj != null) {
                     Ingredient centerIng = (Ingredient) getField(inputObj, "ingredient");
                     if (centerIng != null) {
-                        ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                        ItemStack stack = endpoint != null
+                                ? ledger.reserveFromEndpoint(centerIng, centerCount, endpoint, player)
+                                : CraftPacketUtils.ensureMaterialAvailable(
                                 player, altarDim, pos, centerIng, centerCount, ledger, network);
                         if (stack.isEmpty()) {
                             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
@@ -203,7 +208,9 @@ public final class MalumCraftPacket {
                     Ingredient ing = (Ingredient) getField(eItem, "ingredient");
                     if (ing == null) continue;
                     int itemCount = CraftPacketUtils.readIngredientCount(eItem, 1);
-                    ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                    ItemStack stack = endpoint != null
+                            ? ledger.reserveFromEndpoint(ing, itemCount, endpoint, player)
+                            : CraftPacketUtils.ensureMaterialAvailable(
                             player, altarDim, pos, ing, itemCount, ledger, network);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
@@ -223,7 +230,9 @@ public final class MalumCraftPacket {
                     int sCount = CraftPacketUtils.readIngredientCount(swc, 1);
                     Item spiritItem = (Item) swc.getClass().getMethod("getItem").invoke(swc);
                     Ingredient spiritIng = Ingredient.of(spiritItem);
-                    ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                    ItemStack stack = endpoint != null
+                            ? ledger.reserveFromEndpoint(spiritIng, sCount, endpoint, player)
+                            : CraftPacketUtils.ensureMaterialAvailable(
                             player, altarDim, pos, spiritIng, sCount, ledger, network);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
@@ -266,8 +275,8 @@ public final class MalumCraftPacket {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Malum] craft(Recipe) threw for recipe {}:", recipeId, e);
                 player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
-                refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
-                refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
+                refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, endpoint, player);
+                refundAndClearPedestals(pedestals, filledPedestalIndices, network, endpoint, player);
                 return;
             }
 
@@ -278,8 +287,8 @@ public final class MalumCraftPacket {
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.error("[RSI-Malum] craft() threw for recipe {}:", recipeId, e);
                     player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
-                    refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, player);
-                    refundAndClearPedestals(pedestals, filledPedestalIndices, network, player);
+                    refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, endpoint, player);
+                    refundAndClearPedestals(pedestals, filledPedestalIndices, network, endpoint, player);
                     return;
                 }
 
@@ -334,17 +343,23 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearAltar(Object invMain, Object invSpirit, int mainSlots, int spiritSlots,
-                                            INetwork network, ServerPlayer player) {
+                                            INetwork network, @Nullable CraftStorageEndpoint endpoint,
+                                            ServerPlayer player) {
         for (int i = 0; i < mainSlots; i++) {
             try {
                 ItemStack stack = (ItemStack) invMain.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(invMain, i);
                 if (!stack.isEmpty()) {
-                    if (network != null) {
+                    if (endpoint != null || network != null) {
+                        if (endpoint != null) {
+                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
+                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        } else {
                         ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
                             net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                         }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
@@ -358,11 +373,16 @@ public final class MalumCraftPacket {
                 ItemStack stack = (ItemStack) invSpirit.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
                 if (!stack.isEmpty()) {
-                    if (network != null) {
+                    if (endpoint != null || network != null) {
+                        if (endpoint != null) {
+                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
+                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        } else {
                         ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
                             net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                         }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
@@ -374,7 +394,8 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearPedestals(List<?> pedestals, List<Integer> indices,
-                                                 INetwork network, ServerPlayer player) {
+                                                 INetwork network, @Nullable CraftStorageEndpoint endpoint,
+                                                 ServerPlayer player) {
         for (int idx : indices) {
             if (idx < 0 || idx >= pedestals.size()) continue;
             try {
@@ -384,11 +405,16 @@ public final class MalumCraftPacket {
                 ItemStack stack = (ItemStack) inv.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(inv, 0);
                 if (!stack.isEmpty()) {
-                    if (network != null) {
+                    if (endpoint != null || network != null) {
+                        if (endpoint != null) {
+                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
+                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        } else {
                         ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
                             net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                        }
                         }
                     } else if (player != null) {
                         net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());

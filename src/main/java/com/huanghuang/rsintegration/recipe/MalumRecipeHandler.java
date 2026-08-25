@@ -28,6 +28,15 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
     @Override
     public ModType modType() { return ModType.byId("malum"); }
 
+    /**
+     * Spirit focusing recipes implement CraftingRecipe for JEI compatibility,
+     * but their central input is a reusable crucible catalyst.  The generic
+     * crafting probe cannot infer that from a crafting remainder, so this
+     * handler must win before CraftTweaker/vanilla ingredient extraction.
+     */
+    @Override
+    public boolean preferHandlerIngredients() { return true; }
+
     @Override
     public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
         Class<?> scan = recipe.getClass();

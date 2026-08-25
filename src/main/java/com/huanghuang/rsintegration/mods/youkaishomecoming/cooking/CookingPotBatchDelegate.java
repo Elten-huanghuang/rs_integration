@@ -795,7 +795,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (network != null) {
+        if (storageEndpoint() != null || network != null) {
             ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
             if (!leftover.isEmpty() && player != null)
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);

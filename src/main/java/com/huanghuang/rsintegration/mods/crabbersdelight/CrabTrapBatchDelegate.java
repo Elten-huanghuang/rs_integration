@@ -214,7 +214,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         // Return first item as the "result", deposit rest to RS
         ItemStack primary = outputs.get(0);
-        if (network != null) {
+        if (storageEndpoint() != null || network != null) {
             for (int i = 1; i < outputs.size(); i++) {
                 insertIntoStorage(player, outputs.get(i), false);
             }

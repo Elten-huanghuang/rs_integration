@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -1106,6 +1107,14 @@ public final class CraftPacketUtils {
     }
 
     public static List<IngredientSpec> extractCraftingIngredientSpecs(CraftingRecipe recipe) {
+        // Some machine recipes implement CraftingRecipe only so JEI can display
+        // them.  Give their registered handler a chance to preserve semantics
+        // such as reusable catalysts before applying vanilla or script probes.
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler != null && handler.preferHandlerIngredients()) {
+            List<IngredientSpec> handled = handler.getIngredients(recipe);
+            if (handled != null) return handled;
+        }
         List<IngredientSpec> craftTweakerSpecs = tryExtractCraftTweakerSpecs(recipe);
         if (craftTweakerSpecs != null) return craftTweakerSpecs;
         List<IngredientSpec> kubeJsSpecs = KubeJsCraftingSemantics.extractSpecs(recipe);
@@ -1500,7 +1509,7 @@ public final class CraftPacketUtils {
                                     ? RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player)
                                     : null;
             if (endpoint == null && network == null && altarDim != null && altarPos != null) {
-                network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
+                network = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
             }
             ItemStack reserved = ledger.reserve(ingredient, count, network, player, altarDim, altarPos);
             if (!reserved.isEmpty()) return reserved;
@@ -1535,7 +1544,7 @@ public final class CraftPacketUtils {
 
         INetwork network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
         if (network == null) {
-            network = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
+            network = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
         }
         if (network == null) return ItemStack.EMPTY;
 
@@ -1568,7 +1577,7 @@ public final class CraftPacketUtils {
         // specific RS network, that network takes priority over any random
         // NetworkItem the player happens to carry.
         if (altarDim != null && altarPos != null) {
-            INetwork net = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
+            INetwork net = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
             if (net != null) return net;
         }
         // Fall back only to a credential that is present now. A persisted

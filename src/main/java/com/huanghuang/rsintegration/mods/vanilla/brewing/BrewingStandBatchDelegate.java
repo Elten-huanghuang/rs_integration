@@ -6,7 +6,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -66,8 +65,11 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         if (recipe == null || stand == null) return false;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
-        if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        }
+        if (network == null && !hasStorageAccess()) return false;
+        ledger.setStorageEndpoint(storageEndpoint());
         ItemStack input = ledger.reserve(recipe.getIngredients().get(0), 3, network, player,
                 level.dimension(), pos);
         ItemStack reagent = ledger.reserveExact(recipe.reagent(), 1, network, player, level.dimension(), pos);

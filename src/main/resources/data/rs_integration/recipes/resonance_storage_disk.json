@@ -1,6 +1,9 @@
 {
   "conditions": [
-    { "mod_loaded": "refinedstorage" }
+    {
+      "type": "forge:mod_loaded",
+      "modid": "refinedstorage"
+    }
   ],
   "type": "minecraft:crafting_shaped",
   "pattern": [

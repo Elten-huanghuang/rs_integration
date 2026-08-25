@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 build/
+bin/
 output/
 !gradle/wrapper/gradle-wrapper.jar
 

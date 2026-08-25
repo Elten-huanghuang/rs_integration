@@ -173,7 +173,7 @@ public final class MachineHubRenderer {
 
             boolean isHovered = mouseX >= sx && mouseX < sx + SLOT_SIZE
                     && mouseY >= sy && mouseY < sy + SLOT_SIZE;
-            boolean favorite = MachineFavoritesClient.isFavorite(info);
+            boolean favorite = isFavorite(info);
             int favoriteX = sx + 1;
             int favoriteY = sy + 1;
             boolean favoriteHovered = isHovered
@@ -322,6 +322,13 @@ public final class MachineHubRenderer {
     static ItemStack resolveIcon(BindingInfo info) {
         return BindingEventHandler.resolveBlockIcon(
                 info.blockRegKey(), info.blockKey(), info.displayStack());
+    }
+
+    private static boolean isFavorite(BindingInfo info) {
+        if (net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")) {
+            return MachineFavoritesClient.isFavorite(info);
+        }
+        return MachineHub.isLocalFavorite(info);
     }
 
     private static void drawFavoriteStar(GuiGraphics graphics, int x, int y, int color) {

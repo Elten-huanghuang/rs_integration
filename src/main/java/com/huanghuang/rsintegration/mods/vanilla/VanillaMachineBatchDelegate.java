@@ -282,10 +282,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        if (this.network == null) {
-            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null) {
+                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            }
         }
+        this.ledger.setStorageEndpoint(storageEndpoint());
         this.craftDone = false;
 
         if (kind == MachineKind.FURNACE) {

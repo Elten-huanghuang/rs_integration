@@ -1,9 +1,11 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CookingMachineFamilyTest {
     @Test
@@ -33,5 +35,14 @@ class CookingMachineFamilyTest {
         assertEquals(50, BrickFurnaceCompat.scale(100, 0.5));
         assertEquals(150, BrickFurnaceCompat.scale(100, 1.5));
         assertEquals(0, BrickFurnaceCompat.scale(100, 0));
+    }
+
+    @Test
+    void cookingWrapperExposesParallelCapabilityBeforeMachineSelection() {
+        CookingMachineBatchDelegate delegate = new CookingMachineBatchDelegate();
+
+        assertEquals(BatchConcurrencyCapabilities.machineSlot(),
+                delegate.concurrencyCapabilities());
+        assertTrue(delegate.supportsConcurrentNodeExecution());
     }
 }

@@ -1,8 +1,10 @@
 package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.util.TextBuilder;
-import com.refinedmods.refinedstorage.blockentity.ControllerBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -49,8 +51,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     }
 
     public static boolean isBoundToRS(ItemStack stack) {
-        CompoundTag tag = stack.getTag();
-        return tag != null && tag.contains("RSBlockPos") && tag.contains("RSBlockDimension");
+        return StorageBackpackUtils.readReference(stack.getTag()) != null;
     }
 
     @Override
@@ -67,12 +68,16 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     public static void appendRSInfo(ItemStack stack, List<Component> tooltip) {
         CompoundTag tag = stack.hasTag() ? stack.getTag() : null;
         if (tag != null) {
-            String dimKey = tag.getString("RSBlockDimension");
-            if (!dimKey.isEmpty() && tag.contains("RSBlockPos")) {
-                BlockPos pos = BlockPos.of(tag.getLong("RSBlockPos"));
+            StorageReference reference = StorageBackpackUtils.readReference(tag);
+            if (reference != null) {
+                String dimKey = tag.getString("RSBlockDimension");
+                BlockPos pos = tag.contains("RSBlockPos") ? BlockPos.of(tag.getLong("RSBlockPos")) : null;
                 tooltip.add(TextBuilder.translate("item.sophisticatedbackpacks.rs_network.tooltip")
                         .colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
-                tooltip.add(TextBuilder.of("  " + dimDisplayName(dimKey) + " " + pos.toShortString())
+                String target = reference.backendId().value().equals("refinedstorage") && pos != null
+                        ? dimDisplayName(dimKey) + " " + pos.toShortString()
+                        : reference.backendId().value() + " #" + reference.networkId();
+                tooltip.add(TextBuilder.of("  " + target)
                         .cornflowerBlue().build());
             } else {
                 tooltip.add(TextBuilder.translate("item.sophisticatedbackpacks.rs_network.unbound")
@@ -141,17 +146,52 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
         Level level = context.getLevel();
         if (level.isClientSide) return InteractionResult.sidedSuccess(true);
 
-        BlockPos pos = context.getClickedPos();
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof ControllerBlockEntity)) return InteractionResult.PASS;
-
         ItemStack stack = context.getItemInHand();
         CompoundTag tag = stack.getOrCreateTag();
-        tag.putLong("RSBlockPos", pos.asLong());
-        ResourceKey<Level> dim = level.dimension();
-        tag.putString("RSBlockDimension", dim.location().toString());
+        BlockPos pos = context.getClickedPos();
+        BlockEntity be = level.getBlockEntity(pos);
+        StorageReference reference = null;
+        if (isRsController(be)) {
+            ResourceKey<Level> dim = level.dimension();
+            reference = new StorageReference(new StorageBackendId("refinedstorage"),
+                    "v1|" + dim.location() + "@" + pos.getX() + "," + pos.getY() + "," + pos.getZ());
+            tag.putLong("RSBlockPos", pos.asLong());
+            tag.putString("RSBlockDimension", dim.location().toString());
+        } else {
+            // BD has no controller block. Hold its bound terminal in the
+            // offhand while binding the upgrade in the main hand.
+            ItemStack terminal = player.getOffhandItem();
+            var hook = com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.findHook(terminal);
+            if (hook.isPresent()) {
+                var binding = hook.get().createBinding(terminal).orElse(null);
+                if (binding != null && com.huanghuang.rsintegration.network.binding.AltarBinding.BD_NETWORK.equals(binding.type())) {
+                    reference = new StorageReference(new StorageBackendId("beyonddimensions"),
+                            Integer.toString(binding.data().getInt("networkId")));
+                }
+            }
+            if (reference == null && player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+                reference = RSIntegrationMod.STORAGE_BACKENDS.registry()
+                        .resolveDefaultSessionsForPlayer(serverPlayer).stream()
+                        .map(StorageSession::reference)
+                        .filter(r -> "beyonddimensions".equals(r.backendId().value()))
+                        .findFirst().orElse(null);
+            }
+            if (reference == null) return InteractionResult.PASS;
+        }
+        if (!"refinedstorage".equals(reference.backendId().value())) {
+            tag.remove("RSBlockPos");
+            tag.remove("RSBlockDimension");
+        }
+        StorageBackpackUtils.writeReference(tag, reference);
         player.displayClientMessage(
                 Component.translatable("item.sophisticatedbackpacks.rs_network.bound"), true);
         return InteractionResult.sidedSuccess(false);
+    }
+
+    private static boolean isRsController(BlockEntity blockEntity) {
+        return blockEntity != null
+                && net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")
+                && "com.refinedmods.refinedstorage.blockentity.ControllerBlockEntity"
+                .equals(blockEntity.getClass().getName());
     }
 }

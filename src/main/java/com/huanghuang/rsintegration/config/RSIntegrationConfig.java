@@ -538,8 +538,9 @@ public final class RSIntegrationConfig {
 
         c.push("autoEat");
         ENABLE_AUTO_EAT = c
-                .comment("Enable the auto-eat system on the RS Grid Screen.",
-                        "Adds three buttons to the Grid Screen for automated eating from the RS network.",
+                .comment("Enable the auto-eat system on supported storage screens.",
+                        "Adds three buttons to RS Grid and Beyond Dimensions terminal screens.",
+                        "Food and cost items are read from the selected backend storage network.",
                         "Modes: Diversity (SolCarrot), Stack (bulk eat), Diet (nutrition balance).")
                 .define("enableAutoEat", true);
         AUTO_EAT_REQUIRED_EFFECT = c

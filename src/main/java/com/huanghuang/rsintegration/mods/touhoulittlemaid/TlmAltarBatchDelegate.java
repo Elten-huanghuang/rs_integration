@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -84,6 +86,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private float powerBeforeTopUp;
     private int reservedPowerPointItems;
     private boolean powerTopUpApplied;
+    private int plannedOperationCount = 1;
+    private boolean batchPowerProvisioned;
 
     // Storage block positions and their TileEntityAltars (the 8 surrounding blocks)
     private List<BlockPos> storagePositions;
@@ -91,6 +95,15 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private boolean[] slotsFilled;            // tracks which slots we put items into
 
     // ── IBatchDelegate impl ──
+
+    @Override
+    public void prepareOperationCount(int totalOperations) {
+        int normalized = Math.max(1, totalOperations);
+        if (plannedOperationCount != normalized) {
+            plannedOperationCount = normalized;
+            batchPowerProvisioned = false;
+        }
+    }
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -156,10 +169,9 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // Verify recipe type -- reject non-altar TLM recipes (e.g. maid crafting)
         if (this.recipe != null && TLMReflection.altarRecipeClass != null && !TLMReflection.altarRecipeClass.isInstance(this.recipe)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] validateAndInit: recipe {} is not an AltarRecipe", recipeId);
-            player.sendSystemMessage(Component.literal("§c")
-                    .append(Component.translatable("rsi.generic.error.wrong_recipe_type"))
-                    .append(" [" + recipeId + " expected=AltarRecipe got="
-                            + this.recipe.getClass().getSimpleName() + "]"));
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.error.wrong_recipe_type_detail",
+                    recipeId, "AltarRecipe", this.recipe.getClass().getSimpleName()));
             return false;
         }
 
@@ -208,13 +220,25 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     // eight base-layer structure positions, not the observed count.
                     this.centrePos = new BlockPos((int) (sumX / 8L), targetY, (int) (sumZ / 8L));
                     BlockPos spawnPos = centrePos.above(2);
-                    // Preserve the structure-wide region resolved above; only
-                    // fall back to locally-computed bounds if resolution failed.
+                    // The altar spawns output above the centre, which may be
+                    // outside the structure block bounds returned by the
+                    // resolver. Always include that point so magnets and other
+                    // pickup handlers cannot win the race before interception.
+                    net.minecraft.world.phys.AABB spawnBox =
+                            new net.minecraft.world.phys.AABB(spawnPos).inflate(1.0);
                     if (this.outputCaptureRegion == null) {
                         this.outputCaptureRegion = new net.minecraft.world.phys.AABB(
                                 minX, Math.min(minY, spawnPos.getY()), minZ,
                                 maxX + 1, Math.max(maxY + 1, spawnPos.getY() + 1), maxZ + 1)
                                 .inflate(1.0);
+                    } else {
+                        this.outputCaptureRegion = new net.minecraft.world.phys.AABB(
+                                Math.min(this.outputCaptureRegion.minX, spawnBox.minX),
+                                Math.min(this.outputCaptureRegion.minY, spawnBox.minY),
+                                Math.min(this.outputCaptureRegion.minZ, spawnBox.minZ),
+                                Math.max(this.outputCaptureRegion.maxX, spawnBox.maxX),
+                                Math.max(this.outputCaptureRegion.maxY, spawnBox.maxY),
+                                Math.max(this.outputCaptureRegion.maxZ, spawnBox.maxZ));
                     }
                     if (count != 8) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] Unexpected altar base count: {} (expected 8), altar={}",
@@ -287,7 +311,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (cost > 0) {
             Float current = readCurrentPower(player);
             if (current != null && current < cost) {
-                int available = countPowerPointItems(player, dim, pos);
+                int available = countPowerPointItems(player, dim, pos, storageEndpoint());
                 if (available < powerItemsNeeded(current, cost)) {
                     return PreparationResult.fatal("insufficient altar power",
                             Component.translatable("rsi.tlm.warn.insufficient_power_bind",
@@ -315,6 +339,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
+        this.ledger.setStorageEndpoint(storageEndpoint());
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
         }
@@ -537,7 +562,11 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // Never synthesize a result from the recipe here. Absence may mean a
         // magnet or another pickup path already took the real entity; returning a
         // template would then duplicate it (one in inventory, one delivered to RS).
-        RSIntegrationMod.LOGGER.warn("[RSI-Batch-TLM] No physical output ItemEntity found at {}", outputPos);
+        // A world-output capture handle may already have claimed and removed
+        // the entity before this compatibility fallback scans the world. That
+        // is normal for successful graph execution, so do not report it as a
+        // missing-output failure; the graph settles the captured stack itself.
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Output already captured or picked up at {}", outputPos);
         return ItemStack.EMPTY;
     }
 
@@ -546,6 +575,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         rollbackAll();
         resetState();
         craftEverConfirmed = false;
+        plannedOperationCount = 1;
+        batchPowerProvisioned = false;
         clearSlotsFilled();
     }
 
@@ -554,6 +585,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         clearHandlers();
         resetState();
         craftEverConfirmed = false;
+        plannedOperationCount = 1;
+        batchPowerProvisioned = false;
         clearSlotsFilled();
     }
 
@@ -609,14 +642,26 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean reservePowerTopUp(ServerPlayer player, ExtractionLedger targetLedger,
-                                      boolean commitSeparately) {
+                                       boolean commitSeparately) {
+        // The power-point reservation can use a temporary ledger (graph/shared
+        // execution). Carry the selected backend into it explicitly; otherwise
+        // BD execution falls back to the legacy RS/null-network path and only
+        // scans the player's inventory.
+        if (targetLedger.storageEndpoint() == null) {
+            targetLedger.setStorageEndpoint(storageEndpoint());
+        }
         Float current = readCurrentPower(player);
         float cost = readPowerCost();
         if (current == null) {
             player.sendSystemMessage(Component.translatable("rsi.tlm.error.no_power"));
             return false;
         }
-        int needed = powerItemsNeeded(current, cost);
+        // Shared graph execution starts this delegate repeatedly for one
+        // requested batch. Provision the complete batch once, so the last
+        // operation cannot fail after earlier operations consumed the points.
+        if (commitSeparately && batchPowerProvisioned) return true;
+        float required = cost * Math.max(1, plannedOperationCount);
+        int needed = powerItemsNeeded(current, required);
         if (needed == 0) return true;
 
         var item = ForgeRegistries.ITEMS.getValue(PP_ID);
@@ -688,6 +733,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     private void finishPowerTopUp() {
         if (powerTopUpLedger != null) powerTopUpLedger.reset();
+        if (usingSharedLedger && plannedOperationCount > 1) batchPowerProvisioned = true;
         clearPowerTopUpState();
     }
 
@@ -816,7 +862,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     if (!expected.isEmpty() && !ItemStack.isSameItemSameTags(stack, expected)) {
                         continue;
                     }
-                    if (network != null) {
+                    if (storageEndpoint() != null || network != null) {
                         ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -849,7 +895,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStack stack = handler.getStackInSlot(0);
                 if (!stack.isEmpty()) {
                     if (!usingSharedLedger && refundToRS) {
-                        if (network != null) {
+                        if (storageEndpoint() != null || network != null) {
                             ItemStack leftover = insertIntoStorage(player, stack, false);
                             if (!leftover.isEmpty()) {
                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -902,6 +948,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
+        return getPlanWarnings(player, recipe, dim, pos, null);
+    }
+
+    /** Uses the plan's selected backend when one is already available. */
+    public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
+                                                @Nullable ResourceLocation dim,
+                                                @Nullable BlockPos pos,
+                                                @Nullable CraftStorageEndpoint selectedEndpoint) {
         List<Component> warnings = new ArrayList<>();
         float cost = rsi$staticPowerCost(recipe);
         if (cost <= 0) return warnings;
@@ -915,7 +969,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         }
 
         // 2. power_point items that can be absorbed on demand
-        int itemPower = countPowerPointItems(player, dim, pos);
+        CraftStorageEndpoint endpoint = selectedEndpoint != null
+                ? selectedEndpoint
+                : CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        int itemPower = countPowerPointItems(player, dim, pos, endpoint);
 
         float totalPower = capPower + itemPower;
         if (totalPower < cost) {
@@ -976,12 +1033,28 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     /** Count power_point items in RS network + player inventory. */
     private static int countPowerPointItems(ServerPlayer player,
                                              @Nullable ResourceLocation dim,
-                                             @Nullable BlockPos pos) {
+                                             @Nullable BlockPos pos,
+                                             @Nullable CraftStorageEndpoint endpoint) {
         int count = 0;
         // Player inventory
         for (ItemStack stack : player.getInventory().items) {
             if (isPowerPoint(stack)) count += stack.getCount();
         }
+        // Selected backend snapshot.  The RS cache fallback remains only for
+        // legacy callers that did not have an endpoint context.
+        if (endpoint != null) {
+            var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+            if (snapshot != null) {
+                for (var entry : snapshot.items()) {
+                    if (isPowerPoint(entry.stack())) {
+                        count = (int) Math.min(Integer.MAX_VALUE,
+                                (long) count + entry.amount());
+                    }
+                }
+            }
+            return count;
+        }
+
         // RS network
         INetwork network = null;
         if (dim != null && pos != null) {

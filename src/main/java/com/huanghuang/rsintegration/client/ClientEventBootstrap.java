@@ -26,8 +26,20 @@ public final class ClientEventBootstrap {
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class);
-        MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class);
+        // The auto-eat UI supports both RS Grid and the BD terminal. The
+        // listener uses class-name checks, so it remains safe in BD-only
+        // installations where RS client classes are absent.
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded("beyonddimensions")) {
+            MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class);
+            MinecraftForge.EVENT_BUS.addListener(
+                    com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents::onScreenRender);
+        }
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient.class);
+        }
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             MinecraftForge.EVENT_BUS.register(
                     com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
@@ -39,7 +51,9 @@ public final class ClientEventBootstrap {
 
     private static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache.clear();
-        com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout();
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout();
+        }
         com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.clear();
     }
 }

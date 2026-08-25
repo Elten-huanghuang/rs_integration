@@ -92,6 +92,14 @@ public final class BindingEventHandler {
         if (hook.isEmpty()) {
             return;
         }
+        // In a BD-only installation, crouch-right-click belongs to BD's
+        // native terminal action. RSI has no legacy RS binding gesture to
+        // preserve there, so machine binding must always come from the
+        // explicit configurable Alt+right-click packet.
+        if (!ModList.get().isLoaded(com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+                && !EXPLICIT_BIND_REQUEST.get()) {
+            return;
+        }
         Optional<AltarBinding> selectedBinding = hook.get().createBinding(held);
         if (selectedBinding.isEmpty()) return;
         ResourceLocation bindingType = selectedBinding.orElseThrow().type();
@@ -101,7 +109,12 @@ public final class BindingEventHandler {
         // (the configurable Alt+right-click packet). Without this guard the
         // same physical click can enter both paths and toggle the RSI machine
         // binding twice, producing an immediate bind/unbind pair.
-        if (AltarBinding.BD_NETWORK.equals(bindingType) && !EXPLICIT_BIND_REQUEST.get()) {
+        if (AltarBinding.BD_NETWORK.equals(bindingType)
+                && !EXPLICIT_BIND_REQUEST.get()) {
+            // BD terminals use crouch-right-click for their own native network
+            // binding. RSI machine binding is intentionally available only via
+            // the explicit configurable Alt+right-click action, so a normal
+            // crouch-right-click must never toggle an RSI machine binding.
             return;
         }
 
@@ -803,9 +816,13 @@ public final class BindingEventHandler {
     }
 
     static void sendBindingRefresh(ServerPlayer player) {
+        // The binding handler is shared by RS and BD-only installations.  The
+        // side-panel bridge has an optional RS API type in its method table,
+        // so never link it when Refined Storage is absent.
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return;
         try {
             RSSidePanelNetworkHandler.sendBindingSync(player);
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync", e);
         }
     }
@@ -942,6 +959,22 @@ public final class BindingEventHandler {
         if (be.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
             TlmAltarStructure.Resolved resolved = TlmAltarStructure.resolve(serverLevel, be);
             if (resolved != null && !resolved.mainPos().equals(pos)) return resolved.mainPos();
+        }
+
+        // The client cannot run the server-side render/main resolver. Use the
+        // structure's stable first position there; the HUD also compares the
+        // clicked target against every stored binding entry, including server
+        // bindings that use the render/main position.
+        try {
+            Object data = be.getClass().getMethod("getBlockPosList").invoke(be);
+            if (data == null) return null;
+            Object raw = data.getClass().getMethod("getData").invoke(data);
+            if (!(raw instanceof List<?> positions) || positions.isEmpty()) return null;
+            for (Object value : positions) {
+                if (value instanceof BlockPos candidatePos) return candidatePos.immutable();
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Bind] TLM structure root-pos resolution failed at {}", pos);
         }
         return null;
     }

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -193,7 +194,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         if (altarDim != null && altarPos != null) {
-            INetwork bindingNet = AltarBindingRegistry.resolveNetworkForAltar(
+            INetwork bindingNet = RSAltarBindingResolver.resolveNetworkForAltar(
                     player, altarDim, altarPos);
             if (bindingNet != null) {
                 ItemStack matched = findAvailableInNetwork(bindingNet, ingredient, count, player);
@@ -247,7 +248,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         if (altarDim != null && altarPos != null) {
-            INetwork bindingNet = AltarBindingRegistry.resolveNetworkForAltar(player, altarDim, altarPos);
+            INetwork bindingNet = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
             if (bindingNet != null && reserveExactAvailability(bindingNet, template, count, pendingNet, player)) {
                 ItemStack reserved = template.copyWithCount(count);
                 recordEntry(new Entry(Source.ALTAR_BINDING, ingredient, reserved, null,
@@ -347,6 +348,17 @@ public final class ExtractionLedger implements AutoCloseable {
                                                @Nonnull CraftStorageEndpoint endpoint,
                                                @Nonnull ServerPlayer player) {
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        if ((template.is(net.minecraft.world.item.Items.WATER_BUCKET)
+                || template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+            var converted = endpoint.session().extractContainerFluid(player,
+                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
+            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
+                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
+                        null, null, null, true));
+                return template.copyWithCount(count);
+            }
+        }
         if (snapshot == null || snapshot.countExact(endpoint.session().itemKey(template)) < count) {
             return ItemStack.EMPTY;
         }
@@ -411,6 +423,30 @@ public final class ExtractionLedger implements AutoCloseable {
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         setStorageEndpoint(endpoint);
+        // A filled vanilla bucket is a derived material in BD: reserve it
+        // against one empty bucket plus 1000 mB of the matching fluid. This
+        // must run on the Ingredient path as well as the exact-item path,
+        // because generic recipe planning normally reaches this method.
+        if (ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
+            ItemStack template = new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET);
+            var converted = endpoint.session().extractContainerFluid(player,
+                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
+            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
+                        null, null, null, false));
+                return template.copyWithCount(count);
+            }
+        }
+        if (ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+            ItemStack template = new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET);
+            var converted = endpoint.session().extractContainerFluid(player,
+                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
+            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
+                        null, null, null, false));
+                return template.copyWithCount(count);
+            }
+        }
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         var matches = snapshot.match(ingredient).items();
@@ -689,6 +725,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     var snapshot = storageEndpoint.snapshot(player).snapshot().orElse(null);
                     if (snapshot == null) return false;
                     for (var ingEntry : neededByIngredient.entrySet()) {
+                        if (isContainerFluidIngredient(ingEntry.getKey())) continue;
                         long available = snapshot.items().stream()
                                 .filter(item -> ingEntry.getKey().test(item.stack()))
                                 .mapToLong(com.huanghuang.rsintegration.storage.StoredItem::amount)
@@ -792,6 +829,11 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingNet.clear();
         pendingInv.clear();
         networkEntryCache.clear();
+    }
+
+    private static boolean isContainerFluidIngredient(Ingredient ingredient) {
+        return ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))
+                || ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET));
     }
 
     private void resetSettlementMirror() {
@@ -987,6 +1029,13 @@ public final class ExtractionLedger implements AutoCloseable {
             case NETWORK -> {
                 INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
                 if (storageEndpoint != null) {
+                    if (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
+                            || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET)) {
+                        yield storageEndpoint.session().extractContainerFluid(player,
+                                new ItemStack(net.minecraft.world.item.Items.BUCKET), entry.template,
+                                entry.count, false).extractedStacks().stream().findFirst()
+                                .orElse(ItemStack.EMPTY);
+                    }
                     var result = entry.exactIdentity
                             && entry.template.getTag() != null
                             ? storageEndpoint.extractExact(player, entry.template, entry.count, false)

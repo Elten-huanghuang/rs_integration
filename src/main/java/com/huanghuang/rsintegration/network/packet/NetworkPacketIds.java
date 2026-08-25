@@ -108,4 +108,10 @@ public final class NetworkPacketIds {
     public static final int ENCHANTING_RESTOCK_REQUEST = 128;
     public static final int ENCHANTING_RESTOCK_RESULT = 129;
     public static final int EXPLICIT_MACHINE_BINDING = 130;
+    /** BD-only machine GUI open request; kept separate from the RS side-panel packet. */
+    public static final int BD_OPEN_BOUND_MACHINE_GUI = 131;
+    public static final int BD_MACHINE_COLLECT = 132;
+    public static final int BD_MACHINE_INSERT = 133;
+    public static final int BD_UNBIND_MACHINE = 134;
+    public static final int BD_BINDING_SYNC = 135;
 }

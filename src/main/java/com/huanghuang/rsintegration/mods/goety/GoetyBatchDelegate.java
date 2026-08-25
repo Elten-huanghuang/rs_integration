@@ -344,7 +344,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean initCraftState(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        this.ledger.setStorageEndpoint(storageEndpoint());
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
         this.pendingRitualResult = ItemStack.EMPTY;
@@ -1525,7 +1528,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (stack != null && !stack.isEmpty()) {
                 if (usingSharedLedger) {
                     // Shared ledger owns the refund — don't double-insert.
-                } else if (network != null) {
+                } else if (storageEndpoint() != null || network != null) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1552,7 +1555,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 if (usingSharedLedger) {
                     // Shared ledger will refund the original extraction — do NOT
                     // re-insert items into RS or we double-refund (dupe exploit).
-                } else if (refundToRS && network != null) {
+                } else if (refundToRS && (storageEndpoint() != null || network != null)) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1573,7 +1576,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                         if (!s.isEmpty()) {
                             if (usingSharedLedger) {
                                 // Shared ledger will refund — do not double-insert
-                            } else if (refundToRS && network != null) {
+                            } else if (refundToRS && (storageEndpoint() != null || network != null)) {
                                 ItemStack leftover = insertIntoStorage(player, s, false);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1602,7 +1605,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = pendingRitualResult;
         pendingRitualResult = ItemStack.EMPTY;
         ItemStack remainder = result;
-        if (network != null) {
+        if (storageEndpoint() != null || network != null) {
             remainder = insertIntoStorage(player, result.copy(), false);
         }
         if (!remainder.isEmpty() && player != null) {

@@ -256,7 +256,10 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        } else {
+            this.network = null;
         }
+        this.ledger.setStorageEndpoint(storageEndpoint());
 
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
             BlockEntity current = resolveMachineLevel(player).getBlockEntity(myPos);
@@ -487,8 +490,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
+        if (sharedLedger != null && sharedLedger.storageEndpoint() != null) {
+            setStorageEndpoint(sharedLedger.storageEndpoint());
+        }
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        } else {
+            this.network = null;
         }
         this.usingSharedLedger = true;
 
@@ -839,7 +847,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             int mainSlot = FaRitualHelper.getMainSlot();
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
-                if (network != null) {
+                if (storageEndpoint() != null || network != null) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -858,7 +866,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
-                    if (network != null) {
+                    if (storageEndpoint() != null || network != null) {
                         ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);

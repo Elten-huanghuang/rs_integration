@@ -170,7 +170,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        }
+        this.ledger.setStorageEndpoint(storageEndpoint());
 
         // Verify the cached BlockEntity is still valid
         if (myPos != null && myLevel != null && myLevel.isLoaded(myPos)) {
@@ -329,6 +332,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
+        this.ledger = null;
+        if (storageEndpoint() == null && sharedLedger != null) {
+            setStorageEndpoint(sharedLedger.storageEndpoint());
+        }
 
         // Verify the cached BlockEntity is still valid
         if (myPos != null && myLevel != null && myLevel.isLoaded(myPos)) {
