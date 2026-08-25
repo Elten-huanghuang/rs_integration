@@ -9,11 +9,14 @@ import dev.ftb.mods.ftbquests.quest.reward.CustomReward;
 import dev.ftb.mods.ftbquests.quest.reward.Reward;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
+import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -29,6 +32,11 @@ public final class FtbQuestSubmissionExecutor {
     private FtbQuestSubmissionExecutor() {}
 
     public static void submit(ServerPlayer player, long questId, INetwork network) {
+        submit(player, questId, network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network), network);
+    }
+
+    public static void submit(ServerPlayer player, long questId,
+                               CraftStorageEndpoint endpoint, @Nullable INetwork network) {
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
         if (file == null || file.isLoading() || data == null || data.isLocked()) {
@@ -43,14 +51,14 @@ public final class FtbQuestSubmissionExecutor {
             return;
         }
         try {
-            file.withPlayerContext(player, () -> submitLocked(player, data, quest, network));
+            file.withPlayerContext(player, () -> submitLocked(player, data, quest, endpoint, network));
         } finally {
             ACTIVE.remove(key);
         }
     }
 
     private static void submitLocked(ServerPlayer player, TeamData data, Quest quest,
-                                     INetwork network) {
+                                     CraftStorageEndpoint endpoint, @Nullable INetwork network) {
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.inspect(quest, data, true);
         if (!snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
@@ -62,7 +70,7 @@ public final class FtbQuestSubmissionExecutor {
             if (task instanceof ItemTask itemTask) tasks.put(itemTask.getId(), itemTask);
         }
 
-        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, network)) {
+        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint, network)) {
             for (QuestItemRequirement requirement : snapshot.requirements()) {
                 ItemTask task = tasks.get(requirement.taskId());
                 if (task == null) return;
@@ -75,7 +83,7 @@ public final class FtbQuestSubmissionExecutor {
                 if (!escrow.reserve(task.getId(), ingredient, remaining)) {
                     RSIntegrationMod.LOGGER.warn(
                             "[RSI-FTBQuests] Escrow reservation failed task={} remaining={} display={}",
-                            task.getId(), remaining, requirement.displayStack().getHoverName().getString());
+                            task.getId(), remaining, requirement.displayStack());
                     player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
                     return;
                 }
@@ -87,26 +95,28 @@ public final class FtbQuestSubmissionExecutor {
                 return;
             }
 
-            for (QuestItemRequirement requirement : snapshot.requirements()) {
-                ItemTask task = tasks.get(requirement.taskId());
-                QuestSubmissionEscrow.Entry entry = escrow.entry(task.getId());
-                long before = data.getProgress(task);
-                ItemStack remainder = task.insert(data, entry.stack(), false);
-                long accepted = data.getProgress(task) - before;
-                long consumed = entry.stack().getCount() - remainder.getCount();
-                // insert() has already mutated progress and consumed its accepted
-                // portion. Settle the physical outcome before validating it so
-                // an invariant failure cannot refund already-consumed items.
-                escrow.settle(entry, remainder);
-                if (accepted <= 0L || consumed != accepted) {
-                    throw new IllegalStateException("FTB Quest task rejected escrowed items: " + task.getId());
+            boolean questCompleted;
+            try (QuestSubmissionAutoCompletionContext.Scope ignored =
+                         QuestSubmissionAutoCompletionContext.open()) {
+                for (QuestItemRequirement requirement : snapshot.requirements()) {
+                    ItemTask task = tasks.get(requirement.taskId());
+                    QuestSubmissionEscrow.Entry entry = escrow.entry(task.getId());
+                    long before = data.getProgress(task);
+                    ItemStack remainder = task.insert(data, entry.stack(), false);
+                    long consumed = entry.stack().getCount() - remainder.getCount();
+                    long expected = QuestProgressSettlement.expectedAccepted(
+                            before, task.getMaxProgress(), entry.stack().getCount());
+                    if (expected <= 0L || consumed != expected) {
+                        throw new IllegalStateException("FTB Quest task rejected escrowed items: " + task.getId());
+                    }
+                    escrow.settle(entry, remainder);
                 }
+                questCompleted = data.isCompleted(quest);
             }
-        }
-
-        if (!data.isCompleted(quest)) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.partial"));
-            return;
+            if (!questCompleted) {
+                player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.partial"));
+                return;
+            }
         }
         claimSafeRewards(player, data, quest);
         player.sendSystemMessage(Component.translatable("rsi.ftb_quest.complete", quest.getTitle()));

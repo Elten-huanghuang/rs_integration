@@ -42,6 +42,8 @@ class NativeSubmissionHookTest {
 
         assertTrue(config.contains("ftbquests.SubmitTaskMessageMixin"));
         assertTrue(config.contains("ftbquests.InventoryTaskAutoSubmissionMixin"));
+        assertTrue(config.contains("ftbquests.TeamDataAutoCompletionMixin"),
+                "automatic reward/reset must be deferred during item settlement");
         assertFalse(config.contains("ftbquests.ItemTaskSubmissionMixin"),
                 "ItemTask.submitTask is also called by automatic inventory detection");
         assertTrue(service.contains("reserveUpToFromMainInventoryThenNetwork"),

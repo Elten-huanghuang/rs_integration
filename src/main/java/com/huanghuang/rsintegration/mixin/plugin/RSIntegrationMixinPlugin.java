@@ -79,6 +79,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("ironfurnaces.BlockIronFurnaceTileBaseMixin")) {
             return isClassPresent("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase");
         }
+        // These mixins are attached to non-RS mods but their method bodies
+        // contain RS API signatures. Skip them before Mixin can load those
+        // signatures in BD-only or no-RS installations.
+        if (mixinClassName.contains("sophisticatedbackpacks.InventoryInteractionHelperMixin")
+                || mixinClassName.contains("reliquary.PyromancerStaffMixin")) {
+            return isClassPresent("com.refinedmods.refinedstorage.api.network.INetwork")
+                    && isClassPresent("com.refinedmods.refinedstorage.api.util.Action");
+        }
         if (mixinClassName.contains("forbidden.ClibanoMainBlockEntityAccessor")) {
             return isClassPresent("com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity")
                     && hasMethod(targetClassName, "getBurnDuration");
@@ -139,6 +147,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("ftbquests.InventoryTaskAutoSubmissionMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.util.FTBQuestsInventoryListener")
                     && hasMethod(targetClassName, "lambda$detect$0");
+        }
+        if (mixinClassName.contains("ftbquests.TeamDataAutoCompletionMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData")
+                    && hasMethod(targetClassName, "checkAutoCompletion");
         }
         if (mixinClassName.contains("ftbquests.ClaimAllRewardsMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.ClaimAllRewardsMessage")
@@ -264,6 +276,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains("refinedstorage.CraftingTaskAccessor")) {
             return hasField(targetClassName, "network");
+        }
+        if (mixinClassName.contains("beyonddimensions.NetMagnetItemMixin")) {
+            return isClassPresent("com.wintercogs.beyonddimensions.common.item.NetMagnetItem")
+                    && hasMethod(targetClassName, "workContent");
+        }
+        if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiAutoEatMixin")) {
+            return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
+                    && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("refinedstorage.GridTransferMessageAccessor")) {
             return hasField(targetClassName, "recipe");

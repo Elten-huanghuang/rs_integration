@@ -16,6 +16,7 @@
     "placebo.PlaceboContainerMenuMixin",
     "ftbquests.SubmitTaskMessageMixin",
     "ftbquests.InventoryTaskAutoSubmissionMixin",
+    "ftbquests.TeamDataAutoCompletionMixin",
     "ftbquests.ClaimAllRewardsMessageMixin",
     "ftbquests.ItemRewardMixin",
     "ftbquests.ItemTaskSequenceAccessor",
@@ -23,6 +24,7 @@
     "minecraft.ServerPlayerTickMixin",
     "minecraft.ServerPlayerMessageMixin",
     "minecraft.ServerGamePacketListenerMixin",
+    "beyonddimensions.NetMagnetItemMixin",
     "minecraft.SmithingTransformRecipeAccessor",
     "minecraft.SmithingTrimRecipeAccessor",
     "refinedstorage.CraftingGridBehaviorMixin",
@@ -77,6 +79,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "beyonddimensions.DimensionsNetGuiAutoEatMixin",
     "apotheosis.EnchLibraryScreenMixin",
     "apotheosis.ReforgingMenuRestockMixin",
     "ftbquests.ClearRepeatCooldownMessageMixin",

@@ -3,19 +3,17 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
-import net.minecraftforge.network.PacketDistributor;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraftforge.network.PacketDistributor;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,14 +33,17 @@ public final class FtbQuestSubmissionService {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
             return;
         }
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
+        CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        INetwork network = endpoint != null && "refinedstorage".equals(
+                endpoint.session().reference().backendId().value())
+                ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
+        if (endpoint == null) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.no_network"));
             return;
         }
 
         QuestSubmissionPlan questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot,
-                CraftStorageEndpoints.fromLegacyNetwork(network), network);
+                endpoint, network);
         List<PlanStep> steps = questPlan.graphView().nodes().stream()
                 .map(node -> node.asPlanStep())
                 .toList();
@@ -66,14 +67,17 @@ public final class FtbQuestSubmissionService {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
             return;
         }
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
+        CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        INetwork network = endpoint != null && "refinedstorage".equals(
+                endpoint.session().reference().backendId().value())
+                ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
+        if (endpoint == null) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.no_network"));
             return;
         }
 
         QuestSubmissionPlan plan = FtbQuestSubmissionPlanner.plan(player, snapshot,
-                CraftStorageEndpoints.fromLegacyNetwork(network), network);
+                endpoint, network);
         if (!plan.feasible()) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                     CraftPacketUtils.formatMissingSummary(plan.missing())));
@@ -82,13 +86,13 @@ public final class FtbQuestSubmissionService {
 
         List<CraftingResolver.ResolutionStep> steps = projectSteps(plan);
         if (steps.isEmpty()) {
-            FtbQuestSubmissionExecutor.submit(player, questId, network);
+            FtbQuestSubmissionExecutor.submit(player, questId, endpoint, network);
             return;
         }
 
         if (steps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
-            if (CraftPacketUtils.executeCraftingSteps(player, steps, network)) {
-                FtbQuestSubmissionExecutor.submit(player, questId, network);
+            if (CraftPacketUtils.executeCraftingSteps(player, steps, network, endpoint)) {
+                FtbQuestSubmissionExecutor.submit(player, questId, endpoint, network);
             } else {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
             }
@@ -96,13 +100,13 @@ public final class FtbQuestSubmissionService {
         }
 
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
-                plan.graph());
+                endpoint, plan.graph());
         AsyncCraftManager.getInstance().submit(chain);
         chain.onDone(() -> {
             ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
             if (current == null) return;
             if (chain.state() == AsyncCraftChain.State.COMPLETED) {
-                FtbQuestSubmissionExecutor.submit(current, questId, network);
+                FtbQuestSubmissionExecutor.submit(current, questId, endpoint, network);
             } else {
                 current.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.crafting_failed",
                         chain.abortReason()));

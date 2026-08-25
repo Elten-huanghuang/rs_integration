@@ -2,7 +2,8 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.mixin.ftbquests.ItemTaskSequenceAccessor;
@@ -47,19 +48,31 @@ public final class NativeItemTaskSubmissionService {
             return true;
         }
 
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network != null && !canExtract(network, player)) network = null;
-        submitTransaction(task, data, player, network, (int) remaining, display);
+        CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        INetwork network = endpoint != null && "refinedstorage".equals(
+                endpoint.session().reference().backendId().value())
+                ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
+        CraftStorageEndpoint transactionEndpoint = endpoint;
+        if (endpoint != null && "refinedstorage".equals(
+                endpoint.session().reference().backendId().value())
+                && (network == null || !canExtract(network, player))) {
+            // Do not leave an RS endpoint attached after the native permission
+            // check rejects extraction; otherwise the endpoint-aware ledger
+            // could bypass the intended inventory-only fallback.
+            transactionEndpoint = null;
+            network = null;
+        }
+        submitTransaction(task, data, player, transactionEndpoint, network,
+                (int) remaining, display);
         return true;
     }
 
     private static void submitTransaction(ItemTask task, TeamData data, ServerPlayer player,
+                                          @Nullable CraftStorageEndpoint endpoint,
                                           @Nullable INetwork network, int count,
                                           ItemStack display) {
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (network != null) {
-                ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
-            }
+            ledger.setStorageEndpoint(endpoint);
             int mark = ledger.reservationMark();
             Ingredient ingredient = new ItemTaskIngredient(task, display);
             int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
@@ -86,25 +99,51 @@ public final class NativeItemTaskSubmissionService {
             }
 
             long before = data.getProgress(task);
-            data.addProgress(task, reserved);
-            long accepted = data.getProgress(task) - before;
-            if (accepted != reserved) {
+            long expectedAccepted = QuestProgressSettlement.expectedAccepted(
+                    before, task.getMaxProgress(), reserved);
+            if (expectedAccepted != reserved) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-FTBQuests] Reservation exceeds task capacity task={} reserved={} before={} max={}",
+                        task.getId(), reserved, before, task.getMaxProgress());
+                ledger.refundCommitted(token, network, player);
+                sendMissing(player, display,
+                        Math.max(0L, task.getMaxProgress() - before));
+                return;
+            }
+            long after;
+            boolean reachedCompletion;
+            try (QuestSubmissionAutoCompletionContext.Scope ignored =
+                         QuestSubmissionAutoCompletionContext.open()) {
+                data.addProgress(task, reserved);
+                after = data.getProgress(task);
+                reachedCompletion = data.isCompleted(task);
+            }
+            long accepted = Math.max(0L, after - before);
+            if (accepted != reserved && !reachedCompletion) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-FTBQuests] Transaction invariant failed for task {}: reserved={}, accepted={}",
                         task.getId(), reserved, accepted);
                 if (QuestProgressSettlement.shouldRefundRejectedProgress(accepted)) {
                     ledger.refundCommitted(token, network, player);
                     sendMissing(player, display,
-                            Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+                            Math.max(0L, task.getMaxProgress() - after));
                     return;
                 }
-                // A partial write may already have fired completion side effects. The token
-                // cannot be split safely here, so keep the conservative paid settlement.
+                // Preserve the established partial-progress behavior. The task
+                // has already accepted part of the reservation.
                 ledger.settleCommitted(token);
+                sendMissing(player, display,
+                        Math.max(0L, task.getMaxProgress() - after));
                 return;
             }
             ledger.settleCommitted(token);
-            long stillMissing = Math.max(0L, task.getMaxProgress() - data.getProgress(task));
+            if (reachedCompletion) {
+                // Run FTB's normal auto-claim/reset only after the ledger has
+                // irrevocably settled the consumed items.
+                data.checkAutoCompletion(task.getQuest());
+            }
+            long stillMissing = reachedCompletion
+                    ? 0L : Math.max(0L, task.getMaxProgress() - after);
             if (stillMissing > 0L) sendMissing(player, display, stillMissing);
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.error(

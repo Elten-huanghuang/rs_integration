@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,17 +21,21 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     private final List<Entry> entries = new ArrayList<>();
     private final ServerPlayer player;
     private final INetwork network;
+    private final CraftStorageEndpoint endpoint;
     private boolean committed;
 
-    QuestSubmissionEscrow(ServerPlayer player, INetwork network) {
+    QuestSubmissionEscrow(ServerPlayer player, CraftStorageEndpoint endpoint, INetwork network) {
         this.player = player;
         this.network = network;
-        this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
+        this.endpoint = endpoint;
+        this.ledger.setStorageEndpoint(endpoint);
     }
 
     boolean reserve(long taskId, Ingredient ingredient, int count) {
         int mark = ledger.reservationMark();
-        ItemStack stack = ledger.reserveFromNetwork(ingredient, count, network, player);
+        ItemStack stack = endpoint != null
+                ? ledger.reserveFromEndpoint(ingredient, count, endpoint, player)
+                : ledger.reserveFromNetwork(ingredient, count, network, player);
         if (stack.isEmpty()) stack = ledger.reserveFromInventory(ingredient, count, player);
         if (stack.isEmpty()) return false;
         entries.add(new Entry(taskId, stack.copy(), ledger.tokenSince(mark)));
@@ -61,8 +66,15 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     }
 
     private ItemStack ledgerStorageInsert(ItemStack stack) {
-        return CraftStorageEndpoints.fromLegacyNetwork(network).insert(player, stack, false)
-                .remainder().orElse(ItemStack.EMPTY);
+        if (endpoint != null) {
+            return endpoint.insert(player, stack, false)
+                    .remainder().orElse(ItemStack.EMPTY);
+        }
+        if (network != null) {
+            return CraftStorageEndpoints.fromLegacyNetwork(network)
+                    .insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+        }
+        return stack.copy();
     }
 
     @Override
