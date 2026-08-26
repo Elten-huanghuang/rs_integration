@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.storage.StorageResolutionResult;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.bd.BeyondDimensionsReflection;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -25,9 +26,9 @@ public final class BDResonanceDiskAccess {
         if (ModItems.DIMENSIONAL_RESONANCE_DISK == null) return null;
         ItemStack stack = findDiskStack(player);
         if (stack.isEmpty()) return null;
+        if (!isBound(stack)) return null;
         UUID diskId = getDiskId(stack);
         int networkId = getNetworkId(stack);
-        if (diskId == null || networkId < 0) return null;
         int rebound = rebindAfterMergedNetwork(player, stack, diskId, networkId);
         if (rebound >= 0) {
             networkId = rebound;
@@ -57,16 +58,36 @@ public final class BDResonanceDiskAccess {
 
     @Nullable
     public static UUID getDiskId(ItemStack stack) {
-        if (!isDisk(stack) || !stack.hasTag()) return null;
-        var tag = stack.getTag();
-        if (!tag.contains(DISK_TAG, 10) || !tag.getCompound(DISK_TAG).hasUUID(UUID_TAG)) return null;
-        return tag.getCompound(DISK_TAG).getUUID(UUID_TAG);
+        return isDisk(stack) ? getTaggedDiskId(stack) : null;
     }
 
     public static int getNetworkId(ItemStack stack) {
-        if (!isDisk(stack) || !stack.hasTag()) return -1;
-        var tag = stack.getTag();
-        return tag.contains(DISK_TAG, 10) ? tag.getCompound(DISK_TAG).getInt(NET_ID_TAG) : -1;
+        return isDisk(stack) ? getTaggedNetworkId(stack) : -1;
+    }
+
+    public static boolean isBound(ItemStack stack) {
+        return isDisk(stack) && hasCompleteBindingTags(stack);
+    }
+
+    @Nullable
+    static UUID getTaggedDiskId(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) return null;
+        var root = stack.getTag();
+        if (!root.contains(DISK_TAG, Tag.TAG_COMPOUND)) return null;
+        var disk = root.getCompound(DISK_TAG);
+        return disk.hasUUID(UUID_TAG) ? disk.getUUID(UUID_TAG) : null;
+    }
+
+    static int getTaggedNetworkId(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) return -1;
+        var root = stack.getTag();
+        if (!root.contains(DISK_TAG, Tag.TAG_COMPOUND)) return -1;
+        var disk = root.getCompound(DISK_TAG);
+        return disk.contains(NET_ID_TAG, Tag.TAG_INT) ? disk.getInt(NET_ID_TAG) : -1;
+    }
+
+    static boolean hasCompleteBindingTags(ItemStack stack) {
+        return getTaggedDiskId(stack) != null && getTaggedNetworkId(stack) >= 0;
     }
 
     public static void bind(ItemStack stack, UUID diskId, int networkId) {
@@ -99,16 +120,25 @@ public final class BDResonanceDiskAccess {
         int replacement = resolvePrimaryNetworkId(player);
         if (replacement < 0 || replacement == networkId
                 || !BeyondDimensionsReflection.isAuthorizedNetwork(player, replacement)) return -1;
-        bindToNetwork(player, stack, diskId, replacement);
-        return replacement;
+        return bindToNetwork(player, stack, diskId, replacement) ? replacement : -1;
     }
 
     /** Binds a disk and coalesces it with the network's existing resonance disk. */
-    public static void bindToNetwork(ServerPlayer player, ItemStack stack,
-                                     UUID diskId, int networkId) {
+    public static boolean bindToNetwork(ServerPlayer player, ItemStack stack,
+                                        UUID diskId, int networkId) {
         BDResonanceDiskData data = BDResonanceDiskData.get(player.server);
         data.bind(diskId, player.getUUID(), networkId);
+        // The item NBT is the portable source of truth. This must happen even
+        // when there is no pre-existing disk to trigger the coalescing branch.
+        bind(stack, diskId, networkId);
         coalesceWithNetwork(player, stack, diskId, networkId);
+        player.getInventory().setChanged();
+
+        UUID boundDiskId = getDiskId(stack);
+        BDResonanceDiskData.DiskRecord record = boundDiskId == null
+                ? null : data.find(boundDiskId);
+        return isBound(stack) && getNetworkId(stack) == networkId
+                && record != null && record.boundNetId() == networkId;
     }
 
     /** Returns true when the item was redirected into an existing disk. */
