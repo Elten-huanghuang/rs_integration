@@ -70,6 +70,7 @@ public final class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (found == null) found = CosmopolitanTisaneRecipeResolver.resolve(recipeId);
         if (found == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;

@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
+import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
+import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -906,6 +908,16 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getBindingFilter YHK: uid={} filter={} class={}",
                         uidStr, filter, recipe.getClass().getName());
             }
+            // Miner's Delight and similar add-ons reuse CookingPotRecipe in a
+            // different JEI machine category. A class-only fallback would make
+            // their machines borrow the Farmer's Delight cooking-pot binding.
+            if (!JeiMachineCategoryPolicy.allowClassFallback(
+                    uid, recipe.getClass().getName(), filter)) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI-Mixin] Skipping class fallback for machine-owned category {} ({})",
+                        uid, recipe.getClass().getName());
+                return null;
+            }
             if (filter != null) return filter;
 
             // Ars Nouveau has kept the native recipe type stable while its
@@ -970,18 +982,11 @@ public class RecipeGuiLayoutsMixin {
      */
     @Unique
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
-        if (id == null) return null;
-        String path = id.getPath();
-        if (!path.startsWith("jei.")) return id;
-        // Strip "jei." prefix
-        String inner = path.substring(4);
-        // Strip trailing "/N" page number
-        int slash = inner.lastIndexOf('/');
-        if (slash > 0 && slash < inner.length() - 1) {
-            inner = inner.substring(0, slash);
+        ResourceLocation normalized = JeiRecipeIdNormalizer.normalize(id);
+        if (id != null && !id.equals(normalized)) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] unwrapJeiId: {} -> {}", id, normalized);
         }
-        RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] unwrapJeiId: {} -> {}", id, inner);
-        return new ResourceLocation(id.getNamespace(), inner);
+        return normalized;
     }
 
     @Unique

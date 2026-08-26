@@ -189,6 +189,17 @@ public interface IBatchDelegate {
                 .toList();
     }
 
+    /** Configure source preferences before this delegate's materials are reserved. */
+    default void configureMaterialReservation(@Nonnull ExtractionLedger ledger,
+                                              @Nonnull ServerPlayer player) {
+    }
+
+    /** Optional specific message when this delegate's material reservation fails. */
+    @Nullable
+    default Component materialReservationFailureMessage(@Nonnull ServerPlayer player) {
+        return null;
+    }
+
     /**
      * Return reusable materials that were intentionally left installed between
      * operations. Called once after a standalone node or parallel worker group

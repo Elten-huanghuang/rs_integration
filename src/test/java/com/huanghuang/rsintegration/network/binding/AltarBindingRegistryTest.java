@@ -40,6 +40,16 @@ class AltarBindingRegistryTest {
                     new String[]{"skillet", "campfire"},
                     new String[]{ModIds.ID_FD_SKILLET}, () -> null);
         }
+        if (ModType.byId("farmersdelight_cooking_pot") == ModType.GENERIC) {
+            ModType.register("farmersdelight_cooking_pot", new String[0],
+                    new String[]{"cooking_pot"},
+                    new String[]{"farmersdelight_cooking_pot"}, () -> null);
+        }
+        if (ModType.byId(ModIds.ID_FD_CUTTING_BOARD) == ModType.GENERIC) {
+            ModType.register(ModIds.ID_FD_CUTTING_BOARD, new String[0],
+                    new String[]{"cutting_board"},
+                    new String[]{ModIds.ID_FD_CUTTING_BOARD}, () -> null);
+        }
     }
 
     @Test
@@ -142,6 +152,28 @@ class AltarBindingRegistryTest {
         assertNull(AltarBindingRegistry.normalizeSubType(
                 AltarBindingRegistry.recipeSubTypeHint(recipeId),
                 ModType.byId(ModIds.ID_FD_SKILLET)));
+    }
+
+    @Test
+    void salvagingRecipeFolderDoesNotRejectFarmersDelightCuttingBoardBinding() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "farmersdelight", "salvaging/stone");
+
+        assertEquals("salvaging", AltarBindingRegistry.recipeSubTypeHint(recipeId));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(recipeId),
+                ModType.byId(ModIds.ID_FD_CUTTING_BOARD)));
+    }
+
+    @Test
+    void addonRecipeFolderDoesNotRejectFarmersDelightCookingPotBinding() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "cosmopolitan", "farmersdelight/cooking/tisane");
+
+        assertEquals("farmersdelight", AltarBindingRegistry.recipeSubTypeHint(recipeId));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(recipeId),
+                ModType.byId("farmersdelight_cooking_pot")));
     }
 
     @Test

@@ -196,6 +196,12 @@ public final class PlanWarnings {
             case ModIds.ID_FD_SKILLET:
                 warnings.addAll(SkilletBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
+            case ModIds.ID_FD_CUTTING_BOARD:
+                var cuttingBoardCheck = com.huanghuang.rsintegration.mods.farmersdelight
+                        .CuttingBoardBatchDelegate.getPlanCheck(player, recipe, endpoint);
+                warnings.addAll(cuttingBoardCheck.warnings());
+                blocksExecution = cuttingBoardCheck.blocksExecution();
+                break;
             case ModIds.ID_YHK_MOKA:
                 warnings.addAll(MokaPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;

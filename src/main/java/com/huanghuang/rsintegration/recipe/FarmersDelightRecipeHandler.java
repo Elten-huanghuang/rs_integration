@@ -3,11 +3,12 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CampfireCookingRecipe;
-import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -17,6 +18,8 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     private static final String COOKING_POT_CLASS =
             "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
+    private static final String CUTTING_BOARD_CLASS =
+            "vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe";
 
     @Override
     public ModType modType() { return ModType.byId("farmersdelight"); }
@@ -24,13 +27,23 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         return recipe.getClass().getName().equals(COOKING_POT_CLASS)
+                || recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)
                 || recipe instanceof CampfireCookingRecipe;
+    }
+
+    @Override
+    public boolean preferHandlerIngredients() {
+        return true;
     }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CampfireCookingRecipe) {
             return CampfireRecipeSupport.resolveOutput(recipe, access);
+        }
+        if (recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) {
+            List<ItemStack> results = getCuttingBoardResults(recipe);
+            return results.isEmpty() ? ItemStack.EMPTY : results.get(0).copy();
         }
         return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
@@ -42,6 +55,15 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             Ingredient ing = recipe.getIngredients().get(0);
             if (ing.isEmpty()) return null;
             return List.of(new IngredientSpec(ing, 1));
+        }
+        if (recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) {
+            List<Ingredient> ingredients = recipe.getIngredients();
+            if (ingredients.isEmpty() || ingredients.get(0).isEmpty()) return null;
+            Ingredient toolIngredient = getCuttingBoardToolIngredient(recipe);
+            if (toolIngredient != null) {
+                return cuttingBoardIngredients(ingredients.get(0), toolIngredient);
+            }
+            return null;
         }
         if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
             List<Ingredient> ingredients = recipe.getIngredients();
@@ -86,6 +108,44 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         return ItemStack.EMPTY;
     }
 
+    @Override
+    public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
+        if (!recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return List.of();
+        List<ItemStack> results = getCuttingBoardResults(recipe);
+        return results.size() <= 1 ? List.of() : List.copyOf(results.subList(1, results.size()));
+    }
+
+    private static List<ItemStack> getCuttingBoardResults(Recipe<?> recipe) {
+        try {
+            Object values = recipe.getClass().getMethod("getResults").invoke(recipe);
+            if (!(values instanceof List<?> list) || list.isEmpty()) return List.of();
+            List<ItemStack> outputs = new ArrayList<>();
+            for (Object value : list) {
+                if (value instanceof ItemStack stack && !stack.isEmpty()) {
+                    outputs.add(stack.copy());
+                }
+            }
+            return List.copyOf(outputs);
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] cutting board outputs probe failed", e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+        if (!recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return true;
+        try {
+            Object values = recipe.getClass().getMethod("getRollableResults").invoke(recipe);
+            if (!(values instanceof List<?> list) || list.isEmpty()) return false;
+            Object first = list.get(0);
+            Object chance = first == null ? null : first.getClass().getMethod("getChance").invoke(first);
+            return chance instanceof Number number && number.floatValue() >= 1.0F;
+        } catch (ReflectiveOperationException e) {
+            return false;
+        }
+    }
+
     static List<IngredientSpec> appendOutputContainerSpec(
             List<IngredientSpec> inputSpecs, ItemStack container) {
         List<IngredientSpec> specs = new ArrayList<>(inputSpecs.size() + 1);
@@ -94,5 +154,38 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)), 1));
         }
         return List.copyOf(specs);
+    }
+
+    static List<IngredientSpec> cuttingBoardIngredients(Ingredient input, Ingredient tool) {
+        if (input == null || input.isEmpty() || tool == null || tool.isEmpty()) return List.of();
+        return List.of(
+                new IngredientSpec(input, 1, DemandRole.CONSUMED),
+                new IngredientSpec(tool, 1, DemandRole.CATALYST));
+    }
+
+    /**
+     * Cutting-board tools are runtime resources, not recursive craft demands.
+     * They are selected from resonance storage first and the active storage
+     * backend second by the batch delegate.
+     */
+    public static List<IngredientSpec> cuttingBoardGraphIngredients(
+            List<IngredientSpec> specs) {
+        if (specs == null || specs.isEmpty()) return List.of();
+        return specs.stream()
+                .filter(spec -> !spec.isEmpty() && spec.role() != DemandRole.CATALYST)
+                .toList();
+    }
+
+    @Nullable
+    public static Ingredient getCuttingBoardToolIngredient(Recipe<?> recipe) {
+        if (recipe == null || !CUTTING_BOARD_CLASS.equals(recipe.getClass().getName())) return null;
+        try {
+            Object tool = recipe.getClass().getMethod("getTool").invoke(recipe);
+            return tool instanceof Ingredient ingredient && !ingredient.isEmpty()
+                    ? ingredient : null;
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] cutting board tool probe failed", e);
+            return null;
+        }
     }
 }

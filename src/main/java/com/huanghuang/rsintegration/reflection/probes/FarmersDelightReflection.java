@@ -12,6 +12,7 @@ public final class FarmersDelightReflection {
     public static volatile Class<?> cookingPotBEClass;
     public static volatile Class<?> cookingPotRecipeClass;
     public static volatile Class<?> skilletBEClass;
+    public static volatile Class<?> cuttingBoardBEClass;
     public static volatile Class<?> stoveBEClass;
 
 
@@ -19,6 +20,7 @@ public final class FarmersDelightReflection {
         register("vectorwing.farmersdelight.common.block.entity.CookingPotBlockEntity", "cookingPotBEClass");
         register("vectorwing.farmersdelight.common.crafting.CookingPotRecipe", "cookingPotRecipeClass");
         register("vectorwing.farmersdelight.common.block.entity.SkilletBlockEntity", "skilletBEClass");
+        register("vectorwing.farmersdelight.common.block.entity.CuttingBoardBlockEntity", "cuttingBoardBEClass");
         register("vectorwing.farmersdelight.common.block.entity.StoveBlockEntity", "stoveBEClass");
     }
 

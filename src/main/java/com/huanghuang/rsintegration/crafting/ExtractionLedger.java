@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageReservationSource;
@@ -47,6 +48,8 @@ public final class ExtractionLedger implements AutoCloseable {
     private final Map<Integer, Entry> entriesById = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingNet = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Integer> pendingInv = new HashMap<>();
+    private final Map<ResonanceReservationKey, Integer> pendingResonance = new HashMap<>();
+    private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
     private State state = State.IDLE;
 
     @Nullable
@@ -64,6 +67,12 @@ public final class ExtractionLedger implements AutoCloseable {
     public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
         this.storageEndpoint = endpoint;
         this.networkEntryCache.clear();
+    }
+
+    /** Prefer a matching tool/catalyst from the selected backend's resonance disk. */
+    public void preferResonanceFor(@Nonnull Ingredient ingredient) {
+        requireState(State.IDLE, State.RESERVING);
+        if (!ingredient.isEmpty()) preferredResonanceIngredients.add(ingredient);
     }
 
     /**
@@ -142,6 +151,12 @@ public final class ExtractionLedger implements AutoCloseable {
                 key = StorageItemKey.fromItemStack(
                         new com.huanghuang.rsintegration.storage.StorageBackendId("local"),
                         entry.template);
+            } else if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
+                source = StorageReservationSource.external(
+                        "resonance_disk:" + entry.resonanceView.backendId());
+                key = StorageItemKey.fromItemStack(
+                        new com.huanghuang.rsintegration.storage.StorageBackendId(
+                                entry.resonanceView.backendId()), entry.template);
             } else if (endpoint != null) {
                 var reference = endpoint.session().reference();
                 source = StorageReservationSource.storage(reference);
@@ -362,6 +377,9 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack reserveExactFromEndpoint(@Nonnull ItemStack template, int count,
                                                @Nonnull CraftStorageEndpoint endpoint,
                                                @Nonnull ServerPlayer player) {
+        ItemStack resonance = reserveFromPreferredResonance(
+                Ingredient.of(template.copyWithCount(1)), template, count, endpoint, player);
+        if (!resonance.isEmpty()) return resonance;
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (storageSupportsFluidContainers(endpoint)
                 && (template.is(net.minecraft.world.item.Items.WATER_BUCKET)
@@ -444,6 +462,9 @@ public final class ExtractionLedger implements AutoCloseable {
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         setStorageEndpoint(endpoint);
+        ItemStack resonance = reserveFromPreferredResonance(
+                ingredient, ItemStack.EMPTY, count, endpoint, player);
+        if (!resonance.isEmpty()) return resonance;
         // A filled vanilla bucket is a derived material in BD: reserve it
         // against one empty bucket plus 1000 mB of the matching fluid. This
         // must run on the Ingredient path as well as the exact-item path,
@@ -487,6 +508,37 @@ public final class ExtractionLedger implements AutoCloseable {
         recordEntry(new Entry(Source.NETWORK, ingredient, reserved.copy(), null, null,
                 null, null, GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)));
         return reserved;
+    }
+
+    private ItemStack reserveFromPreferredResonance(
+            Ingredient requested, ItemStack exactTemplate, int count,
+            CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (preferredResonanceIngredients.isEmpty() || count <= 0) return ItemStack.EMPTY;
+        for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
+            for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
+                ItemStack stack = stored.stack();
+                if (stack.isEmpty() || !IngredientMatcher.test(requested, stack)
+                        || !matchesPreferredResonanceIngredient(stack)) continue;
+                if (!exactTemplate.isEmpty()
+                        && !ItemStack.isSameItemSameTags(exactTemplate, stack)) continue;
+                ResonanceReservationKey key = new ResonanceReservationKey(
+                        view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
+                int available = stack.getCount() - pendingResonance.getOrDefault(key, 0);
+                if (available < count) continue;
+                ItemStack reserved = stack.copyWithCount(count);
+                pendingResonance.merge(key, count, Integer::sum);
+                recordEntry(Entry.resonance(requested, reserved, view, stored.slot(), key));
+                return reserved;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private boolean matchesPreferredResonanceIngredient(ItemStack stack) {
+        for (Ingredient preferred : preferredResonanceIngredients) {
+            if (IngredientMatcher.test(preferred, stack)) return true;
+        }
+        return false;
     }
 
     /**
@@ -724,6 +776,7 @@ public final class ExtractionLedger implements AutoCloseable {
         MaterialSources.invalidateFor(player);
         pendingNet.clear();
         pendingInv.clear();
+        pendingResonance.clear();
         networkEntryCache.clear();
         transition(State.COMMITTED);
         return true;
@@ -781,6 +834,19 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
         }
+        for (Entry entry : entries) {
+            if (entry.source != Source.RESONANCE_DISK) continue;
+            if (entry.resonanceView == null) return false;
+            ItemStack simulated = entry.resonanceView.extractExactView(
+                    entry.resonanceSlot, entry.template, entry.count, true);
+            if (simulated.getCount() != entry.count
+                    || !ItemStack.isSameItemSameTags(simulated, entry.template)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ledger] Resonance tool changed before commit: backend={} slot={} expected={}",
+                        entry.resonanceView.backendId(), entry.resonanceSlot, entry.template);
+                return false;
+            }
+        }
         // Player inventory entries are verified at extraction time
         // since inventory can change between reservation and commit.
         return true;
@@ -822,6 +888,17 @@ public final class ExtractionLedger implements AutoCloseable {
                         PlayerUtils.safeGiveToPlayer(player, s, null);
                     }
                 }
+                case RESONANCE_DISK -> {
+                    Entry entry = entriesById.get(rec.entryId);
+                    if (entry == null || entry.resonanceView == null) {
+                        PlayerUtils.safeGiveToPlayer(player, s, null);
+                        continue;
+                    }
+                    ItemStack remainder = entry.resonanceView.insertView(
+                            entry.resonanceSlot, s, s.getCount(), false);
+                    entry.resonanceView.markDirty(player);
+                    if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
+                }
                 case PLAYER_INVENTORY -> PlayerUtils.safeGiveToPlayer(player, s, null);
             }
         }
@@ -851,6 +928,7 @@ public final class ExtractionLedger implements AutoCloseable {
         // tracking maps so future reservations see accurate counts.
         pendingNet.clear();
         pendingInv.clear();
+        pendingResonance.clear();
         networkEntryCache.clear();
     }
 
@@ -885,6 +963,25 @@ public final class ExtractionLedger implements AutoCloseable {
         public ReservationToken {
             entryIds = List.copyOf(entryIds);
         }
+    }
+
+    /** Stable return target for a reusable item reserved from a resonance disk. */
+    public record ResonanceReturnTarget(ResonanceStorageView view, int slot) {}
+
+    /** Resolve the original resonance slot for a reusable item before settlement. */
+    @Nullable
+    public ResonanceReturnTarget resonanceReturnTarget(
+            @Nonnull ItemStack reservedItem, @Nonnull Ingredient matcher) {
+        if (reservedItem.isEmpty() || matcher.isEmpty()) return null;
+        for (Entry entry : entries) {
+            if (entry.source != Source.RESONANCE_DISK
+                    || entry.resonanceView == null
+                    || entry.count != 1
+                    || !ItemStack.isSameItem(entry.template, reservedItem)
+                    || !matcher.test(entry.template)) continue;
+            return new ResonanceReturnTarget(entry.resonanceView, entry.resonanceSlot);
+        }
+        return null;
     }
 
     /** Mark the current end of the reservation list before reserving one operation. */
@@ -960,6 +1057,8 @@ public final class ExtractionLedger implements AutoCloseable {
         entriesById.clear();
         pendingNet.clear();
         pendingInv.clear();
+        pendingResonance.clear();
+        preferredResonanceIngredients.clear();
         networkEntryCache.clear();
         // A chain reuses its master ledger across vanilla steps. The settlement
         // mirror is a per-commit scope and must be reset with the legacy ledger;
@@ -988,12 +1087,17 @@ public final class ExtractionLedger implements AutoCloseable {
         entriesById.clear();
         pendingNet.clear();
         pendingInv.clear();
+        pendingResonance.clear();
+        preferredResonanceIngredients.clear();
         networkEntryCache.clear();
         resetSettlementMirror();
         state = State.ROLLED_BACK;
     }
 
-    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING }
+    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK }
+
+    private record ResonanceReservationKey(
+            String backendId, int slot, CraftingResolver.StackKey stackKey) {}
 
     private static final AtomicInteger entryIdSeq = new AtomicInteger();
 
@@ -1008,6 +1112,9 @@ public final class ExtractionLedger implements AutoCloseable {
         @Nullable final ResourceKey<Level> altarDim;
         @Nullable final BlockPos altarPos;
         @Nullable final INetwork sourceNetwork;
+        @Nullable final ResonanceStorageView resonanceView;
+        final int resonanceSlot;
+        @Nullable final ResonanceReservationKey resonanceKey;
         ItemStack extracted = ItemStack.EMPTY;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
@@ -1019,6 +1126,16 @@ public final class ExtractionLedger implements AutoCloseable {
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
               @Nullable INetwork sourceNetwork, boolean exactIdentity) {
+            this(source, originalIngredient, template, preExtracted, altarDim, altarPos,
+                    sourceNetwork, exactIdentity, null, -1, null);
+        }
+
+        private Entry(Source source, Ingredient originalIngredient, ItemStack template,
+                      @Nullable ItemStack preExtracted,
+                      @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
+                      @Nullable INetwork sourceNetwork, boolean exactIdentity,
+                      @Nullable ResonanceStorageView resonanceView, int resonanceSlot,
+                      @Nullable ResonanceReservationKey resonanceKey) {
             this.id = entryIdSeq.incrementAndGet();
             this.source = source;
             this.originalIngredient = originalIngredient;
@@ -1029,6 +1146,16 @@ public final class ExtractionLedger implements AutoCloseable {
             this.altarDim = altarDim;
             this.altarPos = altarPos;
             this.sourceNetwork = sourceNetwork;
+            this.resonanceView = resonanceView;
+            this.resonanceSlot = resonanceSlot;
+            this.resonanceKey = resonanceKey;
+        }
+
+        static Entry resonance(Ingredient ingredient, ItemStack template,
+                               ResonanceStorageView view, int slot,
+                               ResonanceReservationKey key) {
+            return new Entry(Source.RESONANCE_DISK, ingredient, template,
+                    null, null, null, null, true, view, slot, key);
         }
 
         void confirmExtracted(ItemStack stack) {
@@ -1081,6 +1208,13 @@ public final class ExtractionLedger implements AutoCloseable {
                                 source, entry.template, entry.count, player)
                         : RSIntegrationNetwork.extractFromNetwork(
                                 source, entry.originalIngredient, entry.count, player);
+            }
+            case RESONANCE_DISK -> {
+                if (entry.resonanceView == null) yield ItemStack.EMPTY;
+                ItemStack extracted = entry.resonanceView.extractExactView(
+                        entry.resonanceSlot, entry.template, entry.count, false);
+                if (!extracted.isEmpty()) entry.resonanceView.markDirty(player);
+                yield extracted;
             }
             case PLAYER_INVENTORY -> {
                 ItemStack extracted = extractFromSlots(entry, player.getInventory().items);
@@ -1177,11 +1311,15 @@ public final class ExtractionLedger implements AutoCloseable {
                                              @Nullable ServerPlayer player) {
         try {
             if (storageEndpoint != null && player != null) {
-                long available = storageEndpoint.snapshot(player).snapshot()
+                long endpointAvailable = storageEndpoint.snapshot(player).snapshot()
                         .map(snapshot -> snapshot.countExact(storageEndpoint.session().itemKey(template)))
                         .orElse(0L);
-                return (int) Math.min(Integer.MAX_VALUE, Math.max(0L,
-                        available - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0)));
+                endpointAvailable = Math.max(0L, endpointAvailable
+                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0));
+                long resonanceAvailable = countExactAvailableInPreferredResonance(
+                        template, storageEndpoint, player);
+                return (int) Math.min(Integer.MAX_VALUE,
+                        Math.max(0L, endpointAvailable + resonanceAvailable));
             }
             var cache = network.getItemStorageCache();
             if (cache == null) return 0;
@@ -1198,6 +1336,24 @@ public final class ExtractionLedger implements AutoCloseable {
             RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error counting exact network stack", e);
             return 0;
         }
+    }
+
+    private int countExactAvailableInPreferredResonance(
+            ItemStack template, CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (template.isEmpty() || !matchesPreferredResonanceIngredient(template)) return 0;
+        long available = 0L;
+        for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
+            for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
+                ItemStack stack = stored.stack();
+                if (stack.isEmpty() || !ItemStack.isSameItemSameTags(stack, template)) continue;
+                ResonanceReservationKey key = new ResonanceReservationKey(
+                        view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
+                available += Math.max(0,
+                        stack.getCount() - pendingResonance.getOrDefault(key, 0));
+                if (available >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            }
+        }
+        return (int) available;
     }
 
     private int countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
@@ -1597,6 +1753,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         case NETWORK -> "network";
                         case PLAYER_INVENTORY -> "inventory";
                         case ALTAR_BINDING -> "altar_binding";
+                        case RESONANCE_DISK -> "resonance_disk";
                     }));
         }
         return out;
@@ -1644,6 +1801,18 @@ public final class ExtractionLedger implements AutoCloseable {
                     }
                 } else {
                     refundLeftoverToPlayerOrNetwork(refund, player, network);
+                }
+            }
+            case RESONANCE_DISK -> {
+                if (e.resonanceView == null || player == null) {
+                    refundLeftoverToPlayerOrNetwork(refund, player, network);
+                    return;
+                }
+                ItemStack leftover = e.resonanceView.insertView(
+                        e.resonanceSlot, refund, refund.getCount(), false);
+                e.resonanceView.markDirty(player);
+                if (!leftover.isEmpty()) {
+                    refundLeftoverToPlayerOrNetwork(leftover, player, network);
                 }
             }
             case PLAYER_INVENTORY -> refundLeftoverToPlayerOrNetwork(refund, player, network);
@@ -1775,6 +1944,13 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private void decrementPending(Entry entry) {
+        if (entry.source == Source.RESONANCE_DISK && entry.resonanceKey != null) {
+            pendingResonance.computeIfPresent(entry.resonanceKey, (ignored, reserved) -> {
+                int remaining = reserved - entry.count;
+                return remaining <= 0 ? null : remaining;
+            });
+            return;
+        }
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(entry.template, true);
         Map<CraftingResolver.StackKey, Integer> pending =
                 entry.source == Source.PLAYER_INVENTORY ? pendingInv : pendingNet;
