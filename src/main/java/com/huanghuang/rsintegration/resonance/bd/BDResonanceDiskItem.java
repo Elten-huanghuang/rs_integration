@@ -43,7 +43,12 @@ public final class BDResonanceDiskItem extends Item {
                         "rsi.resonance.bd.no_network"));
                 return InteractionResultHolder.fail(stack);
             }
-            BDResonanceDiskAccess.bindToNetwork(serverPlayer, stack, diskId, networkId);
+            if (!BDResonanceDiskAccess.bindToNetwork(
+                    serverPlayer, stack, diskId, networkId)) {
+                serverPlayer.sendSystemMessage(Component.translatable(
+                        "rsi.resonance.bd.bind_failed"));
+                return InteractionResultHolder.fail(stack);
+            }
             serverPlayer.sendSystemMessage(Component.translatable(
                     "rsi.resonance.bd.bound", networkId));
             return InteractionResultHolder.success(stack);
@@ -78,7 +83,8 @@ public final class BDResonanceDiskItem extends Item {
         UUID diskId = BDResonanceDiskAccess.getDiskId(stack);
         int networkId = BDResonanceDiskAccess.getNetworkId(stack);
         tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.capacity", CAPACITY));
-        if (diskId == null) {
+        tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.inventory_required"));
+        if (!BDResonanceDiskAccess.isBound(stack)) {
             tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.unbound"));
         } else {
             tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.network", networkId));
