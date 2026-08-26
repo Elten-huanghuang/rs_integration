@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.GridTransferClassifier;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -42,7 +41,6 @@ public abstract class MixinGridTransferMessage {
     )
     private static void rsi$redirectCraftingGridToInventory(
             Player player, GridTransferMessage msg, CallbackInfo ci) {
-        if (!RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) return;
         if (!(player.containerMenu instanceof GridContainerMenu container)) return;
 
         // onRecipeTransfer also fires for pattern grids; only the crafting grid

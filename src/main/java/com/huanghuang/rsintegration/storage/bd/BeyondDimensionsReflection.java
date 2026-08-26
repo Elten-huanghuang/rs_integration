@@ -23,11 +23,11 @@ import java.util.List;
 import java.util.Set;
 
 /** Small, fail-closed reflection boundary for the optional BD API. */
-final class BeyondDimensionsReflection {
+public final class BeyondDimensionsReflection {
     private static final String NET = "com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet";
     private static final String KEY = "com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey";
     private static final String FLUID_KEY = "com.wintercogs.beyonddimensions.api.storage.key.impl.FluidStackKey";
-    static StorageResolutionResult resolvePrimary(ServerPlayer player, StorageBackendId id) {
+    public static StorageResolutionResult resolvePrimary(ServerPlayer player, StorageBackendId id) {
         StorageResolutionResult primary;
         try {
             Object net = invokeStatic(NET, "getPrimaryNetFromPlayer", new Class<?>[]{net.minecraft.world.entity.player.Player.class}, player);
@@ -157,6 +157,12 @@ final class BeyondDimensionsReflection {
         addBoundNetworkIds(ids, player.getInventory().items);
         addBoundNetworkIds(ids, player.getInventory().armor);
         addBoundNetworkIds(ids, player.getInventory().offhand);
+        // BD's own terminal supports Curios, so it must be treated as an
+        // authenticated network item everywhere we resolve or authorize a
+        // storage session. CuriosAccess is reflective and returns an empty
+        // list when Curios is not installed.
+        addBoundNetworkIds(ids,
+                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
         return ids;
     }
 
@@ -180,6 +186,25 @@ final class BeyondDimensionsReflection {
 
     static boolean hasBoundNetworkItem(ServerPlayer player, int networkId) {
         return boundNetworkIds(player).contains(networkId);
+    }
+
+    public static boolean isAuthorizedNetwork(ServerPlayer player, int networkId) {
+        try {
+            Object net = invokeStatic(NET, "getNetFromId", new Class<?>[]{int.class}, networkId);
+            return net != null && (hasPlayerAccess(net, player) || hasBoundNetworkItem(player, networkId));
+        } catch (Exception | LinkageError e) {
+            return false;
+        }
+    }
+
+    /** Returns whether BD still has a live network object for this id. */
+    public static boolean networkExists(int networkId) {
+        if (networkId < 0) return false;
+        try {
+            return invokeStatic(NET, "getNetFromId", new Class<?>[]{int.class}, networkId) != null;
+        } catch (Exception | LinkageError e) {
+            return false;
+        }
     }
 
     private static Object invokeStatic(String className, String name, Class<?>[] types, Object... args) throws Exception {

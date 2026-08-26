@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -56,7 +57,11 @@ public abstract class GridScreenMachineTabMixin {
         if (!rsi$bindingSyncRequested) {
             rsi$bindingSyncRequested = true;
             MachineHub.hideImmediate();
-            RSSidePanelNetworkHandler.sendRequestSync();
+            if (RSSidePanelModule.isEnabled()) {
+                RSSidePanelNetworkHandler.sendRequestSync();
+            } else {
+                RSSidePanelNetworkHandler.sendBindingSyncRequest();
+            }
         }
 
         var screen = (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;

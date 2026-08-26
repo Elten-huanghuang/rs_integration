@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.resonance.disk;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,25 +20,22 @@ public final class ResonanceDiskAbilityService {
     private ResonanceDiskAbilityService() {}
 
     public static boolean hasActiveAbility(ServerPlayer player, int ability) {
-        var network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        ResonanceDiskWrapper disk = network == null
-                ? null : PassiveEffectEngine.findResonanceDisk(network);
-        return disk != null && disk.hasAbility(ability);
+        for (ResonanceStorageView view : ResonanceStorageResolvers.resolveAll(player)) {
+            if (view.hasAbility(ability)) return true;
+        }
+        return false;
     }
 
     public static UnlockResult unlockActiveDisk(ServerPlayer player, int ability) {
-        var network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        ResonanceDiskWrapper disk = network == null
-                ? null : PassiveEffectEngine.findResonanceDisk(network);
-        if (disk == null) return UnlockResult.NO_RESONANCE_DISK;
-        if (!disk.unlockAbility(ability)) return UnlockResult.ALREADY_UNLOCKED;
-
-        // A bound network may live in a different dimension from the player.
-        // Mark every level manager dirty so the UUID-owned disk record is saved.
-        for (ServerLevel level : player.server.getAllLevels()) {
-            API.instance().getStorageDiskManager(level).markForSaving();
+        var views = ResonanceStorageResolvers.resolveAll(player);
+        if (views.isEmpty()) return UnlockResult.NO_RESONANCE_DISK;
+        for (ResonanceStorageView view : views) {
+            if (view.unlockAbility(ability)) {
+                view.markDirty(player);
+                return UnlockResult.UNLOCKED;
+            }
         }
-        return UnlockResult.UNLOCKED;
+        return UnlockResult.ALREADY_UNLOCKED;
     }
 
     public static UnlockResult unlockDiskStack(ServerLevel level, ItemStack stack, int ability) {

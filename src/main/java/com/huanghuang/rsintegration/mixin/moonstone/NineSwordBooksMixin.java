@@ -3,8 +3,7 @@ package com.huanghuang.rsintegration.mixin.moonstone;
 import com.google.common.collect.Multimap;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.util.ThreadLocalStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -97,8 +96,6 @@ public abstract class NineSwordBooksMixin {
     @Unique
     private int rsi$computeExtraSize(Player player) {
         if (!(player instanceof ServerPlayer sp)) return 0;
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) return 0;
 
         // 获取原模组的 Config List，用于备用判定
         @SuppressWarnings("unchecked")
@@ -119,7 +116,7 @@ public abstract class NineSwordBooksMixin {
         if (needed <= 0) return 0;
 
         int extraSize = 0;
-        for (ItemStack sword : disk.getInternalStacks()) {
+        for (ItemStack sword : ResonanceInventoryBridge.getItems(sp)) {
             if (needed <= 0) break;
             if (sword.isEmpty()) continue;
 

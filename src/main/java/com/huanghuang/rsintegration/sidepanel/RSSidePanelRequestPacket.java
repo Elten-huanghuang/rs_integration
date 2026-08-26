@@ -48,6 +48,7 @@ public final class RSSidePanelRequestPacket {
     private static final int ENTRIES_PER_TICK = 64;
 
     static boolean refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
+        if (!RSSidePanelModule.isEnabled()) return false;
         UUID id = player.getUUID();
         if (REFRESH_TASKS.containsKey(id)) return true;
         // Opening/refreshing the panel must authenticate again from a current
@@ -136,6 +137,8 @@ public final class RSSidePanelRequestPacket {
     }
 
     static void cancelRefresh(UUID playerId) { REFRESH_TASKS.remove(playerId); }
+
+    static void cancelAllRefreshTasks() { REFRESH_TASKS.clear(); }
 
     static boolean hasRefresh(UUID playerId) { return REFRESH_TASKS.containsKey(playerId); }
 

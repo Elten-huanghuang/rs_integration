@@ -2,8 +2,7 @@ package com.huanghuang.rsintegration.mixin.yuusha;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -49,10 +48,8 @@ public abstract class YuushaNineSwordBooksMixin {
     @Unique
     private static int rsi$countDiskSwords(Player player) {
         if (!(player instanceof ServerPlayer sp)) return 0;
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) return 0;
         int count = 0;
-        for (ItemStack s : disk.getInternalStacks()) {
+        for (ItemStack s : ResonanceInventoryBridge.getItems(sp)) {
             if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade) {
                 count++;
             }
@@ -63,10 +60,8 @@ public abstract class YuushaNineSwordBooksMixin {
     @Unique
     private static float rsi$sumDiskSwordDamage(Player player) {
         if (!(player instanceof ServerPlayer sp)) return 0f;
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) return 0f;
         float total = 0f;
-        for (ItemStack s : disk.getInternalStacks()) {
+        for (ItemStack s : ResonanceInventoryBridge.getItems(sp)) {
             if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade blade) {
                 var mods = blade.getAttributeModifiers(EquipmentSlot.MAINHAND, s);
                 for (var mod : mods.get(Attributes.ATTACK_DAMAGE)) {

@@ -124,7 +124,7 @@ RS+BD 同装时必须由 UI 或绑定上下文明确选择；不能把注册表�
 - 机器中心的快速插入、取出、解绑已按绑定类型分流：RS 绑定继续发送 `MachineCollectPacket`、`MachineInsertPacket`、`UnbindMachinePacket`，BD 绑定发送独立的 `BeyondDimensionsMachineCollectPacket`、`BeyondDimensionsMachineInsertPacket`、`BeyondDimensionsUnbindMachinePacket`。BD packet 已由 `BeyondDimensionsMachineNetworkHandler.register()` 注册；侧栏 UI 本身仍是 RS-only，但这三个机器中心操作不再属于“未脱离 RS 注册”的代码缺口，仍需实机验证。
 - 递归计划界面的“打开机器”和 JEI layout 的机器 GUI 按钮已按当前绑定物品分流到 RS 或 BD packet；RS-only 仍使用 `OpenBoundMachineGuiPacket`，BD-only 使用 `BeyondDimensionsOpenBoundMachineGuiPacket`。当前剩余工作是实机回归，不是 packet 注册缺口。
 - 精妙背包 Deposit Upgrade 的自动存入仍直接匹配 RS `GridBlockEntity` 并操作 RS `INetwork`；这是 RS-only 功能，当前没有 BD 等价实现。
-- `ResonanceDisk*`、`RSInventoryBridge`、`PassiveEffectEngine`：没有 BD 等价实现，继续明确标记为 RS-only。
+- `ResonanceDisk*` 的存储实现仍是 RS-only；被动效果、能力服务和第三方兼容查询已下沉到后端中立的 `ResonanceStorageView`、`ResonanceStorageResolvers`、`ResonanceInventoryBridge`，当前只注册 RS adapter，BD adapter 待实现。
 - `GuiNavStack` 中返回 RS Grid 的 `ReturnToRSPacket` 路径、RS 专属 GUI 和少数调试入口仍是 RS-only；侧栏暂不接入 BD，BD-only 入口必须跳过这些路径。
 - `RSIntegrationNetwork`、旧 flat/legacy packet 以及直接使用 `INetwork` 的兼容桥属于 RS legacy 白名单，不得从 BD-only 初始化或公共业务路径触达。
 - 各 mod delegate 中保留的 `INetwork` 字段和 `resolveNetworkFromPlayer` 调用，只有在 endpoint 为空时才是 RS fallback；它们不是自动等价证明。所有从旧 packet、辅助检查器或特殊 mod 入口进入的调用，都必须确认 endpoint 已传递，否则仍可能退回 RS-only 行为。

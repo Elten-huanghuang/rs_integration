@@ -108,6 +108,30 @@ resonance.bd.migration
 
 需要复用的是槽位规则、能力定义和被动效果契约；不复用 RS 磁盘包装类或 RS 存储管理器。
 
+## 被动效果与兼容层共用
+
+RS 盘和 BD 盘可以共用同一套被动效果、能力解锁和第三方兼容逻辑，但不能让这些逻辑直接依赖某一个后端的类。实现时增加后端中立的 `ResonanceStorageView`/`ResonanceStorageResolver` 边界：
+
+```text
+兼容 Mixin / 被动效果 / 能力服务
+                |
+      ResonanceStorageView
+          /              \
+ RS adapter                  BD adapter
+ResonanceDiskWrapper       BDResonanceDiskRecord
+```
+
+统一视图至少提供：完整槽位快照、精确 NBT 身份、槽位原子变更、精确提取/插入、能力掩码、内容 revision 和后端状态。`TickSimulator`、被动效果扫描、物品查找、数量统计和能力判断只调用这个视图，因此以后新增兼容只写一份。
+
+现有 `RSInventoryBridge` 保留为旧 RS 调用方的兼容外观；新的公共入口应改为 `ResonanceInventoryBridge`。它可以同时返回玩家当前有权限访问的 RS 盘和 BD 盘：
+
+- 查询类操作合并两个视图的快照；相同物品不会因为后端不同而丢失数量。
+- 提取类操作按明确的后端优先级逐个执行，并在不足时回滚已提取部分，禁止静默跨网络扣错物品。
+- 能力掩码按位或合并；同一能力在两个盘中存在时只执行一次被动效果。
+- 被动 `inventoryTick` 按每个磁盘的 revision 独立缓存，任何一个盘的变更不会污染另一个盘。
+
+RS 和 BD 同时存在时，二者是两个独立库存源，但兼容层只产生一个逻辑结果。RS 盘的物品 ID、`ResonanceDiskWrapper`、RS 存储管理器和旧背包路径保持不变；BD 盘只通过 BD adapter 接入。未安装 BD 时不会加载 BD 类，也不会改变现有 RS 运行路径。
+
 BeyondDimensions 相关类应放在可选集成边界内，确保未安装 BD 时不会提前链接 BD 类。
 
 ## 界面

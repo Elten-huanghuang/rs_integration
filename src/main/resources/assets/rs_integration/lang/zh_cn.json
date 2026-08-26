@@ -870,6 +870,17 @@
 
   "item.rs_integration.resonance_storage_disk": "共振存储盘",
   "item.rs_integration.resonance_storage_disk.tooltip": "§d共振盘 §7— 放入磁盘驱动器激活被动效果",
+  "item.rs_integration.resonance_network_generator": "共振网络发生器",
+  "rsi.resonance.bd.no_network": "§c没有可绑定的 BD 网络",
+  "rsi.resonance.bd.no_disk": "§c未找到已绑定的共振网络发生器",
+  "rsi.resonance.bd.merge_full": "§e主共振空间容量不足，已保留当前发生器的独立空间",
+  "rsi.resonance.bd.bound": "§b共振网络发生器已绑定 BD 网络 #%s",
+  "rsi.resonance.bd.bound_status": "§b共振网络发生器已连接 BD 网络 #%s",
+  "rsi.resonance.bd.access_denied": "§c无法访问该 BD 网络",
+  "rsi.resonance.bd.tooltip.capacity": "容量：%s",
+  "rsi.resonance.bd.tooltip.unbound": "状态：未绑定，右键 BD 网络绑定",
+  "rsi.resonance.bd.tooltip.network": "BD 网络：#%s",
+  "rsi.resonance.bd.tooltip.uuid": "空间标识：%s",
 
   "rsi.machine_center.title": "机器管理中心",
   "rsi.machine_center.machine_count": "%s 台机器已绑定",

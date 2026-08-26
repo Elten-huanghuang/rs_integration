@@ -8,6 +8,7 @@ import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
@@ -29,7 +30,10 @@ public final class ModItems {
 
     /** Optional RS-owned entries are registered only by RSOptionalBootstrap. */
     public static RegistryObject<Item> RESONANCE_STORAGE_DISK;
-    public static RegistryObject<MenuType<?>> RESONANCE_BACKPACK;
+    public static RegistryObject<Item> DIMENSIONAL_RESONANCE_DISK;
+    public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
+            "resonance_backpack",
+            () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
 
     public static final RegistryObject<CreativeModeTab> RSI_TAB = TABS.register("main",
             () -> CreativeModeTab.builder()
@@ -39,6 +43,9 @@ public final class ModItems {
                     .displayItems((params, output) -> {
                         if (RESONANCE_STORAGE_DISK != null) {
                             output.accept(RESONANCE_STORAGE_DISK.get());
+                        }
+                        if (DIMENSIONAL_RESONANCE_DISK != null) {
+                            output.accept(DIMENSIONAL_RESONANCE_DISK.get());
                         }
                         // Backpack upgrades are only registered when Sophisticated
                         // Backpacks is present. Look them up by registry name so we
@@ -68,9 +75,12 @@ public final class ModItems {
     }
 
     public static void registerOptionalResonance(IEventBus modBus,
-                                                  Supplier<? extends Item> diskSupplier,
-                                                  Supplier<? extends MenuType<?>> backpackSupplier) {
+                                                  Supplier<? extends Item> diskSupplier) {
         RESONANCE_STORAGE_DISK = ITEMS.register("resonance_storage_disk", diskSupplier);
-        RESONANCE_BACKPACK = MENUS.register("resonance_backpack", backpackSupplier);
+    }
+
+    public static void registerOptionalBeyondDimensions(IEventBus modBus,
+                                                         Supplier<? extends Item> diskSupplier) {
+        DIMENSIONAL_RESONANCE_DISK = ITEMS.register("resonance_network_generator", diskSupplier);
     }
 }

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.machine;
 
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
+import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -61,6 +62,8 @@ public final class BeyondDimensionsMachineHubClient {
     private static final int MACHINE_CENTER_SIZE = 16;
     private static int machineCenterX;
     private static int machineCenterY;
+    private static int resonanceBackpackX;
+    private static int resonanceBackpackY;
 
     private BeyondDimensionsMachineHubClient() {}
 
@@ -70,6 +73,7 @@ public final class BeyondDimensionsMachineHubClient {
         if (!isTerminal(screen)) return;
         refreshLocalBindings();
         renderMachineCenterEntry(event);
+        renderResonanceEntry(event);
         renderFavoriteStrip(event);
         if (!MachineHub.isVisible()) return;
         int centerX = screen.width / 2;
@@ -82,6 +86,7 @@ public final class BeyondDimensionsMachineHubClient {
     public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
         if (!isTerminal(event.getScreen())) return;
         if (handleMachineCenterClick(event)) return;
+        if (handleResonanceClick(event)) return;
         if (!MachineHub.isVisible() && handleFavoriteClick(event)) return;
         if (!MachineHub.isVisible()) return;
         if (MachineHubInputHandler.mouseClicked(event.getMouseX(), event.getMouseY(), event.getButton())) {
@@ -117,10 +122,42 @@ public final class BeyondDimensionsMachineHubClient {
         g.pose().popPose();
     }
 
+    /** BD terminal slot 10: opens the generator's independent BD resonance space. */
+    private static void renderResonanceEntry(ScreenEvent.Render.Post event) {
+        Screen screen = event.getScreen();
+        int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
+        resonanceBackpackX = Math.max(0, left - 18);
+        resonanceBackpackY = machineCenterY + 18;
+        boolean available = ModItems.DIMENSIONAL_RESONANCE_DISK != null;
+        boolean hovered = available
+                && event.getMouseX() >= resonanceBackpackX
+                && event.getMouseX() < resonanceBackpackX + MACHINE_CENTER_SIZE
+                && event.getMouseY() >= resonanceBackpackY
+                && event.getMouseY() < resonanceBackpackY + MACHINE_CENTER_SIZE;
+        MachineTabHandler.setResonanceBackpackHovered(hovered);
+        if (!available) return;
+        GuiGraphics g = event.getGuiGraphics();
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 460);
+        g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, resonanceBackpackX, resonanceBackpackY,
+                0, 0, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
+        ItemStack icon = new ItemStack(ModItems.DIMENSIONAL_RESONANCE_DISK.get());
+        g.renderItem(icon, resonanceBackpackX, resonanceBackpackY);
+        g.pose().popPose();
+    }
+
     private static boolean handleMachineCenterClick(ScreenEvent.MouseButtonPressed.Pre event) {
         if (event.getButton() != GLFW.GLFW_MOUSE_BUTTON_LEFT
                 || !MachineTabHandler.isMachineCenterHovered()) return false;
         MachineTabHandler.toggleMachineCenter();
+        event.setCanceled(true);
+        return true;
+    }
+
+    private static boolean handleResonanceClick(ScreenEvent.MouseButtonPressed.Pre event) {
+        if (event.getButton() != GLFW.GLFW_MOUSE_BUTTON_LEFT
+                || !MachineTabHandler.isResonanceBackpackHovered()) return false;
+        MachineTabHandler.toggleResonanceBackpack(true);
         event.setCanceled(true);
         return true;
     }

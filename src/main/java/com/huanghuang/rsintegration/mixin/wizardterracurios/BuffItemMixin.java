@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mixin.wizardterracurios;
 
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,10 +34,7 @@ public abstract class BuffItemMixin {
                 "applyBuffFromStack", new Class<?>[]{Player.class, ItemStack.class});
         if (applyBuff == null) return;
 
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(player);
-        if (disk == null) return;
-
-        for (ItemStack stack : disk.getInternalStacks()) {
+        for (ItemStack stack : ResonanceInventoryBridge.getItems(player)) {
             if (stack.isEmpty()) continue;
             try {
                 applyBuff.invoke(null, player, stack);

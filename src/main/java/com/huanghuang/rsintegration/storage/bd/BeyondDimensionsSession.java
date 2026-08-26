@@ -12,6 +12,7 @@ import net.minecraftforge.fluids.FluidStack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 final class BeyondDimensionsSession implements StorageSession {
     private final Object network;
@@ -22,8 +23,11 @@ final class BeyondDimensionsSession implements StorageSession {
         this.reference = Objects.requireNonNull(reference, "reference");
     }
     @Override public StorageReference reference() { return reference; }
+    @Override public Set<StorageCapability> capabilities() {
+        return Set.of(StorageCapability.ITEM_STORAGE, StorageCapability.FLUID_STORAGE);
+    }
     @Override public StorageItemKey itemKey(ItemStack stack) {
-        return StorageItemKey.fromItemStack(reference.backendId(), stack);
+        return BeyondDimensionsItemKeys.fromStack(reference.backendId(), stack);
     }
 
     private Object storage() throws Exception {
@@ -272,7 +276,10 @@ final class BeyondDimensionsSession implements StorageSession {
         java.lang.reflect.Method extract;
         try {
             nativeStorage = storage();
-            nativeKey = BeyondDimensionsReflection.itemKey(ItemStack.of(key.backendPayload()));
+            StorageItemKey storedKey = snapshotItems(player).snapshot()
+                    .map(snapshot -> storedPayloadKey(snapshot, key))
+                    .orElse(key);
+            nativeKey = BeyondDimensionsReflection.itemKey(ItemStack.of(storedKey.backendPayload()));
             extract = nativeStorage.getClass().getMethod("extract", Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey"), long.class, boolean.class, boolean.class);
         } catch (Exception | LinkageError e) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,
@@ -380,6 +387,14 @@ final class BeyondDimensionsSession implements StorageSession {
             remaining -= count;
         }
         return stacks;
+    }
+
+    static StorageItemKey storedPayloadKey(StorageSnapshot snapshot, StorageItemKey requested) {
+        return snapshot.items().stream()
+                .map(StoredItem::key)
+                .filter(requested::equals)
+                .findFirst()
+                .orElse(requested);
     }
 
     private static StorageSnapshotResult snapshotFailure(StoragePermissionResult permission) {

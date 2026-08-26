@@ -60,6 +60,7 @@ public final class RSSidePanelDeltaPacket {
     /** Convenience: single-entry packet for manual delta sends. */
     public static void send(ServerPlayer player, UUID stackId, ItemStack stack,
                             long timestamp, boolean craftable) {
+        if (!RSSidePanelModule.isEnabled()) return;
         RSSidePanelNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new RSSidePanelDeltaPacket(List.of(new Entry(stackId, stack, timestamp, craftable))));
@@ -67,7 +68,7 @@ public final class RSSidePanelDeltaPacket {
 
     /** Send a batch of deltas collected over a tick. */
     public static void sendBatch(ServerPlayer player, List<Entry> entries) {
-        if (entries.isEmpty()) return;
+        if (!RSSidePanelModule.isEnabled() || entries.isEmpty()) return;
         for (int from = 0; from < entries.size(); from += MAX_ENTRIES) {
             int to = Math.min(from + MAX_ENTRIES, entries.size());
             RSSidePanelNetworkHandler.CHANNEL.send(

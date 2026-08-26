@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.resonance.passive;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,12 +15,12 @@ public final class TickSimulator {
 
     private static Map<Item, WhitelistEntry> whitelist = Map.of();
     private static int lastConfigHash = -1;
-    private static final Map<ResonanceDiskWrapper, MatchedStackCache> MATCH_CACHE =
+    private static final Map<ResonanceStorageView, MatchedStackCache> MATCH_CACHE =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     private TickSimulator() {}
 
-    public static void simulate(ServerPlayer player, ResonanceDiskWrapper disk) {
+    public static void simulate(ServerPlayer player, ResonanceStorageView disk) {
         refreshWhitelist();
         if (whitelist.isEmpty()) return;
 
@@ -30,17 +30,16 @@ public final class TickSimulator {
             ItemStack stack = matched.stack();
             WhitelistEntry entry = matched.entry();
             if (entry.mutates) {
-                int originalSlot = getSlot(stack);
+                int originalSlot = matched.slot();
                 ItemStack before = stack.copy();
-                ResonanceDiskWrapper.rsi$stripSlotTag(before);
                 ItemStack after = before.copy();
                 after.getItem().inventoryTick(after, player.level(), player, -1, false);
                 if ("apotheosis:potion_charm".equals(entry.itemId) && !after.isEmpty()) {
                     after = PotionCharmMutationPolicy.preserveIdentity(before, after);
                 }
-                ResonanceDiskWrapper.SlotMutationResult result =
-                        disk.reconcileSlot(originalSlot, before, after);
-                if (result != ResonanceDiskWrapper.SlotMutationResult.SUCCESS) {
+                ResonanceStorageView.SlotMutationResult result =
+                        disk.reconcileSlotView(originalSlot, before, after);
+                if (result != ResonanceStorageView.SlotMutationResult.SUCCESS) {
                     com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
                             "[RSI-Passive] Rejected mutation for {} in slot {}: {}",
                             entry.itemId, originalSlot, result);
@@ -57,35 +56,31 @@ public final class TickSimulator {
         return stacks.stream().map(ItemStack::copy).toList();
     }
 
-    private static List<MatchedStack> matchedStacks(ResonanceDiskWrapper disk) {
+    private static List<MatchedStack> matchedStacks(ResonanceStorageView disk) {
         long revision = disk.contentRevision();
         MatchedStackCache cached = MATCH_CACHE.get(disk);
         if (cached != null && cached.revision() == revision
                 && cached.whitelistHash() == lastConfigHash) {
             return cached.stacks();
         }
-        List<MatchedStack> stacks = snapshotMatchedStacks(disk.delegate().getStacks());
+        List<MatchedStack> stacks = snapshotMatchedStacks(disk.storedStacks());
         MATCH_CACHE.put(disk, new MatchedStackCache(revision, lastConfigHash, stacks));
         return stacks;
     }
 
-    private static List<MatchedStack> snapshotMatchedStacks(Collection<ItemStack> stacks) {
+    private static List<MatchedStack> snapshotMatchedStacks(
+            Collection<ResonanceStorageView.StoredStack> stacks) {
         List<MatchedStack> matched = new ArrayList<>();
         int scanned = 0;
-        for (ItemStack stack : stacks) {
+        for (ResonanceStorageView.StoredStack stored : stacks) {
             scanned++;
+            ItemStack stack = stored.stack();
             if (stack.isEmpty()) continue;
             WhitelistEntry entry = whitelist.get(stack.getItem());
-            if (entry != null) matched.add(new MatchedStack(stack.copy(), entry));
+            if (entry != null) matched.add(new MatchedStack(stored.slot(), stack.copy(), entry));
         }
         PerformanceMonitor.recordResonanceScan(scanned, matched.size());
         return List.copyOf(matched);
-    }
-
-    private static int getSlot(ItemStack stack) {
-        net.minecraft.nbt.CompoundTag tag = stack.getTag();
-        if (tag != null && tag.contains("RSISlot")) return tag.getInt("RSISlot");
-        return -1;
     }
 
     private static void refreshWhitelist() {
@@ -114,6 +109,6 @@ public final class TickSimulator {
     }
 
     private record WhitelistEntry(String itemId, boolean mutates) {}
-    private record MatchedStack(ItemStack stack, WhitelistEntry entry) {}
+    private record MatchedStack(int slot, ItemStack stack, WhitelistEntry entry) {}
     private record MatchedStackCache(long revision, int whitelistHash, List<MatchedStack> stacks) {}
 }

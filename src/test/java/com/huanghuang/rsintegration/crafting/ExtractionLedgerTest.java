@@ -32,6 +32,8 @@ class ExtractionLedgerTest {
     void exactAllocationCombinesNetworkAndInventory() {
         assertArrayEquals(new int[]{15, 1},
                 ExtractionLedger.allocateExactAcrossSources(16, 15, 1));
+        assertArrayEquals(new int[]{1, 11},
+                ExtractionLedger.allocateExactAcrossSources(12, 1, 11));
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mixin.terraequipment;
 
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.inolia_zaicek.terra_equipment.config.TEConfig;
 import com.inolia_zaicek.terra_equipment.item.EffectPotionItem;
 import net.minecraft.server.level.ServerPlayer;
@@ -23,11 +22,8 @@ public abstract class AutoPotionTickerMixin {
         if (event.player.tickCount % 40 != 0) return;
         if (!(event.player instanceof ServerPlayer player)) return;
 
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(player);
-        if (disk == null) return;
-
         int requiredCount = (int) TEConfig.infinite_potion_number.get().doubleValue();
-        for (ItemStack stack : disk.getInternalStacks()) {
+        for (ItemStack stack : ResonanceInventoryBridge.getItems(player)) {
             if (stack.getCount() < requiredCount) continue;
             if (stack.getItem() instanceof EffectPotionItem potion) {
                 player.addEffect(new MobEffectInstance(

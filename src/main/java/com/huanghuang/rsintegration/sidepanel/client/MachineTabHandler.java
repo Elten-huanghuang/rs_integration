@@ -78,8 +78,13 @@ public final class MachineTabHandler {
 
     /** Open the Resonance Backpack GUI. Called when Resonance Backpack side button is clicked. */
     public static void toggleResonanceBackpack() {
+        toggleResonanceBackpack(false);
+    }
+
+    /** Open the backend-local resonance space from a terminal-specific button. */
+    public static void toggleResonanceBackpack(boolean preferBeyondDimensions) {
         RSIntegrationMod.LOGGER.info("[RSI-Backpack] Button clicked, sending open packet to server");
-        NetworkHandler.CHANNEL.sendToServer(new OpenResonanceBackpackPacket());
+        NetworkHandler.CHANNEL.sendToServer(new OpenResonanceBackpackPacket(preferBeyondDimensions));
     }
 
     /** Handle a click on a machine tab. Sends the OpenBoundMachineGuiPacket to server. */

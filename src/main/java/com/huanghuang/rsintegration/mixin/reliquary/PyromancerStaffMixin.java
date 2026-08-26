@@ -1,9 +1,7 @@
 package com.huanghuang.rsintegration.mixin.reliquary;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.refinedmods.refinedstorage.api.util.Action;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -66,33 +64,22 @@ public abstract class PyromancerStaffMixin {
         if (player.level().isClientSide()) return;
         if (!(player instanceof ServerPlayer sp)) return;
 
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) {
+        ItemStack extracted = ResonanceInventoryBridge.extractFirst(
+                sp, stack -> stack.getItem() == item, count, false);
+        if (extracted.isEmpty()) {
             if (rsi$diagNoDisk++ < 3)
                 RSIntegrationMod.LOGGER.info("[RSI-Staff] consumeAndCharge: no disk for {}",
                         player.getName().getString());
             return;
         }
-
-        for (ItemStack diskStack : disk.delegate().getStacks()) {
-            if (diskStack.isEmpty()) continue;
-            if (diskStack.getItem() != item) continue;
-
-            int take = Math.min(count, diskStack.getCount());
-            ItemStack extracted = disk.manualExtractExact(diskStack, take, 0, Action.PERFORM);
-            if (!extracted.isEmpty()) {
-                int charge = extracted.getCount() * chargeLimit;
-                if (charge > 0) chargeCallback.accept(charge);
-                if (rsi$diagHit++ < 5)
-                    RSIntegrationMod.LOGGER.info("[RSI-Staff] consumeAndCharge from disk:"
-                            + " {}x {} -> charge {} for {}",
-                            extracted.getCount(),
-                            diskStack.getDisplayName().getString(),
-                            charge, sp.getName().getString());
-                ci.cancel();
-                return;
-            }
-        }
+        int charge = extracted.getCount() * chargeLimit;
+        if (charge > 0) chargeCallback.accept(charge);
+        if (rsi$diagHit++ < 5)
+            RSIntegrationMod.LOGGER.info("[RSI-Staff] consumeAndCharge from resonance storage:"
+                    + " {}x {} -> charge {} for {}",
+                    extracted.getCount(), extracted.getDisplayName().getString(),
+                    charge, sp.getName().getString());
+        ci.cancel();
     }
 
     @Unique
@@ -112,33 +99,18 @@ public abstract class PyromancerStaffMixin {
         if (player.level().isClientSide()) return;
         if (!(player instanceof ServerPlayer sp)) return;
 
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) {
+        ItemStack extracted = ResonanceInventoryBridge.extractFirst(
+                sp, stack -> stack.getItem() == item, count, simulate);
+        if (extracted.isEmpty() || extracted.getCount() < count) {
             if (rsi$diagNoDisk++ < 3)
                 RSIntegrationMod.LOGGER.info("[RSI-Staff] no resonance disk for {}, item={}, count={}",
                         sp.getName().getString(), item.getDescription().getString(), count);
             return;
         }
-
-        for (ItemStack diskStack : disk.delegate().getStacks()) {
-            if (diskStack.isEmpty()) continue;
-            if (diskStack.getItem() != item) continue;
-            if (diskStack.getCount() < count) continue;
-
-            if (simulate) {
-                cir.setReturnValue(true);
-                return;
-            }
-
-            ItemStack extracted = disk.manualExtractExact(diskStack, count, 0, Action.PERFORM);
-            if (!extracted.isEmpty() && extracted.getCount() >= count) {
-                if (rsi$diagHit++ < 5)
-                    RSIntegrationMod.LOGGER.info("[RSI-Staff] extracted {}x {} from disk for {}",
-                            count, item.getDescription().getString(), sp.getName().getString());
-                cir.setReturnValue(true);
-                return;
-            }
-        }
+        if (rsi$diagHit++ < 5)
+            RSIntegrationMod.LOGGER.info("[RSI-Staff] extracted {}x {} from resonance storage for {}",
+                    count, item.getDescription().getString(), sp.getName().getString());
+        cir.setReturnValue(true);
 
         if (rsi$diagMiss++ < 3)
             RSIntegrationMod.LOGGER.info("[RSI-Staff] item {} not found in disk for {}",

@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
+import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageReservationSource;
 import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
@@ -334,21 +335,36 @@ public final class ExtractionLedger implements AutoCloseable {
         if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         setStorageEndpoint(endpoint);
+        int endpointAvailable = countExactAvailableInNetwork(null, template, player);
+        int inventoryAvailable = countExactAvailableInInventory(player, template);
+        int[] allocation = allocateExactAcrossSources(count, endpointAvailable, inventoryAvailable);
+        if (allocation.length == 0) return ItemStack.EMPTY;
+
+        int mark = reservationMark();
         Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
-        ItemStack stored = reserveExactFromEndpoint(template, count, endpoint, player);
-        if (!stored.isEmpty()) return stored;
-        if (!reserveExactInventoryAvailability(player, template, count)) return ItemStack.EMPTY;
-        ItemStack reserved = template.copyWithCount(count);
-        recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved,
-                null, null, null, null, true));
-        return reserved;
+        if (allocation[0] > 0
+                && reserveExactFromEndpoint(template, allocation[0], endpoint, player).isEmpty()) {
+            cancelReservationsSince(mark);
+            return ItemStack.EMPTY;
+        }
+        if (allocation[1] > 0) {
+            if (!reserveExactInventoryAvailability(player, template, allocation[1])) {
+                cancelReservationsSince(mark);
+                return ItemStack.EMPTY;
+            }
+            ItemStack reserved = template.copyWithCount(allocation[1]);
+            recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved,
+                    null, null, null, null, true));
+        }
+        return template.copyWithCount(count);
     }
 
     private ItemStack reserveExactFromEndpoint(@Nonnull ItemStack template, int count,
                                                @Nonnull CraftStorageEndpoint endpoint,
                                                @Nonnull ServerPlayer player) {
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
-        if ((template.is(net.minecraft.world.item.Items.WATER_BUCKET)
+        if (storageSupportsFluidContainers(endpoint)
+                && (template.is(net.minecraft.world.item.Items.WATER_BUCKET)
                 || template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
             var converted = endpoint.session().extractContainerFluid(player,
                     new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
@@ -359,11 +375,16 @@ public final class ExtractionLedger implements AutoCloseable {
                 return template.copyWithCount(count);
             }
         }
-        if (snapshot == null || snapshot.countExact(endpoint.session().itemKey(template)) < count) {
+        CraftingResolver.StackKey pendingKey = CraftingResolver.StackKey.of(template, true);
+        long available = snapshot == null ? 0L
+                : snapshot.countExact(endpoint.session().itemKey(template));
+        available -= pendingNet.getOrDefault(pendingKey, 0);
+        if (available < count) {
             return ItemStack.EMPTY;
         }
         Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
         ItemStack reserved = template.copyWithCount(count);
+        pendingNet.merge(pendingKey, count, Integer::sum);
         recordEntry(new Entry(Source.NETWORK, ingredient, reserved, null,
                 null, null, null, true));
         return reserved;
@@ -427,7 +448,8 @@ public final class ExtractionLedger implements AutoCloseable {
         // against one empty bucket plus 1000 mB of the matching fluid. This
         // must run on the Ingredient path as well as the exact-item path,
         // because generic recipe planning normally reaches this method.
-        if (ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
+        if (storageSupportsFluidContainers(endpoint)
+                && ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
             ItemStack template = new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
                     new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
@@ -437,7 +459,8 @@ public final class ExtractionLedger implements AutoCloseable {
                 return template.copyWithCount(count);
             }
         }
-        if (ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+        if (storageSupportsFluidContainers(endpoint)
+                && ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
             ItemStack template = new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
                     new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
@@ -831,6 +854,10 @@ public final class ExtractionLedger implements AutoCloseable {
         networkEntryCache.clear();
     }
 
+    private static boolean storageSupportsFluidContainers(@Nullable CraftStorageEndpoint endpoint) {
+        return endpoint != null && endpoint.session().supports(StorageCapability.FLUID_STORAGE);
+    }
+
     private static boolean isContainerFluidIngredient(Ingredient ingredient) {
         return ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))
                 || ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET));
@@ -1029,8 +1056,9 @@ public final class ExtractionLedger implements AutoCloseable {
             case NETWORK -> {
                 INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
                 if (storageEndpoint != null) {
-                    if (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                            || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET)) {
+                    if (storageSupportsFluidContainers(storageEndpoint)
+                            && (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
+                            || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
                         yield storageEndpoint.session().extractContainerFluid(player,
                                 new ItemStack(net.minecraft.world.item.Items.BUCKET), entry.template,
                                 entry.count, false).extractedStacks().stream().findFirst()
@@ -1692,15 +1720,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (entries.isEmpty()) return;
         Entry last = entries.remove(entries.size() - 1);
         entriesById.remove(last.id);
-        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(last.template, true);
-        pendingNet.computeIfPresent(key, (k, v) -> {
-            int nv = v - last.count;
-            return nv <= 0 ? null : nv;
-        });
-        pendingInv.computeIfPresent(key, (k, v) -> {
-            int nv = v - last.count;
-            return nv <= 0 ? null : nv;
-        });
+        decrementPending(last);
     }
 
     /** Undo every uncommitted reservation created after the supplied mark. */
@@ -1732,18 +1752,6 @@ public final class ExtractionLedger implements AutoCloseable {
         Set<Integer> idsToRemove = new HashSet<>();
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            if (updatePending) {
-                CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
-                int count = stack.getCount();
-                pendingNet.computeIfPresent(key, (k, v) -> {
-                    int nv = v - count;
-                    return nv <= 0 ? null : nv;
-                });
-                pendingInv.computeIfPresent(key, (k, v) -> {
-                    int nv = v - count;
-                    return nv <= 0 ? null : nv;
-                });
-            }
             // Find the matching entry by (template item, count) and record its id.
             // Search in reverse so we match the most recently added entry first.
             for (int i = entries.size() - 1; i >= 0; i--) {
@@ -1751,6 +1759,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (!idsToRemove.contains(e.id)
                         && ItemStack.isSameItemSameTags(e.template, stack)
                         && e.count == stack.getCount()) {
+                    if (updatePending) decrementPending(e);
                     idsToRemove.add(e.id);
                     break;
                 }
@@ -1763,5 +1772,15 @@ public final class ExtractionLedger implements AutoCloseable {
                 entriesById.remove(removed.id);
             }
         }
+    }
+
+    private void decrementPending(Entry entry) {
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(entry.template, true);
+        Map<CraftingResolver.StackKey, Integer> pending =
+                entry.source == Source.PLAYER_INVENTORY ? pendingInv : pendingNet;
+        pending.computeIfPresent(key, (ignored, reserved) -> {
+            int remaining = reserved - entry.count;
+            return remaining <= 0 ? null : remaining;
+        });
     }
 }

@@ -1,14 +1,8 @@
 package com.huanghuang.rsintegration.resonance.backpack;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,12 +14,22 @@ import java.util.function.Supplier;
 
 public final class OpenResonanceBackpackPacket {
 
-    public OpenResonanceBackpackPacket() {}
+    private final boolean preferBeyondDimensions;
 
-    public void encode(FriendlyByteBuf buf) {}
+    public OpenResonanceBackpackPacket() {
+        this(false);
+    }
+
+    public OpenResonanceBackpackPacket(boolean preferBeyondDimensions) {
+        this.preferBeyondDimensions = preferBeyondDimensions;
+    }
+
+    public void encode(FriendlyByteBuf buf) {
+        buf.writeBoolean(preferBeyondDimensions);
+    }
 
     public static OpenResonanceBackpackPacket decode(FriendlyByteBuf buf) {
-        return new OpenResonanceBackpackPacket();
+        return new OpenResonanceBackpackPacket(buf.readBoolean());
     }
 
     public static void handle(OpenResonanceBackpackPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -35,29 +39,35 @@ public final class OpenResonanceBackpackPacket {
 
             if (GuiOpenRateLimiter.isRateLimited(player.getUUID())) return;
 
-            INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-            if (network == null) {
-                player.sendSystemMessage(Component.translatable("rsi.side_panel.no_network"));
+            ResonanceStorageView view = selectView(player, packet.preferBeyondDimensions);
+            if (view != null) {
+                open(player, view);
                 return;
             }
-
-            ResonanceDiskWrapper wrapper = findResonanceDisk(network);
-            if (wrapper == null) {
-                player.displayClientMessage(
-                        Component.translatable("rsi.resonance_backpack.no_disk"), true);
-                return;
-            }
-            NetworkHooks.openScreen(player,
-                    new SimpleMenuProvider(
-                            (containerId, inv, p) -> new ResonanceBackpackContainer(
-                                    containerId, inv, wrapper, network),
-                            Component.translatable("rsi.resonance_backpack.title")),
-                    buf -> {});
+            player.displayClientMessage(Component.translatable(
+                    packet.preferBeyondDimensions
+                            ? "rsi.resonance.bd.no_disk"
+                            : "rsi.resonance_backpack.no_disk"), true);
         });
         ctx.get().setPacketHandled(true);
     }
 
-    private static ResonanceDiskWrapper findResonanceDisk(INetwork network) {
-        return PassiveEffectEngine.findResonanceDisk(network);
+    private static ResonanceStorageView selectView(ServerPlayer player,
+                                                   boolean preferBeyondDimensions) {
+        var views = ResonanceStorageResolvers.resolveAll(player);
+        String preferred = preferBeyondDimensions ? "beyonddimensions" : "refinedstorage";
+        for (ResonanceStorageView view : views) {
+            if (preferred.equals(view.backendId())) return view;
+        }
+        return preferBeyondDimensions || views.isEmpty() ? null : views.get(0);
+    }
+
+    private static void open(ServerPlayer player, ResonanceStorageView view) {
+        NetworkHooks.openScreen(player,
+                new SimpleMenuProvider(
+                        (containerId, inv, p) -> new ResonanceBackpackContainer(
+                                containerId, inv, view),
+                        Component.translatable("rsi.resonance_backpack.title")),
+                buf -> {});
     }
 }

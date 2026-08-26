@@ -30,9 +30,9 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
     /**
      * Spirit focusing recipes implement CraftingRecipe for JEI compatibility,
-     * but their central input is a reusable crucible catalyst.  The generic
-     * crafting probe cannot infer that from a crafting remainder, so this
-     * handler must win before CraftTweaker/vanilla ingredient extraction.
+     * but their central input has Malum-specific durability semantics. The
+     * generic crafting probe cannot infer those semantics from a Forge crafting
+     * remainder, so this handler must win before CraftTweaker/vanilla extraction.
      */
     @Override
     public boolean preferHandlerIngredients() { return true; }
@@ -142,10 +142,10 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
                         Ingredient ing = (Ingredient) ingField.get(iwc);
                         int count = countField.getInt(iwc);
                         if (ing != null && count > 0) result.add(new IngredientSpec(ing, count,
-                                focusingRecipe ? DemandRole.CATALYST : DemandRole.CONSUMED));
+                                focusingRecipe ? focusingInputRole(recipe, ing) : DemandRole.CONSUMED));
                     } else if (iwc instanceof Ingredient plain && !plain.isEmpty()) {
                         result.add(new IngredientSpec(plain, 1,
-                                focusingRecipe ? DemandRole.CATALYST : DemandRole.CONSUMED));
+                                focusingRecipe ? focusingInputRole(recipe, plain) : DemandRole.CONSUMED));
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             });
@@ -165,6 +165,44 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Malum mutates damageable focusing inputs itself instead of exposing a
+     * Forge crafting remainder. Inputs that are guaranteed to exhaust their
+     * remaining durability in one operation must be supplied per operation;
+     * multi-use tools remain installed and reusable by the physical worker.
+     */
+    public static DemandRole focusingInputRole(Object recipe, Ingredient input) {
+        int durabilityCost = focusingDurabilityCost(recipe);
+        if (durabilityCost <= 0) return DemandRole.CATALYST;
+
+        ItemStack[] candidates = input == null ? new ItemStack[0] : input.getItems();
+        if (candidates.length == 0) return DemandRole.CATALYST;
+        for (ItemStack candidate : candidates) {
+            if (candidate != null && !candidate.isEmpty() && candidate.isDamageableItem()
+                    && durabilityCost >= candidate.getMaxDamage() - candidate.getDamageValue()) {
+                return DemandRole.CONTAINER_RETURNING;
+            }
+        }
+        return DemandRole.CATALYST;
+    }
+
+    private static int focusingDurabilityCost(Object recipe) {
+        if (recipe == null) return 0;
+        for (Class<?> scan = recipe.getClass(); scan != null && scan != Object.class;
+             scan = scan.getSuperclass()) {
+            try {
+                Field field = scan.getDeclaredField("durabilityCost");
+                field.setAccessible(true);
+                return field.getInt(recipe);
+            } catch (NoSuchFieldException ignored) {
+                // Compatibility subclasses may inherit the Malum field.
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     @SuppressWarnings("unchecked")

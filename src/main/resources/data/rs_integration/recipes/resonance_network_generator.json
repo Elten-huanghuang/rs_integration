@@ -1,0 +1,37 @@
+{
+  "conditions": [
+    {
+      "type": "forge:mod_loaded",
+      "modid": "beyonddimensions"
+    }
+  ],
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "APA",
+    "FNF",
+    "AEA"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:amethyst_shard"
+    },
+    "P": {
+      "item": "minecraft:ender_pearl"
+    },
+    "F": {
+      "item": "beyonddimensions:space_time_stable_frame"
+    },
+    "N": {
+      "item": "beyonddimensions:net_control"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    }
+  },
+  "result": {
+    "item": "rs_integration:resonance_network_generator",
+    "count": 1
+  },
+  "show_notification": true
+}

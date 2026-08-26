@@ -41,6 +41,7 @@ import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatNetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.storage.StorageBackendDescriptors;
 import com.huanghuang.rsintegration.storage.StorageBackendLoadResult;
 import com.huanghuang.rsintegration.storage.StorageBackendRuntime;
@@ -205,6 +206,10 @@ public final class RSIntegrationMod {
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
             if (e.getConfig().getType() == ModConfig.Type.COMMON) {
                 refreshConfigCache();
+                if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+                    com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                            .onSidePanelConfigReload();
+                }
             }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.reloadPlanningConfig();
@@ -222,6 +227,10 @@ public final class RSIntegrationMod {
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSOptionalBootstrap.registerItems(MOD_BUS);
             RSOptionalBootstrap.registerBindings();
+        }
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            ModItems.registerOptionalBeyondDimensions(MOD_BUS,
+                    com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskItem::new);
         }
 
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
@@ -559,12 +568,12 @@ public final class RSIntegrationMod {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> ContainerTransferClient::init);
         }
-        if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()) {
-            if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-                DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                        () -> RSOptionalBootstrap::registerSidePanelClient);
-                RSOptionalBootstrap.registerSidePanelCommon();
-            }
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> RSOptionalBootstrap::registerSidePanelClient);
+            // This registers the shared RS integration channel even when the
+            // side-panel UI itself is disabled.
+            RSOptionalBootstrap.registerSidePanelCommon();
         }
 
         // Binding tooltip handler
@@ -575,6 +584,9 @@ public final class RSIntegrationMod {
         }
         // Crafting
         BatchCraftNetworkHandler.register();
+        // Resonance storage is shared by RS and Beyond Dimensions. Register
+        // its sync packet independently of either optional storage backend.
+        ResonanceNetworkHandler.register();
         com.huanghuang.rsintegration.villager.VillagerRestockNetworkHandler.register();
         com.huanghuang.rsintegration.enchanting.EnchantingRestockNetworkHandler.register();
         com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockSnapshotPacket.register();
@@ -685,8 +697,15 @@ public final class RSIntegrationMod {
 
         // Auto-eat system
         AutoEatNetworkHandler.register();
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers.register(
+                    com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess::resolve);
+        }
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSOptionalBootstrap.registerCommon();
+        } else if (ModList.get().isLoaded("beyonddimensions")) {
+            MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine.class);
         }
 
         ModType.confirmReviewedGraphExecution(REVIEWED_GRAPH_EXECUTION_TYPES,
@@ -697,8 +716,11 @@ public final class RSIntegrationMod {
     }
 
     private void onClientSetup(final net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
-        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-            RSOptionalBootstrap.registerClientScreens();
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                || ModList.get().isLoaded("beyonddimensions")) {
+            net.minecraft.client.gui.screens.MenuScreens.register(
+                    (net.minecraft.world.inventory.MenuType) ModItems.RESONANCE_BACKPACK.get(),
+                    com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackScreen::new);
         }
     }
 
