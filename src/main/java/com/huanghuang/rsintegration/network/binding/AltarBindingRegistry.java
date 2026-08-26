@@ -878,6 +878,18 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_FD_SKILLET.equals(type.id())) {
             return null;
         }
+        // Cooking Pot is a leaf machine type as well. Add-ons commonly group
+        // compatible recipes under their own namespace folders, which must not
+        // be interpreted as a different physical pot.
+        if ("farmersdelight_cooking_pot".equals(type.id())) {
+            return null;
+        }
+        // Cutting Board is also a leaf machine type. Native Farmer's Delight
+        // IDs use folders such as salvaging/ to group recipe content; those
+        // folders do not name another machine and must not reject a bound board.
+        if (ModIds.ID_FD_CUTTING_BOARD.equals(type.id())) {
+            return null;
+        }
         // Aether recipe path prefixes (freezing/incubating/enchanting) don't
         // match block keys (freezer/incubator/altar).  Sub-type filtering
         // is handled by validateAndInit() in AetherFurnaceBatchDelegate.

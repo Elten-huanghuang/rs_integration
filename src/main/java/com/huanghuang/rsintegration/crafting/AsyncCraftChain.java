@@ -1466,6 +1466,7 @@ public final class AsyncCraftChain {
         boolean ownershipTransferred = false;
         boolean terminalCleanupInvoked = false;
         try {
+            delegate.configureMaterialReservation(nodeLedger, online);
             delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
             delegate.prepareOperationCount(Math.max(1, prepared.step().executions()));
             if (prepared.parallelGroup()) {
@@ -3128,13 +3129,18 @@ public final class AsyncCraftChain {
             machineCount = flatBatch;
             List<IngredientSpec> specs = startedDelegate.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
+                if (startedDelegate instanceof AbstractBatchDelegate abstractDelegate) {
+                    abstractDelegate.setStorageEndpoint(storageEndpoint);
+                }
+                startedDelegate.configureMaterialReservation(ledger, online);
                 List<IngredientSpec> batchSpecs = scaleGraphSpecsForExecutions(
                         specs, startedDelegate.getMaterialReservationScopes(), flatBatch);
                 List<ItemStack> materials = preReserveStepMaterials(batchSpecs, online);
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
                             step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
+                    Component specific = startedDelegate.materialReservationFailureMessage(online);
+                    online.sendSystemMessage(specific != null ? specific : Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
@@ -3156,7 +3162,8 @@ public final class AsyncCraftChain {
                     closeFlatOperationScope();
                     RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for {}"),
                             step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
+                    Component specific = startedDelegate.materialReservationFailureMessage(online);
+                    online.sendSystemMessage(specific != null ? specific : Component.translatable(
                             "rsi.generic.error.missing_materials", step.recipeId()));
                     try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);

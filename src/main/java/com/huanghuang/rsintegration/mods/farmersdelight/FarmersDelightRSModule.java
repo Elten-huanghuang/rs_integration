@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.farmersdelight;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
@@ -59,6 +60,22 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "farmersdelight_skillet"}},
                 "gui.rs_integration.jei.fd_skillet_craft");
 
+        // Specific: Cutting Board. Its outputs are independently randomized and
+        // its knife/shears tool loses durability, so keep execution serial and
+        // let the delegate return the exact rolled stacks to the network.
+        ModType cuttingBoard = ModType.register(ModIds.ID_FD_CUTTING_BOARD,
+                new String[]{"vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe"},
+                new String[]{"cutting_board", "cuttingboard"},
+                new String[]{ModIds.ID_FD_CUTTING_BOARD},
+                CuttingBoardBatchDelegate::new);
+        cuttingBoard.requireFlatExecution(
+                "cutting board has probabilistic outputs and a durability-bearing tool");
+        ModType.configureJei(ModIds.ID_FD_CUTTING_BOARD,
+                new String[][]{{"farmersdelight:cutting", ModIds.ID_FD_CUTTING_BOARD}},
+                new String[][]{{"vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe",
+                        ModIds.ID_FD_CUTTING_BOARD}},
+                "gui.rs_integration.jei.fd_cutting_board_craft");
+
         // General fallback for any future Farmer's Delight recipe types
         ModType.register("farmersdelight",
                 new String[]{"vectorwing.farmersdelight."},
@@ -86,6 +103,13 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
                 List.of("vectorwing.farmersdelight.common.block.SkilletBlock"),
                 "farmersdelight_skillet", false
+        ));
+
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "farmersdelight", ModType.byId(ModIds.ID_FD_CUTTING_BOARD),
+                RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
+                List.of("vectorwing.farmersdelight.common.block.CuttingBoardBlock"),
+                ModIds.ID_FD_CUTTING_BOARD, false
         ));
 
         // Campfire — also registered under farmersdelight_skillet so that

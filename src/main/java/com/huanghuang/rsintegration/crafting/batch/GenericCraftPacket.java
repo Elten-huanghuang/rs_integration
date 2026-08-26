@@ -88,6 +88,7 @@ import com.huanghuang.rsintegration.storage.StorageResolutionResult;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
@@ -679,6 +680,10 @@ public final class GenericCraftPacket {
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe != null) return recipe;
 
+        recipe = com.huanghuang.rsintegration.mods.farmersdelight
+                .CosmopolitanTisaneRecipeResolver.resolve(recipeId);
+        if (recipe != null) return recipe;
+
         if ("rs_integration".equals(recipeId.getNamespace())
                 && recipeId.getPath().startsWith("vanilla_brewing/")) {
             com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
@@ -772,15 +777,7 @@ public final class GenericCraftPacket {
 
     /** Strip JEI pagination prefix from pseudo-IDs like {@code mod:jei.real_path/page}. */
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
-        if (id == null) return null;
-        String path = id.getPath();
-        if (!path.startsWith("jei.")) return id;
-        String inner = path.substring(4);
-        int slash = inner.lastIndexOf('/');
-        if (slash > 0 && slash < inner.length() - 1) {
-            inner = inner.substring(0, slash);
-        }
-        return new ResourceLocation(id.getNamespace(), inner);
+        return com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer.normalize(id);
     }
 
     /** Launch an async craft chain with standard onDone/scheduleNext wiring. */
@@ -1276,6 +1273,10 @@ public final class GenericCraftPacket {
                                         recipe, player.serverLevel().registryAccess());
                 List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                         executionSpecs, recipeOutput, repeatCount);
+                if (FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe) != null) {
+                    graphSpecs = FarmersDelightRecipeHandler
+                            .cuttingBoardGraphIngredients(graphSpecs);
+                }
                 Map<StackKey, Integer> avail = listAvailable(player, network, storageEndpoint);
                 logExecutionAvailability(recipeId, avail);
                 List<String> missing = new ArrayList<>();
@@ -2751,6 +2752,12 @@ public final class GenericCraftPacket {
         // Build plan via CraftingResolver
         List<String> missing = new ArrayList<>();
 
+        List<IngredientSpec> recursiveRecipeSpecs = recipeSpecs;
+        if (FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe) != null) {
+            recursiveRecipeSpecs = FarmersDelightRecipeHandler
+                    .cuttingBoardGraphIngredients(recipeSpecs);
+        }
+
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;
         List<ResourceLocation> stepIds;
@@ -2783,11 +2790,11 @@ public final class GenericCraftPacket {
                         new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
                 planGraph = usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
-                                recipeSpecs, available, player.serverLevel(),
+                                recursiveRecipeSpecs, available, player.serverLevel(),
                                 player, network, missing, forcedOverrides, true, typedTimeoutMs,
                                 activeRoot)
                         : CraftingResolver.resolveGraphForSpecsWithTypes(
-                                recipeSpecs, available, player.serverLevel(),
+                                recursiveRecipeSpecs, available, player.serverLevel(),
                                 player, network, missing, forcedOverrides, true, typedTimeoutMs,
                                 activeRoot);
             } catch (CraftingPlanningTimeoutException timeout) {
