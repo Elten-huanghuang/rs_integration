@@ -868,6 +868,17 @@
 
   "item.rs_integration.resonance_storage_disk": "Resonance Storage Disk",
   "item.rs_integration.resonance_storage_disk.tooltip": "§dResonance Disk §7— insert into Disk Drive to activate passive effects",
+  "item.rs_integration.resonance_network_generator": "Resonance Network Generator",
+  "rsi.resonance.bd.no_network": "§cNo BD network is available to bind",
+  "rsi.resonance.bd.no_disk": "§cNo bound Resonance Network Generator was found",
+  "rsi.resonance.bd.merge_full": "§eThe primary resonance space is full; this generator remains independent",
+  "rsi.resonance.bd.bound": "§bResonance Network Generator bound to BD network #%s",
+  "rsi.resonance.bd.bound_status": "§bResonance Network Generator connected to BD network #%s",
+  "rsi.resonance.bd.access_denied": "§cThe BD network cannot be accessed",
+  "rsi.resonance.bd.tooltip.capacity": "Capacity: %s",
+  "rsi.resonance.bd.tooltip.unbound": "Status: unbound; right-click a BD network to bind",
+  "rsi.resonance.bd.tooltip.network": "BD network: #%s",
+  "rsi.resonance.bd.tooltip.uuid": "Space ID: %s",
 
   "rsi.machine_center.title": "Machine Center",
   "rsi.machine_center.machine_count": "%s bound machine(s)",

@@ -1,16 +1,15 @@
 package com.huanghuang.rsintegration.mods.lychee;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
-import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
+import java.util.Collection;
 
 /** Presence-only substrate catalysts stored in ordinary Resonance Disk slots. */
 public final class LycheeVirtualCatalysts {
@@ -41,31 +40,18 @@ public final class LycheeVirtualCatalysts {
         return hasCatalyst(player, POWDER_SNOW_BUCKET);
     }
 
-    public static boolean hasPowderSnowBucket(@Nullable ResonanceDiskWrapper disk) {
-        return hasCatalyst(catalystMask(disk), POWDER_SNOW_BUCKET);
-    }
-
     public static boolean hasCatalyst(@Nullable ServerPlayer player, int requiredMask) {
         if (player == null || requiredMask == 0) return false;
-        // Lychee substrates are explicitly stored in the RS Resonance Disk.
-        // Do not use the generic default backend here: when Beyond Dimensions
-        // is selected as the default, its ordinary snapshot can hide a valid
-        // RS disk and make this condition fail incorrectly.
-        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        if (network == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Lychee] no current RS network for player={} requiredMask={}",
-                    player.getGameProfile().getName(), requiredMask);
-            return false;
-        }
-        ResonanceDiskWrapper disk = PassiveEffectEngine.findResonanceDisk(network);
-        int availableMask = catalystMask(disk);
-        if (disk == null) {
+        var views = ResonanceInventoryBridge.getViews(player);
+        int availableMask = catalystMask(views);
+        if (views.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI-Lychee] no Resonance Disk for player={} requiredMask={}",
                     player.getGameProfile().getName(), requiredMask);
         } else {
             RSIntegrationMod.LOGGER.debug("[RSI-Lychee] catalyst check player={} requiredMask={} availableMask={} stacks={}",
                     player.getGameProfile().getName(), requiredMask, availableMask,
-                    disk.getInternalStacks().stream()
+                    views.stream().flatMap(view -> view.storedStacks().stream())
+                            .map(ResonanceStorageView.StoredStack::stack)
                             .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
                             .toList());
         }
@@ -76,13 +62,16 @@ public final class LycheeVirtualCatalysts {
         return requiredMask != 0 && (availableMask & requiredMask) == requiredMask;
     }
 
-    public static int catalystMask(@Nullable ResonanceDiskWrapper disk) {
-        if (disk == null) return 0;
+    public static int catalystMask(Collection<? extends ResonanceStorageView> views) {
         int mask = 0;
-        for (ItemStack stack : disk.getInternalStacks()) {
-            if (stack.isEmpty()) continue;
-            mask |= catalystForItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()));
-            if (mask == ALL_CATALYSTS) break;
+        if (views == null) return 0;
+        for (ResonanceStorageView view : views) {
+            for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
+                ItemStack stack = stored.stack();
+                if (stack.isEmpty()) continue;
+                mask |= catalystForItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()));
+                if (mask == ALL_CATALYSTS) return mask;
+            }
         }
         return mask;
     }

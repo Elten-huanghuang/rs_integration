@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
+import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class ResonanceNetworkHandler {
@@ -16,6 +17,10 @@ public final class ResonanceNetworkHandler {
         ch.registerMessage(NetworkPacketIds.RESONANCE_SYNC, ResonanceSyncPacket.class,
                 ResonanceSyncPacket::encode, ResonanceSyncPacket::decode, ResonanceSyncPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
+                OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode,
+                OpenResonanceBackpackPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
     }
 }

@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -196,8 +197,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                         } else if (val instanceof net.minecraft.world.item.crafting.Ingredient r) {
                             ri = r;
                         }
-                        if (ri != null && ri.test(existing)) {
-                            matches = true; // reuse matching catalyst
+                        if (ri != null && ri.test(existing) && hasReusableCatalystInput()) {
+                            matches = true;
                         }
                     }
                 } catch (Exception e) {
@@ -318,10 +319,17 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public List<IBatchDelegate.MaterialReservationScope>
     getMaterialReservationScopes() {
         List<IngredientSpec> specs = getRequiredMaterials();
+        return materialReservationScopes(specs);
+    }
+
+    static List<IBatchDelegate.MaterialReservationScope> materialReservationScopes(
+            @Nullable List<IngredientSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
         List<IBatchDelegate.MaterialReservationScope> scopes =
                 new ArrayList<>(specs.size());
-        scopes.add(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
+        scopes.add(specs.get(0).role() == DemandRole.CATALYST
+                ? IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE
+                : IBatchDelegate.MaterialReservationScope.PER_OPERATION);
         for (int i = 1; i < specs.size(); i++) {
             scopes.add(IBatchDelegate.MaterialReservationScope.PER_OPERATION);
         }
@@ -490,9 +498,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         int matIdx = 0;
 
         if (!materials.isEmpty()) {
-            // Catalyst is a worker-level reusable material. The physical slot
-            // survives queued operations on the same crucible; never overwrite it.
+            boolean reusable = hasReusableCatalystInput();
             ItemStack existing = invCatalyst.getStackInSlot(0);
+            if (!existing.isEmpty() && !reusable) {
+                returnCrucibleItem(existing.copy());
+                setSlot(invCatalyst, 0, ItemStack.EMPTY);
+                existing = ItemStack.EMPTY;
+            }
             if (!existing.isEmpty()) {
                 matIdx++;
             } else {
@@ -683,14 +695,19 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        // The catalyst is a worker-level reusable input. Keep it in the
-        // crucible for the next queued operation; only spirits are consumed.
         clearSpiritSlots();
+        if (!hasReusableCatalystInput()) {
+            releaseCatalystSlot();
+        }
         resetState();
     }
 
     @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
+        releaseCatalystSlot();
+    }
+
+    private void releaseCatalystSlot() {
         if (invCatalyst == null) return;
         for (int i = 0; i < invCatalyst.getSlots(); i++) {
             ItemStack catalyst = invCatalyst.getStackInSlot(i);
@@ -699,6 +716,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             setSlot(invCatalyst, i, ItemStack.EMPTY);
         }
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
+    }
+
+    private boolean hasReusableCatalystInput() {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        return specs != null && !specs.isEmpty()
+                && specs.get(0).role() == DemandRole.CATALYST;
     }
 
     @Override

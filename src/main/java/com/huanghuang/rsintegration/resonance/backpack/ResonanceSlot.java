@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.resonance.backpack;
 
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
 
 import net.minecraft.world.Container;
 import net.minecraft.world.inventory.Slot;
@@ -22,7 +22,7 @@ public class ResonanceSlot extends Slot {
 
     @Override
     public int getMaxStackSize(ItemStack stack) {
-        return Math.min(ResonanceDiskWrapper.isLogicallyNonStackable(stack) ? 1 : stack.getMaxStackSize(),
+        return Math.min(ResonanceStackRules.isLogicallyNonStackable(stack) ? 1 : stack.getMaxStackSize(),
                 inventory.getItem(getContainerSlot()).getCount()
                 + inventory.simulateAccept(getContainerSlot(), stack));
     }

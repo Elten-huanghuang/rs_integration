@@ -2,8 +2,7 @@ package com.huanghuang.rsintegration.mixin.enigmaticlegacy;
 
 import auviotre.enigmatic.addon.handlers.AddonEventHandler;
 import com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -39,17 +38,9 @@ public abstract class AddonEventHandlerMixin {
             return true;
         }
 
-        // 2. 如果原版背包找不到，我们补查 RS 盘
+        // 2. 如果原版背包找不到，补查所有已授权的共振存储后端
         if (player instanceof ServerPlayer sp) {
-            ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-            if (disk != null) {
-                for (ItemStack stack : disk.getInternalStacks()) {
-                    // 如果 RS 盘内的物品和模组正在查询的物品一致，返回 true
-                    if (!stack.isEmpty() && stack.getItem() == item) {
-                        return true;
-                    }
-                }
-            }
+            return ResonanceInventoryBridge.hasItem(sp, stack -> stack.getItem() == item);
         }
 
         return false;

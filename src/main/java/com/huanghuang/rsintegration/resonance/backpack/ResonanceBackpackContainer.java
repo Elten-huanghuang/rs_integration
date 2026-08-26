@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.resonance.backpack;
 
 import com.huanghuang.rsintegration.ModItems;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageMenu;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
@@ -13,30 +13,19 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
-import javax.annotation.Nullable;
-
-public class ResonanceBackpackContainer extends AbstractContainerMenu {
+public class ResonanceBackpackContainer extends AbstractContainerMenu implements ResonanceStorageMenu {
 
     static final int DISK_SLOTS = 36;
     private static final int DISK_ROWS = 4;
     private static final int INV_SLOTS = 36;
 
     private final Container diskInventory;
-    final ResonanceDiskWrapper disk;
-    @Nullable
-    private final INetwork ownerNetwork;
+    final ResonanceStorageView disk;
 
     public ResonanceBackpackContainer(int containerId, Inventory playerInv,
-                                      ResonanceDiskWrapper disk) {
-        this(containerId, playerInv, disk, null);
-    }
-
-    public ResonanceBackpackContainer(int containerId, Inventory playerInv,
-                                      ResonanceDiskWrapper disk,
-                                      @Nullable INetwork ownerNetwork) {
+                                      ResonanceStorageView disk) {
         super(ModItems.RESONANCE_BACKPACK.get(), containerId);
         this.disk = disk;
-        this.ownerNetwork = ownerNetwork;
         this.diskInventory = new ResonanceDiskInventory(disk,
                 playerInv.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
         layoutSlots(playerInv, true);
@@ -46,14 +35,12 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
                                       FriendlyByteBuf buf) {
         super(ModItems.RESONANCE_BACKPACK.get(), containerId);
         this.disk = null;
-        this.ownerNetwork = null;
         this.diskInventory = new SimpleContainer(DISK_SLOTS);
         layoutSlots(playerInv, false);
     }
 
-    @Nullable
-    public INetwork getOwnerNetwork() {
-        return ownerNetwork;
+    public boolean usesBackend(String backendId) {
+        return disk != null && disk.backendId().equals(backendId);
     }
 
     private void layoutSlots(Inventory playerInv, boolean serverSide) {
@@ -110,7 +97,7 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu {
             // Debit the disk before crediting the player. Mutating the live slot stack
             // first lets a rejected disk write duplicate everything already moved.
             Slot source = this.slots.get(index);
-            int debitCount = ResonanceDiskWrapper.isLogicallyNonStackable(original)
+            int debitCount = com.huanghuang.rsintegration.resonance.api.ResonanceStackRules.isLogicallyNonStackable(original)
                     ? 1 : original.getCount();
             ItemStack debited = source.remove(debitCount);
             if (debited.isEmpty()) return ItemStack.EMPTY;

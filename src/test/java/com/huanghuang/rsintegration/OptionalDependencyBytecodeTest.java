@@ -9,6 +9,13 @@ import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRuntime;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
+import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
+import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
+import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceDiskInventory;
+import com.huanghuang.rsintegration.resonance.backpack.ResonanceSlot;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -32,6 +39,38 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OptionalDependencyBytecodeTest {
+    @Test
+    void sharedResonanceRuntimeDoesNotLinkRefinedStorageTypes() throws IOException {
+        assertNoTypeReference(PassiveEffectEngine.class,
+                "com/refinedmods/refinedstorage", "Refined Storage");
+        assertNoTypeReference(PassiveEffectEngine.class,
+                "com/huanghuang/rsintegration/resonance/disk", "RS resonance disk");
+        assertNoTypeReference(PassiveEffectEngine.class,
+                "com/huanghuang/rsintegration/resonance/backpack", "RS resonance backpack");
+        assertNoTypeReference(LycheeVirtualCatalysts.class,
+                "com/refinedmods/refinedstorage", "Refined Storage");
+        assertNoTypeReference(LycheeVirtualCatalysts.class,
+                "com/huanghuang/rsintegration/resonance/disk", "RS resonance disk");
+    }
+
+    @Test
+    void sharedResonanceMenuPathDoesNotLinkOptionalBackendImplementations() throws IOException {
+        Class<?>[] sharedTypes = {
+                ResonanceNetworkHandler.class,
+                OpenResonanceBackpackPacket.class,
+                ResonanceBackpackContainer.class,
+                ResonanceDiskInventory.class,
+                ResonanceSlot.class
+        };
+        for (Class<?> type : sharedTypes) {
+            assertNoTypeReference(type, "com/refinedmods/refinedstorage", "Refined Storage");
+            assertNoTypeReference(type,
+                    "com/huanghuang/rsintegration/resonance/disk", "RS resonance disk");
+            assertNoTypeReference(type,
+                    "com/huanghuang/rsintegration/resonance/bd", "Beyond Dimensions backend");
+        }
+    }
+
     @Test
     void sharedJeiAndPlanningClassesDoNotLinkBotaniaTypes() throws IOException {
         assertNoBotaniaTypeReference(RecipeGuiLayoutsMixin.class);

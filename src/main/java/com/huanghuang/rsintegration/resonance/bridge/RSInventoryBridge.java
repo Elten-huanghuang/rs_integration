@@ -4,9 +4,9 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -43,7 +43,7 @@ public final class RSInventoryBridge {
                         player.getName().getString());
             return null;
         }
-        ResonanceDiskWrapper disk = PassiveEffectEngine.findResonanceDisk(network);
+        ResonanceDiskWrapper disk = RSResonanceDiskAccess.find(network);
         if (disk != null) {
             if (rsi$diagCounter++ < 3)
                 RSIntegrationMod.LOGGER.info("[RSI-Bridge] getResonanceDisk: found resonance disk (stored={}, capacity={}) for {}",
@@ -56,17 +56,18 @@ public final class RSInventoryBridge {
         return disk;
     }
 
+    /** Adapter entry point used by the backend-neutral resonance resolver. */
+    @Nullable
+    public static ResonanceStorageView resolveResonanceView(ServerPlayer player) {
+        INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        return network == null ? null : RSResonanceDiskAccess.find(network);
+    }
+
     public static boolean hasItem(ServerPlayer player, Predicate<ItemStack> predicate) {
         for (ItemStack stack : player.getInventory().items) {
             if (predicate.test(stack)) return true;
         }
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk != null) {
-            for (ItemStack stack : disk.getInternalStacks()) {
-                if (!stack.isEmpty() && predicate.test(stack)) return true;
-            }
-        }
-        return false;
+        return ResonanceInventoryBridge.hasItem(player, predicate);
     }
 
     public static int countItems(ServerPlayer player, Predicate<ItemStack> predicate) {
@@ -74,13 +75,7 @@ public final class RSInventoryBridge {
         for (ItemStack stack : player.getInventory().items) {
             if (predicate.test(stack)) count += stack.getCount();
         }
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk != null) {
-            for (ItemStack stack : disk.getInternalStacks()) {
-                if (!stack.isEmpty() && predicate.test(stack)) count += stack.getCount();
-            }
-        }
-        return count;
+        return count + ResonanceInventoryBridge.countItems(player, predicate);
     }
 
     @Nullable
@@ -88,36 +83,20 @@ public final class RSInventoryBridge {
         for (ItemStack stack : player.getInventory().items) {
             if (predicate.test(stack)) return stack.copy();
         }
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk != null) {
-            for (ItemStack stack : disk.getInternalStacks()) {
-                if (!stack.isEmpty() && predicate.test(stack)) return stack.copy();
-            }
-        }
-        return null;
+        return ResonanceInventoryBridge.findFirst(player, predicate);
     }
 
     /** Extract one or more matching items from the resonance disk. */
     public static ItemStack extractFromDisk(ServerPlayer player, Predicate<ItemStack> predicate,
                                             int amount, int flags) {
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk == null) return ItemStack.EMPTY;
-        for (ItemStack tagged : disk.delegate().getStacks()) {
-            if (tagged.isEmpty()) continue;
-            if (!predicate.test(tagged)) continue;
-            ItemStack result = disk.manualExtractExact(tagged, amount, flags, Action.PERFORM);
-            if (!result.isEmpty()) {
-                return result;
-            }
-        }
-        return ItemStack.EMPTY;
+        return ResonanceInventoryBridge.extract(player, predicate, amount);
     }
 
     /** Insert into the resonance disk without slot-tagging (no backpack slot). */
     public static ItemStack insertToDisk(ServerPlayer player, ItemStack stack) {
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk == null) return stack;
-        return disk.manualInsertUnassigned(stack, stack.getCount(), Action.PERFORM);
+        if (stack.isEmpty()) return stack;
+        ItemStack remainder = ResonanceInventoryBridge.insert(player, stack);
+        return remainder;
     }
 
     /** Get all items from player inventory + resonance disk as a merged list. */
@@ -126,19 +105,12 @@ public final class RSInventoryBridge {
         for (ItemStack stack : player.getInventory().items) {
             if (!stack.isEmpty()) result.add(stack);
         }
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk != null) {
-            for (ItemStack stack : disk.getInternalStacks()) {
-                if (!stack.isEmpty()) result.add(stack);
-            }
-        }
+        result.addAll(ResonanceInventoryBridge.getCombinedItems(player));
         return result;
     }
 
     /** Get all items from the resonance disk only. */
     public static Collection<ItemStack> getDiskItems(ServerPlayer player) {
-        ResonanceDiskWrapper disk = getResonanceDisk(player);
-        if (disk == null) return List.of();
-        return disk.getInternalStacks();
+        return ResonanceInventoryBridge.getItems(player);
     }
 }

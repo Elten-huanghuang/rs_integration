@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
@@ -21,6 +20,7 @@ import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
 import com.huanghuang.rsintegration.sidepanel.network.ReturnToRSPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
+import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncRequestPacket;
 import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
@@ -126,8 +126,10 @@ public final class RSSidePanelNetworkHandler {
                 PlaceboRemoteMenuSnapshotPacket::encode, PlaceboRemoteMenuSnapshotPacket::decode,
                 PlaceboRemoteMenuSnapshotPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
-        ch.registerMessage(NetworkPacketIds.OPEN_RESONANCE_BACKPACK, OpenResonanceBackpackPacket.class,
-                OpenResonanceBackpackPacket::encode, OpenResonanceBackpackPacket::decode, OpenResonanceBackpackPacket::handle,
+        ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC_REQUEST,
+                RSBindingSyncRequestPacket.class,
+                RSBindingSyncRequestPacket::encode, RSBindingSyncRequestPacket::decode,
+                RSBindingSyncRequestPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         registered = true;
 
@@ -305,6 +307,11 @@ public final class RSSidePanelNetworkHandler {
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(true, false));
     }
 
+    /** Refresh machine-tab bindings without requesting a side-panel snapshot. */
+    public static void sendBindingSyncRequest() {
+        CHANNEL.sendToServer(new RSBindingSyncRequestPacket());
+    }
+
     public static void sendCloseRequest() {
         if (!RSSidePanelModule.isEnabled()) return;
         CHANNEL.sendToServer(new RSSidePanelRequestPacket(false, true));
@@ -313,6 +320,7 @@ public final class RSSidePanelNetworkHandler {
     /** Starts a server-thread refresh. The task scheduler hook is kept here so
      * packet handling never performs an unbounded scan before enqueueing. */
     public static boolean startRefresh(ServerPlayer player, boolean forceFullSync) {
+        if (!RSSidePanelModule.isEnabled()) return false;
         return RSSidePanelRequestPacket.refreshOnServerThread(player, forceFullSync);
     }
 
@@ -328,6 +336,7 @@ public final class RSSidePanelNetworkHandler {
                                 List<Boolean> craftableFlags,
                                 int totalSlotCount, boolean networkAvailable,
                                 String networkName) {
+        if (!RSSidePanelModule.isEnabled()) return;
         synchronizedStackIds.put(player.getUUID(), Set.copyOf(ids));
         // Build binding info list from player's inventory bindings
         List<BindingInfo> bindings = collectPlayerBindings(player);
@@ -473,6 +482,7 @@ public final class RSSidePanelNetworkHandler {
      *  Used as a safety net in {@code RSSidePanelClickPacket}. */
     public static void sendDeltaImmediate(ServerPlayer player, UUID stackId,
                                           ItemStack stack, long timestamp, boolean craftable) {
+        if (!RSSidePanelModule.isEnabled()) return;
         RSSidePanelDeltaPacket.send(player, stackId, stack, timestamp, craftable);
     }
 
@@ -482,6 +492,7 @@ public final class RSSidePanelNetworkHandler {
      *  Multiple changes to the same stackId within a tick are consolidated. */
     public static void queueDelta(ServerPlayer player, UUID stackId,
                                   ItemStack stack, long timestamp, boolean craftable) {
+        if (!RSSidePanelModule.isEnabled()) return;
         pendingDeltas.add(player.getUUID(), new RSSidePanelDeltaPacket.Entry(stackId, stack, timestamp, craftable));
     }
 
@@ -490,6 +501,7 @@ public final class RSSidePanelNetworkHandler {
     @SuppressWarnings("unchecked")
     public static boolean registerListener(ServerPlayer player,
                                            com.refinedmods.refinedstorage.api.network.INetwork network) {
+        if (!RSSidePanelModule.isEnabled()) return false;
         dirtyMachinePlayers.add(player.getUUID());
         IStorageCache<ItemStack> cache = network.getItemStorageCache();
         if (cache == null) return false;
@@ -700,6 +712,18 @@ public final class RSSidePanelNetworkHandler {
     /** @return true if the player has an active storage-cache listener. */
     public static boolean hasListener(UUID playerId) {
         return playerListeners.containsKey(playerId);
+    }
+
+    /** Detach panel-only storage listeners after a common-config reload. */
+    public static void onSidePanelConfigReload() {
+        if (RSSidePanelModule.isEnabled()) return;
+        for (UUID playerId : List.copyOf(playerListeners.keySet())) {
+            unregisterListener(playerId, false);
+        }
+        RSSidePanelRequestPacket.cancelAllRefreshTasks();
+        for (UUID playerId : pendingDeltas.keysSnapshot()) {
+            pendingDeltas.clear(playerId);
+        }
     }
 
     private static void refreshCraftableKeys(

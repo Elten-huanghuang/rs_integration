@@ -4,9 +4,10 @@ import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
+import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
 import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
@@ -25,9 +26,7 @@ public final class RSOptionalBootstrap {
 
     public static void registerItems(IEventBus modBus) {
         ModItems.registerOptionalResonance(modBus,
-                () -> com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem.INSTANCE,
-                () -> net.minecraftforge.common.extensions.IForgeMenuType.create(
-                        com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer::new));
+                () -> com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem.INSTANCE);
     }
 
     public static void registerBindings() {
@@ -35,7 +34,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerCommon() {
-        ResonanceNetworkHandler.register();
+        ResonanceStorageResolvers.register(RSInventoryBridge::resolveResonanceView);
         API.instance().getStorageDiskRegistry().add(
                 ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
@@ -76,9 +75,4 @@ public final class RSOptionalBootstrap {
         RSSidePanelNetworkHandler.clearServerState();
     }
 
-    public static void registerClientScreens() {
-        net.minecraft.client.gui.screens.MenuScreens.register(
-                (net.minecraft.world.inventory.MenuType) ModItems.RESONANCE_BACKPACK.get(),
-                com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackScreen::new);
-    }
 }

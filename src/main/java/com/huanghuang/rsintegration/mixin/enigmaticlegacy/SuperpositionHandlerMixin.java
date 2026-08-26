@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.mixin.enigmaticlegacy;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -42,20 +41,13 @@ public abstract class SuperpositionHandlerMixin {
         if (cir.getReturnValue()) return;
         if (!(player instanceof ServerPlayer sp)) return;
 
-        ResonanceDiskWrapper disk = RSInventoryBridge.getResonanceDisk(sp);
-        if (disk == null) return;
-
         ResourceLocation target = BuiltInRegistries.ITEM.getKey(item);
-        for (ItemStack stack : disk.getInternalStacks()) {
-            if (!stack.isEmpty() && stack.is(item)) {
-                cir.setReturnValue(true);
-                if (rsi$diagCount < 5) {
-                    rsi$diagCount++;
-                    RSIntegrationMod.LOGGER.info("[RSI-hasItem] FOUND {} in resonance disk for {}",
-                            target, sp.getName().getString());
-                }
-                return;
-            }
+        if (!ResonanceInventoryBridge.hasItem(sp, stack -> stack.is(item))) return;
+        cir.setReturnValue(true);
+        if (rsi$diagCount < 5) {
+            rsi$diagCount++;
+            RSIntegrationMod.LOGGER.info("[RSI-hasItem] FOUND {} in resonance storage for {}",
+                    target, sp.getName().getString());
         }
     }
 }

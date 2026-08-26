@@ -16,7 +16,9 @@ public final class RSSidePanelModule {
     }
 
     public static void initCommon() {
-        if (!isEnabled()) return;
+        // The unified channel also carries machine-tab, remote-GUI, grid
+        // swipe, and resonance-backpack packets. Registering it must not be
+        // tied to the optional side-panel UI switch.
         RSSidePanelNetworkHandler.register();
     }
 

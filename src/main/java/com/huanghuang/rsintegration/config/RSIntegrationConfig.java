@@ -576,7 +576,7 @@ public final class RSIntegrationConfig {
         ENABLE_RS_SIDE_PANEL = c
                 .comment("Enable the RS Side Panel -a foldable, draggable overlay showing RS network items on any screen.",
                         "Toggle with the configured hotkey while in-game.")
-                .define("enableRSSidePanel", true);
+                .define("enableRSSidePanel", false);
         c.pop();
 
         c.push("remoteMachineGui");

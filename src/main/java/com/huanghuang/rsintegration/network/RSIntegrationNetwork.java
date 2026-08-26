@@ -113,10 +113,8 @@ public final class RSIntegrationNetwork {
     public static INetwork resolveCurrentNetworkFromPlayer(ServerPlayer player) {
         if (player == null || !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return null;
 
-        if (player.containerMenu instanceof ResonanceBackpackContainer backpack) {
-            INetwork network = backpack.getOwnerNetwork();
-            if (network != null) return network;
-        }
+        INetwork resonanceNetwork = resolveAuthenticatedResonanceMenuNetwork(player);
+        if (resonanceNetwork != null) return resonanceNetwork;
 
         INetwork network = getNetworkFromContainer(player.containerMenu);
         if (network != null) return network;
@@ -157,12 +155,8 @@ public final class RSIntegrationNetwork {
 
     @Nullable
     private static INetwork resolveNetworkFromPlayerUncached(ServerPlayer player) {
-        if (player.containerMenu instanceof ResonanceBackpackContainer backpack) {
-            // Resolve the parent RS network only. ResonanceDiskWrapper keeps its
-            // private contents out of the RS cache and rejects public extraction.
-            INetwork network = backpack.getOwnerNetwork();
-            if (network != null) return network;
-        }
+        INetwork resonanceNetwork = resolveAuthenticatedResonanceMenuNetwork(player);
+        if (resonanceNetwork != null) return resonanceNetwork;
 
         INetwork net = getNetworkFromContainer(player.containerMenu);
         if (net != null) return net;
@@ -270,6 +264,25 @@ public final class RSIntegrationNetwork {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork error", e);
         }
+        return null;
+    }
+
+    /**
+     * A resonance menu is opened only after its backend resolver authenticates
+     * the player. Preserve that exact RS session while the menu remains open,
+     * without exposing RS types through the backend-neutral menu class.
+     */
+    @Nullable
+    private static INetwork resolveAuthenticatedResonanceMenuNetwork(ServerPlayer player) {
+        if (!(player.containerMenu instanceof ResonanceBackpackContainer backpack)
+                || !backpack.usesBackend("refinedstorage")) return null;
+        INetwork network = LAST_RESOLVED_NETWORKS.get(player.getUUID());
+        if (network == null) return null;
+        try {
+            if (network.canRun() && network.getItemStorageCache() != null) return network;
+        } catch (RuntimeException | LinkageError ignored) {
+        }
+        LAST_RESOLVED_NETWORKS.remove(player.getUUID(), network);
         return null;
     }
 

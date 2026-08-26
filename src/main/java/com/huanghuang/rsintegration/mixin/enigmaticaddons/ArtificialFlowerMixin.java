@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mixin.enigmaticaddons;
 
 import auviotre.enigmatic.addon.contents.items.ArtificialFlower;
 import auviotre.enigmatic.addon.handlers.SuperAddonHandler;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
+import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.resonance.passive.PassiveItemLookup;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -31,6 +31,6 @@ public abstract class ArtificialFlowerMixin {
         List<ItemStack> original = SuperAddonHandler.getAllItem(player, item);
         if (!(player instanceof ServerPlayer serverPlayer)) return original;
         return PassiveItemLookup.appendMatching(
-                original, RSInventoryBridge.getDiskItems(serverPlayer), item);
+                original, ResonanceInventoryBridge.getItems(serverPlayer), item);
     }
 }

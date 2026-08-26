@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.resonance.disk;
 
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
 import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
 import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
@@ -8,11 +10,13 @@ import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskContainerCont
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
+import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -22,7 +26,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
+public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, ResonanceStorageView {
 
     public static final ResourceLocation FACTORY_ID =
             new ResourceLocation("rs_integration", "resonance");
@@ -46,40 +50,20 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
     }
 
     public static boolean isLogicallyNonStackable(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        if (stack.getMaxStackSize() <= 1 || stack.isDamageableItem()) return true;
-
-        // Equipment and capability-backed items can advertise a normal stack
-        // size while their persistent NBT represents an individual state.
-        // Keeping every NBT-bearing variant in its own logical slot prevents
-        // equal-state equipment from being merged and later duplicated on take.
-        if (stack.getTag() != null && stack.getTag().getAllKeys().stream()
-                .anyMatch(key -> !RSI_SLOT_TAG.equals(key))) return true;
-
-        // Some modded weapons incorrectly advertise a stack size above one.
-        // Main-hand combat attributes are a more reliable cross-mod signal.
-        try {
-            var modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
-            if (modifiers.containsKey(Attributes.ATTACK_DAMAGE)
-                    || modifiers.containsKey(Attributes.ATTACK_SPEED)) return true;
-        } catch (RuntimeException ignored) {
-            // A broken third-party attribute provider must not break disk access.
-        }
-
-        // SlashBlade can expose its combat state through capabilities instead of
-        // vanilla attributes, so retain an explicit hierarchy fallback.
-        for (Class<?> type = stack.getItem().getClass(); type != null; type = type.getSuperclass()) {
-            if ("mods.flammpfeil.slashblade.item.ItemSlashBlade".equals(type.getName())) return true;
-        }
-        return false;
+        return ResonanceStackRules.isLogicallyNonStackable(stack);
     }
 
     /** Item identity used by logical backpack slots; NBT variants must never merge. */
     public static boolean isSameVariant(ItemStack first, ItemStack second) {
-        return ResonanceStackIdentity.isSameVariant(first, second);
+        return ResonanceStackRules.isSameVariant(first, second);
     }
     public IStorageDisk<ItemStack> delegate() {
         return delegate;
+    }
+
+    @Override
+    public String backendId() {
+        return "refinedstorage";
     }
 
     public int abilityMask() {
@@ -88,6 +72,31 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
 
     public long contentRevision() {
         return contentRevision;
+    }
+
+    @Override
+    public int normalizeForMenu() {
+        return splitLogicallyNonStackableStacks();
+    }
+
+    @Override
+    public boolean remapLogicalSlot(ItemStack stack, int logicalSlot) {
+        return moveSlot(stack, logicalSlot);
+    }
+
+    @Override
+    public List<ResonanceStorageView.StoredStack> storedStacks() {
+        List<ResonanceStorageView.StoredStack> result = new ArrayList<>();
+        for (ItemStack stored : delegate.getStacks()) {
+            if (stored.isEmpty()) continue;
+            CompoundTag tag = stored.getTag();
+            int slot = tag != null && tag.contains(RSI_SLOT_TAG)
+                    ? tag.getInt(RSI_SLOT_TAG) : -1;
+            ItemStack detached = stored.copy();
+            rsi$stripSlotTag(detached);
+            result.add(new ResonanceStorageView.StoredStack(slot, detached));
+        }
+        return List.copyOf(result);
     }
 
     public boolean hasAbility(int ability) {
@@ -99,6 +108,14 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         if (updated == abilityMask) return false;
         abilityMask = updated;
         return true;
+    }
+
+    @Override
+    public void markDirty(ServerPlayer player) {
+        if (player == null) return;
+        for (var level : player.server.getAllLevels()) {
+            API.instance().getStorageDiskManager(level).markForSaving();
+        }
     }
 
     @Override
@@ -257,6 +274,43 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack> {
         if (action == Action.PERFORM && !result.isEmpty()) markInternalMutation();
         if (!result.isEmpty()) rsi$stripSlotTag(result);
         return result;
+    }
+
+    @Override
+    public ItemStack extractExactView(int slot, ItemStack template, int size, boolean simulate) {
+        if (template.isEmpty() || size <= 0) return ItemStack.EMPTY;
+        return slot < 0
+                ? manualExtractUnassignedExact(template, size,
+                        simulate ? Action.SIMULATE : Action.PERFORM)
+                : manualExtract(slot, template, size, 0,
+                        simulate ? Action.SIMULATE : Action.PERFORM);
+    }
+
+    @Override
+    public ItemStack insertView(int slot, ItemStack stack, int size, boolean simulate) {
+        if (stack.isEmpty() || size <= 0) return stack;
+        Action action = simulate ? Action.SIMULATE : Action.PERFORM;
+        return slot < 0
+                ? manualInsertUnassigned(stack, size, action)
+                : manualInsert(slot, stack, size, action);
+    }
+
+    private ItemStack manualExtractUnassignedExact(ItemStack template, int size, Action action) {
+        ItemStack result = delegate.extract(template, size,
+                IComparer.COMPARE_NBT, action);
+        if (action == Action.PERFORM && !result.isEmpty()) markInternalMutation();
+        if (!result.isEmpty()) rsi$stripSlotTag(result);
+        return result;
+    }
+
+    @Override
+    public ResonanceStorageView.SlotMutationResult reconcileSlotView(
+            int slot, ItemStack previous, ItemStack requested) {
+        return switch (reconcileSlot(slot, previous, requested)) {
+            case SUCCESS -> ResonanceStorageView.SlotMutationResult.SUCCESS;
+            case REJECTED -> ResonanceStorageView.SlotMutationResult.REJECTED;
+            case RECOVERY_FAILED -> ResonanceStorageView.SlotMutationResult.RECOVERY_FAILED;
+        };
     }
 
     public enum SlotMutationResult {
