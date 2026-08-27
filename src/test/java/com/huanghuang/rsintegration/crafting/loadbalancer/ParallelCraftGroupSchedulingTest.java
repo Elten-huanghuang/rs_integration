@@ -12,6 +12,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -61,6 +62,18 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     @Test
     void concurrencySafeDelegateCanJoinMultiWorkerGroup() {
         assertTrue(ParallelCraftGroup.operationGroupAcceptsChild(false, 2));
+    }
+
+    @Test
+    void privateLedgerCapabilityIsReadFromChildDelegate() {
+        IBatchDelegate privateLedger = (IBatchDelegate) Proxy.newProxyInstance(
+                IBatchDelegate.class.getClassLoader(),
+                new Class<?>[]{IBatchDelegate.class},
+                (proxy, method, args) -> method.getName()
+                        .equals("requiresPrivateLedgerGraphDispatch"));
+
+        assertTrue(ParallelCraftGroup.requiresPrivateLedgerGraphDispatch(privateLedger));
+        assertFalse(ParallelCraftGroup.requiresPrivateLedgerGraphDispatch(null));
     }
 
     @Test

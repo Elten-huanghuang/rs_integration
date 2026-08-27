@@ -855,6 +855,12 @@ public final class BindingEventHandler {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Bind] Clibano main-pos resolution failed at {}", pos, e);
             }
+            // ClibanoPart.findMainPos() is server-only: its implementation
+            // returns Optional.empty() for an ordinary client Level. The HUD
+            // still needs the canonical root in order to compare the looked-at
+            // shell block with the root position stored by the server binding.
+            BlockPos nearbyMain = findNearbyClibanoMainPart(level, pos);
+            if (nearbyMain != null) return nearbyMain;
             return pos;
         }
 
@@ -933,6 +939,27 @@ public final class BindingEventHandler {
         }
 
         return pos;
+    }
+
+    @Nullable
+    static BlockPos findNearbyClibanoMainPart(Level level, BlockPos origin) {
+        BlockPos nearest = null;
+        double nearestDistance = Double.MAX_VALUE;
+        for (BlockPos candidate : BlockPos.betweenClosed(
+                origin.offset(-2, -2, -2), origin.offset(2, 2, 2))) {
+            BlockEntity blockEntity = level.getBlockEntity(candidate);
+            if (blockEntity == null || blockEntity.isRemoved()
+                    || !blockEntity.getClass().getName().equals(
+                    "com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity")) {
+                continue;
+            }
+            double distance = candidate.distSqr(origin);
+            if (distance < nearestDistance) {
+                nearest = candidate.immutable();
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
     }
 
     private static boolean isL2ModularBlock(Block block) {

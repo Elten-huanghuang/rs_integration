@@ -1,8 +1,11 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import net.minecraft.world.item.ItemStack;
 
+import javax.annotation.Nullable;
 import java.util.List;
+import java.util.function.ToIntFunction;
 
 /** Pure slot and ownership calculations for the two-lane Clibano inventory. */
 public final class ClibanoInventoryLogic {
@@ -49,5 +52,19 @@ public final class ClibanoInventoryLogic {
 
     public static boolean fireSatisfies(int currentOrdinal, int requiredOrdinal) {
         return currentOrdinal >= requiredOrdinal;
+    }
+
+    @Nullable
+    public static VanillaFurnaceFuelPolicy.Selection selectFuel(
+            List<ItemStack> candidates, List<? extends String> priorityIds,
+            int requiredTicks, ToIntFunction<ItemStack> burnTime) {
+        return VanillaFurnaceFuelPolicy.select(
+                candidates, priorityIds, requiredTicks, burnTime);
+    }
+
+    public static int fuelToAdd(int requiredTicks, int singleFuelTicks, int existingCount) {
+        int required = VanillaFurnaceFuelPolicy.requiredAmount(requiredTicks, singleFuelTicks);
+        if (required == Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        return Math.max(0, required - Math.max(0, existingCount));
     }
 }

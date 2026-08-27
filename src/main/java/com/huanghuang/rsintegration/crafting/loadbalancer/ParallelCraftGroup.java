@@ -251,6 +251,24 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return workers.get(0).delegate.getMaterialReservationScopes();
     }
 
+    /**
+     * Preserve the child's private-ledger graph contract when this group is
+     * used as the graph node delegate.  Some machines (for example Arcane
+     * Iterator) deliberately expose no graph material specs because they run
+     * several internal stages and own extraction themselves.  Without this
+     * delegation the group is rejected as having no graph materials before it
+     * can dispatch its workers through their private ledgers.
+     */
+    @Override
+    public boolean requiresPrivateLedgerGraphDispatch() {
+        return !workers.isEmpty()
+                && requiresPrivateLedgerGraphDispatch(workers.get(0).delegate);
+    }
+
+    static boolean requiresPrivateLedgerGraphDispatch(@Nullable IBatchDelegate delegate) {
+        return delegate != null && delegate.requiresPrivateLedgerGraphDispatch();
+    }
+
     public void setReservationTokens(List<ExtractionLedger.ReservationToken> tokens) {
         this.reservationTokens = List.copyOf(tokens);
     }

@@ -46,4 +46,25 @@ class ClibanoInventoryLogicTest extends BootstrapTest {
         assertTrue(ClibanoInventoryLogic.fireSatisfies(1, 1));
         assertFalse(ClibanoInventoryLogic.fireSatisfies(0, 1));
     }
+
+    @Test
+    void configuredFuelWinsOverStorageIterationOrder() {
+        var selection = ClibanoInventoryLogic.selectFuel(
+                List.of(new ItemStack(Items.BAMBOO, 64), new ItemStack(Items.COAL, 4)),
+                List.of("minecraft:coal", "minecraft:charcoal"), 1600,
+                stack -> stack.is(Items.COAL) ? 1600 : stack.is(Items.BAMBOO) ? 50 : 0);
+
+        assertNotNull(selection);
+        assertTrue(selection.fuel().is(Items.COAL));
+        assertEquals(1, selection.amount());
+        assertFalse(selection.partial());
+    }
+
+    @Test
+    void existingFuelOnlyTopsUpTheMissingAmount() {
+        assertEquals(1, ClibanoInventoryLogic.fuelToAdd(3200, 1600, 1));
+        assertEquals(0, ClibanoInventoryLogic.fuelToAdd(1600, 1600, 1));
+        assertEquals(Integer.MAX_VALUE,
+                ClibanoInventoryLogic.fuelToAdd(1600, 0, 1));
+    }
 }
