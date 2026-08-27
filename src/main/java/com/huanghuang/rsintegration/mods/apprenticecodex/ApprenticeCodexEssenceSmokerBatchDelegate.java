@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -26,6 +27,8 @@ import java.util.List;
 public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBatchDelegate {
     private static final String BE_CLASS =
             "jp.aquafactory.apprenticecodex.block.essencesmoker.EssenceSmokerBlockEntity";
+    private static final int MAX_MATERIAL_COUNT =
+            ApprenticeCodexRecipeHandler.ESSENCE_SMOKER_MATERIAL_SLOTS;
 
     private ServerLevel level;
     private ResourceKey<Level> dimension;
@@ -34,6 +37,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     private ItemStack expected = ItemStack.EMPTY;
     private final List<ItemStack> results = new ArrayList<>();
     private boolean started;
+    private int activeMaterialCount;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -50,6 +54,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         this.expected = found.getResultItem(resolved.registryAccess()).copy();
         this.results.clear();
         this.started = false;
+        this.activeMaterialCount = 0;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -57,10 +62,29 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     }
 
     @Override public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (recipe == null) return null;
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        return handler != null ? handler.getIngredients(recipe)
+                : CraftPacketUtils.extractIngredientSpecs(recipe);
     }
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        return Math.max(0, Math.min(MAX_MATERIAL_COUNT, remainingOperations));
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        // Graph dispatch supplies the concrete batch size through
+        // preferredParallelBatchSize and the aggregated material stack.
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return Math.max(1, Math.min(MAX_MATERIAL_COUNT, totalOperations));
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
@@ -99,22 +123,32 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         List<IngredientSpec> specs = getRequiredMaterials();
         BlockEntity be = level.getBlockEntity(pos);
         if (specs == null || specs.size() != 2 || materials.size() != 2 || !isIdle(be)) return false;
-        for (int i = 0; i < 2; i++) {
-            if (materials.get(i).isEmpty() || materials.get(i).getCount() < specs.get(i).count()
-                    || !specs.get(i).ingredient().test(materials.get(i))) return false;
-        }
-        ItemStack catalyst = materials.get(0).copyWithCount(1);
-        ItemStack material = materials.get(1).copyWithCount(1);
+        ItemStack catalystInput = materials.get(0);
+        ItemStack materialInput = materials.get(1);
+        if (catalystInput.isEmpty() || catalystInput.getCount() < specs.get(0).count()
+                || !specs.get(0).ingredient().test(catalystInput)) return false;
+        if (materialInput.isEmpty() || materialInput.getCount() < specs.get(1).count()
+                || materialInput.getCount() > MAX_MATERIAL_COUNT
+                || !specs.get(1).ingredient().test(materialInput)) return false;
+
+        ItemStack catalyst = catalystInput.copyWithCount(1);
         if (!invokeBoolean(be, "setCatalyst", new Class<?>[]{ItemStack.class}, catalyst)) return false;
-        if (!invokeBoolean(be, "addMaterial", new Class<?>[]{ItemStack.class}, material)) {
-            invoke(be, "popCatalyst", new Class<?>[0]);
-            return false;
+        int materialCount = materialInput.getCount();
+        int added = 0;
+        for (; added < materialCount; added++) {
+            if (!invokeBoolean(be, "addMaterial", new Class<?>[]{ItemStack.class},
+                    materialInput.copyWithCount(1))) {
+                for (int i = 0; i < added; i++) invoke(be, "popLastMaterial", new Class<?>[0]);
+                invoke(be, "popCatalyst", new Class<?>[0]);
+                return false;
+            }
         }
         if (!invokeBoolean(be, "ignite", new Class<?>[]{long.class}, level.getGameTime())) {
-            invoke(be, "popLastMaterial", new Class<?>[0]);
+            for (int i = 0; i < added; i++) invoke(be, "popLastMaterial", new Class<?>[0]);
             invoke(be, "popCatalyst", new Class<?>[0]);
             return false;
         }
+        activeMaterialCount = materialCount;
         started = true;
         return true;
     }
@@ -151,15 +185,18 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
 
     @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
     @Override public ExpectedProduction getExpectedProduction() {
-        return expected.isEmpty() ? null : new ExpectedProduction(expected, expected.getCount());
+        if (expected.isEmpty()) return null;
+        int count = Math.max(1, activeMaterialCount) * Math.max(1, expected.getCount());
+        return new ExpectedProduction(expected, count);
     }
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         resetContents(be);
-        results.clear(); started = false; resetState();
+        results.clear(); started = false; activeMaterialCount = 0; resetState();
     }
     @Override public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        results.clear(); started = false; expected = ItemStack.EMPTY; resetState();
+        results.clear(); started = false; activeMaterialCount = 0;
+        expected = ItemStack.EMPTY; resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }
 

@@ -100,7 +100,9 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             try {
                 ItemStack container = (ItemStack) recipe.getClass()
                         .getMethod("getOutputContainer").invoke(recipe);
-                return container == null ? ItemStack.EMPTY : container.copy();
+                if (container == null || container.isEmpty()) return ItemStack.EMPTY;
+                ItemStack result = recipe.getResultItem(RegistryAccess.EMPTY);
+                return withResultCount(container, result);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
             }
@@ -151,9 +153,16 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         List<IngredientSpec> specs = new ArrayList<>(inputSpecs.size() + 1);
         specs.addAll(inputSpecs);
         if (container != null && !container.isEmpty()) {
-            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)), 1));
+            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)),
+                    container.getCount()));
         }
         return List.copyOf(specs);
+    }
+
+    static ItemStack withResultCount(ItemStack container, ItemStack result) {
+        if (container == null || container.isEmpty()) return ItemStack.EMPTY;
+        int count = result == null || result.isEmpty() ? container.getCount() : result.getCount();
+        return container.copyWithCount(Math.max(1, count));
     }
 
     static List<IngredientSpec> cuttingBoardIngredients(Ingredient input, Ingredient tool) {

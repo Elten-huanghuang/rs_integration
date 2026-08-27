@@ -881,7 +881,8 @@ public final class AltarBindingRegistry {
         // Cooking Pot is a leaf machine type as well. Add-ons commonly group
         // compatible recipes under their own namespace folders, which must not
         // be interpreted as a different physical pot.
-        if ("farmersdelight_cooking_pot".equals(type.id())) {
+        if ("farmersdelight_cooking_pot".equals(type.id())
+                || ModIds.ID_MD_COPPER_POT.equals(type.id())) {
             return null;
         }
         // Cutting Board is also a leaf machine type. Native Farmer's Delight

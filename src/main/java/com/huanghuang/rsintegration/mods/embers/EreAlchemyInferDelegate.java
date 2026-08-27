@@ -24,10 +24,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -51,8 +49,6 @@ public final class EreAlchemyInferDelegate
 extends AbstractBatchDelegate {
     private static final int MINIMAX_THRESHOLD = 1024;
     private static final int MAX_COMBINATIONS = 50000;
-    private static final long PROGRESS_TTL_MS = 1800000L;
-    private static final Map<String, InferenceProgress> PROGRESS_CACHE;
     private ServerLevel level;
     private BlockPos machinePos;
     private Object recipe;
@@ -78,44 +74,33 @@ extends AbstractBatchDelegate {
     private EreAlchemyMaterials firstAttemptMaterials;
     private int[] aspectEquivClasses;
 
-    private static String progressKey(UUID playerId, String recipeId) {
-        return playerId + "|" + recipeId;
-    }
-
     private void saveProgress(UUID playerId) {
-        if (this.recipe == null || playerId == null) {
+        if (this.level == null || this.recipe == null || playerId == null) {
             return;
         }
         ResourceLocation rid = ((Recipe<?>) this.recipe).getId();
         if (rid == null) {
             return;
         }
-        EreAlchemyInferDelegate.cleanExpiredProgress(1800000L);
-        PROGRESS_CACHE.put(EreAlchemyInferDelegate.progressKey(playerId, rid.toString()), new InferenceProgress(this.allCombinations, new ArrayList<int[]>(this.candidates), this.currentGuess != null ? (int[])this.currentGuess.clone() : null, this.attemptCount, this.consecutiveZeroBlackPins, this.aspectsSize, this.inputsSize, System.currentTimeMillis()));
+        EreAlchemyProgressSavedData.get(this.level).putProgress(
+                playerId,
+                rid.toString(),
+                new EreAlchemyProgressSavedData.Progress(
+                        this.candidates,
+                        this.currentGuess,
+                        this.attemptCount,
+                        this.consecutiveZeroBlackPins,
+                        this.aspectsSize,
+                        this.inputsSize));
         RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Saved progress for {}: {} candidates, {} attempts", (Object)rid, (Object)this.candidates.size(), (Object)this.attemptCount);
     }
 
-    private static InferenceProgress takeProgress(UUID playerId, String recipeId) {
-        if (playerId == null) {
-            return null;
-        }
-        return PROGRESS_CACHE.remove(EreAlchemyInferDelegate.progressKey(playerId, recipeId));
-    }
-
-    private static void clearProgress(UUID playerId, String recipeId) {
-        if (playerId == null) {
-            return;
-        }
-        PROGRESS_CACHE.remove(EreAlchemyInferDelegate.progressKey(playerId, recipeId));
-    }
-
-    private static void cleanExpiredProgress(long maxAgeMs) {
-        long cutoff = System.currentTimeMillis() - maxAgeMs;
-        Iterator<Map.Entry<String, InferenceProgress>> it = PROGRESS_CACHE.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, InferenceProgress> entry = it.next();
-            if (entry.getValue().timestamp() >= cutoff) continue;
-            it.remove();
+    private void clearSavedProgress() {
+        if (this.level == null || this.player == null || this.recipe == null) return;
+        ResourceLocation rid = ((Recipe<?>) this.recipe).getId();
+        if (rid != null) {
+            EreAlchemyProgressSavedData.get(this.level).removeProgress(
+                    this.player.getUUID(), rid.toString());
         }
     }
 
@@ -201,26 +186,30 @@ extends AbstractBatchDelegate {
                     p.pos().below().toShortString(), bottomStack.getHoverName().getString()));
             return false;
         }
-        InferenceProgress saved = EreAlchemyInferDelegate.takeProgress(player.getUUID(), recipeId.toString());
+        long total = EreAlchemyInferDelegate.pow(this.aspectsSize, this.inputsSize);
+        if (total > MAX_COMBINATIONS) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] {} combinations exceeds limit {}",
+                    (Object)total, (Object)MAX_COMBINATIONS);
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.embers.error.too_many_combos", total, MAX_COMBINATIONS));
+            return false;
+        }
+        this.generateAllCombinations();
+        EreAlchemyProgressSavedData progressData = EreAlchemyProgressSavedData.get(lvl);
+        EreAlchemyProgressSavedData.Progress saved = progressData.getProgress(
+                player.getUUID(), recipeId.toString());
         if (saved != null && saved.aspectsSize() == this.aspectsSize && saved.inputsSize() == this.inputsSize) {
-            this.allCombinations = saved.allCombinations();
-            this.candidates = new ArrayList<int[]>(saved.candidates());
-            this.currentGuess = saved.currentGuess() != null ? (int[])saved.currentGuess().clone() : null;
+            this.candidates = new ArrayList<>(saved.candidates());
+            this.currentGuess = saved.currentGuess();
             this.attemptCount = saved.attemptCount();
             this.consecutiveZeroBlackPins = saved.consecutiveZeroBlackPins();
             RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Restored progress for {}: {} candidates remain, {} attempts so far", (Object)recipeId, (Object)this.candidates.size(), (Object)this.attemptCount);
         } else {
-            long total;
             if (saved != null) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] Saved progress mismatch (aspects/inputs size changed), discarding");
+                progressData.removeProgress(player.getUUID(), recipeId.toString());
             }
-            if ((total = EreAlchemyInferDelegate.pow(this.aspectsSize, this.inputsSize)) > 50000L) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] {} combinations exceeds limit {} \u2014 use Mode 2", (Object)total, (Object)50000);
-                player.sendSystemMessage(Component.translatable("rsi.embers.error.too_many_combos", total, 50000));
-                return false;
-            }
-            this.generateAllCombinations();
-            this.candidates = new ArrayList<int[]>(this.allCombinations);
+            this.candidates = new ArrayList<>(this.allCombinations);
             this.currentGuess = this.selectInitialGuess();
             this.attemptCount = 0;
             this.consecutiveZeroBlackPins = 0;
@@ -371,10 +360,8 @@ extends AbstractBatchDelegate {
             ResourceLocation rid = ((Recipe<?>) this.recipe).getId();
             if (rid != null) {
                 KnownCodeSavedData.get((ServerLevel)this.level).putCode(rid.toString(), codeIndices);
-                if (this.player != null) {
-                    EreAlchemyInferDelegate.clearProgress(this.player.getUUID(), rid.toString());
-                }
             }
+            this.clearSavedProgress();
             RSIntegrationMod.LOGGER.debug("[RSI-Embers-Infer] SUCCESS after {} attempts: code={}", (Object)this.attemptCount, (Object)Arrays.toString(codeIndices));
             if (this.player != null) {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.success", this.attemptCount), true);
@@ -407,6 +394,7 @@ extends AbstractBatchDelegate {
                     this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_zero_black", zeroLimit), true);
                 }
                 this.clearAndRefundSurvivors();
+                this.clearSavedProgress();
                 this.phase = Phase.DONE_FAILED;
                 return true;
             }
@@ -419,6 +407,7 @@ extends AbstractBatchDelegate {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_max", maxAttempts), true);
             }
             this.clearAndRefundSurvivors();
+            this.clearSavedProgress();
             this.phase = Phase.DONE_FAILED;
             return true;
         }
@@ -431,12 +420,14 @@ extends AbstractBatchDelegate {
                 this.player.displayClientMessage(Component.translatable("rsi.embers.infer.failed_no_candidates"), true);
             }
             this.clearAndRefundSurvivors();
+            this.clearSavedProgress();
             this.phase = Phase.DONE_FAILED;
             return true;
         }
         this.currentGuess = this.candidates.size() == 1 ? this.candidates.get(0) : this.selectNextGuess();
         if (this.currentGuess == null) {
             this.clearAndRefundSurvivors();
+            this.clearSavedProgress();
             this.phase = Phase.DONE_FAILED;
             return true;
         }
@@ -688,19 +679,16 @@ extends AbstractBatchDelegate {
                 }
                 ((BlockEntity) pi.be()).setChanged();
             }
-            int progressBefore = Reflect.getIntField((Object)this.tablet, "progress").orElse(-999);
-            Reflect.invoke((Object)this.tablet, "sparkProgress", this.tablet, 1000.0);
-            int progressAfter = Reflect.getIntField((Object)this.tablet, "progress").orElse(-999);
-            if (progressAfter == 0) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] sparkProgress FAILED: progress stayed 0");
+            EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
+                    this.level, this.machinePos, (BlockEntity) this.tablet);
+            if (ignition != EmbersBeamCannonIgnition.Result.STARTED) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Beam Cannon ignition failed: {}", ignition);
                 if (this.player != null) {
-                    this.player.sendSystemMessage(Component.translatable("rsi.embers.error.placement_failed"));
+                    this.player.sendSystemMessage(Component.translatable(ignition.translationKey()));
                 }
                 this.clearAndRefundSurvivors();
                 return false;
             }
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] sparkProgress OK: progress {} -> {}",
-                    (Object)progressBefore, (Object)progressAfter);
             return true;
         }
         catch (Exception e) {
@@ -721,21 +709,22 @@ extends AbstractBatchDelegate {
         }
         ItemStack t = this.extractOne(tabletIng);
         if (t.isEmpty()) {
-            this.refundPartial(materials);
-            return false;
+            return this.pauseForMissingMaterial(
+                    "rsi.embers.infer.paused_missing_tablet", tabletIng, materials);
         }
         materials.add(t);
         for (int i = 0; i < this.inputsSize; ++i) {
             ItemStack a = this.extractOne(this.aspects.get(this.currentGuess[i]));
             if (a.isEmpty()) {
-                this.refundPartial(materials);
-                return false;
+                return this.pauseForMissingMaterial(
+                        "rsi.embers.infer.paused_missing_aspect",
+                        this.aspects.get(this.currentGuess[i]), materials);
             }
             materials.add(a);
             ItemStack in = this.extractOne(this.inputs.get(i));
             if (in.isEmpty()) {
-                this.refundPartial(materials);
-                return false;
+                return this.pauseForMissingMaterial(
+                        "rsi.embers.infer.paused_missing_input", this.inputs.get(i), materials);
             }
             materials.add(in);
         }
@@ -745,6 +734,24 @@ extends AbstractBatchDelegate {
             this.waitStartTick = this.level.getServer().getTickCount();
         }
         return ok;
+    }
+
+    private boolean pauseForMissingMaterial(String translationKey, Ingredient missing,
+                                            List<ItemStack> partialMaterials) {
+        this.refundPartial(partialMaterials);
+        int remainingCandidates = this.candidates != null ? this.candidates.size() : 0;
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-Embers-Infer] Paused after {} attempts with {} candidates: missing {}",
+                this.attemptCount, remainingCandidates,
+                CraftPacketUtils.describeIngredient(missing).getString());
+        if (this.player != null) {
+            this.player.sendSystemMessage(Component.translatable(
+                    translationKey,
+                    CraftPacketUtils.describeIngredient(missing),
+                    this.attemptCount,
+                    remainingCandidates));
+        }
+        return false;
     }
 
     private ItemStack extractOne(Ingredient ing) {
@@ -896,10 +903,6 @@ extends AbstractBatchDelegate {
         }
     }
 
-    static {
-        PROGRESS_CACHE = new ConcurrentHashMap<String, InferenceProgress>();
-    }
-
     private static enum Phase {
         INIT,
         PLACED,
@@ -907,9 +910,6 @@ extends AbstractBatchDelegate {
         DONE_SUCCESS,
         DONE_FAILED;
 
-    }
-
-    private record InferenceProgress(List<int[]> allCombinations, List<int[]> candidates, int[] currentGuess, int attemptCount, int consecutiveZeroBlackPins, int aspectsSize, int inputsSize, long timestamp) {
     }
 
     private record MatchStats(int correct, int valueOnly) {

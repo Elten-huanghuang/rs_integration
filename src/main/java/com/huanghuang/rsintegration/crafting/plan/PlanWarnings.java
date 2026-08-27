@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.mods.arsnouveau.ArsPlanWarnings;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.farmersdelight.SkilletBatchDelegate;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
@@ -192,6 +193,9 @@ public final class PlanWarnings {
                 break;
             case ModIds.ID_FD_COOKING_POT:
                 warnings.addAll(CookingPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_MD_COPPER_POT:
+                warnings.addAll(MinersDelightCopperPotSupport.getPlanWarnings(player, recipe));
                 break;
             case ModIds.ID_FD_SKILLET:
                 warnings.addAll(SkilletBatchDelegate.getPlanWarnings(player, recipe, dim, pos));

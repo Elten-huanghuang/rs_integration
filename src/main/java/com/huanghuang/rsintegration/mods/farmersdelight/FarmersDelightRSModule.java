@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.fml.ModList;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -42,6 +43,18 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[][]{{"farmersdelight:cooking"}},
                 new String[][]{{"vectorwing.farmersdelight.common.crafting.CookingPotRecipe", "farmersdelight_cooking_pot"}},
                 "gui.rs_integration.jei.fd_cooking_pot_craft");
+
+        if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {
+            ModType.register(ModIds.ID_MD_COPPER_POT,
+                    new String[0],
+                    new String[]{"copper_pot"},
+                    new String[]{ModIds.ID_MD_COPPER_POT},
+                    MinersDelightCopperPotBatchDelegate::new);
+            ModType.configureJei(ModIds.ID_MD_COPPER_POT,
+                    new String[][]{{"miners_delight:cooking", ModIds.ID_MD_COPPER_POT}},
+                    null,
+                    "gui.rs_integration.jei.md_copper_pot_craft");
+        }
 
         // Specific: Skillet (campfire-like recipes)
         // Registered after vanilla_machine (modules run in onCommonSetup, after
@@ -104,6 +117,15 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 List.of("vectorwing.farmersdelight.common.block.SkilletBlock"),
                 "farmersdelight_skillet", false
         ));
+
+        if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {
+            BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                    ModIds.MINERS_DELIGHT, ModType.byId(ModIds.ID_MD_COPPER_POT),
+                    RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
+                    List.of("com.sammy.minersdelight.content.block.copper_pot.CopperPotBlock"),
+                    ModIds.ID_MD_COPPER_POT, true
+            ));
+        }
 
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "farmersdelight", ModType.byId(ModIds.ID_FD_CUTTING_BOARD),

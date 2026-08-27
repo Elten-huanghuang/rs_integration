@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.apprenticecodex.ApprenticeCodexRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,21 @@ class GraphExecutionPolicyTest {
         assertEquals(GraphExecutionPolicy.Reason.MOD_REQUIRES_FLAT_EXECUTION,
                 decision.reason());
         assertTrue(decision.detail().contains("tablet locking"));
+    }
+
+    @Test
+    void essenceSmokerUsesFlatExecutionForPerBatchCatalysts() {
+        ApprenticeCodexRSModule.INSTANCE.registerModType();
+        ModType smoker = ModType.byId(ApprenticeCodexRSModule.ESSENCE_SMOKER_TYPE);
+
+        GraphExecutionPolicy.Decision decision = GraphExecutionPolicy.decide(false, smoker);
+
+        assertFalse(decision.useGraphExecutor());
+        assertEquals(ModType.GraphExecutionAudit.FLAT_REQUIRED,
+                smoker.graphExecutionAudit());
+        assertEquals(GraphExecutionPolicy.Reason.MOD_REQUIRES_FLAT_EXECUTION,
+                decision.reason());
+        assertTrue(decision.detail().contains("one catalyst per eight-material"));
     }
 
     @Test

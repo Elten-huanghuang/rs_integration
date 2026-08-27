@@ -1,20 +1,26 @@
 package com.huanghuang.rsintegration.resonance.item;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.api.storage.StorageType;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import com.refinedmods.refinedstorage.apiimpl.storage.ItemStorageType;
 import com.refinedmods.refinedstorage.item.StorageDiskItem;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 
+import java.util.List;
 import java.util.UUID;
 
 public final class ResonanceDiskItem extends StorageDiskItem {
@@ -39,6 +45,42 @@ public final class ResonanceDiskItem extends StorageDiskItem {
         // disk uses FOUR_K only as an RS compatibility token, so inheriting
         // that behavior incorrectly turns it into a 4K part and disk housing.
         return InteractionResultHolder.pass(player.getItemInHand(hand));
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip,
+                                TooltipFlag flag) {
+        super.appendHoverText(stack, level, tooltip, flag);
+        tooltip.add(Component.empty());
+
+        if (!Screen.hasShiftDown()) {
+            tooltip.add(TextBuilder.translate("item.rs_integration.resonance_storage_disk.tooltip")
+                    .colorFlow(1600L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS)
+                    .bold()
+                    .build());
+            tooltip.add(TextBuilder.translate(
+                            "item.rs_integration.resonance_storage_disk.tooltip.subtitle")
+                    .colorFlow(1600L, 0.35F, RSIntegrationMod.RS_FLOW_COLORS)
+                    .build());
+            tooltip.add(TextBuilder.translate(
+                            "item.rs_integration.resonance_storage_disk.tooltip.expand")
+                    .darkGray()
+                    .build());
+            return;
+        }
+
+        tooltip.add(TextBuilder.translate(
+                        "item.rs_integration.resonance_storage_disk.tooltip.title")
+                .aqua()
+                .bold()
+                .build());
+        for (int line = 1; line <= 8; line++) {
+            tooltip.add(TextBuilder.of("• ").darkAqua()
+                    .append(TextBuilder.translate(
+                            "item.rs_integration.resonance_storage_disk.tooltip.detail_" + line)
+                            .gray())
+                    .build());
+        }
     }
 
     @Override

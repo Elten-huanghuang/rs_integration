@@ -356,9 +356,8 @@ public class RecipeGuiLayoutsMixin {
                     faSmithingBase, concreteTargetOutput);
             if (handler == null) continue;
 
-            ModType modType = "vanilla_brewing_stand".equals(filter)
-                    ? ModType.byId("vanilla_brewing_stand")
-                    : recipeModType;
+            ModType filteredType = ModType.findById(filter);
+            ModType modType = filteredType != null ? filteredType : recipeModType;
 
             String tooltipKey;
             if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {

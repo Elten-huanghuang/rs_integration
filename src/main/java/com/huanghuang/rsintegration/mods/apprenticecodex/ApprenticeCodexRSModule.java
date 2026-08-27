@@ -28,7 +28,9 @@ public final class ApprenticeCodexRSModule implements IModIntegration {
     public void registerModType() {
         ModType.register(ESSENCE_SMOKER_TYPE, new String[]{ESSENCE_RECIPE},
                 new String[]{"essence_smoker"}, new String[]{ESSENCE_SMOKER_TYPE},
-                ModType.delegateSupplier(ApprenticeCodexEssenceSmokerBatchDelegate.class.getName()));
+                ModType.delegateSupplier(ApprenticeCodexEssenceSmokerBatchDelegate.class.getName()))
+                .requireFlatExecution(
+                        "Essence Smoker consumes one catalyst per eight-material physical batch");
         ModType.configureJei(ESSENCE_SMOKER_TYPE,
                 new String[][]{{"apprenticecodex:essence_smoker", ESSENCE_SMOKER_TYPE}},
                 new String[][]{{ESSENCE_RECIPE, ESSENCE_SMOKER_TYPE}},
