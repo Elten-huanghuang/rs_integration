@@ -18,11 +18,13 @@ import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
@@ -75,7 +77,7 @@ final class StepExecutor {
 
         List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
         List<InputDemand> graphInputs = planRecipeSpecsForGraph(
-                specs, graphNodeId, ctx, depth, edges, batches);
+                recipe, specs, graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
@@ -136,6 +138,8 @@ final class StepExecutor {
         List<IngredientSpec> specs = goetyDynamic
                 ? GoetyDynamicRitualRecipe.buildMaterials(entry.recipe(), demandedOutput)
                 : CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());
         if (entry.modType() == ModType.byId("crockpot")
                 && CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
             List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
@@ -180,7 +184,7 @@ final class StepExecutor {
         }
 
         List<InputDemand> graphInputs = planRecipeSpecsForGraph(
-                specs, graphNodeId, ctx, depth, edges, batches);
+                entry.recipe(), specs, graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
             ctx.rollback();
             edges.rollback();
@@ -211,6 +215,7 @@ final class StepExecutor {
         }
         // Preserve exact hidden outputs, but leave runtime-derived NBT open.
         result = CraftingResolver.resolveDeclaredOutput(entry.recipe(), result);
+        result = MinersDelightCopperPotSupport.adaptResult(entry.modType(), result);
         registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         if (handler != null) {
@@ -256,7 +261,8 @@ final class StepExecutor {
     }
 
     private static List<InputDemand> planRecipeSpecsForGraph(
-            List<IngredientSpec> specs, NodeId nodeId, ResolutionContext ctx, int depth,
+            Recipe<?> recipe, List<IngredientSpec> specs, NodeId nodeId,
+            ResolutionContext ctx, int depth,
             CraftingResolver.EdgeTracker edges, int batches) {
         if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
         List<InputDemand> inputs = new ArrayList<>();
@@ -273,9 +279,12 @@ final class StepExecutor {
         for (int i = 0; i < physicalSpecs.size(); i++) resolutionOrder.add(i);
         resolutionOrder.sort(Comparator
                 .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0));
+        var handler = ModRecipeHandlers.handlerFor(recipe);
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
-            int quantity = CraftPacketUtils.requiredCount(spec, batches);
+            int quantity = handler != null
+                    ? handler.requiredIngredientCount(recipe, spec, originalIndex, batches)
+                    : CraftPacketUtils.requiredCount(spec, batches);
             InputPortId port = new InputPortId(nodeId, originalIndex);
             Ingredient plannedIngredient = ensureSingleVariantMachineInput(
                     spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);

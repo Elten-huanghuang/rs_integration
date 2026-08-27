@@ -245,19 +245,16 @@ extends AbstractBatchDelegate {
                 }
                 ((BlockEntity) pi.be()).setChanged();
             }
-            int progressBefore = Reflect.getIntField((Object)this.tablet, "progress").orElse(-999);
-            Reflect.invoke((Object)this.tablet, "sparkProgress", this.tablet, 1000.0);
-            int progressAfter = Reflect.getIntField((Object)this.tablet, "progress").orElse(-999);
-            if (progressAfter == 0) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Embers] sparkProgress FAILED: progress stayed 0 — recipe mismatch or items wrong");
-                player.sendSystemMessage(Component.translatable("rsi.embers.error.placement_failed"));
+            EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
+                    this.level, this.machinePos, (BlockEntity) this.tablet);
+            if (ignition != EmbersBeamCannonIgnition.Result.STARTED) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Embers] Beam Cannon ignition failed: {}", ignition);
+                player.sendSystemMessage(Component.translatable(ignition.translationKey()));
                 this.clearAllSlots();
                 releaseAlchemyLease();
                 return false;
             }
             this.craftStarted = true;
-            RSIntegrationMod.LOGGER.debug("[RSI-Embers] sparkProgress OK: progress {} -> {}",
-                    (Object)progressBefore, (Object)progressAfter);
             return true;
         }
         catch (Exception e) {

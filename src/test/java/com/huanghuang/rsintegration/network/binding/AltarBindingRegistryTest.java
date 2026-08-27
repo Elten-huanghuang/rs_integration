@@ -45,6 +45,11 @@ class AltarBindingRegistryTest {
                     new String[]{"cooking_pot"},
                     new String[]{"farmersdelight_cooking_pot"}, () -> null);
         }
+        if (ModType.byId(ModIds.ID_MD_COPPER_POT) == ModType.GENERIC) {
+            ModType.register(ModIds.ID_MD_COPPER_POT, new String[0],
+                    new String[]{"copper_pot"},
+                    new String[]{ModIds.ID_MD_COPPER_POT}, () -> null);
+        }
         if (ModType.byId(ModIds.ID_FD_CUTTING_BOARD) == ModType.GENERIC) {
             ModType.register(ModIds.ID_FD_CUTTING_BOARD, new String[0],
                     new String[]{"cutting_board"},
@@ -174,6 +179,17 @@ class AltarBindingRegistryTest {
         assertNull(AltarBindingRegistry.normalizeSubType(
                 AltarBindingRegistry.recipeSubTypeHint(recipeId),
                 ModType.byId("farmersdelight_cooking_pot")));
+    }
+
+    @Test
+    void addonRecipeFolderDoesNotRejectMinersDelightCopperPotBinding() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "veggiesdelight", "compat/culturaldelight/cooking/turnip_cake");
+
+        assertEquals("compat", AltarBindingRegistry.recipeSubTypeHint(recipeId));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(recipeId),
+                ModType.byId(ModIds.ID_MD_COPPER_POT)));
     }
 
     @Test

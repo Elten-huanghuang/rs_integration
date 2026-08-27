@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.ServerPlayer;
@@ -49,6 +50,17 @@ public interface ModRecipeHandler {
     /** Extract ingredients with their required counts. Returns null if this handler cannot parse the recipe. */
     @Nullable
     List<IngredientSpec> getIngredients(Recipe<?> recipe);
+
+    /**
+     * Total quantity required for one input when planning a multi-execution order.
+     * Most inputs use their demand role directly; machine handlers may override
+     * this when one physical cycle covers several logical executions.
+     */
+    default int requiredIngredientCount(@Nonnull Recipe<?> recipe,
+                                        @Nonnull IngredientSpec spec,
+                                        int inputIndex, int executions) {
+        return CraftPacketUtils.requiredCount(spec, executions);
+    }
 
     /** Secondary/byproduct outputs. Default empty — most mods don't have them. */
     @Nonnull

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
@@ -28,6 +29,11 @@ final class CandidateEngine {
     private static final int PREFERRED_RECIPE_BONUS = 10000;
     public record CandidateDiagnostic(ResourceLocation recipeId, int score, ModType modType,
                                        boolean skipped, String skipReason) {}
+    private record CandidateKey(ResourceLocation recipeId, String modTypeId) {
+        static CandidateKey of(RecipeIndex.Entry entry) {
+            return new CandidateKey(entry.recipe().getId(), entry.modType().id());
+        }
+    }
 
     /**
      * Returns recipes whose output matches the ingredient, sorted by score (highest first).
@@ -41,8 +47,8 @@ final class CandidateEngine {
      */
     static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
                                                    @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
-        // Phase 1: collect unique entries by recipe ID (cheap — no getResultItem calls)
-        Map<ResourceLocation, RecipeIndex.Entry> byId = new LinkedHashMap<>();
+        // Shared recipes can have distinct machine routes and runtime outputs.
+        Map<CandidateKey, RecipeIndex.Entry> byId = new LinkedHashMap<>();
         long p1Start = System.nanoTime();
         ItemStack[] items = ingredient.getItems();
         long itemsMs = (System.nanoTime() - p1Start) / 1_000_000;
@@ -73,7 +79,8 @@ final class CandidateEngine {
             for (RecipeIndex.Entry entry : recipes) {
                 if (ctx.timedOut()) break;
                 ResourceLocation rid = entry.recipe().getId();
-                if (byId.containsKey(rid)) continue; // already collected
+                CandidateKey candidateKey = CandidateKey.of(entry);
+                if (byId.containsKey(candidateKey)) continue;
                 if (entry.modType() != ModType.GENERIC) {
                     var handler = ModRecipeHandlers.handlerFor(entry.recipe());
                     if (handler != null
@@ -98,7 +105,7 @@ final class CandidateEngine {
                         }
                     }
                 }
-                byId.put(rid, entry);
+                byId.put(candidateKey, entry);
             }
         }
         long loopMs = (System.nanoTime() - loopStart) / 1_000_000;
@@ -112,7 +119,7 @@ final class CandidateEngine {
 
         boolean nbtStrict = ingredient instanceof StrictNBTIngredient;
         boolean ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
-        Map<ResourceLocation, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
+        Map<CandidateKey, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
 
         // Phase 2: validate outputs.  Vanilla CraftingRecipe entries are
         // instant (getResultItem is pre-computed); mod recipes go through
@@ -138,7 +145,7 @@ final class CandidateEngine {
                             "Non-productive tag conversion");
                     continue;
                 }
-                dedup.put(entry.recipe().getId(), entry);
+                dedup.put(CandidateKey.of(entry), entry);
             }
         }
         int modCount = 0;
@@ -148,7 +155,7 @@ final class CandidateEngine {
             modCount++;
             ItemStack output = outputForDemand(entry, ingredient, ctx);
             if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
-                dedup.put(entry.recipe().getId(), entry);
+                dedup.put(CandidateKey.of(entry), entry);
             }
         }
         long phase2Elapsed = System.nanoTime() - phase2Start;
@@ -166,19 +173,27 @@ final class CandidateEngine {
         // Use an ingredient→count cache so countMatching (which iterates all
         // 546+ inventory item types) is called at most once per unique ingredient.
         Map<Ingredient, Integer> matchCache = new HashMap<>();
-        Map<ResourceLocation, Integer> scoreCache = new HashMap<>();
-        Map<ResourceLocation, Integer> availCache = new HashMap<>();
+        Map<CandidateKey, Integer> scoreCache = new HashMap<>();
+        Map<CandidateKey, Integer> availCache = new HashMap<>();
         for (RecipeIndex.Entry entry : result) {
             if (ctx.timedOut()) break; // don't burn remaining budget on scoring
-            scoreCache.put(entry.recipe().getId(), scoreEntry(entry, ctx, nbtStrict, matchCache));
-            availCache.put(entry.recipe().getId(), countAvailableIngredients(entry, ctx, matchCache));
+            CandidateKey key = CandidateKey.of(entry);
+            scoreCache.put(key, scoreEntry(entry, ctx, nbtStrict, matchCache));
+            availCache.put(key, countAvailableIngredients(entry, ctx, matchCache));
         }
 
         long sortStart = System.nanoTime();
         result.sort((a, b) -> {
-            ResourceLocation idA = a.recipe().getId();
-            ResourceLocation idB = b.recipe().getId();
-            return compareCandidateIds(idA, idB, scoreCache, availCache);
+            CandidateKey keyA = CandidateKey.of(a);
+            CandidateKey keyB = CandidateKey.of(b);
+            int cmp = Integer.compare(scoreCache.getOrDefault(keyB, 0),
+                    scoreCache.getOrDefault(keyA, 0));
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(availCache.getOrDefault(keyB, 0),
+                    availCache.getOrDefault(keyA, 0));
+            if (cmp != 0) return cmp;
+            cmp = a.recipe().getId().compareTo(b.recipe().getId());
+            return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
         });
 
         if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
@@ -224,7 +239,9 @@ final class CandidateEngine {
             ItemStack dynamic = GoetyDynamicRitualRecipe.matchingOutput(entry.recipe(), demand);
             if (!dynamic.isEmpty()) return dynamic;
         }
-        return ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack output = ModRecipeHandlers.tryGetResultItem(
+                entry.recipe(), ctx.level.registryAccess());
+        return MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
     }
 
     @javax.annotation.Nullable
@@ -295,6 +312,9 @@ final class CandidateEngine {
         }
         if (entry.modType() == ModType.GENERIC || entry.modType().isVirtual()) return true;
         if (ctx.player == null) return false;
+        if (MinersDelightCopperPotSupport.isCopperPotType(entry.modType())) {
+            return AltarBindingRegistry.hasAnyBindingForType(ctx.player, entry.modType());
+        }
         return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
     }
 
@@ -317,7 +337,7 @@ final class CandidateEngine {
         int score = 0;
         if (entry.modType() == ModType.GENERIC) score += 10;
         if (nbtStrict && entry.nbtSensitive()) score += 5;
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
         if (specs != null) {
             Map<String, IngredientDemand> demands = specDemands(specs);
             for (IngredientDemand demand : demands.values()) {
@@ -330,7 +350,7 @@ final class CandidateEngine {
             score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
             score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
         }
-        ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack output = outputForDemand(entry, Ingredient.EMPTY, ctx);
         if (!output.isEmpty()) {
             if (isPreferred(entry, ctx)) {
                 score += PREFERRED_RECIPE_BONUS;
@@ -493,7 +513,7 @@ final class CandidateEngine {
             }
             return true;
         }
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
         if (specs == null) return false;
         for (IngredientDemand demand : specDemands(specs).values()) {
             if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) return false;
@@ -510,7 +530,7 @@ final class CandidateEngine {
                             >= demand.required())
                     .count();
         }
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
         if (specs == null) return 0;
         Map<String, IngredientDemand> demands = specDemands(specs);
         return (int) demands.values().stream()
@@ -520,6 +540,13 @@ final class CandidateEngine {
     }
 
     record IngredientDemand(Ingredient ingredient, int required, DemandRole role) {}
+
+    private static List<IngredientSpec> ingredientSpecs(RecipeIndex.Entry entry,
+                                                        ResolutionContext ctx) {
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        return MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());
+    }
 
     static Map<String, IngredientDemand> craftingDemands(CraftingRecipe recipe) {
         return specDemands(CraftPacketUtils.extractCraftingIngredientSpecs(recipe));

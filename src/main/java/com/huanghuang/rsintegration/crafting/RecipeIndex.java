@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefiniti
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
@@ -275,6 +276,18 @@ public final class RecipeIndex {
 
         Entry entry = new Entry(recipe, type, typeId);
         target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
+        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.MINERS_DELIGHT)
+                && MinersDelightCopperPotSupport.isCompatibleRecipe(recipe)) {
+            ModType copperPotType = ModType.findById(ModIds.ID_MD_COPPER_POT);
+            if (copperPotType != null) {
+                ItemStack copperResult = MinersDelightCopperPotSupport.convertResult(result);
+                if (!copperResult.isEmpty()) {
+                    Entry copperEntry = new Entry(recipe, copperPotType, typeId);
+                    target.computeIfAbsent(copperResult.getItem(), key -> new ArrayList<>())
+                            .add(copperEntry);
+                }
+            }
+        }
         List<IngredientSpec> craftingSpecs = null;
         if (recipe instanceof CraftingRecipe crafting) {
             craftingSpecs = CraftPacketUtils.extractCraftingIngredientSpecs(crafting);

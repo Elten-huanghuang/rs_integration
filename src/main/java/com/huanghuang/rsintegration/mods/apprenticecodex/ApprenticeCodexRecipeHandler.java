@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.apprenticecodex;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class ApprenticeCodexRecipeHandler implements ModRecipeHandler {
+    static final int ESSENCE_SMOKER_MATERIAL_SLOTS = 8;
     private final boolean essenceSmoker;
     private final String recipeClass;
     private final String typeId;
@@ -50,7 +52,11 @@ final class ApprenticeCodexRecipeHandler implements ModRecipeHandler {
             Object catalyst = invoke(recipe, "getCatalyst");
             Object material = invoke(recipe, "getMaterial");
             if (!(catalyst instanceof Ingredient c) || !(material instanceof Ingredient m)) return null;
-            return List.of(new IngredientSpec(c, 1), new IngredientSpec(m, 1));
+            // One catalyst is consumed per physical eight-material cycle.
+            // CATALYST prevents ordinary per-operation multiplication; the
+            // handler count hook below supplies the number of physical cycles.
+            return List.of(new IngredientSpec(c, 1, DemandRole.CATALYST),
+                    new IngredientSpec(m, 1));
         }
         Object raw = invoke(recipe, "getSizedIngredients");
         if (!(raw instanceof List<?> sized) || sized.isEmpty()) return null;
@@ -64,6 +70,21 @@ final class ApprenticeCodexRecipeHandler implements ModRecipeHandler {
             specs.add(new IngredientSpec(ing, n.intValue()));
         }
         return List.copyOf(specs);
+    }
+
+    @Override
+    public int requiredIngredientCount(Recipe<?> recipe, IngredientSpec spec,
+                                       int inputIndex, int executions) {
+        if (essenceSmoker && inputIndex == 0) {
+            return requiredCatalystCount(executions);
+        }
+        return ModRecipeHandler.super.requiredIngredientCount(
+                recipe, spec, inputIndex, executions);
+    }
+
+    static int requiredCatalystCount(int executions) {
+        if (executions <= 0) return 0;
+        return 1 + (executions - 1) / ESSENCE_SMOKER_MATERIAL_SLOTS;
     }
 
     @Override

@@ -21,6 +21,7 @@ public final class ModIds {
     public static final String CONFLUENCE = "confluence";
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
     public static final String FARMERSDELIGHT = "farmersdelight";
+    public static final String MINERS_DELIGHT = "miners_delight";
     public static final String FARMERSRESPITE = "farmersrespite";
     public static final String IRON_FURNACES = "ironfurnaces";
     public static final String DISTANT_WORLDS = "distant_worlds";
@@ -58,6 +59,7 @@ public final class ModIds {
     public static final String ID_FD_SKILLET = "farmersdelight_skillet";
     public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";
     public static final String ID_FD_CUTTING_BOARD = "farmersdelight_cutting_board";
+    public static final String ID_MD_COPPER_POT = "miners_delight_copper_pot";
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
     public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
 

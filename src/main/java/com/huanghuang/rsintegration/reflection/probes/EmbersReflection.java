@@ -13,7 +13,10 @@ public final class EmbersReflection {
     public static volatile Class<?> alchemyPedestalTopBEClass;
     public static volatile Class<?> alchemyPedestalBEClass;
     public static volatile Class<?> alchemyRecipeClass;
+    public static volatile Class<?> beamCannonBEClass;
     public static volatile Class<?> ibinClass;
+    public static volatile Class<?> isparkableClass;
+    public static volatile Class<?> iemberPacketReceiverClass;
     public static volatile Class<?> iemberCapabilityClass;
     public static volatile Class<?> registryManagerClass;
 
@@ -23,7 +26,10 @@ public final class EmbersReflection {
         register("com.rekindled.embers.blockentity.AlchemyPedestalTopBlockEntity", "alchemyPedestalTopBEClass");
         register("com.rekindled.embers.blockentity.AlchemyPedestalBlockEntity", "alchemyPedestalBEClass");
         register("com.rekindled.embers.recipe.AlchemyRecipe", "alchemyRecipeClass");
+        register("com.rekindled.embers.blockentity.BeamCannonBlockEntity", "beamCannonBEClass");
         register("com.rekindled.embers.api.tile.IBin", "ibinClass");
+        register("com.rekindled.embers.api.tile.ISparkable", "isparkableClass");
+        register("com.rekindled.embers.api.power.IEmberPacketReceiver", "iemberPacketReceiverClass");
         register("com.rekindled.embers.api.power.IEmberCapability", "iemberCapabilityClass");
         register("com.rekindled.embers.RegistryManager", "registryManagerClass");
     }

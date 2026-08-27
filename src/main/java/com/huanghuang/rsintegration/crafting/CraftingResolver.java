@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -660,6 +661,7 @@ public final class CraftingResolver {
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
             out = resolveDeclaredOutput(candidate.recipe(), out);
+            out = MinersDelightCopperPotSupport.adaptResult(candidate.modType(), out);
             if (out.isEmpty() || out.getCount() <= 0) {
                 continue;
             }
@@ -748,7 +750,7 @@ public final class CraftingResolver {
 
             // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
             // NBT-differentiated items like TACZ attachments (all tacz:attachment).
-            Set<StackKey> inKeys = getRecipeInputKeys(a.entry.recipe(), ctx.level.registryAccess());
+            Set<StackKey> inKeys = getRecipeInputKeys(a.entry, ctx.level.registryAccess());
             boolean isPingPong = false;
             for (StackKey inKey : inKeys) {
                 if (edges.containsReverse(inKey, outKey)) {
@@ -921,6 +923,22 @@ public final class CraftingResolver {
         return getRecipeInputKeys(recipe, null);
     }
 
+    private static Set<StackKey> getRecipeInputKeys(RecipeIndex.Entry entry,
+                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+        if (entry.recipe() instanceof CraftingRecipe) {
+            return getRecipeInputKeys(entry.recipe(), access);
+        }
+        List<IngredientSpec> specs = recipeSpecs(entry, access);
+        if (specs != null && !isIngredientDataBroken(specs)) {
+            Set<StackKey> inputs = new HashSet<>();
+            for (IngredientSpec spec : specs) {
+                if (!spec.isEmpty()) addCycleGuardInputKeys(inputs, spec.ingredient());
+            }
+            return inputs;
+        }
+        return getRecipeInputKeys(entry.recipe(), access);
+    }
+
     private static Set<StackKey> getRecipeInputKeys(Recipe<?> recipe,
                                                      @Nullable net.minecraft.core.RegistryAccess access) {
         Set<StackKey> inputs = new HashSet<>();
@@ -990,7 +1008,7 @@ public final class CraftingResolver {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return requiresMissingSelfInput(cr, output, ctx);
         }
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = recipeSpecs(entry, ctx.level.registryAccess());
         if (isIngredientDataBroken(specs)) {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), ctx.level.registryAccess());
             for (ItemStack stack : repaired) {
@@ -1055,7 +1073,7 @@ public final class CraftingResolver {
             }
             return selfConsumed;
         }
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = recipeSpecs(entry, access);
         if (isIngredientDataBroken(specs)) {
             int selfConsumed = 0;
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), access);
@@ -1073,6 +1091,13 @@ public final class CraftingResolver {
                 selfConsumed += spec.count();
         }
         return selfConsumed;
+    }
+
+    private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
+                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        return MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                entry.modType(), specs, entry.recipe(), access);
     }
 
     private static List<ItemStack> stacksFromCounts(Map<Item, Integer> counts) {

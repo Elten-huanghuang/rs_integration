@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyProgressSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -386,10 +387,14 @@ public final class DebugCommand {
     private static int embersClearCache(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         var level = ctx.getSource().getServer().overworld();
         var data = KnownCodeSavedData.get(level);
-        int count = data.size();
+        var progress = EreAlchemyProgressSavedData.get(level);
+        int codeCount = data.size();
+        int progressCount = progress.size();
         data.clearAll();
+        progress.clearAll();
         ctx.getSource().sendSuccess(() -> Component.literal(
-                "Cleared " + count + " Embers alchemy code cache entries."), true);
+                "Cleared " + codeCount + " Embers alchemy code entries and "
+                        + progressCount + " inference progress entries."), true);
         return 1;
     }
 

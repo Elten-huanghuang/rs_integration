@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.resonance.bd;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.TextBuilder;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -82,14 +84,54 @@ public final class BDResonanceDiskItem extends Item {
                                 TooltipFlag flag) {
         UUID diskId = BDResonanceDiskAccess.getDiskId(stack);
         int networkId = BDResonanceDiskAccess.getNetworkId(stack);
-        tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.capacity", CAPACITY));
-        tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.inventory_required"));
+
+        if (!Screen.hasShiftDown()) {
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.intro")
+                    .colorFlow(1600L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS)
+                    .bold()
+                    .build());
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.subtitle")
+                    .colorFlow(1600L, 0.35F, RSIntegrationMod.RS_FLOW_COLORS)
+                    .build());
+            tooltip.add(Component.empty());
+            appendBindingStatus(tooltip, stack, diskId, networkId);
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.expand")
+                    .darkGray()
+                    .build());
+            return;
+        }
+
+        tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.title")
+                .aqua()
+                .bold()
+                .build());
+        for (int line = 1; line <= 6; line++) {
+            tooltip.add(TextBuilder.of("• ").darkAqua()
+                    .append(TextBuilder.translate("rsi.resonance.bd.tooltip.detail_" + line)
+                            .gray())
+                    .build());
+        }
+        tooltip.add(Component.empty());
+        tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.capacity", CAPACITY)
+                .gray()
+                .build());
+        appendBindingStatus(tooltip, stack, diskId, networkId);
+    }
+
+    private static void appendBindingStatus(List<Component> tooltip, ItemStack stack,
+                                            UUID diskId, int networkId) {
         if (!BDResonanceDiskAccess.isBound(stack)) {
-            tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.unbound"));
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.unbound")
+                    .red()
+                    .build());
         } else {
-            tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.network", networkId));
-            tooltip.add(Component.translatable("rsi.resonance.bd.tooltip.uuid",
-                    diskId.toString().substring(0, 8)));
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.network", networkId)
+                    .cornflowerBlue()
+                    .build());
+            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.uuid",
+                            diskId.toString().substring(0, 8))
+                    .darkGray()
+                    .build());
         }
     }
 }

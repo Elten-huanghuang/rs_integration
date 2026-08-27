@@ -38,6 +38,7 @@ import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
@@ -1076,6 +1077,7 @@ public final class GenericCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
             return;
         }
+        ModType modType = resolveExecutionModType(player, recipe, dim, pos);
 
         // FA ApplyModifierRecipe: no fixed base item, so auto-crafting is impossible.
         // Redirect to opening the smithing table GUI with template & addition pre-filled.
@@ -1106,6 +1108,10 @@ public final class GenericCraftPacket {
         } else {
             specs = CraftPacketUtils.extractIngredientSpecs(recipe);
         }
+        if (modType != null && ModIds.ID_MD_COPPER_POT.equals(modType.id())) {
+            specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                    specs, recipe, player.serverLevel().registryAccess());
+        }
         if (specs == null || specs.isEmpty()) {
             // CrockPot pure-category recipes carry no fixed ingredient list — the batch delegate
             // selects items by food value at run time (Phase 2). Let these through with an empty
@@ -1130,7 +1136,6 @@ public final class GenericCraftPacket {
             grouped.computeIfAbsent(key, k -> new IngredientNeed(spec.ingredient(), 0)).count += spec.count();
         }
 
-        ModType modType = ModType.classifyRecipe(recipe);
         if (repeatCount > 1
                 && com.huanghuang.rsintegration.recipe.GoetyRecipeHandler
                 .requiresManualConfirmation(recipe)) {
@@ -1139,7 +1144,7 @@ public final class GenericCraftPacket {
             return;
         }
         if (requiresBoundMachine(recipe, modType)
-                && !AltarBindingRegistry.hasBindingForRecipe(player, recipe)) {
+                && !hasBindingForExecutionType(player, recipe, modType)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", modType.id()));
             return;
@@ -1271,8 +1276,9 @@ public final class GenericCraftPacket {
                                 ? GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput)
                                 : ModRecipeHandlers.tryGetResultItem(
                                         recipe, player.serverLevel().registryAccess());
+                recipeOutput = routeRecipeOutput(modType, recipeOutput);
                 List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
-                        executionSpecs, recipeOutput, repeatCount);
+                        recipe, executionSpecs, recipeOutput, repeatCount);
                 if (FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe) != null) {
                     graphSpecs = FarmersDelightRecipeHandler
                             .cuttingBoardGraphIngredients(graphSpecs);
@@ -1356,7 +1362,7 @@ public final class GenericCraftPacket {
             ItemStack recipeOutput = cr.getResultItem(
                     player.serverLevel().registryAccess()).copy();
             List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
-                    extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
+                    recipe, extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
             Map<StackKey, Integer> available = listAvailable(player, network, storageEndpoint);
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
@@ -1468,7 +1474,7 @@ public final class GenericCraftPacket {
             ItemStack recipeOutput = cr2.getResultItem(
                     player.serverLevel().registryAccess()).copy();
             List<IngredientSpec> scaledSpecs = scaleTerminalIngredientSpecs(
-                    CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
+                    recipe, CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
             CraftPlanGraph inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     scaledSpecs, avail, player.serverLevel(),
                     player, network, missingCheck, forcedOverrides, false, -1,
@@ -1888,9 +1894,47 @@ public final class GenericCraftPacket {
         return List.copyOf(scaled);
     }
 
+    static List<IngredientSpec> scaleIngredientSpecs(
+            Recipe<?> recipe, List<IngredientSpec> specs, int executions) {
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler == null) return scaleIngredientSpecs(specs, executions);
+        List<IngredientSpec> scaled = new ArrayList<>(specs.size());
+        int inputIndex = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            scaled.add(new IngredientSpec(spec.ingredient(),
+                    handler.requiredIngredientCount(recipe, spec, inputIndex++, executions),
+                    spec.role()));
+        }
+        return List.copyOf(scaled);
+    }
+
     static List<IngredientSpec> scaleTerminalIngredientSpecs(
             List<IngredientSpec> specs, ItemStack output, int executions) {
         return SelfAmplifyingRecipePolicy.scaleTargetInputs(specs, output, executions);
+    }
+
+    static List<IngredientSpec> scaleTerminalIngredientSpecs(
+            Recipe<?> recipe, List<IngredientSpec> specs, ItemStack output, int executions) {
+        List<IngredientSpec> scaled = scaleTerminalIngredientSpecs(specs, output, executions);
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler == null) return scaled;
+
+        List<IngredientSpec> adjusted = new ArrayList<>(scaled.size());
+        int scaledIndex = 0;
+        int inputIndex = 0;
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            IngredientSpec terminalSpec = scaled.get(scaledIndex++);
+            int ordinaryCount = CraftPacketUtils.requiredCount(spec, executions);
+            int handlerCount = handler.requiredIngredientCount(
+                    recipe, spec, inputIndex++, executions);
+            adjusted.add(handlerCount == ordinaryCount
+                    ? terminalSpec
+                    : new IngredientSpec(terminalSpec.ingredient(), handlerCount,
+                            terminalSpec.role()));
+        }
+        return List.copyOf(adjusted);
     }
 
     private static List<Ingredient> expandIngredientSpecs(List<IngredientSpec> specs) {
@@ -2141,9 +2185,9 @@ public final class GenericCraftPacket {
             sink.error(Component.translatable("rsi.generic.error.recipe_stage_missing"));
             return;
         }
-        ModType previewModType = ModType.classifyRecipe(recipe);
+        ModType previewModType = resolveExecutionModType(player, recipe, dim, pos);
         if (requiresBoundMachine(recipe, previewModType)
-                && !AltarBindingRegistry.hasBindingForRecipe(player, recipe)) {
+                && !hasBindingForExecutionType(player, recipe, previewModType)) {
             sink.error(Component.translatable("rsi.plan.failure.no_bound_machine"));
             return;
         }
@@ -2174,7 +2218,7 @@ public final class GenericCraftPacket {
         List<Ingredient> recipeIngredients;
         List<IngredientSpec> recipeSpecs;
         ItemStack targetOutput;
-        ModType recipeModType = null;
+        ModType recipeModType = previewModType;
 
         // Arcane Iterator per-level chain: when the player clicks a level-N enchant
         // book (N>=2), the machine reaches it by leveling a book one step per craft
@@ -2262,7 +2306,7 @@ public final class GenericCraftPacket {
             recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = validated;
-            recipeModType = ModType.classifyRecipe(recipe);
+            recipeModType = previewModType;
         } else if (goetyDynamic) {
             ItemStack validated = GoetyDynamicRitualRecipe.validatedOutput(recipe, clickedOutput);
             List<IngredientSpec> specs = GoetyDynamicRitualRecipe.buildMaterials(recipe, clickedOutput);
@@ -2276,10 +2320,11 @@ public final class GenericCraftPacket {
                     .map(IngredientSpec::ingredient)
                     .toList();
             displayInputRoles = nonEmptyInputRoles(specs);
-            recipeSpecs = scaleTerminalIngredientSpecs(specs, validated, repeatCount);
+            recipeSpecs = scaleTerminalIngredientSpecs(
+                    recipe, specs, validated, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
             targetOutput = validated;
-            recipeModType = ModType.classifyRecipe(recipe);
+            recipeModType = previewModType;
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
             List<IngredientSpec> extractedSpecs = extractPlanIngredientSpecs(cr);
@@ -2300,10 +2345,14 @@ public final class GenericCraftPacket {
             targetOutput = ModRecipeHandlers.tryGetResultItem(
                     cr, player.serverLevel().registryAccess());
             recipeSpecs = scaleTerminalIngredientSpecs(
-                    extractedSpecs, targetOutput, repeatCount);
+                    recipe, extractedSpecs, targetOutput, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+            if (recipeModType != null && ModIds.ID_MD_COPPER_POT.equals(recipeModType.id())) {
+                specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                        specs, recipe, player.serverLevel().registryAccess());
+            }
             boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
             if (crockCategory) {
                 // For any category-constrained recipe (pure or mixed), run
@@ -2344,9 +2393,10 @@ public final class GenericCraftPacket {
             displayIngredients = perRecipe;
             displayInputRoles = nonEmptyInputRoles(specs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-            recipeSpecs = scaleTerminalIngredientSpecs(specs, targetOutput, repeatCount);
+            targetOutput = routeRecipeOutput(recipeModType, targetOutput);
+            recipeSpecs = scaleTerminalIngredientSpecs(
+                    recipe, specs, targetOutput, repeatCount);
             recipeIngredients = expandIngredientSpecs(recipeSpecs);
-            recipeModType = ModType.classifyRecipe(recipe);
             boolean manualGoetyRitual = GoetyRecipeHandler.requiresManualConfirmation(recipe);
             RSIntegrationMod.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
                     recipeId,
@@ -2371,6 +2421,8 @@ public final class GenericCraftPacket {
                 return;
             }
         }
+
+        targetOutput = routeRecipeOutput(recipeModType, targetOutput);
 
         // ── Arcane Iterator per-level chain detection ──
         // All levels of one enchant share this recipeId and declare no static output,
@@ -2424,7 +2476,8 @@ public final class GenericCraftPacket {
 
         final PlanCache.Key cacheKey = new PlanCache.Key(player.getUUID(), recipeId,
                 forcedOverrides == null ? Collections.emptyMap() : forcedRecipes,
-                repeatCount, clickedOutputCacheToken(clickedOutput));
+                repeatCount, clickedOutputCacheToken(clickedOutput) + "|"
+                + (recipeModType == null ? "generic" : recipeModType.id()));
         net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> planDimKey = dim != null
                 ? net.minecraft.resources.ResourceKey.create(
                         net.minecraft.core.registries.Registries.DIMENSION, dim)
@@ -2961,6 +3014,9 @@ public final class GenericCraftPacket {
             }
             ItemStack output = RecipeIndex.tryGetResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
+            ModType stepModType = mergedRs != null ? mergedRs.modType()
+                    : modTypeByRecipe.get(stepId);
+            output = routeRecipeOutput(stepModType, output);
             if (output.isEmpty()) {
                 RSIntegrationMod.debug("[RSI-Generic] Plan step output empty: {} ({})",
                         stepId, stepRecipe.getClass().getSimpleName());
@@ -3011,10 +3067,19 @@ public final class GenericCraftPacket {
                 // per-ingredient counts (extractIngredients drops counts and
                 // returns empty for wrappers like FaRitualWrapper).
                 List<IngredientSpec> modSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                modSpecs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
+                        stepModType, modSpecs, stepRecipe,
+                        player.serverLevel().registryAccess());
                 if (modSpecs != null) {
+                    ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
+                    int stepInputIndex = 0;
                     for (IngredientSpec spec : modSpecs) {
                         if (spec.isEmpty()) continue;
-                        int cnt = spec.count();
+                        int cnt = spec.role() == DemandRole.CATALYST && stepHandler != null
+                                ? stepHandler.requiredIngredientCount(
+                                        stepRecipe, spec, stepInputIndex, batches)
+                                : spec.count();
+                        stepInputIndex++;
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
@@ -3064,7 +3129,7 @@ public final class GenericCraftPacket {
             }
             if (alternatives.isEmpty()) { alternatives = Collections.emptyList(); alternativeModTypes = Collections.emptyList(); }
 
-            ModType mt = modTypeByRecipe.get(stepId);
+            ModType mt = stepModType;
             recipeWidths.put(stepId, recipeW);
             recipeHeights.put(stepId, recipeH);
             steps.add(new PlanStep(stepId, output, batches, inputs, alternatives, mt,
@@ -3204,9 +3269,15 @@ public final class GenericCraftPacket {
                             smithingRecipe, targetSpecs, selectedSmithingBase);
                 }
                 if (targetSpecs != null) {
+                    ModRecipeHandler targetHandler = ModRecipeHandlers.handlerFor(recipe);
+                    int targetInputIndex = 0;
                     for (IngredientSpec spec : targetSpecs) {
                         if (spec.isEmpty()) continue;
-                        int cnt = spec.count();
+                        int cnt = spec.role() == DemandRole.CATALYST && targetHandler != null
+                                ? targetHandler.requiredIngredientCount(
+                                        recipe, spec, targetInputIndex, repeatCount)
+                                : spec.count();
+                        targetInputIndex++;
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
@@ -3356,14 +3427,21 @@ public final class GenericCraftPacket {
                     ? CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe)
                     : CraftPacketUtils.extractIngredientSpecs(stepRecipe);
             if (specs != null) {
+                ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
+                int stepInputIndex = 0;
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
                     ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
                     if (matched != null) {
+                        int required = stepHandler != null
+                                ? stepHandler.requiredIngredientCount(
+                                        stepRecipe, spec, stepInputIndex, step.batches())
+                                : CraftPacketUtils.requiredCount(spec, step.batches());
                         neededCounts.merge(matched.getItem(),
-                                CraftPacketUtils.requiredCount(spec, step.batches()), Integer::sum);
+                                required, Integer::sum);
                         itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
                     }
+                    stepInputIndex++;
                 }
             }
         }
@@ -4008,6 +4086,30 @@ public final class GenericCraftPacket {
 
     static boolean requiresBoundMachine(@Nullable ModType modType) {
         return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
+    }
+
+    private static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
+                                                    @Nullable ResourceLocation dim,
+                                                    @Nullable net.minecraft.core.BlockPos pos) {
+        if (MinersDelightCopperPotSupport.isRequestedCopperPot(player, recipe, dim, pos)) {
+            ModType copperPot = ModType.findById(ModIds.ID_MD_COPPER_POT);
+            if (copperPot != null) return copperPot;
+        }
+        return ModType.classifyRecipe(recipe);
+    }
+
+    private static boolean hasBindingForExecutionType(ServerPlayer player, Recipe<?> recipe,
+                                                       @Nullable ModType executionType) {
+        if (executionType != null && ModIds.ID_MD_COPPER_POT.equals(executionType.id())) {
+            return AltarBindingRegistry.hasAnyBindingForType(player, executionType);
+        }
+        return AltarBindingRegistry.hasBindingForRecipe(player, recipe);
+    }
+
+    private static ItemStack routeRecipeOutput(@Nullable ModType executionType, ItemStack output) {
+        return executionType != null && ModIds.ID_MD_COPPER_POT.equals(executionType.id())
+                ? MinersDelightCopperPotSupport.convertResult(output)
+                : output;
     }
 
     static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {

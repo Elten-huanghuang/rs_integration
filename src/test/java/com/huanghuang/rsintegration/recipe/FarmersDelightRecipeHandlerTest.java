@@ -40,6 +40,18 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
     }
 
     @Test
+    void multiServingCookingRecipePlansOneContainerPerResult() {
+        ItemStack container = FarmersDelightRecipeHandler.withResultCount(
+                new ItemStack(Items.GLASS_BOTTLE), new ItemStack(Items.HONEY_BOTTLE, 2));
+        List<IngredientSpec> specs = FarmersDelightRecipeHandler.appendOutputContainerSpec(
+                List.of(new IngredientSpec(Ingredient.of(Items.SUGAR), 1)), container);
+
+        assertEquals(2, container.getCount());
+        assertEquals(2, specs.get(1).count());
+        assertTrue(specs.get(1).ingredient().test(new ItemStack(Items.GLASS_BOTTLE)));
+    }
+
+    @Test
     void cuttingBoardTreatsInputAsConsumedAndToolAsReusableCatalyst() {
         List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
                 Ingredient.of(Items.CARROT), Ingredient.of(Items.IRON_SWORD));
