@@ -634,7 +634,7 @@ public final class RSIntegrationConfig {
                         List.of("minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         VANILLA_FURNACE_FUEL_PRIORITY = s
-                .comment("Preferred fuels for vanilla furnaces, blast furnaces, and smokers, in priority order.",
+                .comment("Preferred fuels for vanilla furnaces, blast furnaces, smokers, and the Forbidden & Arcanus Clibano, in priority order.",
                         "When the fuel slot is empty, coal is tried before charcoal, then other safe fuels.",
                         "When the slot already contains fuel, only that same fuel type is topped up.",
                         "Automatic selection skips tools, container-return fuels, and items with NBT.",

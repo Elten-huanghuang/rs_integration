@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccessor;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
@@ -430,15 +432,27 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 recipe.getCookingTime(recipe.getRequiredFireType()) - Math.max(0, bankedBurnTime));
         if (neededTicks == 0) return true;
 
-        ItemStack fuelType = current.isEmpty()
-                ? findNetworkItem(stack -> burnDuration(be, stack) > 0)
-                : current.copyWithCount(1);
+        ItemStack fuelType;
+        int count;
+        if (current.isEmpty()) {
+            VanillaFurnaceFuelPolicy.Selection selection = ClibanoInventoryLogic.selectFuel(
+                    storageItems(), RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
+                    neededTicks, stack -> burnDuration(be, stack));
+            if (selection == null || selection.partial()) return false;
+            fuelType = selection.fuel();
+            count = selection.amount();
+        } else {
+            fuelType = current.copyWithCount(1);
+            int duration = burnDuration(be, fuelType);
+            count = ClibanoInventoryLogic.fuelToAdd(
+                    neededTicks, duration, current.getCount());
+            if (count == Integer.MAX_VALUE) return false;
+        }
         int duration = burnDuration(be, fuelType);
         if (fuelType.isEmpty() || duration <= 0) return false;
-        int count = Math.max(1, (neededTicks + duration - 1) / duration);
         int room = Math.min(inventory.getSlotLimit(ClibanoInventoryLogic.FUEL_SLOT),
                 fuelType.getMaxStackSize()) - current.getCount();
-        count = Math.min(count, room);
+        if (count > room) return false;
         if (count <= 0) return true;
 
         ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), count, true);
@@ -484,21 +498,29 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack findNetworkItem(java.util.function.Predicate<ItemStack> predicate) {
-        if (storageEndpoint() != null) {
-            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
-            if (snapshot == null) return ItemStack.EMPTY;
-            for (var entry : snapshot.items()) {
-                ItemStack stack = entry.stack();
-                if (!stack.isEmpty() && predicate.test(stack)) return stack.copyWithCount(1);
-            }
-            return ItemStack.EMPTY;
-        }
-        if (network == null) return ItemStack.EMPTY;
-        for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
-            ItemStack stack = entry.getStack();
+        for (ItemStack stack : storageItems()) {
             if (!stack.isEmpty() && predicate.test(stack)) return stack.copyWithCount(1);
         }
         return ItemStack.EMPTY;
+    }
+
+    private List<ItemStack> storageItems() {
+        List<ItemStack> candidates = new ArrayList<>();
+        if (storageEndpoint() != null) {
+            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            if (snapshot == null) return List.of();
+            for (var entry : snapshot.items()) {
+                ItemStack stack = entry.stack();
+                if (!stack.isEmpty()) candidates.add(stack.copy());
+            }
+            return List.copyOf(candidates);
+        }
+        if (network == null) return List.of();
+        for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
+            ItemStack stack = entry.getStack();
+            if (!stack.isEmpty()) candidates.add(stack.copy());
+        }
+        return List.copyOf(candidates);
     }
 
     private static int burnDuration(ClibanoMainBlockEntity be, ItemStack stack) {
