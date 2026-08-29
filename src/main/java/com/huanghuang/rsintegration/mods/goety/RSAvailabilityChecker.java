@@ -38,7 +38,8 @@ public final class RSAvailabilityChecker {
         Recipe<?> recipe = player.level().getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) return null;
 
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (endpoint == null) network = resolveNetwork(player, altarDim, pos);
         if (network == null && endpoint == null) return null;

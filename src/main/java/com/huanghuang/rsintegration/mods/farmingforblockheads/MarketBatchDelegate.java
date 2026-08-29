@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflection;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -40,6 +41,7 @@ import java.util.UUID;
  * is not interacted with during execution.</p>
  */
 public final class MarketBatchDelegate extends AbstractBatchDelegate {
+    private static final LogSampler VALIDATION_LOGS = new LogSampler(60_000L);
 
     // Reflection — Market API
     private static volatile boolean probed;
@@ -123,22 +125,24 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         // Resolve the bound Market in its recorded dimension.
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: dimension unavailable: {}", dim);
+            warnValidation("dimension", "[RSI-Market] validateAndInit: dimension unavailable: {}", dim);
             return false;
         }
         setMachineDim(level.dimension().location());
         setMachineServer(player.server);
         if (pos == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: pos is null");
+            warnValidation("position", "[RSI-Market] validateAndInit: pos is null");
             return false;
         }
         var be = level.getBlockEntity(pos);
         if (be == null) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no block entity at {}", pos);
+            warnValidation("block-entity", "[RSI-Market] validateAndInit: no block entity at {}", pos);
             return false;
         }
         if (!FarmingForBlockheadsReflection.marketBEClass.isInstance(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: not a MarketBlockEntity, got {}", be.getClass().getName());
+            warnValidation("machine-type",
+                    "[RSI-Market] validateAndInit: not a MarketBlockEntity, got {}",
+                    be.getClass().getName());
             return false;
         }
 
@@ -146,7 +150,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         probe();
         Recipe<?> recipe = resolveWrapper(recipeId);
         if (!(recipe instanceof MarketRecipeWrapper mrw)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: recipe {} is not a MarketRecipeWrapper", recipeId);
+            warnValidation("recipe",
+                    "[RSI-Market] validateAndInit: recipe {} is not a MarketRecipeWrapper", recipeId);
             return false;
         }
         this.wrapper = mrw;
@@ -157,11 +162,19 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         if (!hasStorageAccess()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Market] validateAndInit: no storage backend for player {}", player.getGameProfile().getName());
+            warnValidation("storage",
+                    "[RSI-Market] validateAndInit: no storage backend for player {}",
+                    player.getGameProfile().getName());
             return false;
         }
 
         return true;
+    }
+
+    private static void warnValidation(String reason, String format, Object... args) {
+        if (VALIDATION_LOGS.allow(reason)) {
+            RSIntegrationMod.LOGGER.warn(format, args);
+        }
     }
 
     private static Recipe<?> resolveWrapper(ResourceLocation recipeId) {

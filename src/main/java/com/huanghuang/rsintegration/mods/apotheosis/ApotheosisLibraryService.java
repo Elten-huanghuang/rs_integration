@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.Entr
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.ImportStats;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -352,7 +351,8 @@ public final class ApotheosisLibraryService {
 
     @Nullable
     private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         if (endpoint == null || !endpoint.session().hasPermission(player,
                 com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
         return endpoint;

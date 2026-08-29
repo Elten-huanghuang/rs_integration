@@ -2551,7 +2551,7 @@ public final class GenericCraftPacket {
         final StorageReference planStorageReference = selectedStorageReference;
         List<StorageNetworkDescriptor> storageNetworks =
                 RSIntegrationMod.STORAGE_BACKENDS.registry().discoverNetworksForPlayer(player);
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.debug(
                 "[RSI-Storage] plan network choices player={} selected={} choices={}",
                 player.getGameProfile().getName(), planStorageReference,
                 storageNetworks.stream()

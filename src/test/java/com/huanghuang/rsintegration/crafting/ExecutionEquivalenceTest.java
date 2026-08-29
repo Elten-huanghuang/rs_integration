@@ -1,11 +1,19 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.graph.AllocationId;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
@@ -77,6 +85,41 @@ class ExecutionEquivalenceTest extends BootstrapTest {
         assertTrue(selected.inferMode());
         assertTrue(ItemStack.isSameItemSameTags(fourExecutions.syntheticInput(), selected.syntheticInput()));
         assertTrue(ItemStack.isSameItemSameTags(fourExecutions.syntheticOutput(), selected.syntheticOutput()));
+    }
+
+    @Test
+    void projectsProducerBeforeSyntheticConsumerWhenConsumerHasLowerNodeId() {
+        NodeId taintId = new NodeId(0);
+        NodeId producerId = new NodeId(1);
+        ItemStack plainHeart = new ItemStack(Items.HEART_OF_THE_SEA);
+        MaterialKey heart = MaterialKey.of(plainHeart);
+        OutputPortId producerOutput = new OutputPortId(producerId, 0);
+        InputPortId taintInput = new InputPortId(taintId, 0);
+        CraftNode taint = new CraftNode(taintId,
+                CraftingResolver.TAINT_EARTH_HEART_STEP, ModType.GENERIC.id(),
+                CraftingResolver.TAINT_EARTH_HEART_STEP, 1,
+                List.of(), List.of(), false, plainHeart, new ItemStack(Items.NETHER_STAR),
+                List.of(new InputDemand(taintInput, Ingredient.of(Items.HEART_OF_THE_SEA),
+                        1, DemandRole.TRANSFORMED, plainHeart)), List.of());
+        CraftNode producer = new CraftNode(producerId,
+                new net.minecraft.resources.ResourceLocation("test", "plain_heart"),
+                ModType.GENERIC.id(), new net.minecraft.resources.ResourceLocation("minecraft", "crafting"),
+                1, List.of(), List.of(), false, null, null, List.of(),
+                List.of(new OutputDeclaration(producerOutput, heart, 1, OutputKind.PRIMARY)));
+        MaterialAllocation allocation = new MaterialAllocation(new AllocationId(0), taintInput,
+                new MaterialSource.ProducerOutput(producerOutput), heart, 1);
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(taint, producer),
+                List.of(allocation),
+                List.of(new RootDemand(Ingredient.of(Items.NETHER_STAR), 1, 0,
+                        new ItemStack(Items.NETHER_STAR), List.of())),
+                List.of(), List.of(producerId, taintId));
+
+        List<CraftingResolver.ResolutionStep> projected =
+                ExecutionEquivalence.projectFlatSteps(graph);
+
+        assertEquals(producer.recipeId(), projected.get(0).recipeId());
+        assertEquals(CraftingResolver.TAINT_EARTH_HEART_STEP,
+                projected.get(1).recipeId());
     }
 
     @Test

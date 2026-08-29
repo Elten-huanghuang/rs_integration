@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -971,7 +970,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // 2. power_point items that can be absorbed on demand
         CraftStorageEndpoint endpoint = selectedEndpoint != null
                 ? selectedEndpoint
-                : CraftStorageEndpoints.resolveDefault(player).orElse(null);
+                : com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         int itemPower = countPowerPointItems(player, dim, pos, endpoint);
 
         float totalPower = capPower + itemPower;

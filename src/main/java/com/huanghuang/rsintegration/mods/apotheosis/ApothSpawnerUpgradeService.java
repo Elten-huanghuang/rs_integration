@@ -320,7 +320,8 @@ public final class ApothSpawnerUpgradeService {
 
     @Nullable
     private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         if (endpoint == null || !endpoint.session().hasPermission(player,
                 com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
         return endpoint;
