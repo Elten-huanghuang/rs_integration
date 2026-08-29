@@ -30,4 +30,12 @@ class EreAlchemyInferProgressContractTest {
         assertTrue(source.contains("putProgress"));
         assertTrue(source.contains("getProgress"));
     }
+
+    @Test
+    void failedResultsAreConsumedFromBothOutputLocations() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("this.extractFailedResult()"));
+        assertTrue(source.contains("Reflect.invoke(binInv, \"extractItem\", 0, 64, false)"));
+    }
 }

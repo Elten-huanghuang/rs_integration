@@ -347,6 +347,29 @@ extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
+    private ItemStack extractFailedResult() {
+        Object outHandler = Reflect.getField((Object)this.tablet, "outputHandler").orElse(null);
+        if (outHandler != null) {
+            ItemStack removed = Reflect.invoke(outHandler, "extractItem", 0, 64, false)
+                    .map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
+            if (!removed.isEmpty()) {
+                ((BlockEntity) this.tablet).setChanged();
+                return removed;
+            }
+        }
+        BlockPos below = this.machinePos.below();
+        if (!this.level.isLoaded(below)) return ItemStack.EMPTY;
+        BlockEntity be = this.level.getBlockEntity(below);
+        if (EmbersReflection.ibinClass == null || be == null
+                || !EmbersReflection.ibinClass.isInstance(be)) return ItemStack.EMPTY;
+        Object binInv = Reflect.invoke(be, "getInventory").orElse(null);
+        if (binInv == null) return ItemStack.EMPTY;
+        ItemStack removed = Reflect.invoke(binInv, "extractItem", 0, 64, false)
+                .map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
+        if (!removed.isEmpty()) be.setChanged();
+        return removed;
+    }
+
     private boolean processResult(ItemStack result) {
         int maxAttempts;
         boolean isSuccess;
@@ -379,12 +402,11 @@ extends AbstractBatchDelegate {
         if (this.player != null) {
             this.player.displayClientMessage(Component.translatable("rsi.embers.infer.progress", this.attemptCount, blackPins, whitePins, this.candidates.size()), true);
         }
-        // Remove failure item from output slot, matching HEAD version
-        Object outHandler = Reflect.getField((Object)this.tablet, "outputHandler").orElse(null);
-        if (outHandler != null) {
-            Reflect.invoke(outHandler, "extractItem", 0, 64, false);
-        }
-        ((BlockEntity) this.tablet).setChanged();
+        // Consume the observed failure from whichever output location Embers
+        // used. IBin is checked by findResultAnywhere(), so leaving its item
+        // there would make every tick process the same failure again and
+        // repeatedly refund the next attempt's materials.
+        this.extractFailedResult();
         if (blackPins == 0) {
             ++this.consecutiveZeroBlackPins;
             int zeroLimit = (Integer)RSIntegrationConfig.EMBERS_INFER_ZERO_BLACK_LIMIT.get();
