@@ -44,6 +44,22 @@ class MachineFavoritesSavedDataTest {
     }
 
     @Test
+    void removesFavoritesAtUnboundMachineEvenWhenLegacyBlockKeyDiffers() {
+        MachineFavoritesSavedData data = new MachineFavoritesSavedData();
+        UUID player = UUID.randomUUID();
+        ResourceLocation dimension = new ResourceLocation("minecraft", "overworld");
+        BlockPos machinePos = new BlockPos(12, 64, -9);
+        MachineFavoriteKey legacy = new MachineFavoriteKey(dimension, machinePos,
+                "oldmod||block.oldmod.machine");
+        MachineFavoriteKey other = key(3);
+        data.toggle(player, legacy);
+        data.toggle(player, other);
+
+        assertTrue(data.removeAt(player, dimension, machinePos));
+        assertEquals(java.util.List.of(other), data.getFavorites(player));
+    }
+
+    @Test
     void roundTripsSavedData() {
         MachineFavoritesSavedData original = new MachineFavoritesSavedData();
         UUID player = UUID.randomUUID();

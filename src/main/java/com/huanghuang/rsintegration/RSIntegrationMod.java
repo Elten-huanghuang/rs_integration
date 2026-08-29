@@ -70,8 +70,10 @@ import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.PacketDistributor;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
 
 @Mod(RSIntegrationMod.MOD_ID)
 public final class RSIntegrationMod {
@@ -113,14 +115,18 @@ public final class RSIntegrationMod {
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
     public static final StorageBackendRuntime STORAGE_BACKENDS = new StorageBackendRuntime();
 
-    // Cached boolean 閳?avoids per-tick ConfigValue.get() Map lookup + sync overhead
-    private static boolean verboseLogging;
+    // Cached to avoid a ConfigValue lookup on every diagnostic call.
+    private static volatile boolean verboseLogging;
 
     public static void refreshConfigCache() {
         verboseLogging = RSIntegrationConfig.DIAGNOSTIC_VERBOSE_LOGGING.get();
+        // Most legacy call sites use LOGGER.debug directly. Keep the logger
+        // itself at INFO unless diagnostics are explicitly enabled so those
+        // calls cannot flood debug.log while this migration is in progress.
+        Configurator.setLevel(LOGGER.getName(), verboseLogging ? Level.DEBUG : Level.INFO);
     }
 
-    /** Guarded debug 閳?only emits when diagnostic verbose logging is enabled in config. */
+    /** Emits only when diagnostic verbose logging is enabled in config. */
     public static void debug(String format, Object... args) {
         if (verboseLogging) {
             LOGGER.debug(format, args);

@@ -2,9 +2,9 @@ package com.huanghuang.rsintegration.autoeat;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
@@ -50,20 +50,26 @@ final class AutoEatStorage {
     }
 
     ItemStack extract(ServerPlayer player, ItemStack template, int amount, boolean simulate) {
+        if (!simulate) {
+            return StorageRestockSupport.extract(endpoint, player, template, amount);
+        }
         StorageOperationResult result = endpoint.extractExact(player, template, amount, simulate);
-        return merge(result.extractedStacks());
+        return merge(template, result.extractedStacks());
     }
 
     ItemStack insert(ServerPlayer player, ItemStack stack, boolean simulate) {
         return endpoint.insert(player, stack, simulate).remainder().orElse(stack.copy());
     }
 
-    private static ItemStack merge(List<ItemStack> stacks) {
+    private ItemStack merge(ItemStack template, List<ItemStack> stacks) {
         ItemStack merged = ItemStack.EMPTY;
         for (ItemStack stack : stacks) {
             if (stack == null || stack.isEmpty()) continue;
+            if (!endpoint.session().itemKey(template).equals(endpoint.session().itemKey(stack))) {
+                return ItemStack.EMPTY;
+            }
             if (merged.isEmpty()) merged = stack.copy();
-            else if (ItemStack.isSameItemSameTags(merged, stack)) merged.grow(stack.getCount());
+            else merged.grow(stack.getCount());
         }
         return merged;
     }

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -198,11 +199,15 @@ public final class BindingEventHandler {
                 AltarBindingRegistry.unbind(
                         player.getUUID(), event.getLevel().dimension(), clickedPos,
                         bindingType);
+                MachineFavoritesSavedData.get(player.server).removeAt(
+                        player.getUUID(), dim, clickedPos);
             }
             if (BindingStorage.hasBinding(held, dim, bindingPos)) {
                 BindingStorage.removeBinding(held, dim, bindingPos);
                 AltarBindingRegistry.unbind(player.getUUID(), event.getLevel().dimension(),
                         bindingPos, bindingType);
+                MachineFavoritesSavedData.get(player.server).removeAt(
+                        player.getUUID(), dim, bindingPos);
                 AltarBindingRegistry.invalidateScanCache();
                 RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                 player.displayClientMessage(
