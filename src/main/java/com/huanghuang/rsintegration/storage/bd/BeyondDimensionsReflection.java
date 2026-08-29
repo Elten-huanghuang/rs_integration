@@ -82,7 +82,7 @@ public final class BeyondDimensionsReflection {
                 Object net = invokeStatic(NET, "getNetFromId", new Class<?>[]{int.class}, networkId);
                 addNetwork(networks, net, player, id);
             }
-            RSIntegrationMod.LOGGER.info("[RSI-Storage] BD discovery player={} networks={} refs={}",
+            RSIntegrationMod.debug("[RSI-Storage] BD discovery player={} networks={} refs={}",
                     player.getGameProfile().getName(), networks.size(),
                     networks.stream().map(network -> network.reference().networkId()).toList());
             return StorageDiscoveryResult.success(networks);

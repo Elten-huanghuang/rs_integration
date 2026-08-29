@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
@@ -150,6 +151,8 @@ public final class AltarBindingRegistry {
             }
         });
         if (removed[0] == 0) return 0;
+
+        MachineFavoritesSavedData.get(player.server).removeAt(player.getUUID(), dim, pos);
 
         ResourceKey<Level> dimKey = ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION, dim);
@@ -300,6 +303,7 @@ public final class AltarBindingRegistry {
 
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             cleanupPlayerNBT(p, dim.location(), pos);
+            MachineFavoritesSavedData.get(server).removeAt(p.getUUID(), dim.location(), pos);
         }
     }
 
@@ -497,6 +501,8 @@ public final class AltarBindingRegistry {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
                 for (BlockPos candidate : bindingPositions) {
                     removedEntries += cleanupPlayerNBT(p, dim.location(), candidate);
+                    MachineFavoritesSavedData.get(server).removeAt(
+                            p.getUUID(), dim.location(), candidate);
                 }
             }
         }

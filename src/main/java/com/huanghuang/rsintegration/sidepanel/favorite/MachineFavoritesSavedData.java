@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.sidepanel.favorite;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -85,6 +87,22 @@ public final class MachineFavoritesSavedData extends SavedData {
     public boolean remove(UUID playerId, MachineFavoriteKey key) {
         List<MachineFavoriteKey> favorites = byPlayer.get(playerId);
         if (favorites == null || !favorites.remove(key)) return false;
+        if (favorites.isEmpty()) byPlayer.remove(playerId);
+        setDirty();
+        return true;
+    }
+
+    /**
+     * A machine binding is identified by its dimension and position. The
+     * display key may change when a mod updates or a legacy binding migrates,
+     * so unbinding must not leave an old favorite behind on that basis.
+     */
+    public boolean removeAt(UUID playerId, ResourceLocation dimension, BlockPos pos) {
+        List<MachineFavoriteKey> favorites = byPlayer.get(playerId);
+        if (favorites == null) return false;
+        boolean removed = favorites.removeIf(favorite -> favorite.dimension().equals(dimension)
+                && favorite.pos().equals(pos));
+        if (!removed) return false;
         if (favorites.isEmpty()) byPlayer.remove(playerId);
         setDirty();
         return true;
