@@ -119,7 +119,8 @@ public final class WRWandCraftPacket {
                 return;
             }
 
-            CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+            CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                    .resolve(player).orElse(null);
             if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
                 handleWissenCrystallizer(player, be, recipe, endpoint);
             } else if (WRReflection.arcaneIteratorBEClass != null && WRReflection.arcaneIteratorBEClass.isInstance(be)) {

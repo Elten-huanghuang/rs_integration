@@ -210,7 +210,8 @@ public final class EidolonCraftPacket {
 
         // Resolve one authoritative backend for this packet.  BD must not be
         // replaced by a later RS lookup merely because an RS API is available.
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         INetwork network = endpoint == null
                 ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
         Map<StackKey, Integer> available = endpoint != null

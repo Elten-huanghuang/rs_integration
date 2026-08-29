@@ -226,7 +226,8 @@ public final class FaCraftPacket {
         }
 
         // Count available materials
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (endpoint == null) network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
 

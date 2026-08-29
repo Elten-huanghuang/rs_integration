@@ -176,7 +176,8 @@ public final class MalumCraftPacket {
                 recipeId, centerCount, extraCount, spiritCount, emptyPedestalSlots);
 
         // -- Phase 2: reserve all items (deferred extraction via ledger) --
-        CraftStorageEndpoint endpoint = CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+                .resolve(player).orElse(null);
         INetwork network = endpoint == null
                 ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
         List<Integer> filledPedestalIndices = new ArrayList<>();

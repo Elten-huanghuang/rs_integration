@@ -99,7 +99,7 @@ public class RecipeGuiLayoutsMixin {
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
     private void rsi$onLayoutsSetHead(List<?> layouts, CallbackInfo ci) {
         if (layouts != null && !layouts.isEmpty()) {
-            RSIntegrationMod.LOGGER.info("[RSI-JEI-DIAG] setRecipeLayoutsWithButtons invoked: layouts={} firstClass={}",
+            RSIntegrationMod.debug("[RSI-JEI-DIAG] setRecipeLayoutsWithButtons invoked: layouts={} firstClass={}",
                     layouts.size(), layouts.get(0).getClass().getName());
         }
         if (layouts == null || layouts.isEmpty()) {
@@ -436,7 +436,7 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
-        RSIntegrationMod.LOGGER.info("[RSI-JEI-DIAG] Layouts processed: layouts={} totalRecipes={} buttonsAdded={} positions={} "
+        RSIntegrationMod.debug("[RSI-JEI-DIAG] Layouts processed: layouts={} totalRecipes={} buttonsAdded={} positions={} "
                         + "skipped(filter={} recipeId={} binding={} noRecipe={})",
                 recipeLayoutsWithButtons.size(),
                 totalRecipes, buttonsAdded, rsi$positions.size(),

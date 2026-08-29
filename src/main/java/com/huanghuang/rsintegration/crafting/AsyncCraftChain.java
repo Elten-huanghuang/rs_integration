@@ -1168,8 +1168,8 @@ public final class AsyncCraftChain {
         }
         PreparationResult preparation = prepareGraphNode(nodeId, step, online);
         if (preparation.state() == PreparationState.RETRY) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("Graph node {} will retry: {}"),
-                    nodeId, preparation.detail());
+            logGraphRetry(nodeId, preparation.detail(),
+                    graphRequests.getOrDefault(nodeId, List.of()));
             return ConcurrentNodeExecutor.StartResult.retry();
         }
         if (preparation.state() == PreparationState.FATAL || preparation.prepared() == null) {
@@ -1212,7 +1212,7 @@ public final class AsyncCraftChain {
                                List<MaterialBroker.Request> requests) {
         String key = craftId + ":" + nodeId + ":" + detail;
         if (GRAPH_RETRY_LOGS.allow(key)) {
-            RSIntegrationMod.LOGGER.warn(ctx.format(
+            RSIntegrationMod.debug(ctx.format(
                     "[RSI-GraphRetry] node={} detail={} requests={}"),
                     nodeId, detail, requests);
         }

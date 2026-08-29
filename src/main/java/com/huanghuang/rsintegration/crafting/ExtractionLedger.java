@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
@@ -39,6 +40,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ExtractionLedger implements AutoCloseable {
+    private static final LogSampler SETTLEMENT_MIRROR_LOGS = new LogSampler(60_000L);
 
     public enum State {
         IDLE, RESERVING, RESERVED, COMMITTING, COMMITTED, ROLLED_BACK
@@ -753,9 +755,16 @@ public final class ExtractionLedger implements AutoCloseable {
                                                     endpoint == null ? "unknown" : endpoint.session().reference().backendId().value()),
                                             entry.template));
                 } catch (RuntimeException mirrorFailure) {
-                    RSIntegrationMod.LOGGER.warn(
-                            "[RSI-Ledger] settlement mirror extraction skipped for entry {} template={} returned={}",
-                            entry.id, entry.template, entry.extracted, mirrorFailure);
+                    String key = "extraction:" + mirrorFailure.getClass().getName()
+                            + ":" + String.valueOf(mirrorFailure.getMessage());
+                    if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-Ledger] settlement mirror extraction skipped; legacy extraction committed ({}: {})",
+                                mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
+                        RSIntegrationMod.debug(
+                                "[RSI-Ledger] settlement mirror extraction detail entry={} template={} returned={}",
+                                entry.id, entry.template, entry.extracted, mirrorFailure);
+                    }
                 }
             }
         }
@@ -768,8 +777,15 @@ public final class ExtractionLedger implements AutoCloseable {
                 // graph nodes in an endless retry loop after RS has already
                 // removed the requested items.  Keep the legacy transaction
                 // committed and discard only the failed mirror state.
-                RSIntegrationMod.LOGGER.warn("[RSI-Ledger] settlement mirror commit skipped; legacy extraction committed",
-                        mirrorFailure);
+                String key = "commit:" + mirrorFailure.getClass().getName()
+                        + ":" + String.valueOf(mirrorFailure.getMessage());
+                if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Ledger] settlement mirror commit skipped; legacy extraction committed ({}: {})",
+                            mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
+                    RSIntegrationMod.debug(
+                            "[RSI-Ledger] settlement mirror commit detail", mirrorFailure);
+                }
                 resetSettlementMirror();
             }
         }
