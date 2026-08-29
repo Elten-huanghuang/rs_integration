@@ -39,6 +39,21 @@ public final class BindingHintOverlay {
         if (AltarBindingRegistry.findHook(held).isEmpty()) return;
         if (!(mc.hitResult instanceof BlockHitResult hit)) return;
 
+        var blockEntity = mc.level.getBlockEntity(hit.getBlockPos());
+        if (blockEntity != null
+                && "dev.shadowsoffire.apotheosis.spawn.spawner.ApothSpawnerTile"
+                .equals(blockEntity.getClass().getName())) {
+            var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
+            boolean bdTerminal = itemId != null
+                    && "beyonddimensions".equals(itemId.getNamespace())
+                    && "net_terminal_item".equals(itemId.getPath());
+            Component text = Component.translatable(bdTerminal
+                    ? "gui.rs_integration.spawner_hint.open_alt"
+                    : "gui.rs_integration.spawner_hint.open");
+            drawHint(event, text, BIND);
+            return;
+        }
+
         var target = BindingEventHandler.bindingTargetPos(mc.level, hit.getBlockPos());
         if (target == null) return;
         // Multiblock/代理方块 targets can resolve to a root position on the
@@ -71,6 +86,11 @@ public final class BindingHintOverlay {
         Component text = Component.translatable(key);
         int color = bound ? UNBIND : BIND;
 
+        drawHint(event, text, color);
+    }
+
+    private static void drawHint(RenderGuiOverlayEvent.Post event, Component text, int color) {
+        Minecraft mc = Minecraft.getInstance();
         Font font = mc.font;
         int width = font.width(text) + PADDING_X * 2;
         int x = (mc.getWindow().getGuiScaledWidth() - width) / 2;

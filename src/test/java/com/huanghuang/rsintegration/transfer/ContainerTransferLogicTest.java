@@ -37,6 +37,32 @@ class ContainerTransferLogicTest {
     }
 
     @Test
+    void blocksBeyondDimensionsStorageMenusWhenBdIsTheDestination() {
+        assertTrue(ContainerTransferLogic.isBeyondDimensionsSelfStorageMenu(
+                "com.wintercogs.beyonddimensions.common.menu.DimensionsNetMenu"));
+        assertTrue(ContainerTransferLogic.isBeyondDimensionsSelfStorageMenu(
+                "com.wintercogs.beyonddimensions.common.menu.DimensionsCraftMenuTerminal"));
+        assertFalse(ContainerTransferLogic.isBeyondDimensionsSelfStorageMenu(
+                "com.wintercogs.beyonddimensions.common.menu.NetFurnaceMenu"));
+        assertFalse(ContainerTransferLogic.isBeyondDimensionsSelfStorageMenu(
+                "net.minecraft.world.inventory.ChestMenu"));
+    }
+
+    @Test
+    void blocksBeyondDimensionsVirtualConfigurationMenus() {
+        assertTrue(ContainerTransferLogic.isBeyondDimensionsVirtualMenu(
+                "com.wintercogs.beyonddimensions.common.menu.NetFeederMenu"));
+        assertTrue(ContainerTransferLogic.isBeyondDimensionsVirtualMenu(
+                "com.wintercogs.beyonddimensions.common.menu.NetMagnetMenu"));
+        assertTrue(ContainerTransferLogic.isBeyondDimensionsVirtualMenu(
+                "com.wintercogs.beyonddimensions.common.menu.NetRestockerMenu"));
+        assertFalse(ContainerTransferLogic.isBeyondDimensionsVirtualMenu(
+                "com.wintercogs.beyonddimensions.common.menu.DimensionsCraftMenuTerminal"));
+        assertFalse(ContainerTransferLogic.isBeyondDimensionsVirtualMenu(
+                "com.example.OtherMenu"));
+    }
+
+    @Test
     void identifiesSophisticatedBackpackUpgradeSlots() {
         assertTrue(ContainerTransferLogic.isUpgradeSlotClass(
                 "net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase$StorageUpgradeSlot"));

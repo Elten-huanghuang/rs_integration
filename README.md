@@ -136,7 +136,7 @@ Open an RS crafting grid to consume food directly from the network:
 
 ### Apotheosis Spawner Upgrades
 
-- Hold a valid RS network item and shift-right-click an Apotheosis spawner to open the upgrade screen.
+- Hold a valid RS network item and shift-right-click an Apotheosis spawner; with a BD terminal, use `Alt + right-click` instead.
 - The screen lists applicable positive upgrades, current completion, required materials, and available RS stock.
 - Select multiple upgrades and preview the complete dependency plan before confirming.
 - Available materials are extracted from the linked RS network; missing upgrade materials are crafted recursively when a valid recipe graph exists.
