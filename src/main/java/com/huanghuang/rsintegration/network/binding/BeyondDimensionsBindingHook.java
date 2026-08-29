@@ -5,7 +5,8 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
-import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -43,20 +44,24 @@ public final class BeyondDimensionsBindingHook implements IBindingHook {
     @Override
     public ItemStack extractItem(ServerPlayer player, AltarBinding binding,
                                  Ingredient ingredient, int count) {
+        if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         int networkId = binding.data().getInt(KEY_NETWORK_ID);
         if (networkId < 0) return ItemStack.EMPTY;
         Optional<CraftStorageEndpoint> endpoint = CraftStorageEndpoints.resolve(
                 new StorageReference(BACKEND, Integer.toString(networkId)), player);
         if (endpoint.isEmpty()) return ItemStack.EMPTY;
-        StorageOperationResult result = endpoint.orElseThrow().extractMatching(
-                player, ingredient, count, false);
-        return result.extractedStacks().stream().reduce(ItemStack.EMPTY, (left, right) -> {
-            if (left.isEmpty()) return right.copy();
-            if (!ItemStack.isSameItemSameTags(left, right)) return left;
-            ItemStack merged = left.copy();
-            merged.grow(right.getCount());
-            return merged;
-        });
+        CraftStorageEndpoint selectedEndpoint = endpoint.orElseThrow();
+        var snapshot = selectedEndpoint.snapshot(player).snapshot().orElse(null);
+        if (snapshot == null) return ItemStack.EMPTY;
+        var match = snapshot.match(ingredient);
+        if (!match.successful() || match.items().isEmpty()) return ItemStack.EMPTY;
+
+        StoredItem selected = match.items().stream()
+                .filter(candidate -> candidate.amount() >= count)
+                .findFirst().orElse(match.items().get(0));
+        int requested = (int) Math.min((long) count, selected.amount());
+        return StorageRestockSupport.extract(selectedEndpoint, player,
+                selected.stack(), requested);
     }
 
     private static int readNetworkId(ItemStack stack) {
