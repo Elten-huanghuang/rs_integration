@@ -35,6 +35,8 @@ final class ContainerTransferLogic {
             "com.refinedmods.refinedstorage.container.DiskDriveContainerMenu";
     private static final String RESONANCE_BACKPACK_MENU =
             "com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer";
+    private static final String BD_STORAGE_MENU_PREFIX =
+            "com.wintercogs.beyonddimensions.common.menu.Dimensions";
     private static final String STORAGE_UPGRADE_SLOT =
             "net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase$StorageUpgradeSlot";
     private static final String BACKPACK_UPGRADE_SLOT =
@@ -47,6 +49,13 @@ final class ContainerTransferLogic {
 
     // 0 = RS Network, 1 = Backpack, 2 = Beyond Dimensions
     static void transferAll(ServerPlayer player, AbstractContainerMenu menu, byte mode) {
+        // BD handheld item configuration screens expose virtual slots (for
+        // example the feeder/magnet filter item). They are not inventories;
+        // treating their display stacks as source slots duplicates items.
+        if (isBeyondDimensionsVirtualMenu(menu.getClass().getName())) {
+            player.sendSystemMessage(Component.translatable("rsi.transfer.nothing"), false);
+            return;
+        }
         if (mode == 1) {
             transferToBackpack(player, menu);
         } else if (mode == 0) {
@@ -57,6 +66,11 @@ final class ContainerTransferLogic {
     }
 
     private static void transferToBeyondDimensions(ServerPlayer player, AbstractContainerMenu menu) {
+        if (isBeyondDimensionsSelfStorageMenu(menu.getClass().getName())) {
+            player.sendSystemMessage(
+                    Component.translatable("rsi.transfer.self_network_blocked"), false);
+            return;
+        }
         StorageSession session = RSIntegrationMod.STORAGE_BACKENDS.registry()
                 .resolveDefaultSessionsForPlayer(player).stream()
                 .filter(s -> "beyonddimensions".equals(s.reference().backendId().value()))
@@ -75,6 +89,7 @@ final class ContainerTransferLogic {
             if (slot.container instanceof CraftingContainer) continue;
             ItemStack stack = slot.getItem();
             if (stack.isEmpty() || !slot.mayPickup(player)) continue;
+            if (isBoundToBeyondDimensionsNetwork(stack, session)) continue;
             ItemStack input = stack.copy();
             StorageOperationResult result = session.insert(player, input, false);
             ItemStack remainder = result.remainder().orElse(input);
@@ -425,6 +440,49 @@ final class ContainerTransferLogic {
     static boolean isSelfNetworkStorageMenu(String menuClassName) {
         return DISK_DRIVE_MENU.equals(menuClassName)
                 || RESONANCE_BACKPACK_MENU.equals(menuClassName);
+    }
+
+    static boolean isBeyondDimensionsSelfStorageMenu(String menuClassName) {
+        return menuClassName != null && menuClassName.startsWith(BD_STORAGE_MENU_PREFIX)
+                && (menuClassName.endsWith("DimensionsNetMenu")
+                || menuClassName.endsWith("DimensionsCraftMenu")
+                || menuClassName.endsWith("DimensionsCraftMenuTerminal"));
+    }
+
+    static boolean isBeyondDimensionsVirtualMenu(String menuClassName) {
+        if (menuClassName == null
+                || !menuClassName.startsWith("com.wintercogs.beyonddimensions.common.menu.")) {
+            return false;
+        }
+        // Actual network storage screens are handled by the existing
+        // destination-specific self-storage guard.
+        return !menuClassName.endsWith("DimensionsNetMenu")
+                && !menuClassName.endsWith("DimensionsCraftMenu")
+                && !menuClassName.endsWith("DimensionsCraftMenuTerminal");
+    }
+
+    private static boolean isBoundToBeyondDimensionsNetwork(ItemStack stack,
+                                                             StorageSession session) {
+        if (stack.isEmpty() || session == null
+                || !"beyonddimensions".equals(session.reference().backendId().value())) {
+            return false;
+        }
+        var itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (itemId == null || !"beyonddimensions".equals(itemId.getNamespace())) return false;
+        try {
+            Class<?> netedItem = Class.forName(
+                    "com.wintercogs.beyonddimensions.common.item.NetedItem", false,
+                    ContainerTransferLogic.class.getClassLoader());
+            if (!netedItem.isInstance(stack.getItem())) return false;
+            int networkId = ((Number) netedItem.getMethod("getNetId", ItemStack.class)
+                    .invoke(null, stack)).intValue();
+            return networkId >= 0
+                    && Integer.toString(networkId).equals(session.reference().networkId());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // Unknown BD item revisions retain the existing insertion path;
+            // source slots still change only after a known remainder returns.
+            return false;
+        }
     }
 
     private static boolean isUpgradeSlot(Slot slot) {
