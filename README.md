@@ -266,7 +266,7 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Immortaler's Delight | Old and new Enchantal Cooler variants; Hot Spring Bucket resources can participate through Resonance Disks |
 | Apotheosis | Fletching, Gem Cutting, Enchantment Library scanning/import, reforging GUI access, and server-authoritative spawner upgrades with recursive material crafting |
 | TACZ and compatible gun packs | Gun Smith Table recipes, including NBT-bearing guns/ammo |
-| Avaritia | Compressed through Extreme six-tier crafting tables, four-tier Neutron Compressors, and Extreme Smithing |
+| Avaritia | Compressed through Extreme six-tier crafting tables and Extreme Smithing |
 | SlashBlade | NBT-sensitive crafting recipes |
 | Confluence | Workshop |
 | Distant Worlds | Lithum Altar and related interactions; crosshair HUD for recipe, energy, recovery, and all eight pedestal states |

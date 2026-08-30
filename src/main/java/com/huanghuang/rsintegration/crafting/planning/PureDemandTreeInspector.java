@@ -163,7 +163,6 @@ public final class PureDemandTreeInspector {
         }
 
         private Coverage coverIngredient(IngredientRef ingredient) {
-            noteCatalystOpportunity(ingredient);
             int mark = ledger.mark();
             if (consumeAcrossAlternatives(ingredient) == 0) return Coverage.COVERED;
 
@@ -190,6 +189,10 @@ public final class PureDemandTreeInspector {
                 }
             }
             ledger.rollback(mark);
+            // A catalyst-capable producer is a compatibility fallback, not a reason to
+            // discard a pure route that was already proven usable. Only request typed
+            // planning after every immutable alternative failed.
+            noteCatalystOpportunity(ingredient);
             if (firstUnresolved == null) firstUnresolved = first(ingredient);
             return best;
         }
@@ -245,7 +248,6 @@ public final class PureDemandTreeInspector {
             Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
             visiting.add(material);
             try {
-                noteCatalystAlternatives(candidates, count);
                 for (RecipeNode candidate : inventoryFirstCandidates(candidates)) {
                     ledger.rollback(mark);
                     long batches = ((long) count + candidate.outputCount() - 1L)
@@ -261,8 +263,7 @@ public final class PureDemandTreeInspector {
                             candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
                             break;
                         }
-                        Coverage inputCoverage = coverIngredient(new IngredientRef(
-                                input.alternatives(), (int) scaled));
+                        Coverage inputCoverage = coverIngredient(input.withCount((int) scaled));
                         if (inputCoverage == Coverage.NODE_LIMIT) {
                             candidateCoverage = Coverage.NODE_LIMIT;
                             break;
@@ -354,31 +355,6 @@ public final class PureDemandTreeInspector {
                 if (sawProducer && reverseOnly) return true;
             }
             return false;
-        }
-
-        private void noteCatalystAlternatives(List<RecipeNode> candidates, int count) {
-            if (reusableCatalystOutputIds.isEmpty()) return;
-            for (RecipeNode candidate : candidates) {
-                long batches = ((long) count + candidate.outputCount() - 1L)
-                        / candidate.outputCount();
-                if (batches <= 0L || batches > Integer.MAX_VALUE) continue;
-
-                int mark = ledger.mark();
-                try {
-                    for (IngredientRef input : candidate.inputs()) {
-                        long scaled = (long) input.count() * batches;
-                        if (scaled > Integer.MAX_VALUE) break;
-                        IngredientRef demand = new IngredientRef(input.alternatives(), (int) scaled);
-                        int remaining = consumeAcrossAlternatives(demand);
-                        if (remaining > 0 && requiresReusableCatalystOutput(demand)) {
-                            catalystRouteAvailable = true;
-                            return;
-                        }
-                    }
-                } finally {
-                    ledger.rollback(mark);
-                }
-            }
         }
 
         private void noteCatalystOpportunity(IngredientRef ingredient) {

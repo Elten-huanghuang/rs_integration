@@ -82,7 +82,7 @@ public final class RSIntegrationMod {
             "aetherworks_anvil", "aetherworks_tool_station",
             "apotheosis_fletching", "apotheosis_gem_cutting", "apotheosis_library",
             "ars_nouveau_apparatus", "ars_nouveau_imbuement", "ars_nouveau_scribes_table",
-            "avaritia_crafting", "avaritia_compressor", "avaritia_gui", "avaritia_smithing",
+            "avaritia_crafting", "avaritia_gui", "avaritia_smithing",
             "botania_apothecary", "botania_brewery", "botania_elven_trade",
             "botania_mana_pool", "botania_pure_daisy", "botania_runic_altar",
             "botania_terra_plate", "mythicbotany_mana_infuser",
@@ -640,6 +640,7 @@ public final class RSIntegrationMod {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
                 com.huanghuang.rsintegration.autoeat.AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
+                com.huanghuang.rsintegration.autoeat.AutoEatEngine.onPlayerLogout(sp.getUUID());
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
                         .onPlayerLogout(sp.getUUID());
                 com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockService
@@ -661,6 +662,7 @@ public final class RSIntegrationMod {
         });
         MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
             if (e.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+                com.huanghuang.rsintegration.autoeat.AutoEatEngine.tick(e.getServer());
                 com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket
                         .tickWarmUpRequests(e.getServer());
             }

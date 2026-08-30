@@ -53,7 +53,6 @@ public final class ModIds {
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";
     public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";
-    public static final String ID_AVARITIA_COMPRESSOR = "avaritia_compressor";
     public static final String ID_AVARITIA_SMITHING = "avaritia_smithing";
     public static final String ID_MALUM_RUNIC = "malum_runic_workbench";
     public static final String ID_FD_SKILLET = "farmersdelight_skillet";

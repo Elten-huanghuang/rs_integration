@@ -93,6 +93,7 @@ import java.util.function.Predicate;
 public final class AsyncCraftChain {
 
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
+    private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
 
     public enum State {
         PENDING,        // Created, not yet started
@@ -185,6 +186,10 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
     private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
+    /** Prevents an unavailable machine/material from being rescanned every tick. */
+    private final Map<NodeId, Integer> graphRetryUntilTick = new HashMap<>();
+    private final Map<NodeId, Integer> graphRetryAttempts = new HashMap<>();
+    private final Map<String, Integer> graphRetryCounts = new HashMap<>();
     @Nullable
     private final MaterialBroker graphMaterials;
     @Nullable
@@ -850,7 +855,8 @@ public final class AsyncCraftChain {
                     graphWorkers, graphRunningNodeCap, this::isNodeExclusive,
                     this::publishIncrementalGraphOutputs, this::completeGraphNode,
                     this::recordGraphRuntimeFailure,
-                    graphDispatchPerTick, graphDispatchPerCraft);
+                    graphDispatchPerTick, graphDispatchPerCraft,
+                    this::isConcurrentGraphNode);
             sendStartedPacket(online);
             sendProgressSnapshot(online, buildProgressSnapshot(false));
         }
@@ -1021,16 +1027,19 @@ public final class AsyncCraftChain {
 
     @Nullable
     private NodeId findReadyVanillaNode() {
-        List<NodeId> ready = graphScheduler.claimReady(1);
-        if (ready.isEmpty()) return null;
-        NodeId candidate = ready.get(0);
-        CraftingResolver.ResolutionStep step = graphStep(candidate);
-        if (step.modType() == ModType.GENERIC
-                && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
-            return candidate;
-        }
-        graphScheduler.releaseClaim(candidate);
-        return null;
+        return graphScheduler.claimFirstReady(this::isVanillaGraphNode);
+    }
+
+    private boolean isVanillaGraphNode(NodeId nodeId) {
+        CraftingResolver.ResolutionStep step = graphStep(nodeId);
+        return step.modType() == ModType.GENERIC
+                && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP);
+    }
+
+    private boolean isConcurrentGraphNode(NodeId nodeId) {
+        CraftingResolver.ResolutionStep step = graphStep(nodeId);
+        return step.modType() != ModType.GENERIC
+                && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP);
     }
 
     /**
@@ -1138,22 +1147,37 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor.StartResult startAdmittedGraphNode(
             NodeId nodeId, ServerPlayer online) {
         if (graphAdmissions == null) return ConcurrentNodeExecutor.StartResult.failed();
+        int currentTick = server.getTickCount();
+        Integer retryUntil = graphRetryUntilTick.get(nodeId);
+        if (retryUntil != null && currentTick < retryUntil) {
+            return ConcurrentNodeExecutor.StartResult.retry();
+        }
         if (graph != null && !CraftPlanningRevision.isCurrent(graph.planningRevision())) {
             graphFailureDetails.put(nodeId, "Crafting plan is stale after recipe or matcher reload");
             return ConcurrentNodeExecutor.StartResult.failed();
         }
         CraftingResolver.ResolutionStep step = graphStep(nodeId);
 
+        if (step.modType() == ModType.GENERIC) {
+            graphFailureDetails.put(nodeId,
+                    "synchronous generic node reached concurrent graph dispatcher");
+            return ConcurrentNodeExecutor.StartResult.failed();
+        }
+
         // Earth Heart is synchronous and owns no machine/capture resources.
         if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
             NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
                     nodeId, graphRequests.getOrDefault(nodeId, List.of()));
             NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
-            if (admission == null) return ConcurrentNodeExecutor.StartResult.retry();
+            if (admission == null) {
+                return graphRetry(nodeId, "material admission unavailable",
+                        candidate.materialRequests());
+            }
             if (!startEarthHeartTaint(online, step.executions())) {
                 graphAdmissions.releaseMaterial(admission);
                 return ConcurrentNodeExecutor.StartResult.failed();
             }
+            clearGraphRetry(nodeId);
             graphAdmissions.commit(admission);
             graphAdmissions.settleMaterial(admission);
             if (!publishDeclaredNodeOutputs(nodeId, virtualInventory)) {
@@ -1164,13 +1188,13 @@ public final class AsyncCraftChain {
 
         if (craftOperationBudget.availableCapacity() <= 0
                 || globalOperationBudget.availableCapacity() <= 0) {
-            return ConcurrentNodeExecutor.StartResult.retry();
+            return graphRetry(nodeId, "operation budget temporarily unavailable",
+                    graphRequests.getOrDefault(nodeId, List.of()));
         }
         PreparationResult preparation = prepareGraphNode(nodeId, step, online);
         if (preparation.state() == PreparationState.RETRY) {
-            logGraphRetry(nodeId, preparation.detail(),
+            return graphRetry(nodeId, preparation.detail(),
                     graphRequests.getOrDefault(nodeId, List.of()));
-            return ConcurrentNodeExecutor.StartResult.retry();
         }
         if (preparation.state() == PreparationState.FATAL || preparation.prepared() == null) {
             graphFailureDetails.put(nodeId, preparation.detail());
@@ -1186,17 +1210,15 @@ public final class AsyncCraftChain {
                 nodeId, graphRequests.getOrDefault(nodeId, List.of()));
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
         if (admission == null) {
-            logGraphRetry(nodeId, "material admission unavailable", candidate.materialRequests());
             releasePreparationQuietly(prepared.delegate());
-            return ConcurrentNodeExecutor.StartResult.retry();
+            return graphRetry(nodeId, "material admission unavailable", candidate.materialRequests());
         }
 
         GraphDispatchResult dispatch = dispatchPreparedGraphNode(
                 nodeId, prepared, online, admission);
         if (dispatch.state() == DispatchState.RETRY) {
-            logGraphRetry(nodeId, dispatch.detail(), candidate.materialRequests());
             graphAdmissions.releaseMaterial(admission);
-            return ConcurrentNodeExecutor.StartResult.retry();
+            return graphRetry(nodeId, dispatch.detail(), candidate.materialRequests());
         }
         if (dispatch.state() == DispatchState.FATAL || dispatch.worker() == null) {
             graphFailureDetails.put(nodeId, dispatch.detail());
@@ -1205,16 +1227,33 @@ public final class AsyncCraftChain {
             graphAdmissions.releaseMaterial(admission);
             return ConcurrentNodeExecutor.StartResult.failed();
         }
+        clearGraphRetry(nodeId);
         return ConcurrentNodeExecutor.StartResult.started(dispatch.worker());
+    }
+
+    private ConcurrentNodeExecutor.StartResult graphRetry(
+            NodeId nodeId, String detail, List<MaterialBroker.Request> requests) {
+        int attempts = Math.min(graphRetryAttempts.merge(nodeId, 1, Integer::sum), 6);
+        int delay = Math.min(GRAPH_RETRY_MAX_DELAY_TICKS, 1 << attempts);
+        graphRetryUntilTick.put(nodeId, server.getTickCount() + delay);
+        logGraphRetry(nodeId, detail, requests);
+        return ConcurrentNodeExecutor.StartResult.retry();
+    }
+
+    private void clearGraphRetry(NodeId nodeId) {
+        graphRetryUntilTick.remove(nodeId);
+        graphRetryAttempts.remove(nodeId);
     }
 
     private void logGraphRetry(NodeId nodeId, String detail,
                                List<MaterialBroker.Request> requests) {
-        String key = craftId + ":" + nodeId + ":" + detail;
+        String key = craftId + ":" + detail;
+        int count = graphRetryCounts.merge(key, 1, Integer::sum);
         if (GRAPH_RETRY_LOGS.allow(key)) {
-            RSIntegrationMod.debug(ctx.format(
-                    "[RSI-GraphRetry] node={} detail={} requests={}"),
-                    nodeId, detail, requests);
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "[RSI-GraphRetry] node={} detail={} attemptsSinceLog={} requests={}"),
+                    nodeId, detail, count, requests);
+            graphRetryCounts.put(key, 0);
         }
     }
 
@@ -1594,11 +1633,19 @@ public final class AsyncCraftChain {
             ownershipTransferred = true;
             IBatchDelegate startDelegate = delegate;
             List<ItemStack> startMaterials = materials;
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "Graph node dispatching: node={} recipe={} delegate={} machine={} materials={}"),
+                    nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
+                    prepared.machine().pos(), startMaterials.size());
             boolean accepted = operationSession != null
                     ? operationSession.tryStart(
                     () -> startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger))
                     : startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger);
             if (!accepted) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                        "Graph node delegate rejected start: node={} recipe={} delegate={} machine={}"),
+                        nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
+                        prepared.machine().pos());
                 runtime.markStartFailed("delegate rejected graph dispatch after start attempt: delegate="
                         + delegate.getClass().getSimpleName()
                         + " recipe=" + prepared.step().recipeId());
@@ -2095,26 +2142,37 @@ public final class AsyncCraftChain {
                 remaining -= take;
             }
             if (remaining > 0) {
-                // MaterialBroker checkout already selected the concrete runtime
-                // fragment. Preserve that exact identity all the way through the
-                // ledger; selecting again through a broad Ingredient can choose a
-                // different damaged/tagged tool and make the node retry forever.
+                // MaterialBroker checkout selected the item type from the planning
+                // snapshot. Preserve exact NBT when the ingredient requires it;
+                // ordinary tagless ingredients may carry harmless runtime metadata.
                 ItemStack planned = findMatching(
                         initialPool, spec.ingredient(), remaining, true);
                 if (planned.isEmpty() || planned.getCount() != remaining) return null;
                 int reservationMark = ledger.reservationMark();
-                // A tagless graph allocation represents an NBT-insensitive demand, not a
-                // requirement for a physically tagless stack. Reserve through the original
-                // ingredient so stateful variants (damage, affixes, item modifiers, etc.)
-                // remain eligible and the ledger captures the exact stack it selected.
-                ItemStack initial;
                 ItemStack exactTemplate = combined.isEmpty() ? planned : combined;
-                initial = reserveExact(ledger, exactTemplate, remaining, online);
+                boolean exactNbt = requiresExactGraphReservation(spec.ingredient());
+                ItemStack initial = reserveExact(ledger, exactTemplate, remaining, online);
+                if (initial.isEmpty() && !exactNbt) {
+                    // Keep the fallback constrained to the concrete item selected
+                    // by the graph; a broad tag ingredient must not consume another
+                    // item type than the one admitted by the graph.
+                    initial = reserveIngredient(ledger,
+                            Ingredient.of(new ItemStack(planned.getItem())), remaining, online);
+                }
                 if (initial.isEmpty()) {
+                    RSIntegrationMod.LOGGER.info(ctx.format(
+                            "Graph material reservation failed: recipe={} step={} ingredient={} planned={} exactNbt={} availability={}"),
+                            currentRecipeForLogging(), currentStepIdx,
+                            CraftPacketUtils.describeIngredient(spec.ingredient()),
+                            describeStackForLogging(planned), exactNbt,
+                            ledger.describeExactAvailability(exactTemplate, online));
                     ledger.cancelReservationsSince(reservationMark);
                     return null;
                 }
-                if (!takeExactMatching(initialPool, initial, remaining)) {
+                boolean consumed = exactNbt
+                        ? takeExactMatching(initialPool, initial, remaining)
+                        : takeMatchingItem(initialPool, planned, remaining);
+                if (!consumed) {
                     ledger.cancelReservationsSince(reservationMark);
                     return null;
                 }
@@ -2130,6 +2188,36 @@ public final class AsyncCraftChain {
             materials.add(combined);
         }
         return materials;
+    }
+
+    private static boolean takeMatchingItem(List<ItemStack> pool, ItemStack planned, int count) {
+        if (planned == null || planned.isEmpty() || count <= 0) return false;
+        int available = 0;
+        for (ItemStack stack : pool) {
+            if (!stack.isEmpty() && stack.getItem() == planned.getItem()) available += stack.getCount();
+        }
+        if (available < count) return false;
+        int remaining = count;
+        for (ItemStack stack : pool) {
+            if (remaining <= 0) break;
+            if (stack.isEmpty() || stack.getItem() != planned.getItem()) continue;
+            int take = Math.min(remaining, stack.getCount());
+            stack.shrink(take);
+            remaining -= take;
+        }
+        return remaining == 0;
+    }
+
+    private String currentRecipeForLogging() {
+        return steps.isEmpty() ? "unknown"
+                : steps.get(Math.min(Math.max(0, currentStepIdx), steps.size() - 1))
+                .recipeId().toString();
+    }
+
+    private static String describeStackForLogging(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "empty";
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem())
+                + " x" + stack.getCount() + (stack.hasTag() ? " tag=" + stack.getTag() : "");
     }
 
     static boolean requiresExactGraphReservation(Ingredient ingredient) {
@@ -3972,14 +4060,14 @@ public final class AsyncCraftChain {
         }
         if (dropThrottleTripped) {
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped -discarding {} x{} for player {}",
-                    stack.getHoverName().getString(), stack.getCount(), playerId);
+                    com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), playerId);
             return false;
         }
         dropsThisChain++;
         if (dropsThisChain > MAX_DROPS_PER_CHAIN) {
             dropThrottleTripped = true;
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) -discarding {} x{} and all future drops for player {}. Chain will abort.",
-                    MAX_DROPS_PER_CHAIN, stack.getHoverName().getString(), stack.getCount(), playerId);
+                    MAX_DROPS_PER_CHAIN, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), playerId);
             return false;
         }
         if (server != null) {
@@ -3990,7 +4078,7 @@ public final class AsyncCraftChain {
                 new ItemEntity(spawnLevel,
                     spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack.copy()));
             RSIntegrationMod.LOGGER.warn("[RSI] Item dropped at world spawn (player {} offline): {} x{}",
-                playerId, stack.getHoverName().getString(), stack.getCount());
+                playerId, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount());
         }
         return true;
     }

@@ -57,18 +57,20 @@ public final class AsyncPurePlanningService {
                                                      int maxSearchStates, int maxMemoizedFailures,
                                                      int timeoutMs) {
         PlanningThreadContext.throwIfCancelled();
-        RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
+        Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
+                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
+        ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(
+                snapshot.recipeGraph(), stock);
+        RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }
-        Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
-                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
         List<IngredientRef> roots = SelfAmplifyingRecipePolicy.scaleTargetInputs(
                 target, repeatCount);
         long searchStarted = System.nanoTime();
         long deadlineNanos = deadlineAfterMillis(searchStarted, timeoutMs);
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                snapshot.recipeGraph(), stock, roots, maxSteps,
+                planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos);
         long elapsedNanos = System.nanoTime() - searchStarted;
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
@@ -78,7 +80,7 @@ public final class AsyncPurePlanningService {
                     "[RSI-plan] Pure planning timed out: recipe={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={}",
                     snapshot.recipeId(), elapsedNanos / 1_000_000L, result.expandedStates(),
                     result.backtracks(), result.memoHits(), stock.size(),
-                    snapshot.recipeGraph().recipesById().size());
+                    planningGraph.recipesById().size());
         }
         return result;
     }

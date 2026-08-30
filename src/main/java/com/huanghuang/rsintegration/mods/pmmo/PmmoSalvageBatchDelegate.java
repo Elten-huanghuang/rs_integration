@@ -22,6 +22,9 @@ import java.util.List;
 
 /** Synchronous logical salvage anchored to the configured, bound PMMO block. */
 public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
+    /** Keep probabilistic salvage rolls bounded per server tick; the flat chain
+     * resumes the remaining attempts in a fresh delegate batch. */
+    static final int MAX_ATTEMPTS_PER_BATCH = 256;
     private ServerLevel level;
     private ResourceKey<Level> dimension;
     private BlockPos boundPos;
@@ -86,7 +89,7 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
-        return Math.max(0, remainingOperations);
+        return Math.max(0, Math.min(MAX_ATTEMPTS_PER_BATCH, remainingOperations));
     }
 
     @Nullable

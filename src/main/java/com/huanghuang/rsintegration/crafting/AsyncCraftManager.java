@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import net.minecraft.network.chat.Component;
@@ -184,10 +185,15 @@ public final class AsyncCraftManager {
         List<AsyncCraftChain> snapshot = activeChains.snapshot();
         int globalLimit = configuredGlobalVanillaLimit();
         int perChainLimit = configuredPerChainVanillaLimit();
+        long tickBudgetNanos = configuredServerTickBudgetNanos();
         VanillaCraftingTickBudget vanillaBudget = new VanillaCraftingTickBudget(globalLimit);
         int deferredChains = 0;
         int start = snapshot.isEmpty() ? 0 : Math.floorMod(roundRobinCursor, snapshot.size());
         for (AsyncCraftChain chain : roundRobinOrder(snapshot, start)) {
+            if (System.nanoTime() - tickStart >= tickBudgetNanos) {
+                deferredChains++;
+                continue;
+            }
             VanillaCraftingTickBudget.ChainAllowance allowance =
                     vanillaBudget.allowance(perChainLimit);
             try {
@@ -241,6 +247,15 @@ public final class AsyncCraftManager {
         } catch (Exception ignored) {
             return com.huanghuang.rsintegration.config.RSIntegrationConfig
                     .DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
+        }
+    }
+
+    private static long configuredServerTickBudgetNanos() {
+        try {
+            return Math.max(1L, RSIntegrationConfig.CRAFTING_SERVER_TICK_BUDGET_MS.get())
+                    * 1_000_000L;
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS * 1_000_000L;
         }
     }
 

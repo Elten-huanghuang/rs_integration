@@ -180,6 +180,31 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void dispatchFilterLeavesSynchronousNodeForItsOwner() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        AtomicInteger starts = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) nodeId -> {
+                    starts.incrementAndGet();
+                    return ConcurrentNodeExecutor.StartResult.started(
+                            new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING));
+                },
+                2, nodeId -> false,
+                (nodeId, worker) -> { },
+                (nodeId, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                (nodeId, worker) -> { },
+                2, 10,
+                nodeId -> nodeId.equals(new NodeId(1)));
+
+        executor.tick();
+
+        assertEquals(1, starts.get());
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+    }
+
+    @Test
     void exclusivityDecisionIsCachedPerNode() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();

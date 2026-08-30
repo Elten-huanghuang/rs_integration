@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
@@ -12,27 +14,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class PurePlanAdapterTest {
     @Test
-    void preservesPlannerOrderAndBatchCountsWhileDroppingUnknownRecipes() {
-        MaterialRef planks = material("planks");
-        MaterialRef sticks = material("sticks");
-        RecipeNode plankRecipe = recipe("planks", planks, 4);
-        RecipeNode stickRecipe = recipe("sticks", sticks, 4);
-        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
-                planks, List.of(plankRecipe), sticks, List.of(stickRecipe)));
-        PureRecipePlanner.Result result = new PureRecipePlanner.Result(true, List.of(
-                new PureRecipePlanner.PlannedStep(id("planks"), 2),
-                new PureRecipePlanner.PlannedStep(id("missing_projection"), 9),
-                new PureRecipePlanner.PlannedStep(id("sticks"), 3)), List.of(), Map.of());
+    void preservesTypedIntermediateExecutionRoute() {
+        MaterialRef cost = material("cost");
+        MaterialRef output = material("output");
+        ResourceLocation recipeId = id("typed_intermediate");
+        ResourceLocation recipeTypeId = id("typed_recipe_type");
+        RecipeNode typed = new RecipeNode(recipeId, output, 1,
+                List.of(new IngredientRef(List.of(cost), 1)),
+                ModType.FARMINGFORBLOCKHEADS_MARKET.id(), recipeTypeId);
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(typed)));
+        PureRecipePlanner.Result plan = new PureRecipePlanner.Result(true,
+                List.of(new PureRecipePlanner.PlannedStep(recipeId, 3)), List.of(), Map.of());
 
-        var adapted = PurePlanAdapter.toResolutionSteps(result, graph);
+        var steps = PurePlanAdapter.toResolutionSteps(plan, graph);
 
-        assertEquals(List.of(id("planks"), id("sticks")),
-                adapted.stream().map(step -> step.recipeId()).toList());
-        assertEquals(List.of(2, 3), adapted.stream().map(step -> step.executions()).toList());
-    }
-
-    private static RecipeNode recipe(String path, MaterialRef output, int count) {
-        return new RecipeNode(id(path), output, count, List.of());
+        assertEquals(1, steps.size());
+        assertEquals(ModType.FARMINGFORBLOCKHEADS_MARKET, steps.get(0).modType());
+        assertEquals(recipeTypeId, steps.get(0).recipeTypeId());
+        assertEquals(3, steps.get(0).executions());
     }
 
     private static MaterialRef material(String path) {

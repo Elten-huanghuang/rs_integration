@@ -392,7 +392,7 @@ public final class PureRecipePlanner {
             for (IngredientRef input : inputs) {
                 long scaled = (long) input.count() * batches;
                 if (scaled > Integer.MAX_VALUE) return null;
-                branch.add(new DemandTask(new IngredientRef(input.alternatives(), (int) scaled)));
+                branch.add(new DemandTask(input.withCount((int) scaled)));
             }
             branch.add(new CompleteRecipeTask(candidate.output(), candidate.outputCount(),
                     consumeCount, candidate.recipeId(), batches));
@@ -685,7 +685,7 @@ public final class PureRecipePlanner {
                         valid = false;
                         break;
                     }
-                    scaledInputs.add(new IngredientRef(input.alternatives(), (int) scaled));
+                    scaledInputs.add(input.withCount((int) scaled));
                 }
                 if (!valid) continue;
 
@@ -781,7 +781,7 @@ public final class PureRecipePlanner {
         }
 
         private void noteMissing(IngredientRef ingredient, int count) {
-            if (missing == null) missing = new IngredientRef(ingredient.alternatives(), count);
+            if (missing == null) missing = ingredient.withCount(count);
         }
 
         private record PartialChoice(MaterialRef output, RecipeNode recipe) {}

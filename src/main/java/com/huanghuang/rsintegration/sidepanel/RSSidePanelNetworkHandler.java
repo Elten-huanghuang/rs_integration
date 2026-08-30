@@ -51,6 +51,9 @@ public final class RSSidePanelNetworkHandler {
     /** Last validated RS network retained after the side-panel/terminal UI closes. */
     private static final Map<UUID, com.refinedmods.refinedstorage.api.network.INetwork>
             lastKnownNetworks = new ConcurrentHashMap<>();
+    /** One rebind task per invalidated native cache, even when many players share it. */
+    private static final Set<Object> pendingInvalidatedCaches = Collections.synchronizedSet(
+            Collections.newSetFromMap(new IdentityHashMap<>()));
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
@@ -530,42 +533,11 @@ public final class RSSidePanelNetworkHandler {
             public void onInvalidated() {
                 ListenerEntry entry = entryHolder[0];
                 if (entry == null || playerListeners.get(pid) != entry) return;
-                RSIntegrationMod.LOGGER.warn("[RSI] Storage cache invalidated for player {} — attempting re-registration", pid);
-                if (!playerListeners.remove(pid, entry)) return;
-                pendingDeltas.clear(pid);
-                pendingSnapshotPriorities.remove(pid);
-                nextPriorityRefreshTick.remove(pid);
-                lastKnownNetworks.remove(pid, network);
-                com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(pid);
-
-                // Attempt immediate re-registration on the new cache.
-                // Some RS storage implementations rebuild the cache on certain
-                // operations and fire onInvalidated spuriously.  If the network
-                // is still alive, grab the fresh cache and re-attach — otherwise
-                // the panel would stay blank until the next periodic sync (15s).
                 net.minecraft.server.MinecraftServer server = player.getServer();
-                if (server != null) {
-                    ServerPlayer sp = server.getPlayerList().getPlayer(pid);
-                    if (sp != null) {
-                        try {
-                            IStorageCache<ItemStack> freshCache = network.getItemStorageCache();
-                            if (freshCache != null && freshCache != cache) {
-                                RSIntegrationMod.LOGGER.debug("[RSI] Cache rebuilt — re-registering listener for {}", pid);
-                                // registerListener will add the listener to the freshCache
-                                registerListener(sp, network);
-                                return;
-                            }
-                        } catch (Exception ex) {
-                            RSIntegrationMod.LOGGER.warn("[RSI] Re-registration attempt failed for {}", pid, ex);
-                        }
-                        // Network is truly gone — notify client
-                        RSIntegrationMod.LOGGER.debug("[RSI] Network unavailable for {} — clearing panel", pid);
-                        sendSync(sp,
-                                Collections.emptyList(), Collections.emptyList(),
-                                Collections.emptyList(), Collections.emptyList(),
-                                0, false, "");
-                    }
-                }
+                if (server == null || !pendingInvalidatedCaches.add(cache)) return;
+                // RS invokes this callback once per attached listener. Defer the
+                // rebind and process all players sharing this cache together.
+                server.execute(() -> rebindInvalidatedCache(server, network, cache));
             }
 
             private void queue(ItemStack stack, int change, UUID entryId) {
@@ -573,8 +545,12 @@ public final class RSSidePanelNetworkHandler {
                 if (entry == null || playerListeners.get(pid) != entry) return;
                 if (stack == null || stack.getItem() == null) return;
 
+                // Never resolve a display name on the dedicated server. Some
+                // item implementations (for example Bountiful's bounty item)
+                // load client-only classes from getHoverName().
+                var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
                 RSIntegrationMod.LOGGER.debug("[RSI-Delta] Cache onChanged: item={} change={} id={}",
-                        stack.getHoverName().getString(), change, entryId);
+                        itemId != null ? itemId : "unknown", change, entryId);
 
                 // Query the real remaining count from the storage cache.
                 // RS fires onChanged with the pre-extraction stack, so
@@ -651,6 +627,48 @@ public final class RSSidePanelNetworkHandler {
         return isNew;
     }
 
+    private static void rebindInvalidatedCache(
+            net.minecraft.server.MinecraftServer server,
+            com.refinedmods.refinedstorage.api.network.INetwork network,
+            IStorageCache<ItemStack> invalidatedCache) {
+        try {
+            List<UUID> affected = playerListeners.entrySet().stream()
+                    .filter(e -> e.getValue().cache == invalidatedCache
+                            && e.getValue().network == network)
+                    .map(Map.Entry::getKey)
+                    .toList();
+            if (!affected.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI] Storage cache invalidated; rebinding {} players as one batch",
+                        affected.size());
+            }
+            IStorageCache<ItemStack> freshCache;
+            try {
+                freshCache = network.getItemStorageCache();
+            } catch (RuntimeException | LinkageError failure) {
+                freshCache = null;
+            }
+            for (UUID playerId : affected) {
+                ListenerEntry current = playerListeners.get(playerId);
+                if (current == null || current.cache != invalidatedCache
+                        || current.network != network) continue;
+                ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+                unregisterListener(playerId);
+                if (player == null) continue;
+                if (freshCache != null && freshCache != invalidatedCache) {
+                    registerListener(player, network);
+                } else {
+                    sendSync(player,
+                            Collections.emptyList(), Collections.emptyList(),
+                            Collections.emptyList(), Collections.emptyList(),
+                            0, false, "");
+                }
+            }
+        } finally {
+            pendingInvalidatedCaches.remove(invalidatedCache);
+        }
+    }
+
     public static void unregisterListener(UUID playerId) {
         unregisterListener(playerId, true);
     }
@@ -701,6 +719,7 @@ public final class RSSidePanelNetworkHandler {
         lastPushedStatuses.clear();
         syncGenerations.clear();
         lastKnownNetworks.clear();
+        pendingInvalidatedCaches.clear();
         machineScanCounter = 0;
         machineStatusSequence = 0;
         tickFiringConfirmed = false;

@@ -360,6 +360,9 @@ public final class BeyondDimensionsMachineHubClient {
         stacks.addAll(mc.player.getInventory().items);
         stacks.addAll(mc.player.getInventory().offhand);
         stacks.addAll(mc.player.getInventory().armor);
+        // BD terminals are valid Curios equipment; include their bindings in
+        // the local machine-center view just like inventory-held terminals.
+        stacks.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(mc.player));
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             ResourceLocation itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());

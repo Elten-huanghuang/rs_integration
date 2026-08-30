@@ -133,7 +133,8 @@ public final class ExtractionLedger implements AutoCloseable {
     /** Record a per-entry diagnostic before adding it to the list. */
     private void recordEntry(Entry e) {
         ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
-        String itemId = rl != null ? rl.toString() : e.template.getDisplayName().getString();
+        String itemId = rl != null ? rl.toString()
+                : com.huanghuang.rsintegration.util.ItemStackUtils.registryId(e.template);
         Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
                 "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
         entries.add(e);
@@ -728,32 +729,14 @@ public final class ExtractionLedger implements AutoCloseable {
                 return false;
             }
             entry.confirmExtracted(record.stack);
-            StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
-            if (settlementId != null) {
-                try {
-                    // Legacy RS adapters may reconstruct an equivalent stack
-                    // with a different backend payload (for example a native
-                    // NetworkItem wrapper).  The authoritative extraction
-                    // still has to return the reserved item identity; the
-                    // settlement mirror must key it from that confirmed
-                    // template rather than reject a valid extraction because
-                    // two adapter sessions serialized it differently.
-                    if (entry.exactIdentity
-                            && !(ItemStack.isSameItemSameTags(record.stack, entry.template)
-                            || (entry.template.getTag() == null
-                            && entry.originalIngredient.test(record.stack)))) {
-                        throw new IllegalArgumentException("extraction result contains another item identity");
-                    }
+                StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
+                if (settlementId != null) {
+                    try {
                     StorageOperationResult result = StorageOperationResult.extracted(
                             StorageOperationMode.PERFORM, entry.count, List.of(record.stack));
                     CraftStorageEndpoint endpoint = endpointFor(entry.sourceNetwork);
                     settlementLedger.recordExtraction(settlementId, result,
-                            stack -> entry.exactIdentity && endpoint != null
-                                    ? endpoint.session().itemKey(entry.template)
-                                    : StorageItemKey.fromItemStack(
-                                            new com.huanghuang.rsintegration.storage.StorageBackendId(
-                                                    endpoint == null ? "unknown" : endpoint.session().reference().backendId().value()),
-                                            entry.template));
+                            stack -> settlementKey(entry, endpoint));
                 } catch (RuntimeException mirrorFailure) {
                     String key = "extraction:" + mirrorFailure.getClass().getName()
                             + ":" + String.valueOf(mirrorFailure.getMessage());
@@ -1392,6 +1375,43 @@ public final class ExtractionLedger implements AutoCloseable {
         return true;
     }
 
+    private static StorageItemKey settlementKey(
+            Entry entry, @Nullable CraftStorageEndpoint endpoint) {
+        // The mirror key must use the same source namespace as reserve(). A
+        // ledger can contain RS and player-inventory entries at once; mapping
+        // an inventory entry through the active RS session changes only the
+        // backend id and falsely reports an NBT/item identity mismatch.
+        if (entry.source == Source.PLAYER_INVENTORY) {
+            return StorageItemKey.fromItemStack(
+                    new com.huanghuang.rsintegration.storage.StorageBackendId("local"),
+                    entry.template);
+        }
+        if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
+            return StorageItemKey.fromItemStack(
+                    new com.huanghuang.rsintegration.storage.StorageBackendId(
+                            entry.resonanceView.backendId()), entry.template);
+        }
+        if (endpoint != null) return endpoint.session().itemKey(entry.template);
+        return StorageItemKey.fromItemStack(
+                new com.huanghuang.rsintegration.storage.StorageBackendId("unknown"),
+                entry.template);
+    }
+
+    /** Diagnostic snapshot used when a graph reservation cannot be fulfilled. */
+    String describeExactAvailability(ItemStack template, ServerPlayer player) {
+        if (template == null || template.isEmpty() || player == null) return "unreadable";
+        try {
+            int network = countExactAvailableInNetwork(null, template, player);
+            int inventory = countExactAvailableInInventory(player, template);
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+            return "network=" + network + ", inventory=" + inventory
+                    + ", pendingNetwork=" + pendingNet.getOrDefault(key, 0)
+                    + ", pendingInventory=" + pendingInv.getOrDefault(key, 0);
+        } catch (RuntimeException e) {
+            return "unreadable:" + e.getClass().getSimpleName();
+        }
+    }
+
     private static int countExact(List<ItemStack> stacks, ItemStack template) {
         int total = 0;
         for (ItemStack stack : stacks) {
@@ -1762,7 +1782,8 @@ public final class ExtractionLedger implements AutoCloseable {
         List<String> out = new ArrayList<>();
         for (Entry e : entries) {
             ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
-            String itemName = rl != null ? rl.toString() : e.template.getDisplayName().getString();
+            String itemName = rl != null ? rl.toString()
+                    : com.huanghuang.rsintegration.util.ItemStackUtils.registryId(e.template);
             out.add(String.format("#%d %s: %s x%d (source=%s)",
                     e.id, e.source, itemName, e.count,
                     switch (e.source) {
@@ -1800,7 +1821,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ItemStack leftover = result.remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
-                                leftover.getDisplayName().getString(), leftover.getCount());
+                                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
                     return;
@@ -1812,7 +1833,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
                     if (!leftover.isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
-                                refund.getDisplayName().getString(), refund.getCount());
+                                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(refund), refund.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
                 } else {
@@ -1868,13 +1889,13 @@ public final class ExtractionLedger implements AutoCloseable {
                 serverLevel.addFreshEntity(drop);
                 RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Player offline & network full — dropped refund at {} {}: {} x{}",
                         level.dimension().location(), pos,
-                        leftover.getDisplayName().getString(), leftover.getCount());
+                        com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
                 return;
             }
         }
 
         RSIntegrationMod.LOGGER.error("[RSI-Ledger] CRITICAL: could not refund/drop item (no network level) — LOST: {} x{}",
-                leftover.getDisplayName().getString(), leftover.getCount());
+                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
     }
 
     public String describePending() {

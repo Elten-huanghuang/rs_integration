@@ -141,7 +141,7 @@ public final class BackpackRSUtils {
                         .remainder().orElse(ItemStack.EMPTY);
                 if (!leftover2.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-Backpack] Restock return to RS failed: {}x{} lost",
-                            leftover2.getCount(), leftover2.getDisplayName().getString());
+                            leftover2.getCount(), ItemStackUtils.registryId(leftover2));
                 }
             }
         }

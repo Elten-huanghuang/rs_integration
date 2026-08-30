@@ -18,6 +18,15 @@ class PmmoSalvageRollerTest {
     private static final ResourceLocation EXTRA = id("test:extra");
 
     @Test
+    void salvageBatchCapsSynchronousAttempts() {
+        PmmoSalvageBatchDelegate delegate = new PmmoSalvageBatchDelegate();
+
+        assertEquals(PmmoSalvageBatchDelegate.MAX_ATTEMPTS_PER_BATCH,
+                delegate.prepareFlatBatch(Integer.MAX_VALUE));
+        assertEquals(0, delegate.prepareFlatBatch(0));
+    }
+
+    @Test
     void countMeansIndependentSalvageAttemptsAndPreservesOtherOutputs() {
         PmmoSalvageDefinition definition = new PmmoSalvageDefinition(INPUT, List.of(
                 output(TARGET, 2, 0.5, 0.9, Map.of("mining", 0.1),

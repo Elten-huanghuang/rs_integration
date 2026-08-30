@@ -136,7 +136,8 @@ public final class MachineCollectPacket {
                         if (!leftover.isEmpty()) player.drop(leftover, false);
                     } else player.drop(output, false);
                 } else if (!player.getInventory().add(output)) player.drop(output, false);
-                player.sendSystemMessage(Component.translatable("rsi.machine.collected", output.getCount(), output.getHoverName()));
+                player.sendSystemMessage(Component.translatable("rsi.machine.collected", output.getCount(),
+                        Component.translatable(output.getDescriptionId())));
                 return;
             }
             if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
@@ -172,7 +173,8 @@ public final class MachineCollectPacket {
             }
 
             player.sendSystemMessage(
-                Component.translatable("rsi.machine.collected", output.getCount(), output.getHoverName()));
+                Component.translatable("rsi.machine.collected", output.getCount(),
+                        Component.translatable(output.getDescriptionId())));
         });
         context.setPacketHandled(true);
     }

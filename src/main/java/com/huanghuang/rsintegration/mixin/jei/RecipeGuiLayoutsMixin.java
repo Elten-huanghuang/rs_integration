@@ -388,7 +388,6 @@ public class RecipeGuiLayoutsMixin {
                     case "aether_incubator" -> "gui.rs_integration.jei.aether_incubator_craft";
                     case "aether_altar" -> "gui.rs_integration.jei.aether_altar_craft";
                     case ModIds.ID_AVARITIA_CRAFTING -> "gui.rs_integration.jei.avaritia_crafting";
-                    case ModIds.ID_AVARITIA_COMPRESSOR -> "gui.rs_integration.jei.avaritia_compressor";
                     case ModIds.ID_AVARITIA_SMITHING -> "gui.rs_integration.jei.avaritia_smithing";
                     case "crabbersdelight" -> "gui.rs_integration.jei.crabbersdelight_trap";
                     default -> "gui.rs_integration.jei.wr_remote_craft";
@@ -954,8 +953,8 @@ public class RecipeGuiLayoutsMixin {
 
         // Avaritia — multiple sub-types with different filters; not resolved by single-ModType lookup
         if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
+            if (recipeClassName.endsWith("CompressorRecipe")) return null;
             if (recipeClassName.endsWith("ExtremeSmithingRecipe")) return ModIds.ID_AVARITIA_SMITHING;
-            if (recipeClassName.endsWith("CompressorRecipe")) return ModIds.ID_AVARITIA_COMPRESSOR;
             return ModIds.ID_AVARITIA_CRAFTING;
         }
 

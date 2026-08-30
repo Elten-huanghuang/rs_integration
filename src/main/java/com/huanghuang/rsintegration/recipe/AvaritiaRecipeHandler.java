@@ -26,6 +26,15 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId(ModIds.ID_AVARITIA_CRAFTING); }
 
     @Override
+    public boolean canHandle(Recipe<?> recipe) {
+        // The neutron compressor integration is intentionally not supported.
+        // Keep the broad Avaritia prefix for table/special recipes, but do not
+        // let the removed compressor path re-enter through the generic handler.
+        return !recipe.getClass().getName().endsWith("CompressorRecipe")
+                && super.canHandle(recipe);
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access);
     }
@@ -37,8 +46,7 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
         if (name.endsWith("ExtremeSmithingRecipe")) {
             return getSmithingIngredients(recipe);
         }
-        // ShapedTableCraftingRecipe, ShapelessTableCraftingRecipe, CompressorRecipe
-        // all implement vanilla getIngredients()
+        // Avaritia table recipes all implement vanilla getIngredients().
         List<Ingredient> list = recipe.getIngredients();
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : list) {
