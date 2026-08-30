@@ -13,9 +13,13 @@ public final class PurePlanAdapter {
                                                           ImmutableRecipeGraph graph) {
         return result.steps().stream()
                 .filter(step -> graph.recipesById().containsKey(step.recipeId()))
-                .map(step -> new ResolutionStep(step.recipeId(), ModType.GENERIC,
-                        new net.minecraft.resources.ResourceLocation("minecraft", "crafting"),
-                        List.of(), List.of(), false, step.batches(), null, null))
+                .map(step -> {
+                    ImmutableRecipeGraph.RecipeNode node =
+                            graph.recipesById().get(step.recipeId());
+                    return new ResolutionStep(step.recipeId(), ModType.byId(node.modTypeId()),
+                            node.recipeTypeId(), List.of(), List.of(), false,
+                            step.batches(), null, null);
+                })
                 .toList();
     }
 }

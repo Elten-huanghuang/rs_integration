@@ -27,4 +27,14 @@ class CraftingTableBatchDelegateTest {
                 new ResourceLocation("avaritia", "compressed_crafting_table")));
         assertEquals(0, CraftingTableBatchDelegate.machineTier(null));
     }
+
+    @Test
+    void recognizesReAvaritiaExtremeRecipesAndBlockEntity() {
+        assertEquals(true, CraftingTableBatchDelegate.isReAvaritiaExtremeRecipeClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapedExtremeCraftingRecipe"));
+        assertEquals(true, CraftingTableBatchDelegate.isReAvaritiaExtremeRecipeClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapelessExtremeCraftingRecipe"));
+        assertEquals(true, CraftingTableBatchDelegate.isCraftingTableBlockEntity(
+                "committee.nova.mods.avaritia.common.tile.ExtremeCraftingTile"));
+    }
 }

@@ -141,8 +141,7 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains("ftbquests.SubmitTaskMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.SubmitTaskMessage")
-                    && hasMethod(targetClassName, "handle")
-                    && hasMethod(targetClassName, "lambda$handle$0");
+                    && hasMethod(targetClassName, "handle");
         }
         if (mixinClassName.contains("ftbquests.InventoryTaskAutoSubmissionMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.util.FTBQuestsInventoryListener")

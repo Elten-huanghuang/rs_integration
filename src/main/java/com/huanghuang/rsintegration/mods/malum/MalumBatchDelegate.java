@@ -27,6 +27,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
+import javax.annotation.Nonnull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -47,6 +48,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private List<?> pedestals;           // captured pedestal list
     private boolean craftStarted;
     private boolean craftWasSeenActive;
+    private String validationFailureDetail = "Malum altar validation did not accept the operation";
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -68,6 +70,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.pedestals = null;
         this.craftStarted = false;
         this.craftWasSeenActive = false;
+        this.validationFailureDetail = "Malum altar validation did not accept the operation";
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null) {
@@ -110,17 +113,28 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         if (crafting == null || Boolean.TRUE.equals(crafting)) {
             // Preparation is polled while a parallel group waits for this altar.
             // The progress HUD reports MACHINE_BUSY; chat must remain silent here.
+            validationFailureDetail = crafting == null
+                    ? "Malum altar crafting state is unreadable"
+                    : "Malum altar is still crafting";
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
+                    recipeId, pos, validationFailureDetail);
             return false;
         }
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) {
                 player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+                validationFailureDetail = "Malum altar main inventory is not empty";
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
+                        recipeId, pos, validationFailureDetail);
                 return false;
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed — assuming busy", e);
             player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+            validationFailureDetail = "Malum altar main inventory could not be inspected";
             return false;
         }
 
@@ -150,20 +164,34 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] Cannot capture pedestals — assuming busy", e);
             player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+            validationFailureDetail = "Malum altar pedestals could not be inspected";
             return false;
         }
         if (pedestals != null) {
             int emptyPedCount = countEmptyPedestalSlots(pedestals);
             List<?> extraItems = (List<?>) getField(recipe, "extraItems");
-            int needed = extraItems != null ? extraItems.size() : 0;
+            int needed = requiredPedestalSlots(extraItems);
             if (emptyPedCount < needed) {
                 player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
+                validationFailureDetail = "Malum altar has insufficient empty pedestals ("
+                        + emptyPedCount + "/" + needed + ")";
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
+                        recipeId, pos, validationFailureDetail);
                 return false;
             }
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] validateAndInit OK: recipe={}", recipeId);
         return true;
+    }
+
+    @Override
+    public PreparationResult prepare(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, @Nonnull BlockPos pos) {
+        return validateAndInit(player, recipeId, dim, pos)
+                ? PreparationResult.ready()
+                : PreparationResult.retry(validationFailureDetail);
     }
 
     @Override
@@ -243,9 +271,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     int itemCount = CraftPacketUtils.readIngredientCount(eItem, 1);
                     ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, ing, itemCount, ledger);
                     if (stack.isEmpty()) break extraction;
-                    int placedIdx = placeOnNextEmptyPedestal(pedestals, pedIdx, stack);
-                    filledPedestalIndices.add(placedIdx - 1);
-                    pedIdx = placedIdx;
+                    pedIdx = placeAcrossPedestals(pedestals, pedIdx, stack);
                 }
             }
 
@@ -287,6 +313,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             clearPedestals();
             return false;
         }
+
+        // Lodestone's inventory keeps a cached non-empty stack list that is
+        // not reliably invalidated by reflective setStackInSlot calls. Refresh
+        // it before Malum scans the altar for a matching recipe.
+        refreshInventoryCaches();
 
         // Phase 3: let the altar's native tick() drive the crafting animation.
         // We call init() to force recipe recalculation so the altar recognizes
@@ -366,6 +397,18 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         int extraCount = extraItems != null ? extraItems.size() : 0;
         int spiritCount = spirits != null ? spirits.size() : 0;
+        int expectedMaterialCount = (inputObj != null ? 1 : 0) + extraCount + spiritCount;
+        if (materials.size() != expectedMaterialCount) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Malum] Material count mismatch before altar placement: recipe={} pos={} expected={} actual={}",
+                    recipe.getId(), myPos, expectedMaterialCount, materials.size());
+            return false;
+        }
+
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-Batch-Malum] Placing materials: recipe={} pos={} center={} extras={} spirits={} materials={}",
+                recipe.getId(), myPos, inputObj != null, extraCount, spiritCount,
+                describeMaterials(materials));
 
         try {
             pedestals = capturePedestals();
@@ -374,7 +417,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         int emptyPedestalCount = countEmptyPedestalSlots(pedestals);
-        if (extraCount > emptyPedestalCount) return false;
+        if (requiredPedestalSlots(extraItems) > emptyPedestalCount) return false;
 
         this.filledPedestalIndices = new ArrayList<>();
 
@@ -396,9 +439,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                 for (int i = 0; i < extraCount && matIdx < materials.size(); i++) {
                     ItemStack stack = materials.get(matIdx++);
                     if (stack.isEmpty()) continue;
-                    int placedIdx = placeOnNextEmptyPedestal(pedestals, pedIdx, stack);
-                    filledPedestalIndices.add(placedIdx - 1);
-                    pedIdx = placedIdx;
+                    pedIdx = placeAcrossPedestals(pedestals, pedIdx, stack);
                 }
             }
 
@@ -411,6 +452,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     }
                 }
             }
+            refreshInventoryCaches();
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Batch-Malum] Materials placed: recipe={} pos={} center={} spiritSlots={} pedestalsFilled={}",
+                    recipe.getId(), myPos, stackSummary(invMain, 0), spiritCount,
+                    filledPedestalIndices == null ? 0 : filledPedestalIndices.size());
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Malum] Material placement failed:", e);
             clearPedestals();
@@ -458,6 +504,49 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         craftWasSeenActive = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Craft (with materials) started via native tick: recipe={}", recipe.getId());
         return true;
+    }
+
+    private static String describeMaterials(List<ItemStack> materials) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < materials.size(); i++) {
+            if (i > 0) result.append(", ");
+            ItemStack stack = materials.get(i);
+            if (stack == null || stack.isEmpty()) {
+                result.append("empty");
+            } else {
+                ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+                result.append(id == null ? "unknown" : id).append(" x").append(stack.getCount());
+            }
+        }
+        return result.append(']').toString();
+    }
+
+    private static String stackSummary(Object handler, int slot) {
+        try {
+            ItemStack stack = (ItemStack) handler.getClass()
+                    .getMethod("getStackInSlot", int.class).invoke(handler, slot);
+            return stack == null || stack.isEmpty() ? "empty" : describeMaterials(List.of(stack));
+        } catch (Exception ignored) {
+            return "unreadable";
+        }
+    }
+
+    private static void updateInventoryData(Object inventory) {
+        if (inventory == null) return;
+        try { inventory.getClass().getMethod("updateData").invoke(inventory); }
+        catch (ReflectiveOperationException ignored) { }
+    }
+
+    private void refreshInventoryCaches() {
+        updateInventoryData(invMain);
+        updateInventoryData(invSpirit);
+        if (pedestals == null) return;
+        for (Object pedestal : pedestals) {
+            if (isSpiritCrucible(pedestal)) continue;
+            try {
+                updateInventoryData(pedestal.getClass().getMethod("getSuppliedInventory").invoke(pedestal));
+            } catch (ReflectiveOperationException ignored) { }
+        }
     }
 
     /** Refresh Malum's cached altar accelerators after RSI places inputs directly. */
@@ -763,6 +852,57 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             }
         }
         throw new IllegalStateException("No empty pedestal slot found from index " + startIdx);
+    }
+
+    /**
+     * Malum matches extra ingredients across pedestal stacks. In particular,
+     * non-stackable items such as scythes cannot be represented as one stack
+     * with count 2: the item handler clamps that stack to one and matching
+     * then reports a shortage. Split a reserved stack according to its real
+     * max stack size and record every pedestal for cleanup/refund.
+     */
+    private int placeAcrossPedestals(List<?> pedestals, int startIdx, ItemStack stack) throws Exception {
+        int nextIdx = startIdx;
+        int remaining = stack.getCount();
+        int maxPerPedestal = Math.max(1, stack.getMaxStackSize());
+        while (remaining > 0) {
+            int amount = Math.min(remaining, maxPerPedestal);
+            ItemStack part = stack.copy();
+            part.setCount(amount);
+            int placedIdx = placeOnNextEmptyPedestal(pedestals, nextIdx, part);
+            filledPedestalIndices.add(placedIdx - 1);
+            nextIdx = placedIdx;
+            remaining -= amount;
+        }
+        return nextIdx;
+    }
+
+    /** Calculates how many pedestal slots the recipe can actually require. */
+    private int requiredPedestalSlots(@Nullable List<?> extraItems) {
+        if (extraItems == null || extraItems.isEmpty()) return 0;
+        int required = 0;
+        for (Object extra : extraItems) {
+            Object countObj = getField(extra, "count");
+            Object ingredientObj = getField(extra, "ingredient");
+            int count = countObj instanceof Number number ? Math.max(0, number.intValue()) : 1;
+            int maxStack = Integer.MAX_VALUE;
+            if (ingredientObj instanceof Ingredient ingredient) {
+                for (ItemStack option : ingredient.getItems()) {
+                    if (!option.isEmpty()) {
+                        maxStack = Math.min(maxStack, Math.max(1, option.getMaxStackSize()));
+                    }
+                }
+            }
+            if (maxStack == Integer.MAX_VALUE) maxStack = 1;
+            required += pedestalSlotsForCount(count, maxStack);
+        }
+        return required;
+    }
+
+    static int pedestalSlotsForCount(int count, int maxStackSize) {
+        if (count <= 0) return 0;
+        int safeMaxStackSize = Math.max(1, maxStackSize);
+        return (count + safeMaxStackSize - 1) / safeMaxStackSize;
     }
 
     private void clearPedestals() {

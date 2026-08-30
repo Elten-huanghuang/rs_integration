@@ -38,10 +38,12 @@ final class AsyncMaxCraftablePlanningService {
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
                                    int maxSearchStates, int maxMemoizedFailures,
                                    int timeoutMs) {
-        RecipeNode target = snapshot.recipeGraph().recipesById().get(snapshot.recipeId());
-        if (target == null) return new CompletedSearch(false, 0, null, snapshot);
         Map<MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
+        ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(
+                snapshot.recipeGraph(), stock);
+        RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
+        if (target == null) return new CompletedSearch(false, 0, null, snapshot);
         MaxCraftableSearch search = new MaxCraftableSearch(limit);
         PureRecipePlanner.Result best = null;
         long deadlineNanos = AsyncPurePlanningService.deadlineAfterMillis(
@@ -51,7 +53,7 @@ final class AsyncMaxCraftablePlanningService {
             PlanningThreadContext.throwIfCancelled();
             int count = probe.getAsInt();
             PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                    snapshot.recipeGraph(), stock, scale(target.inputs(), count), maxSteps,
+                    planningGraph, stock, scale(target.inputs(), count), maxSteps,
                     maxSearchStates, maxMemoizedFailures, deadlineNanos);
             Verdict verdict = switch (result.feasibility()) {
                 case FEASIBLE -> Verdict.FEASIBLE;
@@ -66,7 +68,7 @@ final class AsyncMaxCraftablePlanningService {
     }
 
     private static List<IngredientRef> scale(List<IngredientRef> roots, int multiplier) {
-        return roots.stream().map(root -> new IngredientRef(root.alternatives(),
+        return roots.stream().map(root -> root.withCount(
                 Math.toIntExact(Math.min(Integer.MAX_VALUE,
                         (long) root.count() * multiplier)))).toList();
     }

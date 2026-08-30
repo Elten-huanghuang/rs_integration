@@ -93,7 +93,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        if (recipe != null && recipe.getClass().getName().endsWith("ShapedTableCraftingRecipe")) {
+        if (recipe != null && isShapedTableRecipe(recipe)) {
             // Avaritia's shaped matcher reads the complete square handler and
             // preserves empty cells. Keep those cells in the material contract
             // so a pattern is inserted at its original coordinates.
@@ -155,8 +155,8 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         if (be == null) return false;
 
         String beClassName = be.getClass().getName();
-        if (!beClassName.equals("committee.nova.mods.avaritia.common.tile.TierCraftTile")) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Not a TierCraftTile at {}", myPos);
+        if (!isCraftingTableBlockEntity(beClassName)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CT] Unsupported crafting-table block entity {} at {}", beClassName, myPos);
             return false;
         }
 
@@ -266,7 +266,22 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     private static IItemHandler getHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
                 net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);
-        return cap.resolve().orElse(null);
+        IItemHandler handler = cap.resolve().orElse(null);
+        if (handler != null) return handler;
+
+        // Re-Avaritia 1.3.8.x exposes the live 81-slot handler through
+        // ExtremeCraftingTile#getInventory(), while its capability can be
+        // empty when the tile is marked removed or queried during dispatch.
+        // Resolve this optional API reflectively so older/newer Avaritia
+        // versions remain link-safe.
+        try {
+            Method inventoryMethod = be.getClass().getMethod("getInventory");
+            Object inventory = inventoryMethod.invoke(be);
+            if (inventory instanceof IItemHandler itemHandler) return itemHandler;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Vanilla/other Avaritia block entities do not expose getInventory().
+        }
+        return null;
     }
 
     private void clearGrid(IItemHandler handler) {
@@ -325,7 +340,26 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             Object value = method.invoke(recipe);
             return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
         } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Re-Avaritia 1.3.8.x uses distinct Extreme recipe classes but
+            // does not expose getTier(). Those recipes always target tier 4.
+            if (isReAvaritiaExtremeRecipeClass(recipe.getClass().getName())) return 4;
             return 0;
         }
+    }
+
+    private static boolean isShapedTableRecipe(Recipe<?> candidate) {
+        String name = candidate.getClass().getName();
+        return name.endsWith("ShapedTableCraftingRecipe")
+                || name.endsWith("ShapedExtremeCraftingRecipe");
+    }
+
+    static boolean isCraftingTableBlockEntity(String className) {
+        return className.equals("committee.nova.mods.avaritia.common.tile.TierCraftTile")
+                || className.equals("committee.nova.mods.avaritia.common.tile.ExtremeCraftingTile");
+    }
+
+    static boolean isReAvaritiaExtremeRecipeClass(String className) {
+        return className.endsWith("ShapedExtremeCraftingRecipe")
+                || className.endsWith("ShapelessExtremeCraftingRecipe");
     }
 }

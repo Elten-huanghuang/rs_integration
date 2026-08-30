@@ -17,13 +17,15 @@ final class PureDemandNormalizer {
     static List<IngredientRef> mergeEquivalent(List<IngredientRef> demands) {
         if (demands.size() < 2) return List.copyOf(demands);
 
-        Map<Set<MaterialRef>, AccumulatedDemand> merged = new LinkedHashMap<>();
+        Map<DemandKey, AccumulatedDemand> merged = new LinkedHashMap<>();
         for (IngredientRef demand : demands) {
-            Set<MaterialRef> key = Set.copyOf(demand.alternatives());
+            DemandKey key = new DemandKey(Set.copyOf(demand.alternatives()),
+                    demand.nbtMatchMode());
             AccumulatedDemand accumulated = merged.get(key);
             if (accumulated == null) {
                 merged.put(key, new AccumulatedDemand(
-                        List.copyOf(new LinkedHashSet<>(demand.alternatives())), demand.count()));
+                        List.copyOf(new LinkedHashSet<>(demand.alternatives())), demand.count(),
+                        demand.nbtMatchMode()));
             } else {
                 accumulated.add(demand.count());
             }
@@ -31,18 +33,25 @@ final class PureDemandNormalizer {
 
         List<IngredientRef> normalized = new ArrayList<>(merged.size());
         for (AccumulatedDemand demand : merged.values()) {
-            normalized.add(new IngredientRef(demand.alternatives, demand.count));
+            normalized.add(new IngredientRef(demand.alternatives, demand.count,
+                    demand.nbtMatchMode));
         }
         return List.copyOf(normalized);
     }
 
+    private record DemandKey(Set<MaterialRef> alternatives,
+                             ImmutableRecipeGraph.NbtMatchMode nbtMatchMode) {}
+
     private static final class AccumulatedDemand {
         private final List<MaterialRef> alternatives;
+        private final ImmutableRecipeGraph.NbtMatchMode nbtMatchMode;
         private int count;
 
-        private AccumulatedDemand(List<MaterialRef> alternatives, int count) {
+        private AccumulatedDemand(List<MaterialRef> alternatives, int count,
+                                  ImmutableRecipeGraph.NbtMatchMode nbtMatchMode) {
             this.alternatives = alternatives;
             this.count = count;
+            this.nbtMatchMode = nbtMatchMode;
         }
 
         private void add(int additional) {

@@ -28,6 +28,8 @@ final class RefinedStorageSession implements StorageSession {
     private final RefinedStorageDriver driver;
     private final StorageReference reference;
     private final StorageInsertObserver insertObserver;
+    private long snapshotTick = Long.MIN_VALUE;
+    private StorageSnapshotResult snapshotCache;
 
     RefinedStorageSession(RefinedStorageDriver driver, StorageReference reference,
                           StorageInsertObserver insertObserver) {
@@ -47,17 +49,32 @@ final class RefinedStorageSession implements StorageSession {
     @Override
     public StorageSnapshotResult snapshotItems(ServerPlayer player) {
         StorageThreadGuard.requireServerThread(player);
+        long currentTick = player.server.getTickCount();
+        if (snapshotCache != null && snapshotTick == currentTick) return snapshotCache;
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.VIEW);
-        if (!permission.allowedAccess()) return StorageSnapshotResult.failure(
-                toSnapshotStatus(permission), permission.diagnosticCode());
-        try {
-            return RefinedStorageSnapshotMapper.map(driver.snapshotItems());
-        } catch (RefinedStorageUnavailableException e) {
-            return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
-        } catch (RuntimeException | LinkageError e) {
-            return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
-                    StorageDiagnosticCode.BACKEND_EXCEPTION);
+        if (!permission.allowedAccess()) {
+            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(
+                    toSnapshotStatus(permission), permission.diagnosticCode()));
         }
+        try {
+            return cacheSnapshot(currentTick, RefinedStorageSnapshotMapper.map(driver.snapshotItems()));
+        } catch (RefinedStorageUnavailableException e) {
+            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE));
+        } catch (RuntimeException | LinkageError e) {
+            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
+                    StorageDiagnosticCode.BACKEND_EXCEPTION));
+        }
+    }
+
+    private StorageSnapshotResult cacheSnapshot(long tick, StorageSnapshotResult result) {
+        snapshotTick = tick;
+        snapshotCache = result;
+        return result;
+    }
+
+    private void invalidateSnapshot() {
+        snapshotTick = Long.MIN_VALUE;
+        snapshotCache = null;
     }
 
     @Override
@@ -103,7 +120,10 @@ final class RefinedStorageSession implements StorageSession {
         if (template.isEmpty()) return StorageOperationResult.failedExtraction(
                 mode(simulate), amount,
                 StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
-        return RefinedStorageOperationExecutor.extract(driver, key, template, amount, target, simulate);
+        StorageOperationResult result = RefinedStorageOperationExecutor.extract(
+                driver, key, template, amount, target, simulate);
+        if (!simulate) invalidateSnapshot();
+        return result;
     }
 
     @Override
@@ -152,7 +172,9 @@ final class RefinedStorageSession implements StorageSession {
             }
             remaining -= result.transferredAmount().orElseThrow();
         }
-        return StorageOperationResult.extracted(mode(simulate), amount, extracted);
+        StorageOperationResult result = StorageOperationResult.extracted(mode(simulate), amount, extracted);
+        if (!simulate) invalidateSnapshot();
+        return result;
     }
 
     @Override
@@ -168,9 +190,11 @@ final class RefinedStorageSession implements StorageSession {
                     permission.diagnosticCode());
         }
         ItemStack input = stack.copy();
-        return RefinedStorageOperationExecutor.insert(driver, input, simulate,
+        StorageOperationResult result = RefinedStorageOperationExecutor.insert(driver, input, simulate,
                 accepted -> driver.recordInsertion(player, accepted),
                 accepted -> insertObserver.beforePerform(player, reference, accepted));
+        if (!simulate) invalidateSnapshot();
+        return result;
     }
 
     private static StorageOperationResult failedPermissionExtraction(long amount,

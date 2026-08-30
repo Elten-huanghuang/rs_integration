@@ -28,7 +28,7 @@ public final class SelfAmplifyingRecipePolicy {
             }
             int count = amplification && input.alternatives().contains(target.output())
                     ? input.count() : saturatingMultiply(input.count(), multiplier);
-            scaled.add(new IngredientRef(alternatives, count));
+            scaled.add(new IngredientRef(alternatives, count, input.nbtMatchMode()));
         }
         return List.copyOf(scaled);
     }

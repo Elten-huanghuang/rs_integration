@@ -37,6 +37,7 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
     public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
+    public static final int DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS = 8;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
             CraftingPreviewPolicy.DEFAULT_RATE_LIMIT_MS;
     public static final int DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS =
@@ -217,6 +218,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
@@ -303,7 +305,7 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with SlashBlade (crafting table recipes with NBT requirements).")
                 .define("enableSlashblade", true);
         ENABLE_AVARITIA = c
-                .comment("Enable RS integration with Avaritia (Dire Crafting Tables, Neutron Compressor,",
+                .comment("Enable RS integration with Avaritia (Dire Crafting Tables,",
                         "Extreme Smithing Table, Neutron Collector, Chest, Tesseract, Anvil).")
                 .define("enableAvaritia", true);
         ENABLE_CONFLUENCE = c
@@ -560,7 +562,7 @@ public final class RSIntegrationConfig {
         AUTO_EAT_MAX_PER_BATCH = c
                 .comment("Maximum number of food items eaten in a single batch.",
                         "Range: 1-1024.")
-                .defineInRange("maxPerBatch", 128, 1, 1024);
+                .defineInRange("maxPerBatch", 16, 1, 1024);
         c.pop();
 
         c.push("containerTransfer");
@@ -848,6 +850,13 @@ public final class RSIntegrationConfig {
                         "The manager distributes this budget fairly between chains. Range: 1-1024.")
                 .defineInRange("craftingGlobalVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK, 1, 1024);
+        CRAFTING_SERVER_TICK_BUDGET_MS = s
+                .comment("Maximum time (ms) RSI may spend advancing active crafting chains in one server tick.",
+                        "Remaining chains continue on later ticks after the budget is reached.",
+                        "This protects server responsiveness; it cannot interrupt one third-party API call already in progress.",
+                        "Range: 1-40.")
+                .defineInRange("craftingServerTickBudgetMs",
+                        DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS, 1, 40);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
                 .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
                         "Set to 1 for serial execution (safest); increase for multi-machine speedup.",

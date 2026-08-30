@@ -147,7 +147,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
             if (!simulate) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-Storage-RS] insert {} x{} -> remainder x{} at {}",
-                        stack.getHoverName().getString(), stack.getCount(), remainder.getCount(),
+                        com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), remainder.getCount(),
                         network.getPosition());
             }
             return StorageOperationResult.inserted(

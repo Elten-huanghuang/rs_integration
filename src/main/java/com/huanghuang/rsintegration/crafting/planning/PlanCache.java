@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import net.minecraft.resources.ResourceLocation;
 
@@ -55,7 +56,18 @@ public final class PlanCache {
 
     public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
                     PureRecipePlanner.Result purePlan, long now) {
-        entries.put(key, new Entry(plan, snapshot, purePlan, now));
+        put(key, plan, snapshot, purePlan, null, now);
+    }
+
+    /**
+     * Stores the server-authoritative graph produced by the typed resolver as
+     * well as the client response.  Confirming a preview can then reuse this
+     * graph after state revalidation instead of running the bounded resolver
+     * again on the server thread.
+     */
+    public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
+                    PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph, long now) {
+        entries.put(key, new Entry(plan, snapshot, purePlan, resolvedGraph, now));
         prune(now);
     }
 
@@ -109,5 +121,6 @@ public final class PlanCache {
     }
 
     public record Entry(PlanResponse plan, PlanningSnapshot snapshot,
-                        PureRecipePlanner.Result purePlan, long createdNanos) {}
+                        PureRecipePlanner.Result purePlan,
+                        CraftPlanGraph resolvedGraph, long createdNanos) {}
 }

@@ -26,6 +26,11 @@ public final class NativeItemTaskSubmissionService {
 
     /** Returns true when the native submit callback must be cancelled. */
     public static boolean handleExplicitSubmission(ItemTask task, TeamData data, ServerPlayer player) {
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-FTBQuests] Submit packet task={} locked={} screenOnly={} onlyFromCrafting={} consumes={} completed={}",
+                task.getId(), data == null || data.isLocked(), task.isTaskScreenOnly(),
+                task.isOnlyFromCrafting(), task.consumesResources(),
+                data != null && data.isCompleted(task));
         if (data == null || data.isLocked() || task.isTaskScreenOnly()
                 || task.isOnlyFromCrafting() || !task.consumesResources()
                 || data.isCompleted(task)

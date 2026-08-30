@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * Server-thread tick loop for bounded concurrent DAG node execution.
@@ -100,6 +101,7 @@ public final class ConcurrentNodeExecutor {
     private final CompletionHandler completions;
     private final FailureHandler failures;
     private final ExclusivityOracle exclusivity;
+    private final Predicate<NodeId> dispatchable;
     private final int maxConcurrentNodes;
     private final int maxDispatchPerTick;
     private final int maxDispatchPerCraft;
@@ -113,7 +115,8 @@ public final class ConcurrentNodeExecutor {
         this(scheduler, adapt(workers), maxConcurrentNodes, nodeId -> false,
                 (nodeId, worker) -> { },
                 (nodeId, worker) -> CompletionStatus.SUCCEEDED,
-                maxConcurrentNodes, Integer.MAX_VALUE);
+                (nodeId, worker) -> { },
+                maxConcurrentNodes, Integer.MAX_VALUE, nodeId -> true);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
@@ -121,7 +124,8 @@ public final class ConcurrentNodeExecutor {
         this(scheduler, adapt(workers), maxConcurrentNodes, exclusivity,
                 (nodeId, worker) -> { },
                 (nodeId, worker) -> CompletionStatus.SUCCEEDED,
-                maxConcurrentNodes, Integer.MAX_VALUE);
+                (nodeId, worker) -> { },
+                maxConcurrentNodes, Integer.MAX_VALUE, nodeId -> true);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
@@ -129,7 +133,8 @@ public final class ConcurrentNodeExecutor {
         this(scheduler, workers, maxConcurrentNodes, exclusivity,
                 (nodeId, worker) -> { },
                 (nodeId, worker) -> CompletionStatus.SUCCEEDED,
-                maxConcurrentNodes, Integer.MAX_VALUE);
+                (nodeId, worker) -> { },
+                maxConcurrentNodes, Integer.MAX_VALUE, nodeId -> true);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
@@ -137,7 +142,8 @@ public final class ConcurrentNodeExecutor {
                                   CompletionHandler completions) {
         this(scheduler, workers, maxConcurrentNodes, exclusivity,
                 (nodeId, worker) -> { }, completions,
-                maxConcurrentNodes, Integer.MAX_VALUE);
+                (nodeId, worker) -> { },
+                maxConcurrentNodes, Integer.MAX_VALUE, nodeId -> true);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
@@ -154,7 +160,8 @@ public final class ConcurrentNodeExecutor {
                                   CompletionHandler completions, int maxDispatchPerTick,
                                   int maxDispatchPerCraft) {
         this(scheduler, workers, maxConcurrentNodes, exclusivity, publications,
-                completions, (nodeId, worker) -> { }, maxDispatchPerTick, maxDispatchPerCraft);
+                completions, (nodeId, worker) -> { }, maxDispatchPerTick, maxDispatchPerCraft,
+                nodeId -> true);
     }
 
     public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
@@ -162,12 +169,23 @@ public final class ConcurrentNodeExecutor {
                                   PublicationHandler publications,
                                   CompletionHandler completions, FailureHandler failures,
                                   int maxDispatchPerTick, int maxDispatchPerCraft) {
+        this(scheduler, workers, maxConcurrentNodes, exclusivity, publications, completions,
+                failures, maxDispatchPerTick, maxDispatchPerCraft, nodeId -> true);
+    }
+
+    public ConcurrentNodeExecutor(DagScheduler scheduler, AdmissionWorkerFactory workers,
+                                  int maxConcurrentNodes, ExclusivityOracle exclusivity,
+                                  PublicationHandler publications,
+                                  CompletionHandler completions, FailureHandler failures,
+                                  int maxDispatchPerTick, int maxDispatchPerCraft,
+                                  Predicate<NodeId> dispatchable) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.workers = Objects.requireNonNull(workers, "workers");
         this.publications = Objects.requireNonNull(publications, "publications");
         this.completions = Objects.requireNonNull(completions, "completions");
         this.failures = Objects.requireNonNull(failures, "failures");
         this.exclusivity = Objects.requireNonNull(exclusivity, "exclusivity");
+        this.dispatchable = Objects.requireNonNull(dispatchable, "dispatchable");
         if (maxConcurrentNodes < 1 || maxDispatchPerTick < 1 || maxDispatchPerCraft < 1) {
             throw new IllegalArgumentException("executor limits must be positive");
         }
@@ -304,6 +322,7 @@ public final class ConcurrentNodeExecutor {
         int dispatchedNow = 0;
         for (NodeId nodeId : ready) {
             if (running.size() >= maxConcurrentNodes || dispatchedNow >= dispatchLimit) break;
+            if (!dispatchable.test(nodeId)) continue;
             if (isExclusive(nodeId)) continue;
 
             StartStatus status = dispatch(nodeId);
@@ -318,6 +337,7 @@ public final class ConcurrentNodeExecutor {
         // so one unavailable machine cannot stall otherwise runnable work.
         if (!running.isEmpty() || dispatchedNow > 0 || dispatchedNow >= dispatchLimit) return;
         for (NodeId nodeId : ready) {
+            if (!dispatchable.test(nodeId)) continue;
             if (!isExclusive(nodeId)) continue;
             StartStatus status = dispatch(nodeId);
             if (status != StartStatus.RETRY) return;

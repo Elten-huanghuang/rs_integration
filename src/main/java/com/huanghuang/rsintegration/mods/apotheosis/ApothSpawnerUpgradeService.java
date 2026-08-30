@@ -299,7 +299,7 @@ public final class ApothSpawnerUpgradeService {
         if (snapshot == null) return 0;
         for (var entry : snapshot.items()) {
             if (ingredient.test(entry.stack())) {
-                total += (int) Math.min(Integer.MAX_VALUE, entry.amount());
+                total = saturatingAdd(total, entry.amount());
             }
         }
         return total;
@@ -312,10 +312,15 @@ public final class ApothSpawnerUpgradeService {
         if (snapshot == null) return 0;
         for (var entry : snapshot.items()) {
             if (ItemStack.isSameItemSameTags(entry.stack(), template)) {
-                total += (int) Math.min(Integer.MAX_VALUE, entry.amount());
+                total = saturatingAdd(total, entry.amount());
             }
         }
         return total;
+    }
+
+    private static int saturatingAdd(int current, long amount) {
+        if (amount <= 0 || current >= Integer.MAX_VALUE) return current;
+        return (int) Math.min(Integer.MAX_VALUE, (long) current + amount);
     }
 
     @Nullable

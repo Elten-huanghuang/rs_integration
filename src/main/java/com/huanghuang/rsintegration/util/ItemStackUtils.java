@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.util;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
 public final class ItemStackUtils {
@@ -7,6 +8,13 @@ public final class ItemStackUtils {
     private static final int MAX_NETWORK_COUNT = 64;
 
     private ItemStackUtils() {}
+
+    /** Server-safe item identifier for diagnostics. Never resolves a hover name. */
+    public static String registryId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "empty";
+        var id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        return id == null ? "unknown" : id.toString();
+    }
 
     /** Returns true if the stack is safe for network transmission. */
     public static boolean isSafeForNetwork(ItemStack stack) {

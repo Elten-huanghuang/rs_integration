@@ -38,7 +38,7 @@ class RecipeGraphWarmUpContractTest {
 
     @Test
     void explicitWarmUpEntryPointRemainsBinaryCompatible() throws IOException {
-        Set<String> calls = methodCalls(RecipeIndex.class, "warmUp");
+        Set<String> calls = methodCalls(RecipeIndex.class, "warmUpBlocking");
 
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".buildSynchronously"));
     }

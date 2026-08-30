@@ -36,6 +36,9 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Unified recipe index replacing the split {@code CraftingPlanManager} +
@@ -70,6 +73,12 @@ public final class RecipeIndex {
     private static volatile RecipeManager source;
     private static volatile long sourceRevision;
     private static volatile boolean generationBuildFailed;
+    private static final AtomicBoolean BUILD_IN_FLIGHT = new AtomicBoolean();
+    private static final ExecutorService WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "RSI-RecipeCatalog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private RecipeIndex() {}
 
@@ -96,8 +105,38 @@ public final class RecipeIndex {
         warmUp(level);
     }
 
-    /** Retained for integrations compiled against the original eager entry point. */
+    /**
+     * Starts catalog generation without blocking the server thread. The
+     * published maps are immutable, so readers continue using the previous
+     * generation (or remain queued) while this build runs.
+     */
     public static void warmUp(Level level) {
+        if (level == null || isReady(level)) return;
+        generationBuildFailed = false;
+        if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) return;
+        WARMUP_EXECUTOR.execute(() -> {
+            long start = System.currentTimeMillis();
+            try {
+                // Keep the original private entry point in this worker so all
+                // indexing code remains in one transaction and is published
+                // only after the complete generation has been built.
+                buildSynchronously(level);
+                RSIntegrationMod.LOGGER.info("[RecipeCatalog] async generation ready in {}ms",
+                        System.currentTimeMillis() - start);
+            } catch (RuntimeException | LinkageError e) {
+                invalidate();
+                generationBuildFailed = true;
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeCatalog] async generation build failed; planning remains unavailable", e);
+            } finally {
+                BUILD_IN_FLIGHT.set(false);
+            }
+        });
+    }
+
+    /** Compatibility fallback for callers that explicitly require a ready index now. */
+    public static void warmUpBlocking(Level level) {
+        if (level == null) return;
         long start = System.currentTimeMillis();
         generationBuildFailed = false;
         try {
@@ -308,6 +347,17 @@ public final class RecipeIndex {
             if (node != null) {
                 projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
             }
+        } else if (isTypedPureProjectionCandidate(handler, type, recipe)) {
+            long graphStarted = System.nanoTime();
+            List<IngredientSpec> typedSpecs = handler.getIngredients(recipe);
+            ImmutableRecipeGraph.RecipeNode node = typedSpecs == null ? null
+                    : ImmutableRecipeGraphProjector.projectRecipe(
+                    recipe.getId(), result, typedSpecs, type.id(), typeId,
+                    !handler.hasRuntimeDependentPrimaryNbt(recipe));
+            timing.graphNanos += System.nanoTime() - graphStarted;
+            if (node != null) {
+                projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
+            }
         }
         if (handler != null) {
             for (ItemStack secondary : handler.getSecondaryOutputs(recipe, level.registryAccess())) {
@@ -317,6 +367,13 @@ public final class RecipeIndex {
             }
         }
         return IndexOutcome.INDEXED;
+    }
+
+    static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,
+                                                   Recipe<?> recipe) {
+        return handler != null && type != null && recipe != null
+                && type.graphExecutionAudit() == ModType.GraphExecutionAudit.GRAPH_SAFE
+                && handler.hasDeterministicPrimaryOutput(recipe);
     }
 
     private static Map<Item, List<Entry>> freezeIndex(Map<Item, List<Entry>> mutable) {
@@ -562,7 +619,7 @@ public final class RecipeIndex {
                 ItemStack[] items = ing.getItems();
                 if (items.length > 0 && !items[0].isEmpty()) {
                     RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA fallback output for {}: {}",
-                            id, items[0].getHoverName().getString());
+                            id, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(items[0]));
                     return items[0].copy();
                 }
             }

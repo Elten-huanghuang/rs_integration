@@ -103,7 +103,7 @@ public final class PlayerUtils {
             int stored = stack.getCount() - remainder.getCount();
             if (stored > 0) {
                 RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
-                    stack.getHoverName().getString(), stored);
+                    ItemStackUtils.registryId(stack), stored);
             }
             // Fall through to world-spawn drop for anything the network rejected.
             stack = remainder;
@@ -116,7 +116,7 @@ public final class PlayerUtils {
                 new ItemEntity(spawnLevel,
                     spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack));
             RSIntegrationMod.LOGGER.warn("[RSI] Refund dropped at world spawn (player {} in unloaded chunk): {} x{}",
-                player.getGameProfile().getName(), stack.getHoverName().getString(), stack.getCount());
+                player.getGameProfile().getName(), ItemStackUtils.registryId(stack), stack.getCount());
         }
     }
 

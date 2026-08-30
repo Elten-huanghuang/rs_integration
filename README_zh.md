@@ -266,7 +266,7 @@ RS Integration 让 Refined Storage 可以自动使用其他模组的机器。你
 | Immortaler's Delight | 新旧版本怨泉；怨泉桶资源可通过共振磁盘参与合成 |
 | Apotheosis | 制箭、宝石切割、附魔图书馆批量扫描与导入、重铸台远程 GUI，以及服务端校验的刷怪笼升级与缺料递归制作 |
 | TACZ 与兼容枪包 | 枪械工作台配方，包括带 NBT 的枪械和弹药 |
-| Avaritia | 压缩、双重压缩、末地、下界、幽匿与终极六级工作台，四级中子态素压缩机，以及终极锻造台 |
+| Avaritia | 压缩、双重压缩、末地、下界、幽匿与终极六级工作台，以及终极锻造台 |
 | SlashBlade | 带 NBT 判定的工作台配方 |
 | Confluence | 工坊 |
 | Distant Worlds | Lithum 祭坛及相关交互；准星 HUD 显示配方、能量、恢复速度和八个基座状态 |

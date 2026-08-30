@@ -184,10 +184,10 @@ public final class RSSidePanelClickPacket {
         int actual = extracted.isEmpty() ? 0 : extracted.getCount();
         if (action == ACTION_PICK_BLOCK && actual > 0) {
             player.displayClientMessage(Component.translatable(
-                    "rsi.world_pick.extracted", targetItem.getHoverName(), actual), true);
+                    "rsi.world_pick.extracted", Component.translatable(targetItem.getDescriptionId()), actual), true);
         } else if (action == ACTION_PICK_BLOCK) {
             player.displayClientMessage(Component.translatable(
-                    "rsi.world_pick.failed", targetItem.getHoverName()), true);
+                    "rsi.world_pick.failed", Component.translatable(targetItem.getDescriptionId())), true);
         }
         return actual > 0
                 ? OperationResult.success(panelId, actual)
@@ -636,17 +636,23 @@ public final class RSSidePanelClickPacket {
             if (knownRemainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Pick-block {} refund became indeterminate for {} x{}",
-                        reason, stack.getHoverName().getString(), stack.getCount());
+                        reason, itemId(stack), stack.getCount());
                 continue;
             }
             ItemStack remainder = knownRemainder.orElse(ItemStack.EMPTY);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Pick-block {} refund left {} x{}; dropping remainder",
-                        reason, remainder.getHoverName().getString(), remainder.getCount());
+                        reason, itemId(remainder), remainder.getCount());
                 player.drop(remainder, false);
             }
         }
+    }
+
+    private static String itemId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "empty";
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id != null ? id.toString() : "unknown";
     }
 
     /** Sync the cursor slot to the client.  The client optimistically clears

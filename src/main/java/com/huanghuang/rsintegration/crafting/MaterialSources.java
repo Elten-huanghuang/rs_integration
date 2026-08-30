@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class MaterialSources {
 
     private static final Map<String, Map<StackKey, Integer>> cache = new ConcurrentHashMap<>();
+    private static final Map<String, Map<StackKey, Integer>> networkCache = new ConcurrentHashMap<>();
     private static final Object cacheLock = new Object();
     private static volatile int lastTick = -1;
 
@@ -85,38 +86,46 @@ public final class MaterialSources {
         if (network != null) {
             return listAllAvailable(player, CraftStorageEndpoints.fromLegacyNetwork(network));
         }
-        MinecraftServer server = player.getServer();
-        int currentTick = server != null ? server.getTickCount() : 0;
-        String cacheKey = player.getUUID() + ":" + (network != null);
-
-        if (currentTick != lastTick) {
-            synchronized (cacheLock) {
-                if (currentTick != lastTick) {
-                    cache.clear();
-                    lastTick = currentTick;
-                }
-            }
-        }
-
+        int currentTick = currentTick(player);
+        String cacheKey = cacheKey(player, null);
+        rotateCache(currentTick);
         Map<StackKey, Integer> cached = cache.get(cacheKey);
         if (cached != null) return cached;
 
         Map<StackKey, Integer> available = countInventory(player);
-        cache.putIfAbsent(cacheKey, available);
-        return available;
+        Map<StackKey, Integer> snapshot = Map.copyOf(available);
+        cache.putIfAbsent(cacheKey, snapshot);
+        return snapshot;
     }
 
     /** Backend-neutral availability view used by migrated planning callers. */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
                                                            CraftStorageEndpoint endpoint) {
+        int currentTick = currentTick(player);
+        String cacheKey = cacheKey(player, endpoint);
+        rotateCache(currentTick);
+        Map<StackKey, Integer> cached = cache.get(cacheKey);
+        if (cached != null) return cached;
+
         Map<StackKey, Integer> available = countInventory(player);
         // Keep the RS compatibility bridge on its native cache representation.
         // StorageItemKey intentionally normalizes display stacks to count=1 and
         // can lose backend-specific payload details; the old planner consumed
         // StackListEntry directly and is authoritative for RS item identity.
         if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
-            addNetworkItems(available, legacy.network());
-            return available;
+            String networkKey = networkCacheKey(legacy);
+            Map<StackKey, Integer> networkItems = networkCache.get(networkKey);
+            if (networkItems == null) {
+                Map<StackKey, Integer> scanned = new HashMap<>();
+                addNetworkItems(scanned, legacy.network());
+                networkItems = Map.copyOf(scanned);
+                Map<StackKey, Integer> existing = networkCache.putIfAbsent(networkKey, networkItems);
+                if (existing != null) networkItems = existing;
+            }
+            networkItems.forEach((key, count) -> available.merge(key, count, Integer::sum));
+            Map<StackKey, Integer> snapshot = Map.copyOf(available);
+            cache.putIfAbsent(cacheKey, snapshot);
+            return snapshot;
         }
         var snapshotResult = endpoint.snapshot(player);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
@@ -148,13 +157,54 @@ public final class MaterialSources {
                     snapshotResult.snapshot().map(s -> s.items().size()).orElse(0),
                     available.size(), exact);
         }
-        return available;
+        // A failed backend snapshot must not be cached as an inventory-only
+        // result: a transient backend failure can recover within this tick.
+        if (!snapshotResult.successful()) return available;
+        Map<StackKey, Integer> snapshot = Map.copyOf(available);
+        cache.putIfAbsent(cacheKey, snapshot);
+        return snapshot;
     }
 
     /** Invalidate cached counts for a player after items are consumed mid-tick. */
     public static void invalidateFor(ServerPlayer player) {
-        cache.remove(player.getUUID() + ":true");
-        cache.remove(player.getUUID() + ":false");
+        String prefix = player.getUUID() + ":";
+        cache.keySet().removeIf(key -> key.startsWith(prefix));
+        networkCache.clear();
+    }
+
+    private static int currentTick(ServerPlayer player) {
+        MinecraftServer server = player.getServer();
+        return server != null ? server.getTickCount() : 0;
+    }
+
+    private static String cacheKey(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null) return player.getUUID() + ":inventory";
+        try {
+            return player.getUUID() + ":" + endpoint.session().reference();
+        } catch (RuntimeException ignored) {
+            // A malformed/disconnected endpoint should remain usable as a
+            // non-cached view rather than taking down the craft request.
+            return player.getUUID() + ":endpoint@" + System.identityHashCode(endpoint);
+        }
+    }
+
+    private static String networkCacheKey(LegacyRsCraftStorageEndpoint endpoint) {
+        try {
+            return endpoint.session().reference().toString();
+        } catch (RuntimeException ignored) {
+            return "legacy@" + System.identityHashCode(endpoint.network());
+        }
+    }
+
+    private static void rotateCache(int currentTick) {
+        if (currentTick == lastTick) return;
+        synchronized (cacheLock) {
+            if (currentTick != lastTick) {
+                cache.clear();
+                networkCache.clear();
+                lastTick = currentTick;
+            }
+        }
     }
 
 }

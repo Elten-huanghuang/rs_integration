@@ -643,7 +643,7 @@ public final class RSIntegrationNetwork {
                 ItemStack refund = network.insertItem(result.copy(), result.getCount(), Action.PERFORM);
                 if (!refund.isEmpty()) {
                     RSIntegrationMod.LOGGER.error("[RSI] partial extraction refund was rejected: {} x{}",
-                            refund.getHoverName().getString(), refund.getCount());
+                            itemId(refund), refund.getCount());
                 }
             }
             return ItemStack.EMPTY;
@@ -693,22 +693,22 @@ public final class RSIntegrationNetwork {
                     ItemStack partialRefund = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
                     if (!partialRefund.isEmpty()) {
                         RSIntegrationMod.LOGGER.error("[RSI] partial exact extraction refund was rejected: {} x{}",
-                                partialRefund.getHoverName().getString(), partialRefund.getCount());
+                                itemId(partialRefund), partialRefund.getCount());
                     }
                 }
                 return ItemStack.EMPTY;
             }
             if (simulate) {
                 RSIntegrationMod.LOGGER.warn("[RSI] Simulated exact extraction returned the wrong identity: {} x{}",
-                        extracted.getDisplayName().getString(), extracted.getCount());
+                        itemId(extracted), extracted.getCount());
                 return ItemStack.EMPTY;
             }
             RSIntegrationMod.LOGGER.error("[RSI] Exact extraction returned the wrong identity; refunding {} x{}",
-                    extracted.getDisplayName().getString(), extracted.getCount());
+                    itemId(extracted), extracted.getCount());
             ItemStack leftover = network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
             if (!leftover.isEmpty()) {
                 RSIntegrationMod.LOGGER.error("[RSI] Exact extraction identity refund left {} x{} unreturned",
-                        leftover.getDisplayName().getString(), leftover.getCount());
+                        itemId(leftover), leftover.getCount());
             }
             // Return only the unrefunded fragment so the ledger can account for
             // and roll it back through its normal partial-extraction path.
@@ -717,6 +717,12 @@ public final class RSIntegrationNetwork {
             RSIntegrationMod.LOGGER.error("[RSI] extractExactFromNetwork error", e);
             return ItemStack.EMPTY;
         }
+    }
+
+    private static String itemId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "empty";
+        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id != null ? id.toString() : "unknown";
     }
 
     public static boolean hasItemInNetwork(INetwork network, Ingredient ingredient) {

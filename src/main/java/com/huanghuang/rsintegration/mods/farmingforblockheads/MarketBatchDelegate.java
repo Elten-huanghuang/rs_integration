@@ -42,6 +42,8 @@ import java.util.UUID;
  */
 public final class MarketBatchDelegate extends AbstractBatchDelegate {
     private static final LogSampler VALIDATION_LOGS = new LogSampler(60_000L);
+    /** Keep virtual trades bounded so one market order cannot monopolize a server tick. */
+    static final int MAX_TRADES_PER_BATCH = 32;
 
     // Reflection — Market API
     private static volatile boolean probed;
@@ -52,6 +54,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     private ServerPlayer player;
     private boolean done;
     private boolean resultInserted;
+    /** Number of trades represented by the currently prepared operation. */
+    private int preparedExecutions = 1;
 
     private static void probe() {
         if (probed) return;
@@ -67,6 +71,29 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     }
 
     // ── IBatchDelegate contract ────────────────────────────────────
+
+    /**
+     * Market trades are instant exchanges, so all remaining flat operations
+     * can share one storage transaction. The caller scales the material spec
+     * to this batch size before invoking {@code tryStartWithMaterials}.
+     */
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        preparedExecutions = Math.min(MAX_TRADES_PER_BATCH, Math.max(0, remainingOperations));
+        return preparedExecutions;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        preparedExecutions = Math.min(MAX_TRADES_PER_BATCH, Math.max(1, executions));
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        // A market trade has no machine state between executions, so one graph
+        // worker can safely represent the complete remaining operation count.
+        return Math.min(MAX_TRADES_PER_BATCH, Math.max(1, totalOperations));
+    }
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
@@ -91,7 +118,8 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         // Direct path: insert result immediately.  The chain path uses the
         // ledger-overloaded tryStartSingleCraft + collectResult instead.
-        ItemStack result = wrapper.getResultItem(player.serverLevel().registryAccess());
+        ItemStack result = scaledResult(
+                wrapper.getResultItem(player.serverLevel().registryAccess()), preparedExecutions);
         if (!result.isEmpty()) {
             ItemStack remainder = insertIntoStorage(player, result, false);
             if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
@@ -109,7 +137,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         if (!hasStorageAccess() || wrapper == null) return false;
 
-        sharedLedger.commit(network, player);
+        if (!sharedLedger.commit(network, player)) return false;
         done = true;
         return true;
     }
@@ -121,6 +149,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         this.player = player;
         this.done = false;
+        this.preparedExecutions = 1;
 
         // Resolve the bound Market in its recorded dimension.
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -279,7 +308,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         // Materials already committed by chain.  Result is delivered by
         // collectResult — do NOT insert here or the chain flushes it twice.
-        sharedLedger.commit(network, player);
+        if (!sharedLedger.commit(network, player)) return false;
         done = true;
         return true;
     }
@@ -299,9 +328,20 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
             return ItemStack.EMPTY; // already inserted in tryStartSingleCraft (direct path)
         }
         if (wrapper != null) {
-            return wrapper.getResultItem(player.serverLevel().registryAccess());
+            return scaledResult(
+                    wrapper.getResultItem(player.serverLevel().registryAccess()), preparedExecutions);
         }
         return ItemStack.EMPTY;
+    }
+
+    static ItemStack scaledResult(ItemStack result, int executions) {
+        if (result == null || result.isEmpty()) return ItemStack.EMPTY;
+        ItemStack scaled = result.copy();
+        if (executions > 1) {
+            long total = (long) scaled.getCount() * executions;
+            scaled.setCount((int) Math.min(Integer.MAX_VALUE, total));
+        }
+        return scaled;
     }
 
     // ── Cleanup ────────────────────────────────────────────────────
@@ -310,6 +350,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         done = false;
         resultInserted = false;
+        preparedExecutions = 1;
         resetState();
     }
 
@@ -317,6 +358,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public void onBatchFinished(@NotNull ServerPlayer player) {
         done = false;
         resultInserted = false;
+        preparedExecutions = 1;
         resetState();
     }
 

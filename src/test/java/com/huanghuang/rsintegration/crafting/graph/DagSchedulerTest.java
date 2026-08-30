@@ -17,6 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DagSchedulerTest extends BootstrapTest {
+    @Test
+    void claimsMatchingReadyNodeBehindQueueHead() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+
+        NodeId claimed = scheduler.claimFirstReady(nodeId -> nodeId.value() == 1);
+
+        assertEquals(new NodeId(1), claimed);
+        assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+    }
 
     @Test
     void independentLeavesCanBeClaimedTogetherAndUnlockJoin() {

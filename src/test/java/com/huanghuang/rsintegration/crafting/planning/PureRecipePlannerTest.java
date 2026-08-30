@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -625,6 +626,23 @@ class PureRecipePlannerTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    void scaledRecipeFailurePreservesAnyNbtSemantics() {
+        MaterialRef target = material("any_nbt_target");
+        MaterialRef input = material("any_nbt_input");
+        IngredientRef anyNbtInput = new IngredientRef(
+                List.of(input), 2, NbtMatchMode.ANY);
+        RecipeNode producer = recipe("any_nbt_producer", target, 1, anyNbtInput);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(producer))), Map.of(),
+                List.of(ingredient(target, 3)), 20);
+
+        assertFalse(result.feasible());
+        assertEquals(NbtMatchMode.ANY, result.missing().get(0).nbtMatchMode());
+        assertEquals(6, result.missing().get(0).count());
     }
 
     private static RecipeNode recipe(String id, MaterialRef output, int count, IngredientRef... inputs) {

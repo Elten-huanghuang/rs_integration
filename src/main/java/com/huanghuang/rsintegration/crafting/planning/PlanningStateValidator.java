@@ -75,6 +75,24 @@ public final class PlanningStateValidator {
     public static boolean revalidateForExecution(ServerPlayer player, PlanningSnapshot snapshot,
                                                  ResourceKey<Level> dimension, BlockPos lookupPos,
                                                  @Nullable StorageReference selectedReference) {
+        return revalidateForExecution(player, snapshot, null, dimension, lookupPos,
+                selectedReference);
+    }
+
+    /**
+     * Revalidates an execution cache while allowing unrelated inventory churn.
+     *
+     * <p>A preview is a reservation candidate, not a lock on every item in the
+     * network.  Comparing the complete inventory fingerprint made two players
+     * invalidate each other's plans even when they used different materials.
+     * The plan graph is therefore used to verify only the supplies that this
+     * execution actually consumes; network identity, recipe revision and
+     * machine binding remain authoritative.</p>
+     */
+    public static boolean revalidateForExecution(ServerPlayer player, PlanningSnapshot snapshot,
+                                                 @Nullable PlanResponse plan,
+                                                 ResourceKey<Level> dimension, BlockPos lookupPos,
+                                                 @Nullable StorageReference selectedReference) {
         if (player.hasDisconnected() || player.isRemoved()
                 || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) {
             return false;
@@ -96,8 +114,13 @@ public final class PlanningStateValidator {
         String fingerprint = selectedReference == null
                 ? networkFingerprint(currentNetwork, currentAvailable)
                 : networkFingerprint(selectedReference, currentAvailable);
-        return snapshot.networkFingerprint().equals(fingerprint)
-                && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
+        if (!networkIdentity(snapshot.networkFingerprint()).equals(networkIdentity(fingerprint))) {
+            return false;
+        }
+        if (!snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos))) {
+            return false;
+        }
+        return plan == null || hasRequiredInitialSupply(plan, currentAvailable);
     }
 
     public static boolean sameState(PlanningSnapshot left, PlanningSnapshot right) {
@@ -132,7 +155,14 @@ public final class PlanningStateValidator {
     static boolean hasRequiredInitialSupply(PlanResponse plan,
                                             Map<StackKey, Integer> available) {
         PlanGraphView graph = plan.graph();
-        if (graph == null || !graph.unresolved().isEmpty()) return false;
+        if (graph == null) {
+            // Pure responses intentionally do not carry a server DAG. Their
+            // material table includes craftable intermediates, so it cannot be
+            // used as an initial-supply bill. The execution ledger performs
+            // the authoritative atomic extraction instead.
+            return true;
+        }
+        if (!graph.unresolved().isEmpty()) return false;
         Map<StackKey, Integer> required = new HashMap<>();
         for (PlanGraphView.EdgeView edge : graph.edges()) {
             if (edge.source().initial()) mergeRequirement(required, edge.material(), edge.quantity());

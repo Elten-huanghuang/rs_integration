@@ -461,7 +461,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 pendingResult = recovered;
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-Generic] Recovered missing collected output recipe={} output={}x{}",
-                        recipe.getId(), recovered.getHoverName().getString(), recovered.getCount());
+                        recipe.getId(), com.huanghuang.rsintegration.util.ItemStackUtils.registryId(recovered), recovered.getCount());
             }
         }
         List<ItemStack> results = new ArrayList<>(pendingSecondary.size() + 1);
@@ -522,7 +522,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",
-                        pendingResult.getCount(), pendingResult.getHoverName().getString());
+                        pendingResult.getCount(), com.huanghuang.rsintegration.util.ItemStackUtils.registryId(pendingResult));
             } else {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Batch failed after commit. "
                         + "{} items may have been lost for recipe {}.",

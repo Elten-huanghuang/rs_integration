@@ -228,7 +228,6 @@ public final class PlanWarnings {
                 }
                 break;
             case ModIds.ID_AVARITIA_CRAFTING:
-            case ModIds.ID_AVARITIA_COMPRESSOR:
             case ModIds.ID_AVARITIA_SMITHING:
                 break;
             default:

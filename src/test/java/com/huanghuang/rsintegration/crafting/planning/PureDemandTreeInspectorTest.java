@@ -296,7 +296,7 @@ class PureDemandTreeInspectorTest {
     }
 
     @Test
-    void detectsCatalystBackedAlternativeEvenWhenDirectRecipeIsCompletable() {
+    void catalystAlternativeDoesNotDisplaceCompletablePureRecipe() {
         MaterialRef block = material("iron_block");
         MaterialRef nugget = material("iron_nugget");
         MaterialRef ingot = material("iron_ingot");
@@ -308,7 +308,7 @@ class PureDemandTreeInspectorTest {
                 Map.of(block, 1), target.recipeId(), 1, 64, Set.of(nugget.itemId()));
 
         assertTrue(result.complete());
-        assertTrue(result.catalystRouteAvailable());
+        assertFalse(result.catalystRouteAvailable());
     }
 
     @Test

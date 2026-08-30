@@ -89,6 +89,18 @@ public final class DagScheduler {
         states.put(nodeId, NodeState.RUNNING);
     }
 
+    /** Claim the first ready node accepted by {@code predicate}, preserving ready order. */
+    public NodeId claimFirstReady(Predicate<NodeId> predicate) {
+        Objects.requireNonNull(predicate, "predicate");
+        if (stopping) return null;
+        for (NodeId nodeId : ready) {
+            if (!predicate.test(nodeId)) continue;
+            claim(nodeId);
+            return nodeId;
+        }
+        return null;
+    }
+
     public void releaseClaim(NodeId nodeId) {
         requireState(nodeId, NodeState.RUNNING);
         if (stopping) {

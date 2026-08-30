@@ -26,6 +26,15 @@ public final class StorageRestockSupport {
         if (heldNetwork.isEmpty()) {
             heldNetwork = beyondDimensionsNetworkId(player.getOffhandItem());
         }
+        // BD terminals can be equipped in a Curios slot. Treat an equipped
+        // terminal as an explicit credential too, otherwise resolveDefault()
+        // may select an unrelated RS network when both backends are present.
+        if (heldNetwork.isEmpty()) {
+            for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+                heldNetwork = beyondDimensionsNetworkId(stack);
+                if (heldNetwork.isPresent()) break;
+            }
+        }
         if (heldNetwork.isPresent()) {
             Optional<CraftStorageEndpoint> held = CraftStorageEndpoints.resolve(
                     new StorageReference(BEYOND_DIMENSIONS,
@@ -118,14 +127,14 @@ public final class StorageRestockSupport {
             if (knownRemainder.isEmpty()) {
                 com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
                         "[RSI-Restock] {} refund became indeterminate for {} x{}",
-                        reason, stack.getHoverName().getString(), stack.getCount());
+                        reason, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount());
                 continue;
             }
             ItemStack remainder = knownRemainder.orElse(ItemStack.EMPTY);
             if (!remainder.isEmpty()) {
                 com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
                         "[RSI-Restock] {} refund left {} x{}; dropping remainder",
-                        reason, remainder.getHoverName().getString(), remainder.getCount());
+                        reason, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(remainder), remainder.getCount());
                 player.drop(remainder, false);
             }
         }

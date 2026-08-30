@@ -113,7 +113,8 @@ public final class CraftPacketUtils {
                 if (!stack.hasTag()) {
                     return missingMaterialName(stack.getDescriptionId());
                 }
-                return stack.getHoverName();
+                // Tagged items may resolve hover text through client-only code.
+                return Component.translatable(stack.getDescriptionId());
             }
         }
         return Component.translatable("rsi.plan.unknown_item");

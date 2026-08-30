@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.RejectedExecutionException;
@@ -144,6 +145,16 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void purePreviewPlanCannotReplaceAPhysicalMachineTerminal() {
+        PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
+                List.of(), List.of(), Map.of());
+
+        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(complete, ModType.GENERIC));
+        assertFalse(GenericCraftPacket.canUsePureExecutionPlan(
+                complete, ModType.FARMINGFORBLOCKHEADS_MARKET));
+    }
+
+    @Test
     void boundedPureSearchStillOpensKnownMissingMaterialTree() {
         var diamondPickaxe = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("minecraft", "diamond_pickaxe"), "");
@@ -208,6 +219,26 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(exact.feasible());
         assertEquals(2080, shortage.required());
         assertFalse(shortage.feasible());
+    }
+
+    @Test
+    void previewAndExecutionCacheKeysShareTheTerminalTypeAndVariant() {
+        UUID player = UUID.randomUUID();
+        ResourceLocation recipe = new ResourceLocation("crafttweaker", "typed_recipe");
+        Map<String, String> forced = Map.of("minecraft:iron", "minecraft:iron_ingot");
+        ItemStack variant = new ItemStack(Items.ENCHANTED_BOOK);
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("level", 2);
+        variant.setTag(tag);
+
+        assertFalse(GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+                        ModType.GENERIC).equals(
+                GenericCraftPacket.planCacheKey(player, recipe, forced, 4, null,
+                        ModType.GENERIC)));
+        assertFalse(GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+                        ModType.GENERIC).equals(
+                GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+                        ModType.FARMINGFORBLOCKHEADS_MARKET)));
     }
 
     @Test
@@ -282,6 +313,19 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void typedMachineStepCanNeverUseTheSynchronousCraftingExecutor() {
+        List<CraftingResolver.ResolutionStep> generic = List.of(genericStep("terminal", 1));
+        List<CraftingResolver.ResolutionStep> physical = List.of(
+                new CraftingResolver.ResolutionStep(
+                        new ResourceLocation("goety", "moonstone_plague"), ModType.CUSTOM_GUI,
+                        new ResourceLocation("goety", "ritual"),
+                        List.of(), List.of(), false, 1));
+
+        assertTrue(GenericCraftPacket.canExecuteSynchronously(generic));
+        assertFalse(GenericCraftPacket.canExecuteSynchronously(physical));
+    }
+
+    @Test
     void pureCraftingOperationCountSaturates() {
         List<CraftingResolver.ResolutionStep> steps = List.of(
                 genericStep("first", Integer.MAX_VALUE), genericStep("second", 1));
@@ -322,6 +366,27 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(GenericCraftPacket.smithingAsyncSteps(
                 List.of(intermediate), new ResourceLocation("test", "divine_gold_helmet"), 1)
                 .isEmpty());
+    }
+
+    @Test
+    void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
+        assertTrue(GenericCraftPacket.shouldUseAsyncPurePreview(true, false));
+        assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(true, true));
+        assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(false, false));
+    }
+
+    @Test
+    void backgroundSmithingPlanRetainsGenericSmithingTerminalSemantics() {
+        ResourceLocation recipeId = new ResourceLocation("test", "background_smithing");
+
+        CraftingResolver.ResolutionStep step =
+                GenericCraftPacket.backgroundPhysicalTerminalStep(
+                        recipeId, ModType.byId("smithing"), true, 4);
+
+        assertEquals(ModType.GENERIC, step.modType());
+        assertEquals(new ResourceLocation("minecraft", "smithing"), step.recipeTypeId());
+        assertFalse(step.inferMode());
+        assertEquals(4, step.executions());
     }
 
     @Test
@@ -409,6 +474,72 @@ class GenericCraftPacketTest extends BootstrapTest {
 
         assertEquals(List.of(DemandRole.CONSUMED, DemandRole.CATALYST, DemandRole.CONSUMED),
                 GenericCraftPacket.alignInputRoles(displayed, specs));
+    }
+
+    @Test
+    void bulkIngredientConsumptionScalesWithVariantsNotRepeatCount() {
+        Map<net.minecraft.world.item.Item, Integer> available = new HashMap<>();
+        available.put(Items.DIAMOND, 1024);
+
+        Map<net.minecraft.world.item.Item, Integer> consumed =
+                GenericCraftPacket.consumeIngredientCount(
+                        Ingredient.of(Items.DIAMOND), 1024, available);
+
+        assertEquals(Map.of(Items.DIAMOND, 1024), consumed);
+        assertEquals(0, available.get(Items.DIAMOND));
+    }
+
+    @Test
+    void anyNbtShortageRemainsARealMaterialShortage() {
+        var demand = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "diamond_sword"), "")),
+                1, ImmutableRecipeGraph.NbtMatchMode.ANY);
+        Map<CraftingResolver.StackKey, Integer> available = Map.of(
+                new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 1);
+
+        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), available));
+    }
+
+    @Test
+    void exactNbtShortageIsReportedOnlyWhenSameItemStockIsSufficient() {
+        var demand = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "diamond_sword"), "{Damage:0}")),
+                2, ImmutableRecipeGraph.NbtMatchMode.EXACT);
+
+        assertTrue(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), Map.of(
+                new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 2)));
+        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), Map.of(
+                new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 1)));
+    }
+
+    @Test
+    void unboundMachineRecipesAreRemovedWithoutHidingUsableAlternatives() {
+        var output = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "diamond"), "");
+        var input = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "coal"), "")), 1);
+        var unbound = new ImmutableRecipeGraph.RecipeNode(
+                new ResourceLocation("test", "unbound"), output, 1, List.of(input),
+                "test_machine", new ResourceLocation("test", "machine"));
+        var crafting = new ImmutableRecipeGraph.RecipeNode(
+                new ResourceLocation("test", "crafting"), output, 1, List.of(input));
+
+        var withAlternative = GenericCraftPacket.filterRecipeGraph(
+                new ImmutableRecipeGraph(Map.of(output, List.of(unbound, crafting))),
+                node -> !"test_machine".equals(node.modTypeId()));
+        assertEquals(List.of(crafting), withAlternative.graph().recipesByOutput().get(output));
+        assertTrue(withAlternative.blockedOutputIds().isEmpty());
+
+        var onlyUnbound = GenericCraftPacket.filterRecipeGraph(
+                new ImmutableRecipeGraph(Map.of(output, List.of(unbound))), node -> false);
+        assertFalse(onlyUnbound.graph().recipesByOutput().containsKey(output));
+        assertEquals(java.util.Set.of(output.itemId()), onlyUnbound.blockedOutputIds());
+        assertTrue(GenericCraftPacket.missingTouchesBlockedOutput(
+                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 1)),
+                onlyUnbound.blockedOutputIds()));
     }
 
     @Test
