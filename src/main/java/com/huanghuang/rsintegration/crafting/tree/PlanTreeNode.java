@@ -60,6 +60,13 @@ public final class PlanTreeNode {
     @Nullable
     public Ingredient ingredient;
 
+    /** Recipe-scoped key and concrete options for a player-selectable tag input. */
+    @Nullable
+    public String materialLockKey;
+    public List<ItemStack> materialOptions = List.of();
+    @Nullable
+    public ItemStack lockedMaterial;
+
     public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
                         int depth, @Nullable PlanStep step) {
         this(key, displayStack, amount, depth, step, null);

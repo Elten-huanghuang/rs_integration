@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
@@ -23,6 +25,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 
 import java.util.List;
 import java.util.Map;
@@ -34,8 +37,45 @@ import java.util.concurrent.RejectedExecutionException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GenericCraftPacketTest extends BootstrapTest {
+
+    @BeforeAll
+    static void loadServerConfig() {
+        CommentedConfig config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+    }
+
+    @Test
+    void materialLocksRoundTripWithDefensiveCounts() {
+        ItemStack selected = new ItemStack(Items.OAK_PLANKS, 64);
+        GenericCraftPacket packet = new GenericCraftPacket(
+                new ResourceLocation("test", "planks"), true)
+                .withMaterialLocks(Map.of("test:planks#abc", selected));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        packet.encode(buffer);
+        GenericCraftPacket decoded = GenericCraftPacket.decode(buffer);
+
+        assertEquals(Items.OAK_PLANKS,
+                decoded.materialLocks().get("test:planks#abc").getItem());
+        assertEquals(1, decoded.materialLocks().get("test:planks#abc").getCount());
+        selected.setCount(1);
+        assertEquals(1, packet.materialLocks().get("test:planks#abc").getCount());
+    }
+
+    @Test
+    void materialLockCountIsBounded() {
+        Map<String, ItemStack> locks = new HashMap<>();
+        for (int i = 0; i <= 128; i++) {
+            locks.put("test:r#" + i, new ItemStack(Items.OAK_PLANKS));
+        }
+        GenericCraftPacket packet = new GenericCraftPacket(
+                new ResourceLocation("test", "planks"), true);
+        assertThrows(IllegalArgumentException.class, () -> packet.withMaterialLocks(locks));
+    }
 
     @Test
     void taglessRecipeDeclarationIgnoresJeiDisplayNbt() {
@@ -170,6 +210,39 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new PureDemandTreeInspector.Result(
                         PureDemandTreeInspector.Status.NODE_LIMIT, 2,
                         diamondPickaxe, false)));
+    }
+
+    @Test
+    void independentRawShortageDoesNotEnterTypedCatalystFallback() {
+        var catalyst = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "catalyst_output"), "");
+        var raw = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "raw_material"), "");
+        PureRecipePlanner.Result missingRaw = new PureRecipePlanner.Result(false,
+                List.of(), List.of(new ImmutableRecipeGraph.IngredientRef(
+                List.of(catalyst), 1), new ImmutableRecipeGraph.IngredientRef(
+                List.of(raw), 1)), Map.of());
+
+        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+                true, false, missingRaw, java.util.Set.of(catalyst.itemId())));
+    }
+
+    @Test
+    void typedCatalystFallbackIsRetainedWhenItCanResolveEveryShortage() {
+        var catalyst = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "catalyst_output"), "");
+        PureRecipePlanner.Result missingCatalyst = new PureRecipePlanner.Result(false,
+                List.of(), List.of(new ImmutableRecipeGraph.IngredientRef(
+                List.of(catalyst), 1)), Map.of());
+        PureRecipePlanner.Result pureSuccess = new PureRecipePlanner.Result(true,
+                List.of(), List.of(), Map.of());
+
+        assertTrue(GenericCraftPacket.requiresTypedCatalystRoute(
+                true, false, missingCatalyst, java.util.Set.of(catalyst.itemId())));
+        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+                true, false, pureSuccess, java.util.Set.of(catalyst.itemId())));
+        assertTrue(GenericCraftPacket.requiresTypedCatalystRoute(
+                true, true, pureSuccess, java.util.Set.of(catalyst.itemId())));
     }
 
     @Test

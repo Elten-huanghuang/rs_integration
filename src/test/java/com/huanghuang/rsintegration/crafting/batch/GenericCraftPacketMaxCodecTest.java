@@ -44,7 +44,8 @@ class GenericCraftPacketMaxCodecTest {
     void executePacketCannotClaimMaximumMode() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         new GenericCraftPacket(id()).encode(buffer);
-        buffer.setBoolean(buffer.writerIndex() - 2, true);
+        // maximize precedes machineSelectionMode and the material-lock count.
+        buffer.setBoolean(buffer.writerIndex() - 3, true);
 
         assertThrows(DecoderException.class, () -> GenericCraftPacket.decode(buffer));
     }

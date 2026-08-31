@@ -13,8 +13,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 class PlanCacheTest extends BootstrapTest {
+    @Test
+    void materialLocksPartitionPreviewCacheKeys() {
+        UUID player = UUID.randomUUID();
+        ResourceLocation recipe = new ResourceLocation("test", "planks");
+        PlanCache.Key oak = new PlanCache.Key(player, recipe, Map.of(), 1, "",
+                Map.of("test:planks#tag", "minecraft:oak_planks"));
+        PlanCache.Key birch = new PlanCache.Key(player, recipe, Map.of(), 1, "",
+                Map.of("test:planks#tag", "minecraft:birch_planks"));
+
+        assertNotEquals(oak, birch);
+    }
+
     @Test
     void evictsOldestEntryAtConfiguredCapacity() {
         PlanCache cache = new PlanCache(1_000, 2);

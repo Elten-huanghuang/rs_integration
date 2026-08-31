@@ -335,6 +335,7 @@ public final class AsyncCraftChain {
             this.graphMaterials = new MaterialBroker();
             this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
             initialiseGraphMaterialFlow(graph);
+            logGraphNodeMappings(graph);
             GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
                     steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList());
             int atomicVanillaLimit = configuredAtomicVanillaGraphLimit();
@@ -1012,6 +1013,18 @@ public final class AsyncCraftChain {
             graphScheduler.succeed(vanillaNode);
             graphProgressWatchdog.markProgress();
             currentStepIdx = idx + 1;
+        }
+    }
+
+    private void logGraphNodeMappings(CraftPlanGraph plan) {
+        if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
+        for (CraftNode node : plan.nodes()) {
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                            "[RSI-GraphNode] node={} recipe={} modType={} recipeType={} "
+                                    + "executions={} outputs={}"),
+                    node.id().value(), node.recipeId(), node.modTypeId(),
+                    node.recipeTypeId(), node.executions(),
+                    describeOutputDeclarations(node.outputs()));
         }
     }
 
@@ -1837,11 +1850,23 @@ public final class AsyncCraftChain {
 
         List<ItemStack> remaining = copyStacks(actualOutputs);
         Map<OutputDeclaration, List<ItemStack>> matched = new java.util.LinkedHashMap<>();
+        List<String> checks = new ArrayList<>();
         for (OutputDeclaration output : node.outputs()) {
             List<ItemStack> fragments = removeMatchingFragments(
                     remaining, output.material(), output.quantity());
             int actualCount = fragments.stream().mapToInt(ItemStack::getCount).sum();
+            checks.add(describeOutputCheck(output, actualCount));
             if (actualCount != output.quantity()) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                                "[RSI-GraphOutputMismatch] node={} recipe={} modType={} "
+                                        + "recipeType={} executions={} failed={} checks={} "
+                                        + "declarations={} actual={} unmatched={}"),
+                        node.id().value(), node.recipeId(), node.modTypeId(),
+                        node.recipeTypeId(), node.executions(),
+                        describeOutputCheck(output, actualCount), checks,
+                        describeOutputDeclarations(node.outputs()),
+                        describeStacksForLogging(actualOutputs),
+                        describeStacksForLogging(remaining));
                 for (ItemStack stack : actualOutputs) addToVirtualInventory(stack);
                 actualOutputs.clear();
                 return false;
@@ -2275,6 +2300,36 @@ public final class AsyncCraftChain {
             remaining -= take;
         }
         return true;
+    }
+
+    private static String describeOutputCheck(OutputDeclaration output, int matchedCount) {
+        return "{port=" + output.id() + ",kind=" + output.kind()
+                + ",material=" + describeMaterialForLogging(output.material())
+                + ",expected=" + output.quantity() + ",matched=" + matchedCount + "}";
+    }
+
+    private static String describeOutputDeclarations(List<OutputDeclaration> outputs) {
+        List<String> descriptions = new ArrayList<>(outputs.size());
+        for (OutputDeclaration output : outputs) {
+            descriptions.add("{port=" + output.id() + ",kind=" + output.kind()
+                    + ",material=" + describeMaterialForLogging(output.material())
+                    + ",quantity=" + output.quantity() + "}");
+        }
+        return descriptions.toString();
+    }
+
+    private static String describeMaterialForLogging(MaterialKey material) {
+        ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                .getKey(material.item());
+        return id + (material.tag() == null ? "" : " tag=" + material.tag());
+    }
+
+    private static String describeStacksForLogging(List<ItemStack> stacks) {
+        List<String> descriptions = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            if (!stack.isEmpty()) descriptions.add(describeStackForLogging(stack));
+        }
+        return descriptions.toString();
     }
 
     private boolean isGraphTerminalNode(NodeId nodeId) {

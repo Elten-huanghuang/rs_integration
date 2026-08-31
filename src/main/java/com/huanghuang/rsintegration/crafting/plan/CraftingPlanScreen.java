@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
+import com.huanghuang.rsintegration.crafting.MaterialLocks;
 import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
@@ -193,6 +194,15 @@ public final class CraftingPlanScreen extends Screen {
     private int dropdownCursor = -1;
     private final List<DropHit> dropHits = new ArrayList<>();
     private record DropHit(int x, int y, int w, int h, ResourceLocation recipeId) {}
+    private final Map<String, ItemStack> materialLocks = new LinkedHashMap<>();
+    @Nullable
+    private PlanTreeNode materialDropdownNode;
+    private int materialDropdownScroll;
+    @Nullable
+    private EditBox materialSearchBox;
+    private int materialPanelX, materialPanelY, materialPanelW, materialPanelH;
+    private final List<MaterialDropHit> materialDropHits = new ArrayList<>();
+    private record MaterialDropHit(int x, int y, int w, int h, ItemStack option) {}
 
     // Hover intent: the full JEI recipe preview only pops after the mouse rests on the same
     // target for HOVER_INTENT_MS, so a quick pass across nodes/candidates doesn't spam previews.
@@ -371,6 +381,7 @@ public final class CraftingPlanScreen extends Screen {
         this.altChoices.clear();
         this.orHitboxes.clear();
         this.altSelection.clear();
+        closeMaterialDropdown();
         this.clearWidgets();
         this.init();
     }
@@ -406,7 +417,7 @@ public final class CraftingPlanScreen extends Screen {
 
         treeModel = PlanTreeModel.from(plan);
         PlanTreeModel.applyCollapsedNodes(treeModel.root, collapsed);
-        JeiSubtreeBuilder.enrichCarousels(treeModel.root);
+        JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialLocks);
         recipePreview.clear();
 
         selectedPath.bindTree(treeModel);
@@ -502,6 +513,7 @@ public final class CraftingPlanScreen extends Screen {
         materialAreaHeight = (plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + matGridH + 8);
         layoutBottomStack();
         createRepeatCountInput(font);
+        createMaterialSearchInput(font);
 
         int btnW = 80;
         int btnY = height - 24;
@@ -555,6 +567,7 @@ public final class CraftingPlanScreen extends Screen {
                     viewMode = (viewMode == ViewMode.CARD) ? ViewMode.TREE : ViewMode.CARD;
                     treeCameraInit = false;
                     dropdownNode = null;
+                    closeMaterialDropdown();
                     btn.setMessage(viewToggleLabel());
                 })
                 .pos(width - 78, 6)
@@ -603,6 +616,18 @@ public final class CraftingPlanScreen extends Screen {
         updatingRepeatCountBox = false;
         repeatCountBox.setResponder(this::onRepeatCountEdited);
         addWidget(repeatCountBox);
+    }
+
+    private void createMaterialSearchInput(Font font) {
+        materialSearchBox = new EditBox(font, 0, 0, 100, 16,
+                Component.translatable("rsi.plan.material.search"));
+        materialSearchBox.setHint(Component.translatable("rsi.plan.material.search"));
+        materialSearchBox.setMaxLength(80);
+        materialSearchBox.setBordered(false);
+        materialSearchBox.setResponder(ignored -> materialDropdownScroll = 0);
+        materialSearchBox.visible = false;
+        materialSearchBox.active = false;
+        addWidget(materialSearchBox);
     }
 
     private void onRepeatCountEdited(String value) {
@@ -764,6 +789,7 @@ public final class CraftingPlanScreen extends Screen {
                         repeatCount, inferMode, plan.baseItem(),
                         executionTarget(plan.clickedOutput(), plan.targetResult()), requestId,
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
+                .withMaterialLocks(materialLocks)
                 .withStorageReference(storageReference);
         BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
     }
@@ -886,6 +912,7 @@ public final class CraftingPlanScreen extends Screen {
     public void tick() {
         super.tick();
         if (repeatCountBox != null) repeatCountBox.tick();
+        if (materialSearchBox != null && materialSearchBox.visible) materialSearchBox.tick();
         ticksOpen++;
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
             planRefreshTick = -1;
@@ -2050,7 +2077,8 @@ public final class CraftingPlanScreen extends Screen {
                         mouseX, mouseY, width, height, mouseX, mouseY);
             }
             if (!previewShown && hoveredItemForTooltip.isEmpty()) {
-                hoveredItemForTooltip = hovered.displayStack;
+                hoveredItemForTooltip = hovered.lockedMaterial != null
+                        ? hovered.lockedMaterial : hovered.displayStack;
                 hoveredTooltipX = mouseX;
                 hoveredTooltipY = mouseY;
                 hoveredTooltipAvail = hovered.available;
@@ -2118,6 +2146,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // Alternative-recipe dropdown (+ its hover preview), topmost.
         renderDropdown(gfx, minecraft.font, mouseX, mouseY);
+        renderMaterialDropdown(gfx, minecraft.font, mouseX, mouseY);
 
         // Control-help tooltip — shown only when hovering the info icon (replaces the old hint bar).
         if (infoHov) {
@@ -2437,6 +2466,144 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
+    private void renderMaterialDropdown(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
+        materialDropHits.clear();
+        PlanTreeNode node = materialDropdownNode;
+        if (node == null || node.materialLockKey == null || node.materialOptions.size() <= 1) {
+            hideMaterialSearchInput();
+            return;
+        }
+        PlanTreeLayout.Box box = treeLayout.boxFor(node);
+        if (box == null) {
+            closeMaterialDropdown();
+            return;
+        }
+
+        int rowH = 20;
+        int searchAreaH = 24;
+        List<ItemStack> options = filteredMaterialOptions(node);
+        int topLimit = Math.max(4, treeViewTop + 4);
+        int bottomLimit = Math.min(height - 4, treeViewBottom - 4);
+        int rowCapacity = Math.max(2, (bottomLimit - topLimit - searchAreaH - 2) / rowH);
+        int maxVisibleOptions = Math.min(options.size(), rowCapacity - 1);
+        materialDropdownScroll = Math.max(0,
+                Math.min(materialDropdownScroll, Math.max(0, options.size() - maxVisibleOptions)));
+        int panelW = Math.min(190, Math.max(120, width - 16));
+        int sx = Math.max(4, width - panelW - 8);
+        int sy = (int) Math.round(box.y() * treeZoom + treePanY);
+        int panelH = searchAreaH + (1 + maxVisibleOptions) * rowH + 2;
+        sy = Math.max(topLimit, Math.min(sy, Math.max(topLimit, bottomLimit - panelH)));
+        materialPanelX = sx;
+        materialPanelY = sy;
+        materialPanelW = panelW;
+        materialPanelH = panelH;
+
+        gfx.fill(sx, sy, sx + panelW, sy + panelH, 0xF00A140E);
+        gfx.fill(sx, sy, sx + panelW, sy + 1, 0xFF55D080);
+        gfx.fill(sx + 4, sy + 3, sx + panelW - 4, sy + searchAreaH - 3, 0xFF15231A);
+
+        int firstRowY = sy + searchAreaH;
+        renderMaterialOption(gfx, font, mouseX, mouseY, node, ItemStack.EMPTY,
+                sx, firstRowY, panelW, rowH);
+        for (int visible = 0; visible < maxVisibleOptions; visible++) {
+            ItemStack option = options.get(materialDropdownScroll + visible);
+            int ry = firstRowY + (visible + 1) * rowH;
+            renderMaterialOption(gfx, font, mouseX, mouseY, node, option,
+                    sx, ry, panelW, rowH);
+        }
+
+        if (materialSearchBox != null) {
+            materialSearchBox.setPosition(sx + 7, sy + 5);
+            materialSearchBox.setWidth(panelW - 14);
+            materialSearchBox.visible = true;
+            materialSearchBox.active = true;
+            materialSearchBox.render(gfx, mouseX, mouseY, 0f);
+        }
+    }
+
+    private void renderMaterialOption(GuiGraphics gfx, Font font, int mouseX, int mouseY,
+                                      PlanTreeNode node, ItemStack option,
+                                      int sx, int ry, int panelW, int rowH) {
+        boolean hovered = mouseX >= sx && mouseX < sx + panelW
+                && mouseY >= ry && mouseY < ry + rowH;
+        if (hovered) gfx.fill(sx, ry, sx + panelW, ry + rowH, 0x33FFFFFF);
+
+        boolean selected = option.isEmpty()
+                ? !materialLocks.containsKey(node.materialLockKey)
+                : node.lockedMaterial != null
+                && ItemStack.isSameItemSameTags(node.lockedMaterial, option);
+        if (!option.isEmpty()) gfx.renderItem(option, sx + 2, ry + 2);
+        String label = option.isEmpty()
+                ? I18n.get("rsi.plan.material.auto") : option.getHoverName().getString();
+        int textX = option.isEmpty() ? sx + 6 : sx + 22;
+        gfx.drawString(font, font.plainSubstrByWidth(label, panelW - (textX - sx) - 5),
+                textX, ry + (rowH - font.lineHeight) / 2,
+                selected ? C_GREEN : 0xFFDDDDDD, false);
+        materialDropHits.add(new MaterialDropHit(sx, ry, panelW, rowH, option));
+    }
+
+    private List<ItemStack> filteredMaterialOptions(PlanTreeNode node) {
+        String query = materialSearchBox == null ? "" : materialSearchBox.getValue();
+        if (query == null || query.isBlank()) return node.materialOptions;
+        List<ItemStack> filtered = new ArrayList<>();
+        for (ItemStack option : node.materialOptions) {
+            ResourceLocation key = BuiltInRegistries.ITEM.getKey(option.getItem());
+            if (MaterialSearchMatcher.matches(option.getHoverName().getString(),
+                    key == null ? "" : key.toString(), query)) {
+                filtered.add(option);
+            }
+        }
+        return filtered;
+    }
+
+    private void selectMaterial(PlanTreeNode node, ItemStack option) {
+        if (node.materialLockKey == null) return;
+        if (option.isEmpty()) {
+            materialLocks.remove(node.materialLockKey);
+        } else {
+            materialLocks.put(node.materialLockKey, option.copyWithCount(1));
+        }
+        closeMaterialDropdown();
+        ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
+        sendCraftPacket(rootRecipe, true, exportForcedSelections(), currentRepeat, false);
+    }
+
+    private void openMaterialDropdown(PlanTreeNode node) {
+        if (node == materialDropdownNode) {
+            closeMaterialDropdown();
+            return;
+        }
+        unfocusRepeatCountInput();
+        materialDropdownNode = node;
+        materialDropdownScroll = 0;
+        dropdownNode = null;
+        if (materialSearchBox != null) {
+            materialSearchBox.visible = true;
+            materialSearchBox.active = true;
+            materialSearchBox.setValue("");
+            materialSearchBox.setFocused(true);
+            setFocused(materialSearchBox);
+        }
+    }
+
+    private void closeMaterialDropdown() {
+        materialDropdownNode = null;
+        materialDropdownScroll = 0;
+        materialDropHits.clear();
+        materialPanelW = 0;
+        materialPanelH = 0;
+        hideMaterialSearchInput();
+    }
+
+    private void hideMaterialSearchInput() {
+        if (materialSearchBox == null) return;
+        boolean focused = materialSearchBox.isFocused();
+        materialSearchBox.visible = false;
+        materialSearchBox.active = false;
+        materialSearchBox.setFocused(false);
+        if (focused) setFocused(null);
+    }
+
     /**
      * Recompute the bottom region stack (embers → missing → material panel → repeat row).
      * The material panel is card-view only (design doc §4.4); in tree view its band collapses
@@ -2537,6 +2704,13 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (materialDropdownNode != null) {
+            int total = filteredMaterialOptions(materialDropdownNode).size();
+            int maxVisible = Math.max(1, materialDropHits.size() - 1);
+            materialDropdownScroll = Math.max(0, Math.min(Math.max(0, total - maxVisible),
+                    materialDropdownScroll - (delta > 0 ? 1 : -1)));
+            return true;
+        }
         if (viewMode == ViewMode.TREE && inTreeViewport(mouseX, mouseY)) {
             if (hasControlDown()) {
                 double factor = delta > 0 ? 1.1 : 1 / 1.1;
@@ -2595,6 +2769,30 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (materialDropdownNode != null && materialPanelW > 0
+                && mx >= materialPanelX && mx < materialPanelX + materialPanelW
+                && my >= materialPanelY && my < materialPanelY + materialPanelH) {
+            if (button == 0 && materialSearchBox != null
+                    && mx >= materialSearchBox.getX()
+                    && mx < materialSearchBox.getX() + materialSearchBox.getWidth()
+                    && my >= materialSearchBox.getY()
+                    && my < materialSearchBox.getY() + materialSearchBox.getHeight()) {
+                materialSearchBox.mouseClicked(mx, my, button);
+                materialSearchBox.setFocused(true);
+                setFocused(materialSearchBox);
+                return true;
+            }
+            if (button == 0) {
+                for (MaterialDropHit hit : materialDropHits) {
+                    if (mx >= hit.x() && mx < hit.x() + hit.w()
+                            && my >= hit.y() && my < hit.y() + hit.h()) {
+                        selectMaterial(materialDropdownNode, hit.option());
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
         if (button == 0) {
             if (machineDropdownOpen) {
                 for (MachineCandidateHit hit : machineCandidateHits) {
@@ -2747,13 +2945,20 @@ public final class CraftingPlanScreen extends Screen {
                     if (node != null) toggleCollapseSameKey(node);
                 } else if (button == 0) {
                     PlanTreeNode node = nodeAt(mx, my);
-                    if (node != null && node.hasAlternatives()) {
+                    if (node != null && node.materialLockKey != null
+                            && node.materialOptions.size() > 1) {
+                        openMaterialDropdown(node);
+                    } else if (node != null && node.hasAlternatives()) {
                         boolean opening = node != dropdownNode;
                         dropdownNode = opening ? node : null;
                         dropdownCursor = opening ? selectedAltIndex(node) : -1;
+                        closeMaterialDropdown();
                     } else if (node != null && node.step != null) {
                         // No alternatives → open recipe in JEI directly.
+                        closeMaterialDropdown();
                         openRecipeInJei(node.step.recipeId());
+                    } else {
+                        closeMaterialDropdown();
                     }
                 } else if (button == 2) {
                     // Middle-click → open recipe in JEI.
@@ -2767,6 +2972,7 @@ public final class CraftingPlanScreen extends Screen {
             }
             // Clicked elsewhere → dismiss any open dropdown.
             dropdownNode = null;
+            closeMaterialDropdown();
         }
         // Card-view fold toggle hitboxes (active in card mode).
         if (button == 0 && viewMode == ViewMode.CARD) {
@@ -2846,6 +3052,16 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (materialSearchBox != null && materialSearchBox.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                closeMaterialDropdown();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         if (repeatCountBox != null && repeatCountBox.isFocused()) {
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 unfocusRepeatCountInput();
@@ -2858,6 +3074,10 @@ public final class CraftingPlanScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
         boolean ctrl = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;
+        if (materialDropdownNode != null && keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            closeMaterialDropdown();
+            return true;
+        }
         // Ctrl+0 — reset camera. Must precede the digit handler, which also matches KEY_0.
         if (ctrl && keyCode == GLFW.GLFW_KEY_0) {
             if (viewMode == ViewMode.TREE) {

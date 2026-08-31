@@ -199,9 +199,12 @@ public final class PlanTreeRenderer {
         // 6. Item icon (or Ingredient carousel for tag nodes).
         int iconX = box.itemCenterX() - PlanTreeLayout.ITEM_ICON_SIZE / 2;
         ItemStack stack = node.displayStack;
+        if (node.lockedMaterial != null && !node.lockedMaterial.isEmpty()) {
+            stack = node.lockedMaterial;
+        }
         if (node.ingredient != null) {
             ItemStack[] opts = node.ingredient.getItems();
-            if (opts.length > 1) {
+            if (opts.length > 1 && node.lockedMaterial == null) {
                 // Cycle through the tag's members ~every 1.2s so all alternatives are visible.
                 int idx = (int) ((System.currentTimeMillis() / 1200) % opts.length);
                 ItemStack cycled = opts[idx];
@@ -211,6 +214,9 @@ public final class PlanTreeRenderer {
         }
         if (!stack.isEmpty()) {
             gfx.renderItem(stack, iconX, iconY);
+        }
+        if (node.lockedMaterial != null) {
+            drawMaterialLock(gfx, iconX + PlanTreeLayout.ITEM_ICON_SIZE - 5, iconY - 1);
         }
 
         // 6b. Limited badge — node hides extra alternatives beyond the candidate cap.
@@ -363,5 +369,11 @@ public final class PlanTreeRenderer {
             int dx = startX + i * 3;
             gfx.fill(dx, barY, dx + 2, barY + 1, C_CAROUSEL);
         }
+    }
+
+    private static void drawMaterialLock(GuiGraphics gfx, int x, int y) {
+        gfx.fill(x + 1, y, x + 4, y + 3, 0xFFB6F0C0);
+        gfx.fill(x, y + 2, x + 5, y + 7, 0xFF247A42);
+        gfx.fill(x + 2, y + 4, x + 3, y + 6, 0xFFFFFFFF);
     }
 }

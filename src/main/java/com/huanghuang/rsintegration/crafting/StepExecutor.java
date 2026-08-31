@@ -75,7 +75,8 @@ final class StepExecutor {
         edges.beginUndo();
         NodeId graphNodeId = ctx.allocateNodeId();
 
-        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
+        List<IngredientSpec> specs = narrowMaterialLocks(
+                recipe.getId(), CraftPacketUtils.extractCraftingIngredientSpecs(recipe), ctx);
         List<InputDemand> graphInputs = planRecipeSpecsForGraph(
                 recipe, specs, graphNodeId, ctx, depth, edges, batches);
         if (graphInputs == null) {
@@ -176,6 +177,8 @@ final class StepExecutor {
                 }
             }
         }
+
+        specs = narrowMaterialLocks(entry.recipe().getId(), specs, ctx);
 
         if (specs == null || specs.isEmpty()) {
             ctx.rollback();
@@ -395,6 +398,12 @@ final class StepExecutor {
 
     static List<IngredientSpec> machineSpecsForGraph(List<IngredientSpec> specs) {
         return specs.stream().filter(spec -> !spec.isEmpty()).toList();
+    }
+
+    static List<IngredientSpec> narrowMaterialLocks(ResourceLocation recipeId,
+                                                    List<IngredientSpec> specs,
+                                                    ResolutionContext ctx) {
+        return ctx.lockedSpecs(recipeId, specs);
     }
 
     private record GraphSpecKey(DemandRole role, String ingredientClass,
