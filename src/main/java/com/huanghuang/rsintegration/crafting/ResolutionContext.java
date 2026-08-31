@@ -83,6 +83,7 @@ final class ResolutionContext {
     long nextAllocationId;
     @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
     @Nullable final Map<ResourceLocation, ResourceLocation> forcedRecipes;
+    private Map<String, ItemStack> materialLocks = Map.of();
     final Set<ResourceLocation> activeForcedRecipes = new HashSet<>();
     @Nullable final ServerPlayer player;
     @Nullable final INetwork network;
@@ -236,6 +237,19 @@ final class ResolutionContext {
     private static Map<ResourceLocation, ResourceLocation> immutableOrNull(
             @Nullable Map<ResourceLocation, ResourceLocation> values) {
         return values == null || values.isEmpty() ? null : Map.copyOf(values);
+    }
+
+    ResolutionContext withMaterialLocks(@Nullable Map<String, ItemStack> locks) {
+        materialLocks = MaterialLocks.immutableCopy(locks);
+        return this;
+    }
+
+    Ingredient lockedIngredient(ResourceLocation recipeId, Ingredient ingredient) {
+        return MaterialLocks.narrow(recipeId, ingredient, materialLocks);
+    }
+
+    List<IngredientSpec> lockedSpecs(ResourceLocation recipeId, List<IngredientSpec> specs) {
+        return MaterialLocks.narrowSpecs(recipeId, specs, materialLocks);
     }
 
     @Nullable

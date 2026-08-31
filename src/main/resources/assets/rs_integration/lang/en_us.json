@@ -1059,5 +1059,7 @@
   "rsi.craft.error.ledger_state": "Craft ledger state error: %s",
   "rsi.craft.error.chain_aborted": "Craft chain aborted: %s",
   "rsi.craft.error.material_unavailable": "Material unavailable: %s (need %s, have %s)",
-  "rsi.craft.error.commit_failed": "Material commit failed: %s"
+  "rsi.craft.error.commit_failed": "Material commit failed: %s",
+  "rsi.plan.material.auto": "Automatic",
+  "rsi.plan.material.search": "Search materials"
 }

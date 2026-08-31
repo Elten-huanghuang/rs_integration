@@ -114,9 +114,16 @@ public final class PlanCache {
 
     public record Key(UUID playerId, ResourceLocation recipeId,
                       Map<String, String> forcedRecipes, int repeatCount,
-                      String clickedOutputToken) {
+                      String clickedOutputToken, Map<String, String> materialLocks) {
+        public Key(UUID playerId, ResourceLocation recipeId,
+                   Map<String, String> forcedRecipes, int repeatCount,
+                   String clickedOutputToken) {
+            this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken, Map.of());
+        }
+
         public Key {
             forcedRecipes = Map.copyOf(forcedRecipes);
+            materialLocks = Map.copyOf(materialLocks);
         }
     }
 

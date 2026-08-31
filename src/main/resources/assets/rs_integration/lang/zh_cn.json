@@ -1060,5 +1060,7 @@
   "rsi.craft.error.ledger_state": "合成账本状态错误：%s",
   "rsi.craft.error.chain_aborted": "合成链已中止：%s",
   "rsi.craft.error.material_unavailable": "材料不足：%s（需要 %s，现有 %s）",
-  "rsi.craft.error.commit_failed": "材料提交失败：%s"
+  "rsi.craft.error.commit_failed": "材料提交失败：%s",
+  "rsi.plan.material.auto": "自动选择",
+  "rsi.plan.material.search": "搜索材料"
 }

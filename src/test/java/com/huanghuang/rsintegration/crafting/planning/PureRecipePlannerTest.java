@@ -116,6 +116,25 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void reportsAllIndependentMissingLeavesFromTheSelectedPlan() {
+        MaterialRef iron = material("missing_iron");
+        MaterialRef gold = material("missing_gold");
+        MaterialRef artifact = material("missing_artifact");
+        RecipeNode assemble = recipe("assemble_missing_artifact", artifact, 1,
+                ingredient(iron, 2), ingredient(gold, 3), ingredient(iron, 4));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(artifact, List.of(assemble))),
+                Map.of(), List.of(ingredient(artifact, 1)), 20);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(List.of(ingredient(iron, 6), ingredient(gold, 3)), result.missing());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("assemble_missing_artifact"), 1)), result.steps());
+    }
+
+    @Test
     void backtracksAcrossEarlierRootWhenItsFirstRecipeConsumesLaterMaterial() {
         MaterialRef ore = material("ore");
         MaterialRef fuel = material("fuel");
@@ -578,6 +597,25 @@ class PureRecipePlannerTest {
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, result.feasibility());
         assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+    }
+
+    @Test
+    void expiredSearchStillBuildsABoundedMultiMissingTrace() {
+        MaterialRef iron = material("timed_out_iron");
+        MaterialRef gold = material("timed_out_gold");
+        MaterialRef artifact = material("timed_out_artifact");
+        RecipeNode assemble = recipe("assemble_timed_out_artifact", artifact, 1,
+                ingredient(iron, 2), ingredient(gold, 3));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(artifact, List.of(assemble))),
+                Map.of(), List.of(ingredient(artifact, 1)),
+                20, 100, 100, System.nanoTime() - 1L);
+
+        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+        assertEquals(List.of(ingredient(iron, 2), ingredient(gold, 3)), result.missing());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("assemble_timed_out_artifact"), 1)), result.steps());
     }
 
     @Test

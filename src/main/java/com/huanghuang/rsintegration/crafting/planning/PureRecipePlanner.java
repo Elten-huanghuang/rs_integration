@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +22,8 @@ public final class PureRecipePlanner {
     private static final int MAX_SEARCH_STATES = 65_536;
     private static final int DEFAULT_MAX_MEMOIZED_FAILURES = 8_192;
     private static final int MAX_SEARCH_CALL_DEPTH = 512;
+    private static final int MAX_REPORTED_MISSING = 64;
+    private static final int MAX_DIAGNOSTIC_OPERATIONS = 32_768;
 
     private PureRecipePlanner() {}
 
@@ -72,26 +75,37 @@ public final class PureRecipePlanner {
         }
         IngredientRef unresolved = search.deepestFailure != null
                 ? search.deepestFailure : (roots.isEmpty() ? null : roots.get(0));
+        List<IngredientRef> missing = status == Status.SUCCESS || unresolved == null
+                ? List.of() : List.of(unresolved);
         List<PlannedStep> resultSteps = switch (status) {
             case SUCCESS -> search.steps;
             case UNRESOLVABLE -> search.bestFailureSteps;
             case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> List.of();
         };
-        if (status == Status.UNRESOLVABLE && !roots.isEmpty()) {
+        if ((status == Status.UNRESOLVABLE || status == Status.TIME_LIMIT) && !roots.isEmpty()) {
+            PartialPlanBuilder partialBuilder = new PartialPlanBuilder(
+                    graph, available, maxSteps,
+                    status == Status.UNRESOLVABLE
+                            ? search::checkBudget
+                            : new DiagnosticBudget(MAX_DIAGNOSTIC_OPERATIONS));
             try {
-                PartialTrace partial = new PartialPlanBuilder(
-                        graph, available, maxSteps, search::checkBudget).build(normalizedRoots);
-                if (partial.missing() != null && partial.steps().size() >= resultSteps.size()) {
-                    unresolved = partial.missing();
+                PartialTrace partial = partialBuilder.build(normalizedRoots);
+                if (!partial.missing().isEmpty()
+                        && partial.steps().size() >= resultSteps.size()) {
+                    missing = partial.missing();
                     resultSteps = partial.steps();
                 }
             } catch (TimeLimitException ignored) {
                 // Feasibility is already known. Keep the search trace when the optional
                 // display-oriented partial expansion exhausts the remaining time budget.
+            } catch (DiagnosticLimitException ignored) {
+                PartialTrace partial = partialBuilder.snapshot();
+                if (!partial.missing().isEmpty()) {
+                    missing = partial.missing();
+                    resultSteps = partial.steps();
+                }
             }
         }
-        List<IngredientRef> missing = status == Status.SUCCESS || unresolved == null
-                ? List.of() : List.of(unresolved);
         Map<MaterialRef, Integer> resultStock = status == Status.SUCCESS ? search.stock : search.initialStock;
         return new Result(Feasibility.from(status), resultSteps, missing, resultStock, status,
                 search.expandedStates, search.backtracks, search.memoHits);
@@ -636,7 +650,7 @@ public final class PureRecipePlanner {
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
         private final Runnable budgetCheck;
-        private IngredientRef missing;
+        private final Map<MissingKey, IngredientRef> missing = new LinkedHashMap<>();
 
         private PartialPlanBuilder(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Integer> available,
@@ -655,7 +669,11 @@ public final class PureRecipePlanner {
                 budgetCheck.run();
                 expand(root);
             }
-            return new PartialTrace(List.copyOf(steps), missing);
+            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()));
+        }
+
+        private PartialTrace snapshot() {
+            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()));
         }
 
         private boolean expand(IngredientRef ingredient) {
@@ -781,8 +799,19 @@ public final class PureRecipePlanner {
         }
 
         private void noteMissing(IngredientRef ingredient, int count) {
-            if (missing == null) missing = ingredient.withCount(count);
+            MissingKey key = new MissingKey(Set.copyOf(ingredient.alternatives()),
+                    ingredient.nbtMatchMode());
+            IngredientRef previous = missing.get(key);
+            if (previous != null) {
+                long combined = (long) previous.count() + count;
+                missing.put(key, previous.withCount((int) Math.min(Integer.MAX_VALUE, combined)));
+            } else if (missing.size() < MAX_REPORTED_MISSING) {
+                missing.put(key, ingredient.withCount(count));
+            }
         }
+
+        private record MissingKey(Set<MaterialRef> alternatives,
+                                  ImmutableRecipeGraph.NbtMatchMode nbtMatchMode) {}
 
         private record PartialChoice(MaterialRef output, RecipeNode recipe) {}
 
@@ -844,7 +873,21 @@ public final class PureRecipePlanner {
         }
     }
 
-    private record PartialTrace(List<PlannedStep> steps, IngredientRef missing) {}
+    private record PartialTrace(List<PlannedStep> steps, List<IngredientRef> missing) {}
+
+    private static final class DiagnosticBudget implements Runnable {
+        private int remaining;
+
+        private DiagnosticBudget(int maximumOperations) {
+            remaining = Math.max(1, maximumOperations);
+        }
+
+        @Override
+        public void run() {
+            PlanningThreadContext.throwIfCancelled();
+            if (--remaining < 0) throw new DiagnosticLimitException();
+        }
+    }
 
     /**
      * Proves seeded reachability only when the search is about to visit a branch.
@@ -969,6 +1012,12 @@ public final class PureRecipePlanner {
 
     private static final class TimeLimitException extends RuntimeException {
         private TimeLimitException() {
+            super(null, null, false, false);
+        }
+    }
+
+    private static final class DiagnosticLimitException extends RuntimeException {
+        private DiagnosticLimitException() {
             super(null, null, false, false);
         }
     }
