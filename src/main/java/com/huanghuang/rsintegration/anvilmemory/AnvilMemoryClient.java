@@ -1,13 +1,9 @@
 package com.huanghuang.rsintegration.anvilmemory;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.mojang.blaze3d.systems.RenderSystem;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -236,14 +232,8 @@ public final class AnvilMemoryClient {
         NetworkHandler.CHANNEL.sendToServer(new AnvilMemoryRequestPacket(action, id, index));
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void bookmark(ItemStack stack) {
-        var runtime = RSJeiPlugin.getRuntime();
-        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) return;
-        var typed = runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK, stack.copyWithCount(1));
-        if (typed.isEmpty()) return;
-        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        ((BookmarkOverlayAccessor) overlay).rsIntegration$getBookmarkList().add(bookmark);
+        RecipeBrowserBridge.addFavorite(stack);
     }
 
     private static ResourceLocation texture(String name) {

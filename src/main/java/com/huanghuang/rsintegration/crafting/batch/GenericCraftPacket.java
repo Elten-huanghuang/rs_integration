@@ -969,7 +969,7 @@ public final class GenericCraftPacket {
                 reusableCatalystOutputIds,
                 RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
-        if (!route.pureCompatible() || route.catalystRouteAvailable()) {
+        if (!route.backgroundCompatible() || route.catalystRouteAvailable()) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-exec] immutable route unavailable recipe={} status={} unresolved={} catalystRoute={}",
                     recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
@@ -3476,7 +3476,10 @@ public final class GenericCraftPacket {
                     recipeId, demandTreeElapsed / 1_000_000L, demandTree.status(),
                     demandTree.visitedNodes(), demandTree.unresolved());
         }
-        boolean pureRoute = demandTree.pureCompatible()
+        // NODE_LIMIT is only a conservative routing-probe cutoff. Keep those
+        // requests on the immutable background planner instead of falling back
+        // to the 500ms typed resolver on the server thread.
+        boolean pureRoute = demandTree.backgroundCompatible()
                 && effectiveOverrides.isEmpty()
                 && materialLocks.isEmpty()
                 && !planningSnapshot.mainThreadOnly()
@@ -3537,7 +3540,7 @@ public final class GenericCraftPacket {
                         ? java.util.Optional.<SynchronousFallbackReason>empty()
                         : SynchronousFallbackReason.whenPureRouteUnavailable(
                                 planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
-                                demandTree.pureCompatible(), demandTree.catalystRouteAvailable());
+                                demandTree.backgroundCompatible(), demandTree.catalystRouteAvailable());
         synchronousFallbackReason.ifPresent(reason ->
                 PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
 

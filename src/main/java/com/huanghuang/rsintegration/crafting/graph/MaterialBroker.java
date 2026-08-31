@@ -220,6 +220,31 @@ public final class MaterialBroker {
         }
     }
 
+    /** Return only recovered producer fragments; unrelated recovered inputs are ignored. */
+    public void refundRecoveredProducerFragments(ReservationToken token, List<ItemStack> fragments) {
+        requireOwnerThread();
+        Reservation reservation = require(token, ReservationState.COMMITTED);
+        List<ItemStack> remaining = new ArrayList<>();
+        for (ItemStack stack : fragments) {
+            if (stack != null && !stack.isEmpty()) remaining.add(stack.copy());
+        }
+        for (Claim claim : reservation.claims) {
+            AssetLot lot = lots.get(claim.lotId);
+            if (!(lot.source instanceof MaterialSource.ProducerOutput) || lot.committed <= 0) continue;
+            int refundable = Math.min(claim.quantity, lot.committed);
+            for (ItemStack stack : remaining) {
+                if (refundable <= 0) break;
+                if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(lot.stack, stack)) continue;
+                int giveBack = Math.min(refundable, stack.getCount());
+                stack.shrink(giveBack);
+                lot.committed -= giveBack;
+                lot.available += giveBack;
+                claim.quantity -= giveBack;
+                refundable -= giveBack;
+            }
+        }
+    }
+
     private Map<Long, Integer> plan(List<Request> requests) {
         Map<Long, Integer> planned = new LinkedHashMap<>();
         for (Request request : requests) {

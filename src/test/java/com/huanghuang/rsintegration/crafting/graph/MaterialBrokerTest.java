@@ -353,6 +353,28 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void recoveredProducerRefundIgnoresUnrelatedInputsAndSettlesMissingQuantity() {
+        MaterialBroker broker = new MaterialBroker();
+        ItemStack actual = new ItemStack(Items.DIAMOND, 3);
+        MaterialKey material = MaterialKey.of(actual);
+        MaterialSource source = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(7), 0));
+        broker.publishActual(source, material, actual);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(8),
+                List.of(new MaterialBroker.Request(source, material, 3)));
+        broker.commit(token);
+
+        broker.refundRecoveredProducerFragments(token, List.of(
+                new ItemStack(Items.IRON_INGOT, 64), new ItemStack(Items.DIAMOND, 1)));
+        broker.settle(token);
+
+        List<ItemStack> available = broker.drainAvailableProducerAssets();
+        assertEquals(1, available.size());
+        assertEquals(1, available.get(0).getCount());
+        assertEquals(0, broker.heldBy(new NodeId(8)));
+    }
+
+    @Test
     void illegalTransitionsFailWithoutChangingQuantity() {
         MaterialBroker broker = brokerWithDiamonds(2);
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));

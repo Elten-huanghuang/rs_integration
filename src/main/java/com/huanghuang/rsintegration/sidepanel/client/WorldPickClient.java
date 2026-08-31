@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClickPacket;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import net.minecraft.client.Minecraft;
@@ -56,8 +57,8 @@ public final class WorldPickClient {
         // inside the JEI-loaded check, so a missing JEI runtime (or a JEI
         // startup timing issue) silently dropped both the bookmark attempt and
         // the user-facing explanation.
-        boolean bookmarked = net.minecraftforge.fml.ModList.get().isLoaded("jei")
-                && WorldPickJeiClient.bookmark(target);
+        boolean bookmarked = RecipeBrowserBridge.addFavorite(target)
+                != RecipeBrowserBridge.FavoriteResult.UNAVAILABLE;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
             minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable(

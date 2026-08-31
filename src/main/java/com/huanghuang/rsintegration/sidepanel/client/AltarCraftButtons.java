@@ -159,11 +159,14 @@ public final class AltarCraftButtons {
 
     public static boolean isVisible(int index) {
         if (index < 0 || index >= MOD_TYPES.size()) return false;
-        ModType type = MOD_TYPES.get(index);
+        return isVisible(RECIPE_IDS.get(index), MOD_TYPES.get(index));
+    }
+
+    public static boolean isVisible(ResourceLocation recipeId, @Nullable ModType type) {
         if (type == null) return true;
         if ("lychee_item_inside_virtual".equals(type.id())) {
             int required = com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
-                    .requiredCatalystMask(RECIPE_IDS.get(index));
+                    .requiredCatalystMask(recipeId);
             return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
                     .hasLycheeCatalyst(required);
         }

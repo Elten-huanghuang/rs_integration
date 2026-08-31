@@ -282,6 +282,8 @@ class PureDemandTreeInspectorTest {
 
         assertFalse(result.complete());
         assertEquals(PureDemandTreeInspector.Status.NODE_LIMIT, result.status());
+        assertTrue(result.backgroundCompatible(),
+                "node-limit is a conservative probe cutoff, not a typed-only dependency");
     }
 
     @Test

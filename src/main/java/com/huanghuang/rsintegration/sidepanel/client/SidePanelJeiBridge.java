@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.recipe.IFocusFactory;
@@ -33,8 +34,7 @@ public final class SidePanelJeiBridge {
     public static void pushFilter(int searchMode, String searchText) {
         if (searchMode < 2) return;
         try {
-            IJeiRuntime rt = RSJeiPlugin.getRuntime();
-            if (rt != null) rt.getIngredientFilter().setFilterText(searchText);
+            RecipeBrowserBridge.setSearchText(searchText);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] JEI push failed", e);
         }
@@ -53,9 +53,7 @@ public final class SidePanelJeiBridge {
                                          String lastJeiFilterText) {
         if (searchMode < 2) return PullResult.NO_CHANGE;
         try {
-            IJeiRuntime rt = RSJeiPlugin.getRuntime();
-            if (rt == null) return PullResult.NO_CHANGE;
-            String t = rt.getIngredientFilter().getFilterText();
+            String t = RecipeBrowserBridge.getSearchText();
             if (t == null) return PullResult.NO_CHANGE;
             if (t.equals(lastJeiFilterText)) return PullResult.NO_CHANGE;
             if (!t.equals(currentSearchText)) {
@@ -73,8 +71,7 @@ public final class SidePanelJeiBridge {
     /** Clear the JEI ingredient filter text. */
     public static void clearFilter() {
         try {
-            IJeiRuntime rt = RSJeiPlugin.getRuntime();
-            if (rt != null) rt.getIngredientFilter().setFilterText("");
+            RecipeBrowserBridge.setSearchText("");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-SidePanel] JEI clear failed", e);
         }
@@ -89,6 +86,7 @@ public final class SidePanelJeiBridge {
     public static void showJeiForItem(boolean usage, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
         try {
+            if (RecipeBrowserBridge.showRecipesOrUses(stack, usage)) return;
             IJeiRuntime runtime = RSJeiPlugin.getRuntime();
             if (runtime == null) return;
             IFocusFactory ff = runtime.getJeiHelpers().getFocusFactory();

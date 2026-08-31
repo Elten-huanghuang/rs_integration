@@ -1115,6 +1115,7 @@ public final class ExtractionLedger implements AutoCloseable {
         final int resonanceSlot;
         @Nullable final ResonanceReservationKey resonanceKey;
         ItemStack extracted = ItemStack.EMPTY;
+        int refundableCount;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
@@ -1148,6 +1149,7 @@ public final class ExtractionLedger implements AutoCloseable {
             this.resonanceView = resonanceView;
             this.resonanceSlot = resonanceSlot;
             this.resonanceKey = resonanceKey;
+            this.refundableCount = this.count;
         }
 
         static Entry resonance(Ingredient ingredient, ItemStack template,
@@ -1162,7 +1164,9 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         ItemStack refundableStack() {
-            return extracted.isEmpty() ? ItemStack.EMPTY : extracted.copy();
+            return extracted.isEmpty() || refundableCount <= 0
+                    ? ItemStack.EMPTY
+                    : extracted.copyWithCount(Math.min(refundableCount, extracted.getCount()));
         }
     }
 
@@ -1950,6 +1954,61 @@ public final class ExtractionLedger implements AutoCloseable {
     public void releaseCommittedEntries(List<ItemStack> stacks) {
         requireState(State.COMMITTED);
         removeMatchingEntries(stacks, false);
+    }
+
+    /**
+     * Keep only quantities that failure cleanup physically recovered. Missing
+     * or consumed fragments are settled instead of recreated during refund.
+     */
+    public void retainCommittedRefunds(List<ItemStack> recovered) {
+        requireState(State.COMMITTED);
+        List<ItemStack> committed = entries.stream()
+                .map(entry -> entry.extracted.copy())
+                .toList();
+        List<ItemStack> refundable = matchRecoveredRefunds(committed, recovered);
+        List<Entry> removed = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            int count = refundable.get(i).getCount();
+            if (count <= 0) {
+                removed.add(entry);
+                continue;
+            }
+            entry.refundableCount = count;
+        }
+        entries.removeAll(removed);
+        for (Entry entry : removed) {
+            entriesById.remove(entry.id);
+            settlementEntries.remove(entry.id);
+        }
+        resetSettlementMirror();
+    }
+
+    static List<ItemStack> matchRecoveredRefunds(List<ItemStack> committed,
+                                                 List<ItemStack> recovered) {
+        List<ItemStack> pool = new ArrayList<>();
+        if (recovered != null) {
+            for (ItemStack stack : recovered) {
+                if (stack != null && !stack.isEmpty()) pool.add(stack.copy());
+            }
+        }
+        List<ItemStack> refundable = new ArrayList<>(committed.size());
+        for (ItemStack expected : committed) {
+            int remaining = expected == null ? 0 : expected.getCount();
+            int matched = 0;
+            for (ItemStack stack : pool) {
+                if (remaining <= 0) break;
+                if (stack.isEmpty() || expected == null
+                        || !ItemStack.isSameItemSameTags(stack, expected)) continue;
+                int take = Math.min(remaining, stack.getCount());
+                stack.shrink(take);
+                remaining -= take;
+                matched += take;
+            }
+            refundable.add(expected == null || matched <= 0
+                    ? ItemStack.EMPTY : expected.copyWithCount(matched));
+        }
+        return List.copyOf(refundable);
     }
 
     private void removeMatchingEntries(List<ItemStack> stacks, boolean updatePending) {

@@ -84,6 +84,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private String failureDetail = "";
     /** Whether every worker requiring physical cleanup was successfully cleaned. */
     private boolean physicalFailureCleanupCompleted;
+    @Nullable
+    private List<ItemStack> failureRecoveredInputs;
     /** Terminal state observed before failure cleanup clears worker operation ids. */
     @Nullable
     private OperationExecutionKernel.TerminalClass failureTerminalClass;
@@ -745,6 +747,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 ? OperationExecutionKernel.TerminalClass.PRE_START
                 : null;
         physicalFailureCleanupCompleted = true;
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        boolean recoveryAudited = true;
         beginDraining(reason);
         for (WorkerSlot worker : workers) {
             // A physical batch may have converted only part of its input before
@@ -760,8 +764,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                     if (physicalCleanupRequired && !physicalCleanupCompleted(worker.delegate)) {
                         physicalFailureCleanupCompleted = false;
                     }
+                    if (physicalCleanupRequired) {
+                        List<ItemStack> recovered = worker.delegate.failureRecoveredInputs();
+                        if (recovered == null) recoveryAudited = false;
+                        else recoveredInputs.addAll(recovered);
+                    }
                 } catch (Exception e) {
                     if (physicalCleanupRequired) physicalFailureCleanupCompleted = false;
+                    if (physicalCleanupRequired) recoveryAudited = false;
                     RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Worker cleanup failed at {}",
                             worker.machine.pos(), e);
                 }
@@ -769,6 +779,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             worker.clearOperations();
             worker.needsFailureCleanup = false;
         }
+        failureRecoveredInputs = recoveryAudited ? List.copyOf(recoveredInputs) : null;
         started = false;
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-ParallelGroup] failure cleanup recipe={} terminal={} physicalCleanupCompleted={} running={} queued={}",
@@ -779,6 +790,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     /** True when all physical worker delegates completed their failure cleanup. */
     public boolean physicalFailureCleanupCompleted() {
         return physicalFailureCleanupCompleted;
+    }
+
+    @Nullable
+    @Override
+    public List<ItemStack> failureRecoveredInputs() {
+        return failureRecoveredInputs;
     }
 
     /** Terminal state captured before {@link #onBatchFailed} clears worker state. */

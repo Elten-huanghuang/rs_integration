@@ -1,13 +1,9 @@
 package com.huanghuang.rsintegration.reforging.client;
 
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.reforging.ReforgingRestockRequestPacket;
 import com.huanghuang.rsintegration.reforging.ReforgingRestockResultPacket;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -134,15 +130,8 @@ public final class ReforgingRestockClient {
         return item == null ? ItemStack.EMPTY : new ItemStack(item);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void bookmarkSigil() {
-        var runtime = RSJeiPlugin.getRuntime();
         var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation("apotheosis", "sigil_of_rebirth"));
-        if (runtime == null || item == null
-                || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) return;
-        var typed = runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK, new ItemStack(item));
-        if (typed.isEmpty()) return;
-        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        ((BookmarkOverlayAccessor) overlay).rsIntegration$getBookmarkList().add(bookmark);
+        if (item != null) RecipeBrowserBridge.addFavorite(new ItemStack(item));
     }
 }

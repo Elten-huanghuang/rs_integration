@@ -39,6 +39,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private CrabTrapLootWrapper wrapper;
     private boolean craftDone;
+    private ItemStack placedBait = ItemStack.EMPTY;
 
     private static volatile Field inventoryField;
     private static volatile boolean reflectionProbed;
@@ -79,6 +80,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         }
 
         this.craftDone = false;
+        this.placedBait = ItemStack.EMPTY;
         return true;
     }
 
@@ -161,6 +163,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         be.setChanged();
+        placedBait = baitStack.copy();
 
         RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] Bait inserted, waiting for loot");
         return true;
@@ -229,15 +232,16 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < TOTAL_SLOTS) return;
 
-        // Refund unconsumed bait
-        ItemStack bait = handler.extractItem(BAIT_SLOT, 64, false);
-        if (!bait.isEmpty() && !usingSharedLedger) refundToRSNetwork(bait);
-
-        // Refund uncollected output
-        for (int slot = OUTPUT_START; slot < OUTPUT_END; slot++) {
-            ItemStack s = handler.extractItem(slot, 64, false);
-            if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
+        // Only the exact bait still present is eligible for input refund.
+        ItemStack visibleBait = handler.getStackInSlot(BAIT_SLOT);
+        ItemStack bait = ItemStack.EMPTY;
+        if (!visibleBait.isEmpty() && ItemStack.isSameItemSameTags(visibleBait, placedBait)) {
+            bait = handler.extractItem(BAIT_SLOT,
+                    Math.min(visibleBait.getCount(), placedBait.getCount()), false);
         }
+        if (!bait.isEmpty() && !usingSharedLedger) refundToRSNetwork(bait);
+        recordFailureRecoveredInputs(bait.isEmpty() ? List.of() : List.of(bait));
+        placedBait = ItemStack.EMPTY;
         be.setChanged();
         forceChunkLoad(false);
     }
@@ -247,6 +251,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
         craftDone = false;
+        placedBait = ItemStack.EMPTY;
         network = null;
     }
 

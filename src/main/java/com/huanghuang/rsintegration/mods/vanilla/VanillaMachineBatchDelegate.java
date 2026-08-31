@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
+import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
@@ -69,6 +70,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // CAMPFIRE path state
     private int campfireSlot = -1;
     private Object campfireBE;
+    private ItemStack suppliedCampfireInput = ItemStack.EMPTY;
     private static final java.lang.reflect.Field CAMPFIRE_ITEMS;
     private static final java.lang.reflect.Field CAMPFIRE_COOKING_PROGRESS;
     private static final java.lang.reflect.Field CAMPFIRE_COOKING_TIME;
@@ -598,18 +600,19 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         suppliedFurnaceFuelCount += fuel.getCount();
     }
 
-    private void removeOwnedFurnaceInput(boolean refund) {
-        if (furnaceBE == null || !furnaceInventoryLease) return;
+    private ItemStack removeOwnedFurnaceInput(boolean refund) {
+        if (furnaceBE == null || !furnaceInventoryLease) return ItemStack.EMPTY;
         ItemStack current = furnaceBE.getItem(0);
         int removable = MachineSlotOwnershipPolicy.removableAddedCount(
                 ItemStack.EMPTY, suppliedFurnaceInput, suppliedFurnaceInputCount, current);
-        if (removable <= 0) return;
+        if (removable <= 0) return ItemStack.EMPTY;
         ItemStack removed = current.copyWithCount(removable);
         ItemStack retained = current.copy();
         retained.shrink(removable);
         furnaceBE.setItem(0, retained.isEmpty() ? ItemStack.EMPTY : retained);
         suppliedFurnaceInputCount = Math.max(0, suppliedFurnaceInputCount - removable);
         if (refund) refundToRSNetwork(removed);
+        return removed;
     }
 
     private void resetFurnaceOwnership() {
@@ -719,6 +722,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 net.minecraft.core.NonNullList<ItemStack> items =
                         (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
                 items.set(campfireSlot, inputTemplate.copy());
+                suppliedCampfireInput = inputTemplate.copy();
                 int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
                 prog[campfireSlot] = 0;
                 int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
@@ -746,6 +750,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             net.minecraft.core.NonNullList<ItemStack> items =
                     (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             items.set(campfireSlot, materials.get(0).copy());
+            suppliedCampfireInput = materials.get(0).copy();
             int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
             prog[campfireSlot] = 0;
             int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
@@ -804,22 +809,31 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    private void clearCampfireSlot(boolean refundToRS) {
+    private ItemStack clearCampfireSlot(boolean refundToRS) {
         try {
             @SuppressWarnings("unchecked")
             net.minecraft.core.NonNullList<ItemStack> items =
                     (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             ItemStack slotItem = items.get(campfireSlot);
-            if (!slotItem.isEmpty()) {
-                if (refundToRS) refundToRSNetwork(slotItem.copy());
+            if (!slotItem.isEmpty()
+                    && !PhysicalInputRecovery.recoveredExpected(
+                    slotItem, suppliedCampfireInput)) {
+                return ItemStack.EMPTY;
             }
-            items.set(campfireSlot, ItemStack.EMPTY);
+            ItemStack recovered = slotItem.isEmpty() ? ItemStack.EMPTY
+                    : slotItem.copyWithCount(suppliedCampfireInput.getCount());
+            ItemStack retained = slotItem.copy();
+            retained.shrink(recovered.getCount());
+            items.set(campfireSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
+            if (!recovered.isEmpty() && refundToRS) refundToRSNetwork(recovered.copy());
             int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
             prog[campfireSlot] = 0;
             int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
             times[campfireSlot] = 0;
+            return recovered;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire clear failed", e);
+            return ItemStack.EMPTY;
         }
     }
 
@@ -910,6 +924,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
         if (kind == MachineKind.FURNACE && furnaceBE != null) {
             // Refund the machine's physical input only when nothing else will.
             //
@@ -919,17 +934,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             // material twice. The ledger holding this input is the deciding
             // factor, so defer to it whenever it is the shared chain ledger.
             boolean refundToRS = !usingSharedLedger;
-            removeOwnedFurnaceInput(refundToRS);
-            // Output slot (slot 2): the transformed result is not a ledger-managed input.
-            // On abort, clear it to prevent residue, but do NOT refund — collectResult()
-            // is the only path that should collect the output. Refunding here would risk
-            // double-collection if collectResult() already ran or races with cleanup.
-            ItemStack slot2 = furnaceBE.getItem(2);
-            if (!slot2.isEmpty() && matchesFurnaceOutput(slot2)
-                    && phase != CraftPhase.WAITING_FOR_START) {
-                furnaceBE.setItem(2, ItemStack.EMPTY);
-                // Do NOT refund output slot to network (no `if (refundToRS) refund...`)
-            }
+            ItemStack recovered = removeOwnedFurnaceInput(refundToRS);
+            if (!recovered.isEmpty()) recoveredInputs.add(recovered);
             // Fuel is outside the ledger, always refund unburned fuel
             refundLeftoverFuel();
             resetFurnaceOwnership();
@@ -937,8 +943,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
         if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
             campfireForceLoad(false);
-            clearCampfireSlot(player == null);
+            ItemStack recovered = clearCampfireSlot(!usingSharedLedger);
+            if (!recovered.isEmpty()) recoveredInputs.add(recovered);
+            suppliedCampfireInput = ItemStack.EMPTY;
         }
+
+        if (kind != MachineKind.VIRTUAL) recordFailureRecoveredInputs(recoveredInputs);
 
         // Rollback uncommitted private ledger
         if (ledger != null && !ledger.isCommitted()) {
@@ -948,6 +958,11 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
         resetState();
+    }
+
+    @Override
+    protected boolean isFailureRefundSafe() {
+        return kind == MachineKind.VIRTUAL;
     }
 
     @Override

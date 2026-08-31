@@ -74,6 +74,7 @@
     "wizardterracurios.BuffItemMixin",
     "terraequipment.AutoPotionTickerMixin",
     "slashblade.RecipeManagerMixin",
+    "easyvillagers.EasyVillagersTradeLockMixin",
     "retraining.RetrainingTradeLockMixin",
     "tradecycling.TradeCyclingTradeLockMixin",
     "traderefresh.TradeRefreshTradeLockMixin"
@@ -93,6 +94,7 @@
     "jei.IngredientFilterSolCarrotMixin",
     "jei.ElementSearchSolCarrotMixin",
     "jei.ElementSearchLowMemSolCarrotMixin",
+    "emi.RecipeDisplayMixin",
     "minecraft.MerchantScreenAccessor",
     "minecraft.MerchantScreenSelectionMixin",
     "minecraft.MinecraftMixin",

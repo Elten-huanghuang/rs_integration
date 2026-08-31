@@ -46,6 +46,7 @@ repositories {
     flatDir { dirs 'libs' }
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com' }
+    maven { url = 'https://maven.terraformersmc.com/releases/' }
     maven {
         url = 'https://repo.spongepowered.org/repository/maven-public/'
         content { includeGroup 'org.spongepowered' }
@@ -58,7 +59,7 @@ dependencies {
 
     // All mod jars in libs — must go through fg.deobf() so ForgeGradle
     // remaps the classes to match the dev-environment mappings.
-    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar']))
+    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar'], exclude: ['emi-*.jar']))
 
     // A production RS jar in run/mods is not remapped for the userdev namespace.
     // Keep the release artifact compile-only, but provide a deobfuscated runtime copy for dev runs.
@@ -67,6 +68,13 @@ dependencies {
     // JEI
     compileOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     compileOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
+
+    // EMI (optional client integration)
+    if (file("libs/emi-${emi_version}+forge.jar").exists()) {
+        compileOnly fg.deobf("local:emi:${emi_version}+forge")
+    } else {
+        compileOnly fg.deobf("dev.emi:emi-forge:${emi_version}")
+    }
 
     // Curios
     compileOnly fg.deobf(files('libs/curios-forge-5.14.1+1.20.1.jar'))
@@ -218,6 +226,7 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
+                    'com/huanghuang/rsintegration/compat/emi/RSEmiPlugin.class',
                     'rs_integration.mixins.json',
                     'rs_integration.refmap.json'
             ]
@@ -227,7 +236,12 @@ tasks.register('verifyReleaseJar') {
                 }
             }
 
-            def forbiddenFragments = ['tinypinyin', 'ahocorasick', 'com/github/promeg/']
+            def forbiddenFragments = [
+                    'tinypinyin',
+                    'ahocorasick',
+                    'com/github/promeg/',
+                    'dev/emi/emi/'
+            ]
             zip.entries().each { entry ->
                 def lowerName = entry.name.toLowerCase(java.util.Locale.ROOT)
                 forbiddenFragments.each { fragment ->

@@ -286,31 +286,40 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, @Nullable ServerPlayer player) {
-        if (level == null) return;
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (level == null) {
+            recordFailureRecoveredInputs(recoveredInputs);
+            return;
+        }
         for (UUID id : List.copyOf(inputEntityIds)) {
             var entity = level.getEntity(id);
             if (!(entity instanceof ItemEntity item) || !item.isAlive()) continue;
             ItemStack refund = item.getItem().copy();
             item.discard();
+            recoveredInputs.add(refund.copy());
             if (!usingSharedLedger) refundStandalone(player, refund);
         }
         inputEntityIds.clear();
+        recordFailureRecoveredInputs(recoveredInputs);
         resetLocalState();
         resetState();
     }
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
         if (level != null) {
             for (UUID id : List.copyOf(inputEntityIds)) {
                 var entity = level.getEntity(id);
                 if (!(entity instanceof ItemEntity item) || !item.isAlive()) continue;
                 ItemStack refund = item.getItem().copy();
                 item.discard();
+                recoveredInputs.add(refund.copy());
                 if (!usingSharedLedger) refundStandalone(player, refund);
             }
         }
         inputEntityIds.clear();
+        recordFailureRecoveredInputs(recoveredInputs);
         resetLocalState();
         resetState();
     }

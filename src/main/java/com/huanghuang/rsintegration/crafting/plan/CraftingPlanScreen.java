@@ -2,10 +2,10 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
@@ -25,11 +25,11 @@ import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeRenderer;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.crafting.tree.SelectedPath;
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
 import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
+import com.huanghuang.rsintegration.sidepanel.client.SidePanelJeiBridge;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
@@ -52,10 +52,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.loading.FMLPaths;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
-import mezz.jei.api.runtime.IJeiRuntime;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -168,7 +164,6 @@ public final class CraftingPlanScreen extends Screen {
     private record StripEntry(ItemStack display, IngredientKey key, int count, int available, boolean enough) {}
     private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
     private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, int missingCount) {}
-    private enum BookmarkResult { ADDED, EXISTS, UNAVAILABLE }
     private int bookmarkAllActionX, bookmarkAllActionY;
     private int bookmarkAllActionW, bookmarkAllActionH;
     @Nullable
@@ -794,23 +789,13 @@ public final class CraftingPlanScreen extends Screen {
         BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
     }
 
-    /** Open JEI for a specific recipe id. No-op when JEI is unavailable. */
+    /** Open the active recipe browser for a specific recipe id. */
     private void openRecipeInJei(ResourceLocation recipeId) {
-        mezz.jei.api.runtime.IJeiRuntime runtime =
-                RSJeiPlugin.getRuntime();
-        if (runtime == null || minecraft.level == null) return;
+        if (minecraft.level == null) return;
         var vanillaRecipe = minecraft.level.getRecipeManager().byKey(recipeId).orElse(null);
         if (vanillaRecipe == null) return;
-        try {
-            runtime.getRecipesGui().show(List.of(
-                    runtime.getJeiHelpers().getFocusFactory().createFocus(
-                            mezz.jei.api.recipe.RecipeIngredientRole.OUTPUT,
-                            mezz.jei.api.constants.VanillaTypes.ITEM_STACK,
-                            vanillaRecipe.getResultItem(minecraft.level.registryAccess()))
-            ));
-        } catch (Exception e) {
-            // JEI integration unavailable — silently no-op
-        }
+        SidePanelJeiBridge.showJeiForItem(false,
+                vanillaRecipe.getResultItem(minecraft.level.registryAccess()));
     }
 
     private void registerBookmarkHit(ItemStack stack, int x, int y, int width, int height,
@@ -823,14 +808,8 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private void bookmarkMissingMaterial(BookmarkHit hit) {
-        var runtime = RSJeiPlugin.getRuntime();
-        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
-            showBookmarkMessage("rsi.plan.bookmark_unavailable", hit.stack());
-            return;
-        }
-        BookmarkResult result = addJeiBookmark(runtime, overlay, hit.stack());
+        RecipeBrowserBridge.FavoriteResult result = RecipeBrowserBridge.addFavorite(hit.stack());
         showBookmarkMessage(switch (result) {
             case ADDED -> "rsi.plan.bookmark_added";
             case EXISTS -> "rsi.plan.bookmark_exists";
@@ -840,37 +819,17 @@ public final class CraftingPlanScreen extends Screen {
 
     private void bookmarkAllMissingMaterials() {
         List<ItemStack> missing = MissingMaterialBookmarkList.from(plan);
-        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
-        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
-            showBookmarkBatchMessage("rsi.plan.bookmark_all.unavailable");
-            return;
-        }
-
         int added = 0;
         int existing = 0;
         int unavailable = 0;
         for (ItemStack stack : missing) {
-            switch (addJeiBookmark(runtime, overlay, stack)) {
+            switch (RecipeBrowserBridge.addFavorite(stack)) {
                 case ADDED -> added++;
                 case EXISTS -> existing++;
                 case UNAVAILABLE -> unavailable++;
             }
         }
         showBookmarkBatchMessage("rsi.plan.bookmark_all.result", added, existing, unavailable);
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private BookmarkResult addJeiBookmark(IJeiRuntime runtime, BookmarkOverlay overlay,
-                                          ItemStack stack) {
-        var typed = runtime.getIngredientManager().createTypedIngredient(
-                VanillaTypes.ITEM_STACK, stack.copyWithCount(1));
-        if (typed.isEmpty()) {
-            return BookmarkResult.UNAVAILABLE;
-        }
-        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        boolean added = ((BookmarkOverlayAccessor) overlay)
-                .rsIntegration$getBookmarkList().add(bookmark);
-        return added ? BookmarkResult.ADDED : BookmarkResult.EXISTS;
     }
 
     private void showBookmarkMessage(String key, ItemStack stack) {

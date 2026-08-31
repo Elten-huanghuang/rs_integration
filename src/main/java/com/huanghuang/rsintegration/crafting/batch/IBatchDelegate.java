@@ -319,6 +319,16 @@ public interface IBatchDelegate {
         return false;
     }
 
+    /**
+     * Exact physical inputs removed during failure cleanup. A null result means
+     * the delegate has not implemented recovery accounting; an empty list means
+     * cleanup was audited and recovered nothing.
+     */
+    @Nullable
+    default List<ItemStack> failureRecoveredInputs() {
+        return null;
+    }
+
     /** Optional translated reason for a terminal craft failure. */
     @Nullable
     default Component craftFailureMessage(@Nonnull CraftObservation observation) {

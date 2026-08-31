@@ -725,38 +725,41 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         // is not sufficient: terminate() nulls the player under SILENT_REFUND, and
         // that policy still refunds the ledger — doing both duplicates the material.
         boolean refundPhysical = player == null && !usingSharedLedger;
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (!queuedMaterial.isEmpty() && queuedOperations > 0) {
+            recoveredInputs.add(queuedMaterial.copyWithCount(queuedOperations));
+        }
         if (factoryMode) {
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
                 if (!ownedFactoryLanes[lane]) continue;
                 int inSlot = FACTORY_INPUT[lane];
                 ItemStack input = current.getItem(inSlot);
-                if (!input.isEmpty()) {
-                    current.setItem(inSlot, ItemStack.EMPTY);
-                    if (refundPhysical) refund(input);
-                }
-                ItemStack output = current.getItem(inSlot + 6);
-                if (!output.isEmpty() && observedWorking) {
-                    current.setItem(inSlot + 6, ItemStack.EMPTY);
-                    if (refundPhysical) refund(output);
+                if (!input.isEmpty() && ItemStack.isSameItemSameTags(input, queuedMaterial)) {
+                    int owned = Math.min(input.getCount(), initialFactoryInputCounts[lane]);
+                    ItemStack recovered = input.copyWithCount(owned);
+                    ItemStack retained = input.copy();
+                    retained.shrink(owned);
+                    current.setItem(inSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
+                    recoveredInputs.add(recovered);
+                    if (refundPhysical) refund(recovered);
                 }
             }
             inputPlaced = false;
         } else if (inputPlaced) {
             int inSlot = INPUT;
             ItemStack input = current.getItem(inSlot);
-            if (!input.isEmpty()) {
-                current.setItem(inSlot, ItemStack.EMPTY);
-                if (refundPhysical) refund(input);
+            if (!input.isEmpty() && ItemStack.isSameItemSameTags(input, queuedMaterial)) {
+                int owned = Math.min(input.getCount(), initialInputCount);
+                ItemStack recovered = input.copyWithCount(owned);
+                ItemStack retained = input.copy();
+                retained.shrink(owned);
+                current.setItem(inSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
+                recoveredInputs.add(recovered);
+                if (refundPhysical) refund(recovered);
             }
             inputPlaced = false;
         }
-        if (!factoryMode) {
-            ItemStack output = current.getItem(OUTPUT);
-            if (!output.isEmpty() && observedWorking) {
-                current.setItem(OUTPUT, ItemStack.EMPTY);
-                if (refundPhysical) refund(output);
-            }
-        }
+        recordFailureRecoveredInputs(recoveredInputs);
         refundFuel(current);
         current.setChanged();
         releaseFactoryLease();

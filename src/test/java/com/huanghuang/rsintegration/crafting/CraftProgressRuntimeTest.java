@@ -104,6 +104,16 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void flatInFlightInputsAlsoRequirePhysicalRecovery() {
+        assertTrue(AsyncCraftChain.shouldRefundFlatCommitted(
+                OperationExecutionKernel.TerminalClass.PRE_START, false));
+        assertTrue(AsyncCraftChain.shouldRefundFlatCommitted(
+                OperationExecutionKernel.TerminalClass.IN_FLIGHT, true));
+        assertFalse(AsyncCraftChain.shouldRefundFlatCommitted(
+                OperationExecutionKernel.TerminalClass.IN_FLIGHT, false));
+    }
+
+    @Test
     void completionFailureKeepsOutputShortageDetail() {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
         NodeId node = new NodeId(6);

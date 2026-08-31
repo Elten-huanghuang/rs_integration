@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -52,6 +53,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     private boolean isSkillet;
     private boolean skilletStarted;
     private int skilletPrevTime = -1;
+    private ItemStack placedInput = ItemStack.EMPTY;
     // Campfire-specific
     private int campfireSlot = -1;
     private Object campfireBE;
@@ -113,6 +115,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         this.recipe = found;
         this.craftDone = false;
         this.skilletStarted = false;
+        this.placedInput = ItemStack.EMPTY;
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null && isSkilletBE(be)) {
@@ -215,6 +218,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             campfireForceLoad(true);
             skilletPrevTime = -1;
             skilletStarted = true;
+            placedInput = input.copy();
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item added to skillet");
             return true;
         } catch (Exception e) {
@@ -245,6 +249,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             for (int i = 0; i < items.size(); i++) {
                 if (items.get(i).isEmpty()) {
                     items.set(i, input.copy());
+                    placedInput = input.copy();
                     int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(be);
                     prog[i] = 0;
                     int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(be);
@@ -385,21 +390,29 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
         if (isSkilletBE(be)) {
             try {
                 Method isCooking = be.getClass().getMethod("isCooking");
                 if ((Boolean) isCooking.invoke(be)) {
                     ItemStack recovered = collectResult(player);
-                    if (!recovered.isEmpty()) refundToRSNetwork(recovered);
+                    if (PhysicalInputRecovery.recoveredExpected(recovered, placedInput)) {
+                        ItemStack owned = recovered.copyWithCount(placedInput.getCount());
+                        recoveredInputs.add(owned);
+                        if (!usingSharedLedger) refundToRSNetwork(owned);
+                    }
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             }
         }
-        clearCampfireSlot();
+        ItemStack campfireRecovered = clearCampfireSlot();
+        if (!campfireRecovered.isEmpty()) recoveredInputs.add(campfireRecovered);
+        recordFailureRecoveredInputs(recoveredInputs);
         campfireForceLoad(false);
         craftDone = false;
         skilletPrevTime = -1;
+        placedInput = ItemStack.EMPTY;
     }
 
     @Override
@@ -507,13 +520,25 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     }
 
     @SuppressWarnings("unchecked")
-    private void clearCampfireSlot() {
-        if (campfireSlot < 0 || campfireBE == null || CAMPFIRE_ITEMS == null) return;
+    private ItemStack clearCampfireSlot() {
+        if (campfireSlot < 0 || campfireBE == null || CAMPFIRE_ITEMS == null) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack recovered = ItemStack.EMPTY;
         try {
             var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             ItemStack leftover = items.get(campfireSlot);
-            if (!leftover.isEmpty() && !usingSharedLedger) refundToRSNetwork(leftover);
-            items.set(campfireSlot, ItemStack.EMPTY);
+            if (!leftover.isEmpty()
+                    && !PhysicalInputRecovery.recoveredExpected(leftover, placedInput)) {
+                return ItemStack.EMPTY;
+            }
+            if (!leftover.isEmpty()) {
+                recovered = leftover.copyWithCount(placedInput.getCount());
+                ItemStack retained = leftover.copy();
+                retained.shrink(recovered.getCount());
+                items.set(campfireSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
+                if (!usingSharedLedger) refundToRSNetwork(recovered);
+            }
             int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
             prog[campfireSlot] = 0;
             int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
@@ -523,6 +548,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
         }
         campfireSlot = -1;
+        return recovered;
     }
 
     private void refundToRSNetwork(ItemStack stack) {

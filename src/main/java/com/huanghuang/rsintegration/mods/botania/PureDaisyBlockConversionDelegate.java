@@ -199,12 +199,24 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, ServerPlayer player) {
-        if (harvested || placed.isEmpty()) return;
-        for (BlockPos target : placed) {
-            if (!level.isEmptyBlock(target)) level.destroyBlock(target, false);
+        List<ItemStack> recovered = new ArrayList<>();
+        if (harvested || placed.isEmpty()) {
+            recordFailureRecoveredInputs(recovered);
+            return;
         }
-        if (!usingSharedLedger && !input.isEmpty()) {
-            ItemStack leftover = insertIntoStorage(player, input, false);
+        int recoveredCount = 0;
+        BlockItem inputBlock = input.getItem() instanceof BlockItem blockItem ? blockItem : null;
+        for (BlockPos target : placed) {
+            if (inputBlock != null && level.getBlockState(target).is(inputBlock.getBlock())) {
+                level.destroyBlock(target, false);
+                recoveredCount++;
+            }
+        }
+        if (recoveredCount > 0) recovered.add(input.copyWithCount(recoveredCount));
+        recordFailureRecoveredInputs(recovered);
+        if (!usingSharedLedger && recoveredCount > 0) {
+            ItemStack leftover = insertIntoStorage(player,
+                    input.copyWithCount(recoveredCount), false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }

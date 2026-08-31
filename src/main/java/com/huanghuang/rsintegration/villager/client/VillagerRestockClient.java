@@ -1,15 +1,11 @@
 package com.huanghuang.rsintegration.villager.client;
 
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.mixin.minecraft.MerchantScreenAccessor;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.villager.VillagerRestockRequestPacket;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.villager.VillagerRestockResultPacket;
 import com.mojang.blaze3d.systems.RenderSystem;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
@@ -54,14 +50,8 @@ public final class VillagerRestockClient {
         SELECTED_SCREENS.add(screen);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void bookmark(ItemStack stack) {
-        var runtime=RSJeiPlugin.getRuntime();
-        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) return;
-        var typed=runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK, stack);
-        if (typed.isEmpty()) return;
-        var bookmark=IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        ((BookmarkOverlayAccessor) overlay).rsIntegration$getBookmarkList().add(bookmark);
+        RecipeBrowserBridge.addFavorite(stack);
     }
 
     @SubscribeEvent(priority=EventPriority.LOWEST)
