@@ -52,6 +52,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean craftDone;
+    private final List<ItemStack> placedInputs = new ArrayList<>();
+    private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
+    private ItemStack placedContainer = ItemStack.EMPTY;
 
     private static volatile Field inventoryField;
     private static volatile boolean reflectionProbed;
@@ -81,6 +84,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.placedInputs.clear();
+        this.detachedRecoveredInputs.clear();
+        this.placedContainer = ItemStack.EMPTY;
         BlockEntity existing = level.getBlockEntity(pos);
         IItemHandler existingInventory = existing != null
                 && isSupportedBlockEntity(existing)
@@ -215,6 +221,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // every slot before reserving this operation's inputs; the old contents
         // are not owned by the new shared ledger.
         if (storageEndpoint() == null || !drainExistingContentsToNetwork(itemHandler)) return false;
+        placedInputs.clear();
+        detachedRecoveredInputs.clear();
+        placedContainer = ItemStack.EMPTY;
 
         forceChunkLoad(true);
 
@@ -266,12 +275,15 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                         slot, remainder.getHoverName().getString());
                 for (int back = 0; back < slot; back++) {
                     ItemStack refund = itemHandler.extractItem(back, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger)
-                        insertIntoStorage(player, refund, false);
+                    if (!refund.isEmpty()) {
+                        detachedRecoveredInputs.add(refund.copy());
+                        if (!usingSharedLedger) insertIntoStorage(player, refund, false);
+                    }
                 }
                 be.setChanged();
                 return false;
             }
+            placedInputs.add(single.copy());
             slot++;
         }
         be.setChanged();
@@ -299,6 +311,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             be.setChanged();
+            placedContainer = containerMaterial.copy();
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Materials inserted, cooking should start next tick");
@@ -353,7 +366,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMachineSlotsAndRefund();
+        List<ItemStack> recovered = recoverFailureInputs(be);
+        recordFailureRecoveredInputs(recovered);
         forceChunkLoad(false);
         craftDone = false;
     }
@@ -485,8 +499,45 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private void rollbackInputs(IItemHandler handler, int insertedSlots) {
         for (int back = 0; back < insertedSlots; back++) {
             ItemStack refund = handler.extractItem(back, 64, false);
-            if (!refund.isEmpty() && !usingSharedLedger) refundToRSNetwork(refund);
+            if (!refund.isEmpty()) {
+                detachedRecoveredInputs.add(refund.copy());
+                if (!usingSharedLedger) refundToRSNetwork(refund);
+            }
         }
+    }
+
+    private List<ItemStack> recoverFailureInputs(BlockEntity be) {
+        List<ItemStack> recovered = new ArrayList<>(detachedRecoveredInputs);
+        detachedRecoveredInputs.clear();
+        if (!isSupportedBlockEntity(be)) return recovered;
+        IItemHandler handler = getInventory(be);
+        if (handler == null || handler.getSlots() < inventorySize()) return recovered;
+        for (int slot = 0; slot < placedInputs.size() && slot < inputSlots(); slot++) {
+            ItemStack expected = placedInputs.get(slot);
+            ItemStack visible = handler.getStackInSlot(slot);
+            if (visible.isEmpty() || !ItemStack.isSameItemSameTags(visible, expected)) continue;
+            ItemStack removed = handler.extractItem(slot,
+                    Math.min(visible.getCount(), expected.getCount()), false);
+            if (!removed.isEmpty()) {
+                recovered.add(removed.copy());
+                if (!usingSharedLedger) refundToRSNetwork(removed);
+            }
+        }
+        if (!placedContainer.isEmpty()) {
+            ItemStack visible = handler.getStackInSlot(containerSlot());
+            if (!visible.isEmpty() && ItemStack.isSameItemSameTags(visible, placedContainer)) {
+                ItemStack removed = handler.extractItem(containerSlot(),
+                        Math.min(visible.getCount(), placedContainer.getCount()), false);
+                if (!removed.isEmpty()) {
+                    recovered.add(removed.copy());
+                    if (!usingSharedLedger) refundToRSNetwork(removed);
+                }
+            }
+        }
+        placedInputs.clear();
+        placedContainer = ItemStack.EMPTY;
+        be.setChanged();
+        return recovered;
     }
 
     private void clearMachineSlotsAndRefund() {

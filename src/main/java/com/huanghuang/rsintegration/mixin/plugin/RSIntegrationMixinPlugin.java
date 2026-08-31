@@ -30,6 +30,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
+            return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
+                    && hasMethod(targetClassName, "getWidgets");
+        }
         // Every mixin under our refinedstorage namespace has RS types in its
         // annotations or method bodies.  Forge may still parse the mixin
         // configuration when the optional dependency is absent, so reject it
@@ -231,6 +235,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains("jei.BookmarkOverlayAccessor")) {
             return hasField(targetClassName, "bookmarkList");
+        }
+        if (mixinClassName.contains("easyvillagers.EasyVillagersTradeLockMixin")) {
+            return isClassPresent("de.maxhenkel.easyvillagers.events.GuiEvents")
+                    && hasMethod(targetClassName, "onCycleTrades");
         }
         if (mixinClassName.contains("retraining.RetrainingTradeLockMixin")) {
             return isClassPresent("com.mrbysco.retraining.CommonRetraining")

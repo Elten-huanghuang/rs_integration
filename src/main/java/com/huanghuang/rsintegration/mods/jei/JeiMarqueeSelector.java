@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.jei;
 import com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
@@ -315,8 +316,8 @@ public final class JeiMarqueeSelector {
         KeyMapping km = RSIKeyBindings.KEY_CLEAR_SEARCH;
         InputConstants.Key mouseKey = InputConstants.Type.MOUSE.getOrCreate(event.getButton());
         if (km != null && km.isActiveAndMatches(mouseKey)
-                && runtime != null && !isOverVanillaGui(screen, mx, my)) {
-            runtime.getIngredientFilter().setFilterText("");
+                && !isOverVanillaGui(screen, mx, my)) {
+            RecipeBrowserBridge.setSearchText("");
             event.setCanceled(true);
             return;
         }
@@ -327,7 +328,7 @@ public final class JeiMarqueeSelector {
                 && runtime != null) {
             String modId = getModIdUnderMouse(screen, mx, my, runtime);
             if (modId != null && !modId.isEmpty()) {
-                runtime.getIngredientFilter().setFilterText("@" + modId);
+                RecipeBrowserBridge.setSearchText("@" + modId);
                 clearSelection();
                 event.setCanceled(true);
                 return;
@@ -886,6 +887,11 @@ public final class JeiMarqueeSelector {
      */
     @Nullable
     private static String getModIdUnderMouse(Screen screen, int mx, int my, IJeiRuntime runtime) {
+        ItemStack emiStack = RecipeBrowserBridge.hoveredEmiItem(mx, my).orElse(ItemStack.EMPTY);
+        if (!emiStack.isEmpty()) {
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(emiStack.getItem());
+            if (id != null) return id.getNamespace();
+        }
         IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
         if (overlay != null) {
             var ingredient = overlay.getIngredientUnderMouse();

@@ -112,6 +112,13 @@ public final class NodeAdmissionCoordinator {
         materials.refund(admission.materialToken());
     }
 
+    /** Refund recovered producer fragments and settle every unrecovered claim. */
+    public void refundRecoveredMaterial(Admission admission,
+                                        List<net.minecraft.world.item.ItemStack> recovered) {
+        materials.refundRecoveredProducerFragments(admission.materialToken(), recovered);
+        materials.settle(admission.materialToken());
+    }
+
     public void succeed(Admission admission) {
         settleMaterial(admission);
         scheduler.succeed(admission.nodeId());

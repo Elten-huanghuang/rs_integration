@@ -2,13 +2,9 @@ package com.huanghuang.rsintegration.enchanting.client;
 
 import com.huanghuang.rsintegration.enchanting.EnchantingRestockRequestPacket;
 import com.huanghuang.rsintegration.enchanting.EnchantingRestockResultPacket;
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.mojang.blaze3d.systems.RenderSystem;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.EnchantmentScreen;
@@ -97,14 +93,7 @@ public final class EnchantingRestockClient {
         };
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void bookmarkLapis() {
-        var runtime = RSJeiPlugin.getRuntime();
-        if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) return;
-        var typed = runtime.getIngredientManager().createTypedIngredient(
-                VanillaTypes.ITEM_STACK, new ItemStack(Items.LAPIS_LAZULI));
-        if (typed.isEmpty()) return;
-        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        ((BookmarkOverlayAccessor) overlay).rsIntegration$getBookmarkList().add(bookmark);
+        RecipeBrowserBridge.addFavorite(new ItemStack(Items.LAPIS_LAZULI));
     }
 }

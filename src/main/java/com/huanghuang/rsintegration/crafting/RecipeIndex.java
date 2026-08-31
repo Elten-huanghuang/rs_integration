@@ -738,7 +738,12 @@ public final class RecipeIndex {
         if (!marketAvailable || marketRegistryInst == null) return 0;
         int count = 0;
         try {
-            Class<?> registryClass = marketRegistryInst.getClass();
+            // Farming for Blockheads exposes these accessors as static methods
+            // in current releases. Resolve them from the declared registry
+            // class and invoke statically; older builds that used instance
+            // methods are handled by the instance fallback below.
+            Class<?> registryClass = Class.forName(
+                    "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
             java.lang.reflect.Method getEntries = Reflect.findMethod(registryClass,
                     "getEntries", new Class<?>[0]);
             if (getEntries == null) {
@@ -746,7 +751,10 @@ public final class RecipeIndex {
                 return 0;
             }
             @SuppressWarnings("unchecked")
-            Collection<Object> entries = (Collection<Object>) getEntries.invoke(marketRegistryInst);
+            Object entriesValue = getEntries.invoke(
+                    java.lang.reflect.Modifier.isStatic(getEntries.getModifiers())
+                            ? null : marketRegistryInst);
+            Collection<Object> entries = (Collection<Object>) entriesValue;
             if (entries == null || entries.isEmpty()) {
                 // MarketRegistry exists but has no entries yet — may be built
                 // before MarketRegistryReloadEvent fires. Reset probe state so

@@ -223,14 +223,17 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         probe();
         if (!available || marketRegistryInstance == null) return null;
         try {
-            Class<?> registryClass = marketRegistryInstance.getClass();
+            Class<?> registryClass = FarmingForBlockheadsReflection.marketRegistryClass;
+            if (registryClass == null) return null;
             java.lang.reflect.Method getEntryById = Reflect.findMethod(registryClass,
                     "getEntryById", new Class<?>[]{UUID.class});
             if (getEntryById == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Market] getEntryById method not found");
                 return null;
             }
-            Object entry = getEntryById.invoke(marketRegistryInstance, entryId);
+            Object entry = getEntryById.invoke(
+                    java.lang.reflect.Modifier.isStatic(getEntryById.getModifiers())
+                            ? null : marketRegistryInstance, entryId);
             if (entry == null) return null;
             return wrapEntry(entry);
         } catch (Exception e) {

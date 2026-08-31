@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -28,6 +29,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     private BrewingStandBlockEntity stand;
     private VanillaBrewingRecipeDefinition recipe;
     private boolean placed;
+    private final List<ItemStack> placedInputs = new ArrayList<>();
 
     /** Each stand owns its three bottle slots and can run independently. */
     @Override
@@ -42,6 +44,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         this.level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         this.recipe = VanillaBrewingCatalog.byId(recipeId);
         this.placed = false;
+        this.placedInputs.clear();
         if (level == null || recipe == null) return false;
         if (!level.hasChunkAt(pos)) return false;
         BlockEntity blockEntity = level.getBlockEntity(pos);
@@ -101,6 +104,12 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         stand.setItem(2, input.copyWithCount(1));
         stand.setItem(3, reagent);
         stand.setItem(4, fuel);
+        placedInputs.clear();
+        placedInputs.add(input.copyWithCount(1));
+        placedInputs.add(input.copyWithCount(1));
+        placedInputs.add(input.copyWithCount(1));
+        placedInputs.add(reagent.copy());
+        placedInputs.add(fuel.copy());
         stand.setChanged();
         level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
         placed = true;
@@ -164,6 +173,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         if (!unusedFuel.isEmpty()) results.add(unusedFuel);
         stand.setChanged();
         placed = false;
+        placedInputs.clear();
         return results;
     }
 
@@ -176,15 +186,23 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        List<ItemStack> recovered = new ArrayList<>();
         if (be instanceof BrewingStandBlockEntity current && placed) {
-            current.setItem(0, ItemStack.EMPTY);
-            current.setItem(1, ItemStack.EMPTY);
-            current.setItem(2, ItemStack.EMPTY);
-            current.setItem(3, ItemStack.EMPTY);
-            current.setItem(4, ItemStack.EMPTY);
+            for (int slot = 0; slot < placedInputs.size(); slot++) {
+                ItemStack expected = placedInputs.get(slot);
+                ItemStack visible = current.getItem(slot);
+                if (!PhysicalInputRecovery.recoveredExpected(visible, expected)) continue;
+                ItemStack owned = visible.copyWithCount(expected.getCount());
+                ItemStack retained = visible.copy();
+                retained.shrink(expected.getCount());
+                current.setItem(slot, retained.isEmpty() ? ItemStack.EMPTY : retained);
+                recovered.add(owned);
+            }
             current.setChanged();
         }
+        recordFailureRecoveredInputs(recovered);
         placed = false;
+        placedInputs.clear();
         resetState();
     }
 

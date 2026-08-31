@@ -2,11 +2,7 @@ package com.huanghuang.rsintegration.compat.ftbquests.client;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkMessage;
-import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
-import mezz.jei.api.constants.VanillaTypes;
-import mezz.jei.gui.bookmarks.IngredientBookmark;
-import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 
@@ -21,20 +17,11 @@ public final class FtbQuestMissingBookmarkClient {
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     static QuestMissingBookmarkMessage.BookmarkResult bookmark(ItemStack stack) {
-        var runtime = RSJeiPlugin.getRuntime();
-        if (stack.isEmpty() || runtime == null
-                || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
-            return QuestMissingBookmarkMessage.BookmarkResult.UNAVAILABLE;
-        }
-        var typed = runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK,
-                stack.copyWithCount(1));
-        if (typed.isEmpty()) return QuestMissingBookmarkMessage.BookmarkResult.UNAVAILABLE;
-        var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
-        boolean added = ((BookmarkOverlayAccessor) overlay)
-                .rsIntegration$getBookmarkList().add(bookmark);
-        return added ? QuestMissingBookmarkMessage.BookmarkResult.ADDED
-                : QuestMissingBookmarkMessage.BookmarkResult.EXISTS;
+        return switch (RecipeBrowserBridge.addFavorite(stack)) {
+            case ADDED -> QuestMissingBookmarkMessage.BookmarkResult.ADDED;
+            case EXISTS -> QuestMissingBookmarkMessage.BookmarkResult.EXISTS;
+            case UNAVAILABLE -> QuestMissingBookmarkMessage.BookmarkResult.UNAVAILABLE;
+        };
     }
 }

@@ -264,7 +264,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity blockEntity, @Nullable ServerPlayer player) {
         boolean refund = !usingSharedLedger;
-        discardOwnedInputEntities(refund, player);
+        List<ItemStack> recoveredInputs = discardOwnedInputEntities(refund, player);
         if (blockEntity instanceof RunicAltarBlockEntity altar) {
             Container inventory = altar.getItemHandler();
             for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
@@ -272,32 +272,38 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
                 if (stack.isEmpty()) continue;
                 ItemStack removed = stack.copy();
                 inventory.setItem(slot, ItemStack.EMPTY);
+                recoveredInputs.add(removed.copy());
                 if (refund) refundStandalone(player, removed);
             }
             altar.setChanged();
             level.sendBlockUpdated(pos, altar.getBlockState(), altar.getBlockState(), 3);
         }
+        recordFailureRecoveredInputs(recoveredInputs);
         clearLocalState();
         resetState();
     }
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
-        discardOwnedInputEntities(!usingSharedLedger, player);
+        recordFailureRecoveredInputs(
+                discardOwnedInputEntities(!usingSharedLedger, player));
         clearLocalState();
         resetState();
     }
 
-    private void discardOwnedInputEntities(boolean refund, @Nullable ServerPlayer player) {
-        if (level == null) return;
+    private List<ItemStack> discardOwnedInputEntities(boolean refund, @Nullable ServerPlayer player) {
+        List<ItemStack> recovered = new ArrayList<>();
+        if (level == null) return recovered;
         for (UUID entityId : inputEntityIds) {
             Entity raw = level.getEntity(entityId);
             if (!(raw instanceof ItemEntity item) || !item.isAlive()) continue;
             ItemStack removed = item.getItem().copy();
             item.discard();
+            recovered.add(removed.copy());
             if (refund) refundStandalone(player, removed);
         }
         inputEntityIds.clear();
+        return recovered;
     }
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -27,6 +28,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * here and must be covered by the real-Forge end-to-end suite.</p>
  */
 class ExtractionLedgerTest {
+
+    @Test
+    void recoveredRefundsAreLimitedByExactPhysicalQuantityAndNbt() {
+        ItemStack first = new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 3);
+        ItemStack tagged = new ItemStack(net.minecraft.world.item.Items.DIAMOND, 2);
+        net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+        tag.putInt("owner", 7);
+        tagged.setTag(tag);
+
+        List<ItemStack> matched = ExtractionLedger.matchRecoveredRefunds(
+                List.of(first, tagged),
+                List.of(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 2),
+                        new ItemStack(net.minecraft.world.item.Items.DIAMOND, 2)));
+
+        assertEquals(2, matched.get(0).getCount());
+        assertTrue(matched.get(1).isEmpty());
+    }
+
+    @Test
+    void oneRecoveredStackIsDistributedAcrossCommittedFragmentsOnce() {
+        List<ItemStack> matched = ExtractionLedger.matchRecoveredRefunds(
+                List.of(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 2),
+                        new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 2)),
+                List.of(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT, 3)));
+
+        assertEquals(2, matched.get(0).getCount());
+        assertEquals(1, matched.get(1).getCount());
+    }
 
     @Test
     void exactAllocationCombinesNetworkAndInventory() {

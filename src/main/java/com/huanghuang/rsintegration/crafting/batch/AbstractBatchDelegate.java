@@ -18,6 +18,7 @@ import net.minecraft.world.phys.AABB;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -58,6 +59,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     private boolean terminalCleanupDone;
     /** True only when a loaded machine was actually given its failure cleanup hook. */
     private boolean physicalFailureCleanupCompleted;
+    @Nullable
+    private List<net.minecraft.world.item.ItemStack> failureRecoveredInputs;
 
     /**
      * A forced-chunk ticket is owned by the delegate operation, not by the
@@ -214,6 +217,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             return;
         }
         physicalFailureCleanupCompleted = false;
+        failureRecoveredInputs = null;
         try {
             releasePreparationResources();
             BlockPos pos = getMachinePos();
@@ -232,9 +236,11 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             BlockEntity be = level.getBlockEntity(pos);
             if (be != null) {
                 clearMachineState(be, player);
-                physicalFailureCleanupCompleted = true;
+                physicalFailureCleanupCompleted = failureRecoveredInputs != null
+                        || isFailureRefundSafe();
             } else {
                 clearMissingMachineState(player);
+                physicalFailureCleanupCompleted = failureRecoveredInputs != null;
             }
         } finally {
             releaseMachineChunk();
@@ -336,6 +342,31 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // no-op; subclasses with inventory-based machines should override
+    }
+
+    /**
+     * Whether failure cleanup recovered or invalidated every physical input that
+     * the shared ledger would refund. Inventory delegates should return false
+     * when an expected input disappeared before cleanup.
+     */
+    protected boolean isFailureRefundSafe() {
+        return false;
+    }
+
+    /** Record the exact stacks physically removed by an audited cleanup hook. */
+    protected final void recordFailureRecoveredInputs(
+            @Nonnull List<net.minecraft.world.item.ItemStack> recovered) {
+        java.util.ArrayList<net.minecraft.world.item.ItemStack> copy = new java.util.ArrayList<>();
+        for (net.minecraft.world.item.ItemStack stack : recovered) {
+            if (stack != null && !stack.isEmpty()) copy.add(stack.copy());
+        }
+        failureRecoveredInputs = List.copyOf(copy);
+    }
+
+    @Nullable
+    @Override
+    public final List<net.minecraft.world.item.ItemStack> failureRecoveredInputs() {
+        return failureRecoveredInputs;
     }
 
     /** Release delegate-owned state when the prepared block entity no longer exists. */

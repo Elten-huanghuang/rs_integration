@@ -4405,10 +4405,22 @@ public final class AsyncCraftChain {
         terminalCause = cause;
         abortReason = reason;
 
-        // Delegate cleanup -works even when player is offline
+        // Delegate cleanup - works even when player is offline.
+        boolean flatPhysicalCleanupRequired = flatOperationSession != null
+                && flatOperationSession.machineLease() != null;
+        boolean flatFailureRefundSafe = !flatPhysicalCleanupRequired;
+        List<ItemStack> flatFailureRecoveredInputs = null;
         if (currentDelegate != null) {
             try {
                 currentDelegate.onBatchFailed(online, reason);
+                flatFailureRecoveredInputs = currentDelegate.failureRecoveredInputs();
+                if (flatPhysicalCleanupRequired
+                        && currentDelegate instanceof AbstractBatchDelegate delegate) {
+                    flatFailureRefundSafe = delegate.physicalFailureCleanupCompleted();
+                } else if (flatPhysicalCleanupRequired
+                        && currentDelegate instanceof ParallelCraftGroup group) {
+                    flatFailureRefundSafe = group.physicalFailureCleanupCompleted();
+                }
                 if (currentDelegate instanceof ParallelCraftGroup group) {
                     for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
                     for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
@@ -4421,6 +4433,15 @@ public final class AsyncCraftChain {
             }
             currentDelegate = null;
         }
+        OperationExecutionKernel.TerminalClass flatTerminalClass = flatOperationSession == null
+                ? null : flatOperationSession.terminalClass();
+        if (flatTerminalClass == OperationExecutionKernel.TerminalClass.IN_FLIGHT
+                && flatFailureRecoveredInputs != null && ledger.isCommitted()) {
+            ledger.retainCommittedRefunds(flatFailureRecoveredInputs);
+            flatFailureRefundSafe = true;
+        }
+        boolean refundFlatCommitted = shouldRefundFlatCommitted(
+                flatTerminalClass, flatFailureRefundSafe);
 
         terminationReport = terminationService.terminate(craftId, cause, reason, policy,
                 new TerminationService.Actions() {
@@ -4449,7 +4470,9 @@ public final class AsyncCraftChain {
                             snapshotCommittedVirtual();
                         }
                     }
-                    @Override public void refundLedger() { refundOrRollbackLedger(online); }
+                    @Override public void refundLedger() {
+                        refundOrRollbackLedger(online, refundFlatCommitted);
+                    }
                     @Override public void deliverSettledAssets() { recoverCommittedVirtual(online); }
                     @Override public void closeLedger() { ledger.close(); }
                     @Override public void notifyOwner() {
@@ -4550,6 +4573,10 @@ public final class AsyncCraftChain {
                     try {
                         ExtractionLedger cleanupLedger = runtime.nodeLedger();
                         if (cleanupLedger != null && cleanupLedger.isCommitted()) {
+                            if (runtime.failureRecoveredInputs() != null) {
+                                cleanupLedger.retainCommittedRefunds(
+                                        runtime.failureRecoveredInputs());
+                            }
                             refundCommitted(cleanupLedger, player);
                         }
                     } catch (Exception e) {
@@ -4559,7 +4586,12 @@ public final class AsyncCraftChain {
                     }
                     try {
                         if (graphAdmissions != null && runtime.admission() != null) {
-                            graphAdmissions.refundCommittedMaterial(runtime.admission());
+                            if (runtime.failureRecoveredInputs() != null) {
+                                graphAdmissions.refundRecoveredMaterial(runtime.admission(),
+                                        runtime.failureRecoveredInputs());
+                            } else {
+                                graphAdmissions.refundCommittedMaterial(runtime.admission());
+                            }
                         }
                     } catch (Exception e) {
                         RSIntegrationMod.LOGGER.error(ctx.format(
@@ -4654,10 +4686,24 @@ public final class AsyncCraftChain {
                 net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
     }
 
-    private void refundOrRollbackLedger(@Nullable ServerPlayer player) {
+    static boolean shouldRefundFlatCommitted(
+            @Nullable OperationExecutionKernel.TerminalClass terminalClass,
+            boolean physicalCleanupCompleted) {
+        return terminalClass != OperationExecutionKernel.TerminalClass.IN_FLIGHT
+                || physicalCleanupCompleted;
+    }
+
+    private void refundOrRollbackLedger(@Nullable ServerPlayer player,
+                                        boolean refundCommittedInputs) {
         try {
             if (ledger.isCommitted()) {
-                refundCommitted(ledger, player);
+                if (refundCommittedInputs) {
+                    refundCommitted(ledger, player);
+                } else {
+                    ledger.settleAllCommitted();
+                    RSIntegrationMod.LOGGER.warn(ctx.format(
+                            "Committed inputs were not physically recovered; suppressing abort refund"));
+                }
             } else {
                 ledger.rollback(player);
             }

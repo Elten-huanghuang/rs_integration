@@ -299,20 +299,19 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // In the shared-ledger (chain) path the chain already refunded materials
         // via refundCommitted(), so we just void the machine slots.
         // In the private-ledger (direct) path we need to refund back to RS.
+        List<ItemStack> recoveredInputs = new ArrayList<>();
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            removeOwnedInput(furnace, !usingSharedLedger);
-            ItemStack slot2 = furnace.getItem(2);
-            if (!slot2.isEmpty() && matchesExpectedOutput(slot2)
-                    && phase != CraftPhase.WAITING_FOR_START) {
-                furnace.setItem(2, ItemStack.EMPTY);
-            }
+            ItemStack recovered = removeOwnedInput(furnace, !usingSharedLedger);
+            if (!recovered.isEmpty()) recoveredInputs.add(recovered);
             furnace.setChanged();
         } else {
             IItemHandler handler = getInventory(be);
             if (handler != null) {
-                removeOwnedInput(handler, !usingSharedLedger);
+                ItemStack recovered = removeOwnedInput(handler, !usingSharedLedger);
+                if (!recovered.isEmpty()) recoveredInputs.add(recovered);
             }
         }
+        recordFailureRecoveredInputs(recoveredInputs);
         refundLeftoverFuel(be);
         resetInventoryOwnership();
         forceChunkLoad(false);
@@ -484,27 +483,29 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private void removeOwnedInput(AbstractFurnaceBlockEntity furnace, boolean refund) {
-        if (!inventoryLease) return;
+    private ItemStack removeOwnedInput(AbstractFurnaceBlockEntity furnace, boolean refund) {
+        if (!inventoryLease) return ItemStack.EMPTY;
         ItemStack current = furnace.getItem(0);
         int removable = MachineSlotOwnershipPolicy.removableAddedCount(
                 ItemStack.EMPTY, suppliedInput, suppliedInputCount, current);
-        if (removable <= 0) return;
+        if (removable <= 0) return ItemStack.EMPTY;
         ItemStack removed = current.copyWithCount(removable);
         ItemStack retained = current.copy();
         retained.shrink(removable);
         furnace.setItem(0, retained.isEmpty() ? ItemStack.EMPTY : retained);
         if (refund) refundToRSNetwork(removed);
+        return removed;
     }
 
-    private void removeOwnedInput(IItemHandler handler, boolean refund) {
-        if (!inventoryLease) return;
+    private ItemStack removeOwnedInput(IItemHandler handler, boolean refund) {
+        if (!inventoryLease) return ItemStack.EMPTY;
         ItemStack current = handler.getStackInSlot(0);
         int removable = MachineSlotOwnershipPolicy.removableAddedCount(
                 ItemStack.EMPTY, suppliedInput, suppliedInputCount, current);
-        if (removable <= 0) return;
+        if (removable <= 0) return ItemStack.EMPTY;
         ItemStack removed = handler.extractItem(0, removable, false);
         if (!removed.isEmpty() && refund) refundToRSNetwork(removed);
+        return removed;
     }
 
     private boolean matchesExpectedOutput(ItemStack output) {

@@ -268,16 +268,22 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        if (level == null || inputEntityIds.isEmpty()) return;
+        List<ItemStack> recoveredInputs = new java.util.ArrayList<>();
+        if (level == null || inputEntityIds.isEmpty()) {
+            recordFailureRecoveredInputs(recoveredInputs);
+            return;
+        }
         for (java.util.UUID id : java.util.List.copyOf(inputEntityIds)) {
             var entity = level.getEntity(id);
             if (entity instanceof ItemEntity item && item.isAlive()) {
                 ItemStack stack = item.getItem().copy();
                 item.discard();
+                recoveredInputs.add(stack.copy());
                 if (!usingSharedLedger) refundStandalone(player, stack);
             }
         }
         inputEntityIds.clear();
+        recordFailureRecoveredInputs(recoveredInputs);
     }
 
     private void discardOwnedInputs() {

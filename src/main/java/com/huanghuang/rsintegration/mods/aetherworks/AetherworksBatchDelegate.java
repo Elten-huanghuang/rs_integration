@@ -40,7 +40,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     private Object forgeBE;
     private Recipe<?> recipe;
     private Item recordedInputItem;
+    private ItemStack placedInput = ItemStack.EMPTY;
     private boolean materialsPlaced;
+    private boolean failureRefundSafe = true;
     private int tempMin;
     private int tempMax;
     private final List<BlockPos> coolerPositions = new ArrayList<>();
@@ -72,15 +74,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
         this.anvilBE = be;
 
-        // Find nearby forge and cooler/vent blocks
-        this.forgePos = findNearbyForge(lvl, pos);
-        if (forgePos != null) {
-            BlockEntity fbe = lvl.getBlockEntity(forgePos);
-            if (fbe != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
-                this.forgeBE = fbe;
-            }
-            findNearbyCoolers(lvl, forgePos, this.coolerPositions);
+        BlockEntity attachedForge = AetherworksMachineSafety.findAttachedForge(lvl, pos, be);
+        if (attachedForge == null) {
+            player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.no_attached_forge"));
+            return false;
         }
+        this.forgeBE = attachedForge;
+        this.forgePos = attachedForge.getBlockPos().immutable();
+        findNearbyCoolers(lvl, forgePos, this.coolerPositions);
         this.tempControlAvailable = !this.coolerPositions.isEmpty();
 
         Recipe<?> r = lvl.getRecipeManager().byKey(recipeId).orElse(null);
@@ -107,24 +108,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
         this.materialsPlaced = false;
         this.recordedInputItem = null;
+        this.placedInput = ItemStack.EMPTY;
+        this.failureRefundSafe = true;
         return true;
-    }
-
-    private static BlockPos findNearbyForge(Level level, BlockPos center) {
-        if (AetherworksReflection.forgeBEClass == null) return null;
-        BlockPos.MutableBlockPos mpos = center.mutable();
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                for (int dy = -2; dy <= 2; dy++) {
-                    mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
-                    BlockEntity be = level.getBlockEntity(mpos);
-                    if (be != null && AetherworksReflection.forgeBEClass.isInstance(be)) {
-                        return mpos.immutable();
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     private static void findNearbyCoolers(Level level, BlockPos center, List<BlockPos> out) {
@@ -190,6 +176,14 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
         this.anvilBE = current;
 
+        BlockEntity attachedForge = AetherworksMachineSafety.findAttachedForge(level, machinePos, current);
+        if (attachedForge == null) {
+            player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.no_attached_forge"));
+            return false;
+        }
+        this.forgeBE = attachedForge;
+        this.forgePos = attachedForge.getBlockPos().immutable();
+
         Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
         if (inv == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Cannot access anvil inventory field");
@@ -208,7 +202,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         ((BlockEntity) anvilBE).setChanged();
 
         this.recordedInputItem = input.getItem();
+        this.placedInput = input.copy();
         this.materialsPlaced = true;
+        this.failureRefundSafe = true;
         this.abortTimer = 0;
         this.craftTimedOut = false;
 
@@ -233,6 +229,11 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             if (fbe != null && AetherworksReflection.forgeBEClass != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
                 this.forgeBE = fbe;
             }
+        }
+        if (!AetherworksMachineSafety.isAttachedToForge(forgeBE, be)) {
+            craftTimedOut = true;
+            warnOnce("anvil_detached", "[RSI-Aetherworks] Anvil detached from forge during craft");
+            return true;
         }
 
         // 1. Temperature control — prefer cooler blocks, fall back to direct setHeat if none found
@@ -311,9 +312,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        materialsPlaced = false;
-
-        if (anvilBE == null) return ItemStack.EMPTY;
+        if (craftTimedOut || anvilBE == null) return ItemStack.EMPTY;
 
         Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
         if (inv == null) return ItemStack.EMPTY;
@@ -334,24 +333,47 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
         RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Collected result: {}",
                 result.isEmpty() ? "EMPTY" : result.getHoverName().getString());
+        if (!result.isEmpty()) materialsPlaced = false;
         recordedInputItem = null;
         return result;
     }
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        // Clear the machine slot to prevent item duplication.
-        // In the shared-ledger (chain) path the chain already refunded materials
-        // via refundCommitted(), so we just void the machine slot. Refunding here
-        // too would double-count the input back into RS.
+        // Remove only the original input. A transformed stack is an output and
+        // remains in the anvil; it must never be counted as an input refund.
+        failureRefundSafe = !materialsPlaced;
+        if (!materialsPlaced) {
+            recordFailureRecoveredInputs(List.of());
+            return;
+        }
         Object inv = Reflect.getField(be, "inventory").orElse(null);
+        List<ItemStack> recovered = new ArrayList<>();
         if (inv != null) {
-            ItemStack leftover = Reflect.invoke(inv, "extractItem", 0, 64, false)
-                    .map(o -> (ItemStack) o).orElse(ItemStack.EMPTY);
+            ItemStack visible = Reflect.invoke(inv, "getStackInSlot", 0)
+                    .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                    .orElse(ItemStack.EMPTY);
+            ItemStack leftover = ItemStack.EMPTY;
+            if (!visible.isEmpty() && ItemStack.isSameItemSameTags(visible, placedInput)) {
+                leftover = Reflect.invoke(inv, "extractItem", 0,
+                                Math.min(visible.getCount(), placedInput.getCount()), false)
+                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                        .orElse(ItemStack.EMPTY);
+            }
+            failureRefundSafe = AetherworksMachineSafety.recoveredExpected(leftover, placedInput);
+            if (!leftover.isEmpty()) recovered.add(leftover.copy());
             if (!leftover.isEmpty() && !usingSharedLedger) {
                 refundToRSNetwork(leftover, player);
             }
         }
+        recordFailureRecoveredInputs(recovered);
+        materialsPlaced = false;
+        placedInput = ItemStack.EMPTY;
+    }
+
+    @Override
+    protected boolean isFailureRefundSafe() {
+        return failureRefundSafe;
     }
 
     private void refundToRSNetwork(ItemStack stack, ServerPlayer player) {
@@ -365,6 +387,8 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     public void onBatchFinished(@NotNull ServerPlayer player) {
         materialsPlaced = false;
         recordedInputItem = null;
+        placedInput = ItemStack.EMPTY;
+        failureRefundSafe = true;
         resetState();
     }
 
@@ -410,7 +434,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
                 if (lvl != null && lvl.isLoaded(pos)) {
                     BlockEntity be = lvl.getBlockEntity(pos);
                     if (be != null && AetherworksReflection.anvilBEClass != null && AetherworksReflection.anvilBEClass.isInstance(be)) {
-                        if (findNearbyForge(lvl, pos) == null) {
+                        if (AetherworksMachineSafety.findAttachedForge(lvl, pos, be) == null) {
                             warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge"));
                         }
                     }

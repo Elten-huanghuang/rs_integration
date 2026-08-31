@@ -3,22 +3,17 @@ package com.huanghuang.rsintegration.mods.aetherworks;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -34,6 +29,9 @@ import java.util.List;
 /** Batch delegate for Aetherworks Tool Station. */
 public final class AetherworksToolStationBatchDelegate extends AbstractBatchDelegate {
 
+    private static final int INPUT_SLOT_COUNT = 5;
+    private static final int OUTPUT_SLOT = 5;
+
     // Instance state
     private ServerLevel level;
     private BlockPos machinePos;
@@ -41,8 +39,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     private Object toolStationBE;
     private Object forgeBE;
     private Recipe<?> recipe;
-    private Item recordedInputItem;
+    private final List<ItemStack> placedInputs = new ArrayList<>();
     private boolean materialsPlaced;
+    private boolean failureRefundSafe = true;
     private int recipeTemperature;
     private final List<BlockPos> coolerPositions = new ArrayList<>();
     private boolean tempControlAvailable;
@@ -74,14 +73,14 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         }
         this.toolStationBE = be;
 
-        this.forgePos = findNearbyForge(lvl, pos);
-        if (forgePos != null) {
-            BlockEntity fbe = lvl.getBlockEntity(forgePos);
-            if (fbe != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
-                this.forgeBE = fbe;
-            }
-            findNearbyCoolers(lvl, forgePos, this.coolerPositions);
+        BlockEntity attachedForge = AetherworksMachineSafety.findAttachedForge(lvl, pos, be);
+        if (attachedForge == null) {
+            player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.no_attached_forge"));
+            return false;
         }
+        this.forgeBE = attachedForge;
+        this.forgePos = attachedForge.getBlockPos().immutable();
+        findNearbyCoolers(lvl, forgePos, this.coolerPositions);
         this.tempControlAvailable = !this.coolerPositions.isEmpty();
 
         Recipe<?> r = lvl.getRecipeManager().byKey(recipeId).orElse(null);
@@ -105,25 +104,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         }
         this.materialsPlaced = false;
-        this.recordedInputItem = null;
+        this.placedInputs.clear();
+        this.failureRefundSafe = true;
         return true;
-    }
-
-    private static BlockPos findNearbyForge(Level level, BlockPos center) {
-        if (AetherworksReflection.forgeBEClass == null) return null;
-        BlockPos.MutableBlockPos mpos = center.mutable();
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
-                for (int dy = -2; dy <= 2; dy++) {
-                    mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
-                    BlockEntity be = level.getBlockEntity(mpos);
-                    if (be != null && AetherworksReflection.forgeBEClass.isInstance(be)) {
-                        return mpos.immutable();
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     private static void findNearbyCoolers(Level level, BlockPos center, List<BlockPos> out) {
@@ -174,7 +157,8 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
 
-        if (toolStationBE == null || recipe == null || materials.isEmpty()) return false;
+        if (toolStationBE == null || recipe == null || materials.isEmpty()
+                || materials.size() > INPUT_SLOT_COUNT) return false;
 
         BlockEntity current = level.getBlockEntity(machinePos);
         if (current == null || current.isRemoved() || !AetherworksReflection.toolStationBEClass.isInstance(current)) {
@@ -183,13 +167,22 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         }
         this.toolStationBE = current;
 
+        BlockEntity attachedForge = AetherworksMachineSafety.findAttachedForge(level, machinePos, current);
+        if (attachedForge == null) {
+            player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.no_attached_forge"));
+            return false;
+        }
+        this.forgeBE = attachedForge;
+        this.forgePos = attachedForge.getBlockPos().immutable();
+
         Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
         if (inv == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Aetherworks] Cannot access tool station inventory");
             return false;
         }
 
-        // Place all materials in consecutive slots
+        // Validate every slot before placing anything so a late conflict cannot
+        // leave an untracked physical copy behind.
         for (int i = 0; i < materials.size(); i++) {
             ItemStack existing = Reflect.invoke(inv, "getStackInSlot", i)
                     .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
@@ -197,15 +190,24 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                 player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.slot_occupied"));
                 return false;
             }
+        }
+        ItemStack existingOutput = Reflect.invoke(inv, "getStackInSlot", OUTPUT_SLOT)
+                .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
+        if (!existingOutput.isEmpty()) {
+            player.sendSystemMessage(Component.translatable("rsi.aetherworks.error.slot_occupied"));
+            return false;
+        }
+        placedInputs.clear();
+        for (int i = 0; i < materials.size(); i++) {
             ItemStack input = materials.get(i).copy();
             input.setCount(1);
             Reflect.invoke(inv, "setStackInSlot", i, input);
+            placedInputs.add(input.copy());
         }
         ((BlockEntity) toolStationBE).setChanged();
 
-        // Record first input for change detection
-        this.recordedInputItem = materials.get(0).getItem();
         this.materialsPlaced = true;
+        this.failureRefundSafe = true;
         this.abortTimer = 0;
         this.craftTimedOut = false;
 
@@ -230,6 +232,12 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             if (fbe != null && AetherworksReflection.forgeBEClass != null && AetherworksReflection.forgeBEClass.isInstance(fbe)) {
                 this.forgeBE = fbe;
             }
+        }
+        if (!AetherworksMachineSafety.isAttachedToForge(forgeBE, be)) {
+            craftTimedOut = true;
+            warnOnce("toolstation_detached",
+                    "[RSI-Aetherworks] Tool station detached from forge during craft");
+            return true;
         }
 
         // Temperature control
@@ -298,21 +306,25 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
 
         if (craftTimedOut) return true;
 
-        // Completion detection: slot 0 item type changed or all input slots emptied
+        // Aetherworks consumes input slots 0..4 and writes the result to slot 5.
         try {
             Object inv = Reflect.getField(be, "inventory").orElse(null);
             if (inv == null) return false;
-            ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
+            ItemStack output = Reflect.invoke(inv, "getStackInSlot", OUTPUT_SLOT)
                     .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
                     .orElse(ItemStack.EMPTY);
+            if (!output.isEmpty()) return true;
 
-            if (!slotItem.isEmpty() && recordedInputItem != null
-                    && slotItem.getItem() != recordedInputItem) {
-                return true;
-            }
-            // Also detect if all input slots became empty (recipe consumed them all)
-            if (slotItem.isEmpty() && recordedInputItem != null) {
-                return true;
+            for (int i = 0; i < placedInputs.size(); i++) {
+                ItemStack input = Reflect.invoke(inv, "getStackInSlot", i)
+                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                        .orElse(ItemStack.EMPTY);
+                if (input.isEmpty()) {
+                    craftTimedOut = true;
+                    warnOnce("toolstation_input_missing",
+                            "[RSI-Aetherworks] Tool station input disappeared before output was produced");
+                    return true;
+                }
             }
         } catch (Exception e) {
             abortTimer++;
@@ -328,52 +340,68 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        materialsPlaced = false;
-
-        if (toolStationBE == null) return ItemStack.EMPTY;
+        if (craftTimedOut || toolStationBE == null) return ItemStack.EMPTY;
 
         Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
         if (inv == null) return ItemStack.EMPTY;
 
-        // Scan all slots for the result
-        for (int i = 0; i < 6; i++) {
-            ItemStack slot = Reflect.invoke(inv, "getStackInSlot", i)
-                    .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
-            if (!slot.isEmpty() && (recordedInputItem == null || slot.getItem() != recordedInputItem)) {
-                ItemStack result = Reflect.invoke(inv, "extractItem", i, 64, false)
-                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
-                if (!result.isEmpty()) {
-                    ((BlockEntity) toolStationBE).setChanged();
-                    recordedInputItem = null;
-                    return result;
-                }
-                // Fallback: manual extraction
-                Reflect.invoke(inv, "setStackInSlot", i, ItemStack.EMPTY);
-                ((BlockEntity) toolStationBE).setChanged();
-                recordedInputItem = null;
-                return slot.copy();
-            }
+        ItemStack slot = Reflect.invoke(inv, "getStackInSlot", OUTPUT_SLOT)
+                .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
+        if (slot.isEmpty()) return ItemStack.EMPTY;
+        ItemStack result = Reflect.invoke(inv, "extractItem", OUTPUT_SLOT, 64, false)
+                .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
+        if (result.isEmpty()) {
+            Reflect.invoke(inv, "setStackInSlot", OUTPUT_SLOT, ItemStack.EMPTY);
+            result = slot.copy();
         }
-        recordedInputItem = null;
-        return ItemStack.EMPTY;
+        ((BlockEntity) toolStationBE).setChanged();
+        materialsPlaced = false;
+        placedInputs.clear();
+        return result;
     }
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        // Clear the machine slots to prevent item duplication.
-        // In the shared-ledger (chain) path the chain already refunded materials
-        // via refundCommitted(), so we just void the machine slots. Refunding here
-        // too would double-count the inputs back into RS.
+        // Remove only inputs that still match this operation. The output slot and
+        // externally replaced stacks remain untouched and are never input refunds.
+        failureRefundSafe = !materialsPlaced;
+        if (!materialsPlaced) {
+            recordFailureRecoveredInputs(List.of());
+            return;
+        }
         Object inv = Reflect.getField(be, "inventory").orElse(null);
+        List<ItemStack> recovered = new ArrayList<>();
         if (inv != null) {
-            for (int i = 0; i < 6; i++) {
-                ItemStack leftover = Reflect.invoke(inv, "extractItem", i, 64, false)
-                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast).orElse(ItemStack.EMPTY);
+            List<ItemStack> recoveredSlots = new ArrayList<>(placedInputs.size());
+            for (int i = 0; i < placedInputs.size(); i++) {
+                ItemStack expected = placedInputs.get(i);
+                ItemStack visible = Reflect.invoke(inv, "getStackInSlot", i)
+                        .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                        .orElse(ItemStack.EMPTY);
+                ItemStack leftover = ItemStack.EMPTY;
+                if (!visible.isEmpty() && ItemStack.isSameItemSameTags(visible, expected)) {
+                    leftover = Reflect.invoke(inv, "extractItem", i,
+                                    Math.min(visible.getCount(), expected.getCount()), false)
+                            .filter(ItemStack.class::isInstance).map(ItemStack.class::cast)
+                            .orElse(ItemStack.EMPTY);
+                }
+                recoveredSlots.add(leftover.copy());
+                if (!leftover.isEmpty()) recovered.add(leftover.copy());
                 if (!leftover.isEmpty() && !usingSharedLedger) {
                     refundToRSNetwork(leftover, player);
                 }
             }
+            failureRefundSafe = AetherworksMachineSafety.recoveredExpectedSlots(
+                    recoveredSlots, placedInputs);
         }
+        recordFailureRecoveredInputs(recovered);
+        materialsPlaced = false;
+        placedInputs.clear();
+    }
+
+    @Override
+    protected boolean isFailureRefundSafe() {
+        return failureRefundSafe;
     }
 
     private void refundToRSNetwork(ItemStack stack, ServerPlayer player) {
@@ -386,7 +414,8 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
         materialsPlaced = false;
-        recordedInputItem = null;
+        placedInputs.clear();
+        failureRefundSafe = true;
         resetState();
     }
 
@@ -425,7 +454,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                 if (lvl != null && lvl.isLoaded(pos)) {
                     BlockEntity be = lvl.getBlockEntity(pos);
                     if (be != null && AetherworksReflection.toolStationBEClass != null && AetherworksReflection.toolStationBEClass.isInstance(be)) {
-                        if (findNearbyForge(lvl, pos) == null) {
+                        if (AetherworksMachineSafety.findAttachedForge(lvl, pos, be) == null) {
                             warnings.add(Component.translatable("rsi.aetherworks.warn.no_forge"));
                         }
                     }

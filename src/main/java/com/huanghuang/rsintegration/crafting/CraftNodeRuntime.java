@@ -52,6 +52,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private List<ExtractionLedger.ReservationToken> reusableReservationTokens = List.of();
     private boolean reusableReservationsSettled;
     private boolean physicalFailureCleanupCompleted;
+    @Nullable
+    private List<ItemStack> failureRecoveredInputs;
     private List<ItemStack> virtualInventory;
     @Nullable
     private ServerPlayer player;
@@ -193,6 +195,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     boolean physicalFailureCleanupCompleted() {
         return physicalFailureCleanupCompleted;
+    }
+
+    @Nullable
+    List<ItemStack> failureRecoveredInputs() {
+        return failureRecoveredInputs;
     }
 
     static boolean shouldRefundInFlightMaterials(
@@ -397,6 +404,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     () -> {
                         delegate.onBatchFailed(null,
                                 failureReason != null ? failureReason : "node failure");
+                        failureRecoveredInputs = delegate.failureRecoveredInputs();
                         if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate abstractDelegate) {
                             physicalFailureCleanupCompleted =
                                     abstractDelegate.physicalFailureCleanupCompleted();

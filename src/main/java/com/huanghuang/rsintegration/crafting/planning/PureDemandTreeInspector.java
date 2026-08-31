@@ -129,6 +129,15 @@ public final class PureDemandTreeInspector {
         public boolean pureCompatible() {
             return status == Status.COMPLETE || status == Status.MISSING_MATERIALS;
         }
+
+        /**
+         * Whether the immutable graph is safe to hand to the background planner.
+         * NODE_LIMIT means this inexpensive routing probe stopped conservatively;
+         * it does not mean that typed/main-thread recipe semantics are required.
+         */
+        public boolean backgroundCompatible() {
+            return pureCompatible() || status == Status.NODE_LIMIT;
+        }
     }
 
     private enum Coverage {

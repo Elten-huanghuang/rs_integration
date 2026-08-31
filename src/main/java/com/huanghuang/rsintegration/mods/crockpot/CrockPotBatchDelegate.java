@@ -401,7 +401,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMachineSlotsAndRefund();
+        recordFailureRecoveredInputs(clearMachineSlotsAndRefund(true));
         forceChunkLoad(false);
         craftDone = false;
         resetInventoryOwnership();
@@ -411,7 +411,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     public void onBatchFinished(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         forceChunkLoad(false);
-        clearMachineSlotsAndRefund();
+        clearMachineSlotsAndRefund(false);
         craftDone = false;
         resetInventoryOwnership();
         resetState();
@@ -850,36 +850,39 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return selected != null ? selected : ItemStack.EMPTY;
     }
 
-    private void clearMachineSlotsAndRefund() {
-        if (!myLevel.hasChunkAt(myPos)) return;
+    private List<ItemStack> clearMachineSlotsAndRefund(boolean failureCleanup) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (!myLevel.hasChunkAt(myPos)) return recoveredInputs;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return;
+        if (be == null) return recoveredInputs;
         if (!CrockPotReflection.crockPotBEClass.isInstance(be))
-            return;
+            return recoveredInputs;
 
         IItemHandler handler = getItemHandler(be);
-        if (handler == null || handler.getSlots() < potLevel + 2) return;
+        if (handler == null || handler.getSlots() < potLevel + 2) return recoveredInputs;
 
-        if (!inventoryLease) return;
+        if (!inventoryLease) return recoveredInputs;
         for (int slot = 0; slot < potLevel; slot++) {
             ItemStack current = handler.getStackInSlot(slot);
             int removable = MachineSlotOwnershipPolicy.removableAddedCount(
                     ItemStack.EMPTY, suppliedInputTypes[slot], suppliedInputCounts[slot], current);
             if (removable <= 0) continue;
             ItemStack s = handler.extractItem(slot, removable, false);
+            if (!s.isEmpty()) recoveredInputs.add(s.copy());
             if (!s.isEmpty() && !usingSharedLedger) refundToRSNetwork(s);
         }
         ItemStack visibleOut = handler.getStackInSlot(potLevel + 1);
-        if (!visibleOut.isEmpty() && isExpectedOutput(visibleOut)) {
+        if (!failureCleanup && !visibleOut.isEmpty() && isExpectedOutput(visibleOut)) {
             ItemStack out = handler.extractItem(potLevel + 1, visibleOut.getCount(), false);
             if (!out.isEmpty() && !usingSharedLedger) refundToRSNetwork(out);
         }
         refundSuppliedFuel(handler);
         be.setChanged();
+        return recoveredInputs;
     }
 
     private boolean rollbackRejectedStart(IItemHandler handler, BlockEntity be) {
-        clearMachineSlotsAndRefund();
+        clearMachineSlotsAndRefund(false);
         be.setChanged();
         forceChunkLoad(false);
         resetInventoryOwnership();

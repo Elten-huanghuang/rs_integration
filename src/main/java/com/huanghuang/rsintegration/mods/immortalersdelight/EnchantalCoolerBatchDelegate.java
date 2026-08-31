@@ -377,9 +377,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         IItemHandler handler = getInventory(be);
         if (handler != null && handler.getSlots() >= 7) {
-            cleanupOwnedSlots(handler, !usingSharedLedger);
+            recordFailureRecoveredInputs(cleanupOwnedSlots(handler, !usingSharedLedger));
             be.setChanged();
         } else {
+            recordFailureRecoveredInputs(List.of());
             resetInventoryLease();
         }
         craftDone = false;
@@ -406,20 +407,24 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    private void cleanupOwnedSlots(IItemHandler handler, boolean refundInputs) {
-        if (!inventoryLease) return;
+    private List<ItemStack> cleanupOwnedSlots(IItemHandler handler, boolean refundInputs) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (!inventoryLease) return recoveredInputs;
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
             ItemStack removed = extractOwnedSlotDelta(handler, slot);
+            if (!removed.isEmpty()) recoveredInputs.add(removed.copy());
             if (!removed.isEmpty() && refundInputs) refundToStorage(removed);
         }
         // Inputs and container share the same ledger. During shared-graph cleanup,
         // remove physical leftovers and let the ledger perform the only refund.
         ItemStack container = extractOwnedSlotDelta(handler, CONTAINER_SLOT);
+        if (!container.isEmpty()) recoveredInputs.add(container.copy());
         if (!container.isEmpty() && refundInputs) refundToStorage(container);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack fuel = extractOwnedSlotDelta(handler, FUEL_SLOT);
         if (!fuel.isEmpty()) refundToStorage(fuel);
         resetInventoryLease();
+        return recoveredInputs;
     }
 
     private void resetInventoryLease() {
