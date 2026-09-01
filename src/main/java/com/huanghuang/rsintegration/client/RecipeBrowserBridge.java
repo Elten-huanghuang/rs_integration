@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockC
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.gui.bookmarks.IngredientBookmark;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 
@@ -102,6 +104,32 @@ public final class RecipeBrowserBridge {
                     .filter(stack -> !stack.isEmpty());
         } catch (LinkageError | RuntimeException exception) {
             return Optional.empty();
+        }
+    }
+
+    public static boolean drawEmiRecipeCategoryIcon(GuiGraphics graphics,
+                                                    ResourceLocation recipeId,
+                                                    int x, int y, int size) {
+        if (graphics == null || recipeId == null || size <= 0 || !hasEmi()) return false;
+        try {
+            return EmiClientBridge.drawRecipeCategoryIcon(graphics, recipeId, x, y, size);
+        } catch (LinkageError | RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug("[RSI-EMI] Failed to draw recipe category icon", exception);
+            return false;
+        }
+    }
+
+    public static boolean renderEmiRecipePreview(GuiGraphics graphics, ResourceLocation recipeId,
+                                                 int anchorX, int anchorY,
+                                                 int screenWidth, int screenHeight,
+                                                 int mouseX, int mouseY) {
+        if (graphics == null || recipeId == null || !hasEmi()) return false;
+        try {
+            return EmiClientBridge.renderRecipePreview(graphics, recipeId, anchorX, anchorY,
+                    screenWidth, screenHeight, mouseX, mouseY);
+        } catch (LinkageError | RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug("[RSI-EMI] Failed to render recipe preview", exception);
+            return false;
         }
     }
 

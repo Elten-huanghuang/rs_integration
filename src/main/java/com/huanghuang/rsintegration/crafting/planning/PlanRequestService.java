@@ -56,7 +56,6 @@ public final class PlanRequestService implements AutoCloseable {
     }
 
     public long begin(UUID playerId) {
-        coordinator.cancel(playerId);
         return generations.merge(playerId, 1L, Long::sum);
     }
 

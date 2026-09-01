@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -341,5 +342,130 @@ class PlanTreeModelGraphTest extends BootstrapTest {
         assertFalse(consumerTree.children.get(0).unresolved > 0
                 && consumerTree.children.get(1).unresolved == 0);
         assertEquals(2, consumerTree.children.get(1).unresolved);
+    }
+
+    @Test
+    void unreachableManifestNodesAreNotAppendedToRoot() {
+        PlanGraphView.NodeView reachable = new PlanGraphView.NodeView(1,
+                new ResourceLocation("test", "reachable"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView.NodeView orphan = new PlanGraphView.NodeView(2,
+                new ResourceLocation("test", "orphan"), "generic", 1,
+                new ItemStack(Items.EMERALD), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.EMERALD), 1, 0)));
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView graph = new PlanGraphView(1, List.of(reachable, orphan), List.of(
+                new PlanGraphView.EdgeView(1, 0, initial, new ItemStack(Items.IRON_INGOT), 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.DIAMOND), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 1, 0),
+                                new ItemStack(Items.DIAMOND), 1)))),
+                List.of(), List.of(1, 2));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:root", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+        PlanTreeModel tree = PlanTreeModel.from(plan);
+        assertEquals(1, tree.root.children.size());
+        assertEquals(new ResourceLocation("test", "reachable"),
+                tree.root.children.get(0).step.recipeId());
+    }
+
+    @Test
+    void graphInputRolesKeepSharedCatalystAtOne() {
+        ItemStack catalyst = new ItemStack(Items.DIAMOND);
+        PlanTreeModel tree = PlanTreeModel.from(sharedCatalystPlan(catalyst, catalyst));
+        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(tree);
+
+        assertEquals(1, gross.get(IngredientKey.of(catalyst)));
+        assertEquals(DemandRole.CATALYST, tree.root.children.get(0).children.get(1).demandRole);
+        assertEquals(DemandRole.CATALYST,
+                tree.root.children.get(0).children.get(0).children.get(0).demandRole);
+    }
+
+    @Test
+    void graphCatalystsWithDifferentNbtRemainSeparate() {
+        ItemStack first = new ItemStack(Items.DIAMOND);
+        first.getOrCreateTag().putString("tool", "first");
+        ItemStack second = new ItemStack(Items.DIAMOND);
+        second.getOrCreateTag().putString("tool", "second");
+
+        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+                PlanTreeModel.from(sharedCatalystPlan(first, second)));
+
+        assertEquals(1, gross.get(IngredientKey.of(first)));
+        assertEquals(1, gross.get(IngredientKey.of(second)));
+    }
+
+    @Test
+    void catalystSlotsFromDifferentSourcesStillSumWithinOneGraphStep() {
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView.NodeView catalystProducer = new PlanGraphView.NodeView(70,
+                new ResourceLocation("test", "make_catalyst"), "generic", 1,
+                new ItemStack(Items.DIAMOND), List.of(), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.DIAMOND), 1, 0)));
+        PlanGraphView.NodeView terminal = new PlanGraphView.NodeView(71,
+                new ResourceLocation("test", "two_catalysts"), "generic", 1,
+                new ItemStack(Items.EMERALD), List.of(
+                new PlanGraphView.InputView(0, new ItemStack(Items.DIAMOND), 1,
+                        DemandRole.CATALYST.ordinal()),
+                new PlanGraphView.InputView(1, new ItemStack(Items.DIAMOND), 1,
+                        DemandRole.CATALYST.ordinal())), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.EMERALD), 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(catalystProducer, terminal), List.of(
+                new PlanGraphView.EdgeView(71, 0,
+                        new PlanGraphView.SourceView(false, 70, 0),
+                        new ItemStack(Items.DIAMOND), 1),
+                new PlanGraphView.EdgeView(71, 1, initial,
+                        new ItemStack(Items.DIAMOND), 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.EMERALD), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 71, 0),
+                                new ItemStack(Items.EMERALD), 1)))),
+                List.of(), List.of(70, 71));
+        PlanResponse plan = new PlanResponse(true, "root", new ItemStack(Items.EMERALD),
+                List.of(), Map.of(), List.of(), "test:two_catalysts", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
+
+        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+                PlanTreeModel.from(plan));
+
+        assertEquals(2, gross.get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
+    }
+
+    private static PlanResponse sharedCatalystPlan(ItemStack firstCatalyst,
+                                                   ItemStack secondCatalyst) {
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView.NodeView intermediate = new PlanGraphView.NodeView(60,
+                new ResourceLocation("test", "intermediate"), "generic", 1,
+                new ItemStack(Items.IRON_INGOT), List.of(
+                new PlanGraphView.InputView(0, firstCatalyst, 1,
+                        DemandRole.CATALYST.ordinal())), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 1, 0)));
+        PlanGraphView.NodeView terminal = new PlanGraphView.NodeView(61,
+                new ResourceLocation("test", "terminal"), "generic", 1,
+                new ItemStack(Items.EMERALD), List.of(
+                new PlanGraphView.InputView(0, new ItemStack(Items.IRON_INGOT), 1,
+                        DemandRole.CONSUMED.ordinal()),
+                new PlanGraphView.InputView(1, secondCatalyst, 1,
+                        DemandRole.CATALYST.ordinal())), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.EMERALD), 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(intermediate, terminal), List.of(
+                new PlanGraphView.EdgeView(60, 0, initial, firstCatalyst, 1),
+                new PlanGraphView.EdgeView(61, 0,
+                        new PlanGraphView.SourceView(false, 60, 0),
+                        new ItemStack(Items.IRON_INGOT), 1),
+                new PlanGraphView.EdgeView(61, 1, initial, secondCatalyst, 1)),
+                List.of(new PlanGraphView.RootView(new ItemStack(Items.EMERALD), 1, 0,
+                        List.of(new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 61, 0),
+                                new ItemStack(Items.EMERALD), 1)))),
+                List.of(), List.of(60, 61));
+        return new PlanResponse(true, "root", new ItemStack(Items.EMERALD),
+                List.of(), Map.of(), List.of(), "test:terminal", null, null, 0, 0, 0,
+                List.of(), 1, null, null, null, 0, false, false, false, null,
+                Set.of(), Map.of(), null, graph);
     }
 }

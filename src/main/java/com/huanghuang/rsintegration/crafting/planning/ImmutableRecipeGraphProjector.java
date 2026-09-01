@@ -184,7 +184,7 @@ public final class ImmutableRecipeGraphProjector {
             }
         }
         return new IngredientRef(List.copyOf(alternatives), ingredient.count(),
-                ingredient.nbtMatchMode());
+                ingredient.nbtMatchMode(), ingredient.role());
     }
 
     static boolean partialNbtMatches(String expectedSnbt, String actualSnbt) {
@@ -201,10 +201,12 @@ public final class ImmutableRecipeGraphProjector {
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
         // Replacement containers still consume one full input per execution; their
-        // remainder is emitted by the real crafting executor. Reusable or transformed
-        // inputs have different demand scaling and cannot be flattened this way.
+        // remainder is emitted by the real crafting executor. Catalysts are retained as
+        // non-consuming demands by the immutable planner. Transformed inputs still need
+        // typed execution semantics and therefore cannot be projected.
         if (spec.role() != DemandRole.CONSUMED
-                && spec.role() != DemandRole.CONTAINER_RETURNING) return null;
+                && spec.role() != DemandRole.CONTAINER_RETURNING
+                && spec.role() != DemandRole.CATALYST) return null;
         Ingredient ingredient = spec.ingredient();
         boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
         NbtMatchMode matchMode = nbtMatchMode(ingredient);
@@ -213,7 +215,8 @@ public final class ImmutableRecipeGraphProjector {
             if (!candidate.isEmpty()) alternatives.add(material(candidate, strictNbt));
         }
         return alternatives.isEmpty() ? null
-                : new IngredientRef(List.copyOf(alternatives), spec.count(), matchMode);
+                : new IngredientRef(List.copyOf(alternatives), spec.count(), matchMode,
+                spec.role());
     }
 
     private static boolean isPartialNbtIngredient(Ingredient ingredient) {

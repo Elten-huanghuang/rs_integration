@@ -20,15 +20,17 @@ public final class SelfAmplifyingRecipePolicy {
         List<IngredientRef> scaled = new ArrayList<>(target.inputs().size());
         for (IngredientRef input : target.inputs()) {
             List<MaterialRef> alternatives = input.alternatives();
-            if (!amplification && alternatives.size() > 1
+            if (input.role() != DemandRole.CATALYST
+                    && !amplification && alternatives.size() > 1
                     && alternatives.contains(target.output())) {
                 alternatives = alternatives.stream()
                         .filter(material -> !material.equals(target.output()))
                         .toList();
             }
-            int count = amplification && input.alternatives().contains(target.output())
+            int count = input.role() == DemandRole.CATALYST
+                    || amplification && input.alternatives().contains(target.output())
                     ? input.count() : saturatingMultiply(input.count(), multiplier);
-            scaled.add(new IngredientRef(alternatives, count, input.nbtMatchMode()));
+            scaled.add(new IngredientRef(alternatives, count, input.nbtMatchMode(), input.role()));
         }
         return List.copyOf(scaled);
     }
@@ -95,7 +97,8 @@ public final class SelfAmplifyingRecipePolicy {
     private static int selfConsumed(List<IngredientRef> inputs, MaterialRef output) {
         long consumed = 0L;
         for (IngredientRef input : inputs) {
-            if (input.alternatives().contains(output)) consumed += input.count();
+            if (input.role() != DemandRole.CATALYST
+                    && input.alternatives().contains(output)) consumed += input.count();
         }
         return consumed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) consumed;
     }

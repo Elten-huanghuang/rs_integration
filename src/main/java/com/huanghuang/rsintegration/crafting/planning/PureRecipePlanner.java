@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -153,6 +154,11 @@ public final class PureRecipePlanner {
         }
     }
 
+    private static long scaledInputCount(IngredientRef input, long batches) {
+        return input.role() == DemandRole.CATALYST
+                ? input.count() : (long) input.count() * batches;
+    }
+
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
     private record DemandTask(IngredientRef ingredient) implements Task {}
     private record CompleteRecipeTask(MaterialRef output, int outputCount, int consumeCount,
@@ -237,18 +243,26 @@ public final class PureRecipePlanner {
 
         private boolean solveDemand(IngredientRef ingredient, List<Task> rest,
                                     List<Task> pending) {
+            boolean catalyst = ingredient.role() == DemandRole.CATALYST;
             List<MaterialRef> orderedAlternatives = inventoryFirst(ingredient.alternatives());
-            for (MaterialRef alternative : orderedAlternatives) {
-                int have = stock.getOrDefault(alternative, 0);
-                if (have < ingredient.count()) continue;
-                setStock(alternative, have - ingredient.count());
-                if (solve(rest)) return true;
-                setStock(alternative, have);
-                backtracks++;
+            if (catalyst) {
+                if (stockAcross(ingredient) >= ingredient.count()) {
+                    if (solve(rest)) return true;
+                    backtracks++;
+                }
+            } else {
+                for (MaterialRef alternative : orderedAlternatives) {
+                    int have = stock.getOrDefault(alternative, 0);
+                    if (have < ingredient.count()) continue;
+                    setStock(alternative, have - ingredient.count());
+                    if (solve(rest)) return true;
+                    setStock(alternative, have);
+                    backtracks++;
+                }
             }
 
-            Map<MaterialRef, Integer> combinedConsumption = consumeAcrossAlternatives(
-                    ingredient, rest);
+            Map<MaterialRef, Integer> combinedConsumption = catalyst ? null
+                    : consumeAcrossAlternatives(ingredient, rest);
             if (combinedConsumption != null) {
                 if (solve(rest)) return true;
                 combinedConsumption.forEach(this::setStock);
@@ -259,7 +273,8 @@ public final class PureRecipePlanner {
                 checkBudget();
                 if (resolving.contains(wanted)) continue;
                 int have = stock.getOrDefault(wanted, 0);
-                int needed = ingredient.count() - have;
+                long present = catalyst ? stockAcross(ingredient) : have;
+                int needed = (int) Math.max(0L, (long) ingredient.count() - present);
                 if (needed <= 0) continue;
                 boolean broadFamily = ingredient.alternatives().size() > 1;
                 if (!broadFamily && !reachability.canReach(wanted)) continue;
@@ -284,7 +299,7 @@ public final class PureRecipePlanner {
                         continue;
                     }
                     int scheduledBatches = batches;
-                    int consumeCount = ingredient.count();
+                    int consumeCount = catalyst ? 0 : ingredient.count();
                     List<Task> continuation = rest;
                     if (selfConsumed > 0) {
                         if (netGain <= 0) continue;
@@ -404,7 +419,7 @@ public final class PureRecipePlanner {
             List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(candidate.inputs());
             List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
             for (IngredientRef input : inputs) {
-                long scaled = (long) input.count() * batches;
+                long scaled = scaledInputCount(input, batches);
                 if (scaled > Integer.MAX_VALUE) return null;
                 branch.add(new DemandTask(input.withCount((int) scaled)));
             }
@@ -469,7 +484,8 @@ public final class PureRecipePlanner {
                                                     int batches) {
             if (stock.getOrDefault(wanted, 0) > 0) return false;
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
-                long required = (long) input.count() * batches;
+                if (input.role() == DemandRole.CATALYST) continue;
+                long required = scaledInputCount(input, batches);
                 if (required <= stockAcross(input)) continue;
                 boolean sawProducer = false;
                 boolean reverseOnly = true;
@@ -521,7 +537,8 @@ public final class PureRecipePlanner {
                     familyKey, BroadFamilyAnalysis::new);
             long consumed = 0L;
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
-                long required = (long) input.count() * batches;
+                if (input.role() == DemandRole.CATALYST) continue;
+                long required = scaledInputCount(input, batches);
                 if (required <= 0L) continue;
                 long cost = analysis.costForIngredient(input, required, new HashSet<>());
                 if (cost >= FAMILY_COST_UNKNOWN) return false;
@@ -580,7 +597,8 @@ public final class PureRecipePlanner {
                         long cost = 0L;
                         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                                 producer.inputs())) {
-                            long scaled = (long) input.count() * producerBatches;
+                            if (input.role() == DemandRole.CATALYST) continue;
+                            long scaled = scaledInputCount(input, producerBatches);
                             if (scaled <= 0L || scaled >= FAMILY_COST_UNKNOWN) {
                                 cost = FAMILY_COST_UNKNOWN;
                                 break;
@@ -617,7 +635,8 @@ public final class PureRecipePlanner {
         private static int selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
             long consumed = 0;
             for (IngredientRef input : candidate.inputs()) {
-                if (input.alternatives().contains(output)) {
+                if (input.role() != DemandRole.CATALYST
+                        && input.alternatives().contains(output)) {
                     consumed += input.count();
                     if (consumed > Integer.MAX_VALUE) return Integer.MAX_VALUE;
                 }
@@ -698,7 +717,7 @@ public final class PureRecipePlanner {
                 List<IngredientRef> scaledInputs = new ArrayList<>();
                 boolean valid = true;
                 for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
-                    long scaled = (long) input.count() * batches;
+                    long scaled = scaledInputCount(input, batches);
                     if (scaled <= 0L || scaled > Integer.MAX_VALUE) {
                         valid = false;
                         break;
@@ -717,7 +736,8 @@ public final class PureRecipePlanner {
                     visiting.remove(choice.output());
                 }
                 steps.add(new PlannedStep(recipe.recipeId(), batches));
-                long surplus = (long) recipe.outputCount() * batches - remaining;
+                long surplus = (long) recipe.outputCount() * batches
+                        - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
                 if (surplus > 0L) {
                     stock.merge(choice.output(), (int) Math.min(Integer.MAX_VALUE, surplus),
                             (left, right) -> (int) Math.min(
@@ -740,8 +760,10 @@ public final class PureRecipePlanner {
                 int have = stock.getOrDefault(material, 0);
                 if (have <= 0) continue;
                 int take = Math.min(have, remaining);
-                if (take == have) stock.remove(material);
-                else stock.put(material, have - take);
+                if (ingredient.role() != DemandRole.CATALYST) {
+                    if (take == have) stock.remove(material);
+                    else stock.put(material, have - take);
+                }
                 remaining -= take;
                 if (remaining == 0) break;
             }
@@ -789,7 +811,8 @@ public final class PureRecipePlanner {
                     List.copyOf(family), PartialFamilyCost::new);
             long consumed = 0L;
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
-                long scaled = (long) input.count() * batches;
+                if (input.role() == DemandRole.CATALYST) continue;
+                long scaled = scaledInputCount(input, batches);
                 long cost = analysis.ingredientCost(input, scaled, new HashSet<>());
                 if (cost >= COST_UNKNOWN) return false;
                 consumed = Math.min(COST_UNKNOWN, consumed + cost);
@@ -800,10 +823,12 @@ public final class PureRecipePlanner {
 
         private void noteMissing(IngredientRef ingredient, int count) {
             MissingKey key = new MissingKey(Set.copyOf(ingredient.alternatives()),
-                    ingredient.nbtMatchMode());
+                    ingredient.nbtMatchMode(), ingredient.role());
             IngredientRef previous = missing.get(key);
             if (previous != null) {
-                long combined = (long) previous.count() + count;
+                long combined = ingredient.role() == DemandRole.CATALYST
+                        ? Math.max(previous.count(), count)
+                        : (long) previous.count() + count;
                 missing.put(key, previous.withCount((int) Math.min(Integer.MAX_VALUE, combined)));
             } else if (missing.size() < MAX_REPORTED_MISSING) {
                 missing.put(key, ingredient.withCount(count));
@@ -811,7 +836,8 @@ public final class PureRecipePlanner {
         }
 
         private record MissingKey(Set<MaterialRef> alternatives,
-                                  ImmutableRecipeGraph.NbtMatchMode nbtMatchMode) {}
+                                  ImmutableRecipeGraph.NbtMatchMode nbtMatchMode,
+                                  DemandRole role) {}
 
         private record PartialChoice(MaterialRef output, RecipeNode recipe) {}
 
@@ -851,6 +877,7 @@ public final class PureRecipePlanner {
                         long cost = 0L;
                         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                                 producer.inputs())) {
+                            if (input.role() == DemandRole.CATALYST) continue;
                             long inputCost = ingredientCost(input, input.count(), path);
                             if (inputCost >= COST_UNKNOWN) {
                                 cost = COST_UNKNOWN;
@@ -902,106 +929,93 @@ public final class PureRecipePlanner {
     private static final class SeededReachability {
         private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
 
-        private final ImmutableRecipeGraph graph;
         private final Set<MaterialRef> seeds;
-        private final Map<MaterialRef, Integer> materialDepth = new HashMap<>();
-        private final Map<RecipeNode, Integer> recipeDepth = new IdentityHashMap<>();
-        private final Set<MaterialRef> unreachable = new HashSet<>();
-        private final Runnable budgetCheck;
+        private final Map<MaterialRef, Integer> materialDepth;
+        private final Map<RecipeNode, Integer> recipeDepth;
 
         private SeededReachability(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Integer> available,
                                    Runnable budgetCheck) {
-            this.graph = graph;
             Set<MaterialRef> present = new HashSet<>();
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
                 if (entry.getValue() != null && entry.getValue() > 0) present.add(entry.getKey());
             }
             this.seeds = Set.copyOf(present);
-            this.budgetCheck = java.util.Objects.requireNonNull(budgetCheck, "budgetCheck");
+            Map<MaterialRef, Integer> materialResult = new HashMap<>();
+            Map<RecipeNode, Integer> recipeResult = new IdentityHashMap<>();
+            Map<MaterialRef, List<InputRef>> dependents = new HashMap<>();
+            Map<RecipeNode, int[]> inputSatisfied = new IdentityHashMap<>();
+            Map<RecipeNode, int[]> inputDepths = new IdentityHashMap<>();
+            java.util.ArrayDeque<MaterialRef> queue = new java.util.ArrayDeque<>();
+            for (MaterialRef seed : seeds) {
+                materialResult.put(seed, 0);
+                queue.add(seed);
+            }
+            for (List<RecipeNode> candidates : graph.recipesByOutput().values()) {
+                for (RecipeNode recipe : candidates) {
+                    int inputCount = recipe.inputs().size();
+                    inputSatisfied.put(recipe, new int[inputCount]);
+                    inputDepths.put(recipe, new int[inputCount]);
+                    for (int inputIndex = 0; inputIndex < inputCount; inputIndex++) {
+                        for (MaterialRef alternative : recipe.inputs().get(inputIndex).alternatives()) {
+                            dependents.computeIfAbsent(alternative, ignored -> new ArrayList<>())
+                                    .add(new InputRef(recipe, inputIndex));
+                        }
+                    }
+                    if (inputCount == 0) {
+                        recipeResult.put(recipe, 1);
+                        materialResult.merge(recipe.output(), 1, Math::min);
+                        queue.add(recipe.output());
+                    }
+                }
+            }
+            while (!queue.isEmpty()) {
+                // This pass is linear in graph edges. It deliberately does not use the search
+                // deadline: reachability is a routing index, not backtracking work, and charging
+                // it against the tiny search budget caused false TIME_LIMIT results at state 1.
+                PlanningThreadContext.throwIfCancelled();
+                MaterialRef material = queue.removeFirst();
+                int depth = materialResult.getOrDefault(material, 0);
+                for (InputRef ref : dependents.getOrDefault(material, List.of())) {
+                    int[] satisfied = inputSatisfied.get(ref.recipe());
+                    int[] depths = inputDepths.get(ref.recipe());
+                    if (depths[ref.inputIndex()] == 0 || depth < depths[ref.inputIndex()]) {
+                        depths[ref.inputIndex()] = depth;
+                    }
+                    if (satisfied[ref.inputIndex()] != 1) satisfied[ref.inputIndex()] = 1;
+                    boolean complete = true;
+                    int deepest = 0;
+                    for (int index = 0; index < satisfied.length; index++) {
+                        if (satisfied[index] == 0) {
+                            complete = false;
+                            break;
+                        }
+                        deepest = Math.max(deepest, depths[index]);
+                    }
+                    if (!complete || recipeResult.containsKey(ref.recipe())) continue;
+                    int recipeDepthValue = deepest + 1;
+                    recipeResult.put(ref.recipe(), recipeDepthValue);
+                    Integer previous = materialResult.putIfAbsent(ref.recipe().output(), recipeDepthValue);
+                    if (previous == null || recipeDepthValue < previous) queue.add(ref.recipe().output());
+                }
+            }
+            this.materialDepth = Map.copyOf(materialResult);
+            this.recipeDepth = new IdentityHashMap<>(recipeResult);
         }
 
         private boolean canReach(MaterialRef material) {
-            return probeMaterial(material, new HashSet<>()).reachable();
+            return seeds.contains(material) || materialDepth.containsKey(material);
         }
 
         private boolean canReach(RecipeNode recipe) {
-            return probeRecipe(recipe, new HashSet<>()).reachable();
+            return recipeDepth.containsKey(recipe);
         }
 
         private int depth(RecipeNode recipe) {
-            if (!recipeDepth.containsKey(recipe)) probeRecipe(recipe, new HashSet<>());
             return recipeDepth.getOrDefault(recipe, UNREACHABLE_DEPTH);
         }
 
-        private Probe probeMaterial(MaterialRef material, Set<MaterialRef> visiting) {
-            budgetCheck.run();
-            if (seeds.contains(material)) return Probe.seeded();
-            Integer cached = materialDepth.get(material);
-            if (cached != null) return new Probe(true, cached, false);
-            if (unreachable.contains(material)) return Probe.unreachable();
-            if (!visiting.add(material)) return Probe.cycle();
-
-            int bestDepth = UNREACHABLE_DEPTH;
-            boolean provisional = false;
-            try {
-                for (RecipeNode recipe : graph.recipesByOutput()
-                        .getOrDefault(material, List.of())) {
-                    budgetCheck.run();
-                    Probe recipeProbe = probeRecipe(recipe, visiting);
-                    if (!recipeProbe.reachable()) continue;
-                    bestDepth = Math.min(bestDepth, recipeProbe.depth());
-                    provisional |= recipeProbe.provisional();
-                }
-            } finally {
-                visiting.remove(material);
-            }
-
-            if (bestDepth == UNREACHABLE_DEPTH) {
-                unreachable.add(material);
-                return Probe.unreachable();
-            }
-            // A result that depended on the current DFS cycle is deliberately not cached:
-            // another branch may later prove or reject it from a real inventory seed.
-            if (!provisional) materialDepth.put(material, bestDepth);
-            return new Probe(true, bestDepth, provisional);
-        }
-
-        private Probe probeRecipe(RecipeNode recipe, Set<MaterialRef> visiting) {
-            budgetCheck.run();
-            Integer cached = recipeDepth.get(recipe);
-            if (cached != null) return new Probe(true, cached, false);
-
-            int deepestInput = 0;
-            boolean provisional = false;
-            for (IngredientRef input : recipe.inputs()) {
-                budgetCheck.run();
-                Probe best = Probe.unreachable();
-                for (MaterialRef alternative : input.alternatives()) {
-                    budgetCheck.run();
-                    Probe candidate = probeMaterial(alternative, visiting);
-                    if (!candidate.reachable()) continue;
-                    if (!best.reachable() || candidate.depth() < best.depth()) best = candidate;
-                    if (candidate.depth() == 0 && !candidate.provisional()) break;
-                }
-                if (!best.reachable()) return Probe.unreachable();
-                deepestInput = Math.max(deepestInput, best.depth());
-                provisional |= best.provisional();
-            }
-
-            int depth = deepestInput == Integer.MAX_VALUE
-                    ? Integer.MAX_VALUE : deepestInput + 1;
-            if (!provisional) recipeDepth.put(recipe, depth);
-            return new Probe(true, depth, provisional);
-        }
-    }
-
-    private record Probe(boolean reachable, int depth, boolean provisional) {
-        private static Probe seeded() { return new Probe(true, 0, false); }
-        private static Probe cycle() { return new Probe(true, 0, true); }
-        private static Probe unreachable() {
-            return new Probe(false, Integer.MAX_VALUE, false);
-        }
+        private record InputRef(RecipeNode recipe, int inputIndex) {}
     }
 
     private static final class SearchLimitException extends RuntimeException {

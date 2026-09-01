@@ -200,6 +200,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
         registerOptionalRefinedStorageGuiHandler(registration);
+        registerOptionalBeyondDimensionsGuiHandlers(registration);
         if (!ModList.get().isLoaded(ModIds.APOTHEOSIS)) return;
         try {
             Class<?> raw = Class.forName(
@@ -232,6 +233,35 @@ public final class RSJeiPlugin implements IModPlugin {
         } catch (ReflectiveOperationException exception) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-JEI] Refined Storage GUI handler unavailable", exception);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void registerOptionalBeyondDimensionsGuiHandlers(
+            IGuiHandlerRegistration registration) {
+        if (!ModList.get().isLoaded("beyonddimensions")) return;
+        IGuiContainerHandler<AbstractContainerScreen<?>> handler =
+                new IGuiContainerHandler<>() {
+                    @Override
+                    public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
+                            AbstractContainerScreen<?> screen) {
+                        return com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient
+                                .getFavoriteExtraAreas(screen);
+                    }
+                };
+        for (String className : java.util.List.of(
+                "com.wintercogs.beyonddimensions.client.gui.DimensionsCraftGUI",
+                "com.wintercogs.beyonddimensions.client.gui.DimensionsTerminalCraftGUI")) {
+            try {
+                Class<?> raw = Class.forName(className);
+                if (AbstractContainerScreen.class.isAssignableFrom(raw)) {
+                    registration.addGuiContainerHandler((Class) raw, handler);
+                }
+            } catch (ReflectiveOperationException exception) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI] BD terminal exclusion handler unavailable for {}",
+                        className, exception);
+            }
         }
     }
 

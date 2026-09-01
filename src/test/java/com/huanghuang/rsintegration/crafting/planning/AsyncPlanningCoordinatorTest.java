@@ -61,6 +61,44 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
     }
 
     @Test
+    void identicalSharedRequestRunsOnceAndUsesLatestSnapshotForCommit() throws Exception {
+        try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
+            UUID player = UUID.randomUUID();
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch committed = new CountDownLatch(1);
+            AtomicInteger computations = new AtomicInteger();
+            AtomicReference<PlanningSnapshot> callbackSnapshot = new AtomicReference<>();
+            Object key = "same-request";
+            coordinator.submitShared(key, snapshot(player, 1), ignored -> {
+                computations.incrementAndGet();
+                started.countDown();
+                try { release.await(2, TimeUnit.SECONDS); } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                return "plan";
+            }, Runnable::run, ignored -> true,
+                    (usedSnapshot, result) -> {
+                        callbackSnapshot.set(usedSnapshot);
+                        committed.countDown();
+                    }, failure -> committed.countDown());
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            coordinator.submitShared(key, snapshot(player, 2), ignored -> {
+                computations.incrementAndGet();
+                return "unexpected";
+            }, Runnable::run, ignored -> true,
+                    (usedSnapshot, result) -> {
+                        callbackSnapshot.set(usedSnapshot);
+                        committed.countDown();
+                    }, failure -> committed.countDown());
+            release.countDown();
+            assertTrue(committed.await(2, TimeUnit.SECONDS));
+            assertEquals(1, computations.get());
+            assertEquals(2, callbackSnapshot.get().requestGeneration());
+        }
+    }
+
+    @Test
     void repeatedCancellationPublishesOneRollback() throws Exception {
         try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
             UUID player = UUID.randomUUID();

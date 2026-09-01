@@ -466,7 +466,8 @@
   "rsi.plan.failure.planner_busy": "The crafting planner is busy. Please try again shortly.",
   "rsi.plan.failure.catalog_unavailable": "The recipe catalog failed to load. Check the server log and reload recipes before trying again.",
   "rsi.plan.failure.max_craftable_unknown": "The recipe is too complex to determine the maximum craftable amount.",
-  "rsi.plan.failure.time_limit": "Craft planning exceeded its time limit. Reduce the amount or adjust the recipe and try again.",
+  "rsi.plan.failure.complexity_limit": "The recipe exceeds the safe branch or step limit. Lock a concrete material or recipe.",
+  "rsi.plan.failure.dynamic_plan_unavailable": "This recipe uses dynamic, transformed, or material-locked inputs and a complete plan cannot currently be generated safely.",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",
   

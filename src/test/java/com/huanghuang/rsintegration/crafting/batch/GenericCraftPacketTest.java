@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeAll;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.RejectedExecutionException;
@@ -177,6 +178,31 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void infeasiblePurePlanningRetriesTypedPlannerForCraftableLowerLevel() {
+        var smithingOutput = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "smithing_output"), "");
+        var missing = new ImmutableRecipeGraph.IngredientRef(
+                List.of(smithingOutput), 1, ImmutableRecipeGraph.NbtMatchMode.ANY,
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED);
+        PureRecipePlanner.Result incomplete = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(), List.of(missing),
+                Map.of(), PureRecipePlanner.Status.UNRESOLVABLE, 3, 2, 0);
+
+        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(incomplete, Set.of()));
+        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(
+                incomplete, Set.of(smithingOutput.itemId())));
+
+        PureRecipePlanner.Result complete = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.FEASIBLE, List.of(), List.of(),
+                Map.of(), PureRecipePlanner.Status.SUCCESS, 3, 0, 0);
+        PureRecipePlanner.Result bounded = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(missing),
+                Map.of(), PureRecipePlanner.Status.SEARCH_LIMIT, 3, 0, 0);
+        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(complete, Set.of()));
+        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(bounded, Set.of()));
+    }
+
+    @Test
     void feasiblePurePlanCanBeUsedWithoutMainThreadReplanning() {
         PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
                 List.of(), List.of(), Map.of());
@@ -213,6 +239,27 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void compatibilityResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
+        assertEquals(2_000, GenericCraftPacket.compatibilityResolverBudgetMs(2_000));
+        assertEquals(1, GenericCraftPacket.compatibilityResolverBudgetMs(0));
+    }
+
+    @Test
+    void boundedPureFailuresReportComplexityInsteadOfTimeLimit() {
+        for (PureRecipePlanner.Status status : List.of(
+                PureRecipePlanner.Status.TIME_LIMIT,
+                PureRecipePlanner.Status.SEARCH_LIMIT,
+                PureRecipePlanner.Status.STEP_LIMIT)) {
+            PureRecipePlanner.Result result = new PureRecipePlanner.Result(
+                    PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(), Map.of(),
+                    status, 10, 0, 0);
+
+            assertEquals("rsi.plan.failure.complexity_limit",
+                    GenericCraftPacket.purePlanningFailureKey(result, Map.of()));
+        }
+    }
+
+    @Test
     void independentRawShortageDoesNotEnterTypedCatalystFallback() {
         var catalyst = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("test", "catalyst_output"), "");
@@ -241,6 +288,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 true, false, missingCatalyst, java.util.Set.of(catalyst.itemId())));
         assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
                 true, false, pureSuccess, java.util.Set.of(catalyst.itemId())));
+        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+                false, true, pureSuccess, java.util.Set.of(catalyst.itemId())));
         assertTrue(GenericCraftPacket.requiresTypedCatalystRoute(
                 true, true, pureSuccess, java.util.Set.of(catalyst.itemId())));
     }
@@ -275,6 +324,21 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new ItemStack(Items.DIAMOND), new ItemStack(Items.EMERALD));
 
         assertFalse(GenericCraftPacket.usesPhysicalMachineInputSlots(market));
+    }
+
+    @Test
+    void virtualTerminalStillUsesTypedDependencyExecution() {
+        ModType virtual = ModType.registerVirtual("test_recursive_virtual_terminal",
+                new String[0], GenericBatchDelegate::new);
+        ShapelessRecipe recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "virtual_terminal"), "",
+                net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                new ItemStack(Items.DIAMOND),
+                net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
+                        Ingredient.of(Items.EMERALD)));
+
+        assertTrue(GenericCraftPacket.requiresTypedTerminalExecution(recipe, virtual));
+        assertFalse(GenericCraftPacket.requiresTypedTerminalExecution(recipe, ModType.GENERIC));
     }
 
     @Test
@@ -396,6 +460,30 @@ class GenericCraftPacketTest extends BootstrapTest {
 
         assertTrue(GenericCraftPacket.canExecuteSynchronously(generic));
         assertFalse(GenericCraftPacket.canExecuteSynchronously(physical));
+    }
+
+    @Test
+    void cachedPurePlanRoutesOnlyTypedOrLargeNetworkChainsAsynchronously() {
+        List<CraftingResolver.ResolutionStep> smallGeneric = List.of(
+                genericStep("intermediate", 1), genericStep("terminal", 1));
+        List<CraftingResolver.ResolutionStep> largeGeneric = List.of(
+                genericStep("intermediate", 5), genericStep("terminal", 4));
+        List<CraftingResolver.ResolutionStep> physical = List.of(
+                genericStep("intermediate", 1),
+                new CraftingResolver.ResolutionStep(
+                        new ResourceLocation("minecraft", "iron_ingot"), ModType.CUSTOM_GUI,
+                        new ResourceLocation("minecraft", "blasting"),
+                        List.of(), List.of(), false, 1),
+                genericStep("terminal", 1));
+
+        assertEquals(GenericCraftPacket.CachedPurePlanExecution.SYNCHRONOUS,
+                GenericCraftPacket.selectCachedPurePlanExecution(smallGeneric, true, 8));
+        assertEquals(GenericCraftPacket.CachedPurePlanExecution.ASYNCHRONOUS,
+                GenericCraftPacket.selectCachedPurePlanExecution(largeGeneric, true, 8));
+        assertEquals(GenericCraftPacket.CachedPurePlanExecution.ASYNCHRONOUS,
+                GenericCraftPacket.selectCachedPurePlanExecution(physical, true, 8));
+        assertEquals(GenericCraftPacket.CachedPurePlanExecution.REPLAN,
+                GenericCraftPacket.selectCachedPurePlanExecution(physical, false, 8));
     }
 
     @Test

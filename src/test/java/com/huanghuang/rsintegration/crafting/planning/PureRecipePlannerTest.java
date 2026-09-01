@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
@@ -37,6 +38,107 @@ class PureRecipePlannerTest {
         assertTrue(result.feasible());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("planks"), 1),
                 new PureRecipePlanner.PlannedStep(id("sticks"), 2)), result.steps());
+    }
+
+    @Test
+    void reusableCatalystIsNotScaledOrConsumedAcrossBatches() {
+        MaterialRef copper = material("copper");
+        MaterialRef hammer = material("hammer");
+        MaterialRef plate = material("plate");
+        RecipeNode hammering = recipe("hammering", plate, 1,
+                ingredient(copper, 1), catalyst(hammer, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(plate, List.of(hammering))),
+                Map.of(copper, 10, hammer, 1), List.of(ingredient(plate, 10)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("hammering"), 10)),
+                result.steps());
+        assertEquals(1, result.remaining().get(hammer));
+    }
+
+    @Test
+    void oneCatalystCanBeSharedByDifferentRecipeSteps() {
+        MaterialRef rawA = material("raw_a");
+        MaterialRef rawB = material("raw_b");
+        MaterialRef hammer = material("shared_hammer");
+        MaterialRef partA = material("part_a");
+        MaterialRef partB = material("part_b");
+        MaterialRef resultMaterial = material("shared_result");
+        RecipeNode makeA = recipe("make_a", partA, 1,
+                ingredient(rawA, 1), catalyst(hammer, 1));
+        RecipeNode makeB = recipe("make_b", partB, 1,
+                ingredient(rawB, 1), catalyst(hammer, 1));
+        RecipeNode assemble = recipe("assemble_shared", resultMaterial, 1,
+                ingredient(partA, 1), ingredient(partB, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        partA, List.of(makeA), partB, List.of(makeB),
+                        resultMaterial, List.of(assemble))),
+                Map.of(rawA, 1, rawB, 1, hammer, 1),
+                List.of(ingredient(resultMaterial, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(1, result.remaining().get(hammer));
+    }
+
+    @Test
+    void missingCatalystIsProducedOnceAndThenReused() {
+        MaterialRef iron = material("hammer_iron");
+        MaterialRef copper = material("hammer_copper");
+        MaterialRef hammer = material("crafted_hammer");
+        MaterialRef plate = material("crafted_plate");
+        RecipeNode makeHammer = recipe("make_hammer", hammer, 1, ingredient(iron, 2));
+        RecipeNode hammering = recipe("crafted_hammering", plate, 1,
+                ingredient(copper, 1), catalyst(hammer, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        hammer, List.of(makeHammer), plate, List.of(hammering))),
+                Map.of(iron, 2, copper, 10), List.of(ingredient(plate, 10)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(1L, result.steps().stream()
+                .filter(step -> step.recipeId().equals(id("make_hammer"))).count());
+        assertEquals(1, result.remaining().get(hammer));
+    }
+
+    @Test
+    void twoCatalystSlotsStillRequireTwoTools() {
+        MaterialRef raw = material("double_tool_raw");
+        MaterialRef tool = material("double_tool");
+        MaterialRef output = material("double_tool_output");
+        RecipeNode recipe = recipe("double_tool_recipe", output, 1,
+                ingredient(raw, 1), catalyst(tool, 1), catalyst(tool, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(recipe)));
+
+        assertFalse(PureRecipePlanner.resolve(graph, Map.of(raw, 1, tool, 1),
+                List.of(ingredient(output, 1)), 20).feasible());
+        assertTrue(PureRecipePlanner.resolve(graph, Map.of(raw, 1, tool, 2),
+                List.of(ingredient(output, 1)), 20).feasible());
+    }
+
+    @Test
+    void catalystTagCanCombineDifferentStockedVariants() {
+        MaterialRef raw = material("tag_tool_raw");
+        MaterialRef ironTool = material("iron_tool");
+        MaterialRef goldTool = material("gold_tool");
+        MaterialRef output = material("tag_tool_output");
+        IngredientRef tools = new IngredientRef(List.of(ironTool, goldTool), 2,
+                NbtMatchMode.EXACT, DemandRole.CATALYST);
+        RecipeNode recipe = recipe("tag_tool_recipe", output, 1,
+                ingredient(raw, 1), tools);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(output, List.of(recipe))),
+                Map.of(raw, 1, ironTool, 1, goldTool, 1),
+                List.of(ingredient(output, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(1, result.remaining().get(ironTool));
+        assertEquals(1, result.remaining().get(goldTool));
     }
 
     @Test
@@ -619,7 +721,7 @@ class PureRecipePlannerTest {
     }
 
     @Test
-    void deadlineIsEnforcedInsideReachabilityTraversal() {
+    void reachabilityIndexDoesNotConsumeSearchDeadline() {
         MaterialRef target = material("reachability_target");
         MaterialRef missing = material("reachability_missing");
         RecipeNode producer = recipe("reachability_producer", target, 1,
@@ -632,8 +734,7 @@ class PureRecipePlannerTest {
                 clock::incrementAndGet);
 
         assertFalse(result.feasible());
-        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
-        assertTrue(clock.get() >= 8L);
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
     }
 
     @Test
@@ -651,8 +752,7 @@ class PureRecipePlannerTest {
 
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
-        assertEquals(List.of(ingredient(target, 1)), result.missing());
-        assertTrue(clock.get() >= 12L);
+        assertEquals(List.of(ingredient(missing, 1)), result.missing());
     }
 
     @Test
@@ -689,6 +789,11 @@ class PureRecipePlannerTest {
 
     private static IngredientRef ingredient(MaterialRef material, int count) {
         return new IngredientRef(List.of(material), count);
+    }
+
+    private static IngredientRef catalyst(MaterialRef material, int count) {
+        return new IngredientRef(List.of(material), count, NbtMatchMode.EXACT,
+                DemandRole.CATALYST);
     }
 
     private static MaterialRef material(String path) {

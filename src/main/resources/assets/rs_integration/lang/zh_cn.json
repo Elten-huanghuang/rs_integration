@@ -472,7 +472,8 @@
   "rsi.plan.failure.planner_busy": "合成规划任务繁忙，请稍后重试。",
   "rsi.plan.failure.catalog_unavailable": "配方目录加载失败，请检查服务端日志并重新加载配方后重试。",
   "rsi.plan.failure.max_craftable_unknown": "配方过于复杂，无法确定最大可合成数量。",
-  "rsi.plan.failure.time_limit": "配方规划超过时间限制，请减少数量或调整配方后重试。",
+  "rsi.plan.failure.complexity_limit": "配方分支或步骤超过安全规划上限，请锁定具体材料或配方。",
+  "rsi.plan.failure.dynamic_plan_unavailable": "此配方包含动态、变换或材料锁定输入，当前无法安全生成完整计划。",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.missing_more": "... (+%s 更多)",
   

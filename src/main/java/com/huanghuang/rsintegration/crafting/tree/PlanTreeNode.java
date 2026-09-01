@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -28,6 +29,8 @@ public final class PlanTreeNode {
     /** Stable logical DAG identity. Repeated tree references share this id. */
     @Nullable
     public final Integer graphNodeId;
+    /** How this material is used by its parent recipe. */
+    public final DemandRole demandRole;
     public final List<PlanTreeNode> children = new ArrayList<>();
 
     /** Quantity carried by the producer edge that created this view reference. */
@@ -69,17 +72,29 @@ public final class PlanTreeNode {
 
     public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
                         int depth, @Nullable PlanStep step) {
-        this(key, displayStack, amount, depth, step, null);
+        this(key, displayStack, amount, depth, step, null, DemandRole.CONSUMED);
+    }
+
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+                        int depth, @Nullable PlanStep step, DemandRole demandRole) {
+        this(key, displayStack, amount, depth, step, null, demandRole);
     }
 
     public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
                         int depth, @Nullable PlanStep step, @Nullable Integer graphNodeId) {
+        this(key, displayStack, amount, depth, step, graphNodeId, DemandRole.CONSUMED);
+    }
+
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+                        int depth, @Nullable PlanStep step, @Nullable Integer graphNodeId,
+                        DemandRole demandRole) {
         this.key = key;
         this.displayStack = displayStack;
         this.amount = amount;
         this.depth = depth;
         this.step = step;
         this.graphNodeId = graphNodeId;
+        this.demandRole = demandRole == null ? DemandRole.CONSUMED : demandRole;
     }
 
     public boolean isLeaf() {

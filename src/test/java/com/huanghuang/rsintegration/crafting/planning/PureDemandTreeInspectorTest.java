@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -346,18 +347,18 @@ class PureDemandTreeInspectorTest {
     }
 
     @Test
-    void targetRecipeWithReusableCatalystRoutesTypedEvenWhenInputsAreStocked() {
+    void projectedTargetCatalystStaysOnPureRouteWhenInputsAreStocked() {
         MaterialRef catalyst = material("catalyst");
         MaterialRef cost = material("cost");
         RecipeNode target = recipe("copy", material("result"), 3,
-                ingredient(catalyst, 1), ingredient(cost, 1));
+                catalyst(catalyst, 1), ingredient(cost, 1));
 
         var result = PureDemandTreeInspector.inspect(graph(target),
                 Map.of(catalyst, 1, cost, 1), target.recipeId(), 1, 64,
                 Set.of(), Set.of(target.recipeId()));
 
         assertTrue(result.complete());
-        assertTrue(result.catalystRouteAvailable());
+        assertFalse(result.catalystRouteAvailable());
     }
 
     private static ImmutableRecipeGraph graph(RecipeNode... recipes) {
@@ -376,6 +377,11 @@ class PureDemandTreeInspectorTest {
 
     private static IngredientRef ingredient(MaterialRef material, int count) {
         return new IngredientRef(List.of(material), count);
+    }
+
+    private static IngredientRef catalyst(MaterialRef material, int count) {
+        return new IngredientRef(List.of(material), count,
+                ImmutableRecipeGraph.NbtMatchMode.EXACT, DemandRole.CATALYST);
     }
 
     private static MaterialRef material(String name) {

@@ -122,6 +122,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -252,8 +253,8 @@ public final class GenericCraftPacket {
                 config.pureTimeoutMs());
     }
 
-    // Time-based plan cache — serves both dedup and compute-avoidance.
-    // On cache hit within TTL: reply with cached plan immediately (no silent drop).
+    // The short TTL serves preview deduplication. PlanCache separately retains
+    // the plan currently shown to each player until it is confirmed or replaced.
     private static final PlanCache PLAN_CACHE = new PlanCache();
 
     private final ResourceLocation recipeId;
@@ -709,7 +710,8 @@ public final class GenericCraftPacket {
                 PerformanceMonitor.recordResolveTimeout();
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-exec] deferred server-thread resolver timeout recipe={}", recipeId);
-                readyPlayer.sendSystemMessage(Component.translatable("rsi.plan.failure.time_limit"));
+                readyPlayer.sendSystemMessage(Component.translatable(
+                        "rsi.plan.failure.dynamic_plan_unavailable"));
             } catch (Throwable failure) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-Generic] Deferred execution failed for {}:", recipeId, failure);
@@ -740,7 +742,8 @@ public final class GenericCraftPacket {
             PerformanceMonitor.recordResolveTimeout();
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-exec] queued server-thread resolver timeout recipe={}", packet.recipeId);
-            player.sendSystemMessage(Component.translatable("rsi.plan.failure.time_limit"));
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.plan.failure.dynamic_plan_unavailable"));
         } catch (Throwable e) {
             RSIntegrationMod.LOGGER.error("[RSI-Generic] Queued execution failed for {}:",
                     packet.recipeId, e);
@@ -756,12 +759,15 @@ public final class GenericCraftPacket {
     /** Budget for the legacy live-object compatibility resolver only. */
     private static int compatibilityResolverBudgetMs() {
         try {
-            return Math.max(1, Math.min(
-                    RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(),
-                    RSIntegrationConfig.CRAFTING_SERVER_TICK_BUDGET_MS.get()));
+            return compatibilityResolverBudgetMs(
+                    RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get());
         } catch (Exception ignored) {
-            return RSIntegrationConfig.DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS;
+            return RSIntegrationConfig.DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS;
         }
+    }
+
+    static int compatibilityResolverBudgetMs(int resolveTimeoutMs) {
+        return Math.max(1, resolveTimeoutMs);
     }
 
     record BindingAwareGraph(ImmutableRecipeGraph graph,
@@ -828,12 +834,16 @@ public final class GenericCraftPacket {
             @Nullable ResourceLocation dimension, @Nullable net.minecraft.core.BlockPos position,
             @Nullable StorageReference storageReference,
             Map<String, ItemStack> materialLocks) {
-        PlanCache.Entry entry = PLAN_CACHE.get(planCacheKey(player.getUUID(), recipeId,
-                forcedRecipes, repeatCount, targetOutput, modType, materialLocks), System.nanoTime());
+        PlanCache.Key exactKey = planCacheKey(player.getUUID(), recipeId,
+                forcedRecipes, repeatCount, targetOutput, modType, materialLocks);
+        PlanCache.Entry entry = PLAN_CACHE.takeForExecution(exactKey);
+        if (entry == null) entry = PLAN_CACHE.get(exactKey, System.nanoTime());
         if (entry == null && (targetOutput == null || targetOutput.isEmpty()
                 || !targetOutput.hasTag())) {
-            entry = PLAN_CACHE.get(planCacheKey(player.getUUID(), recipeId,
-                    forcedRecipes, repeatCount, null, modType, materialLocks), System.nanoTime());
+            PlanCache.Key fallbackKey = planCacheKey(player.getUUID(), recipeId,
+                    forcedRecipes, repeatCount, null, modType, materialLocks);
+            entry = PLAN_CACHE.takeForExecution(fallbackKey);
+            if (entry == null) entry = PLAN_CACHE.get(fallbackKey, System.nanoTime());
         }
         if (entry == null || !entry.plan().success()) return null;
         net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> levelKey = dimension != null
@@ -865,8 +875,20 @@ public final class GenericCraftPacket {
             steps.add(genericTerminalStep(recipeId, repeatCount));
             RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
                     recipeId);
-            if (storageEndpoint != null && shouldExecuteGenericChainAsync(steps)) {
-                launchAsyncChain(player, steps, LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+            CachedPurePlanExecution execution = selectCachedPurePlanExecution(
+                    steps, storageEndpoint != null,
+                    RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
+            if (execution == CachedPurePlanExecution.REPLAN) {
+                RSIntegrationMod.debug(
+                        "[RSI-Generic] Cached pure plan for {} contains physical steps but has no storage endpoint; resolving again",
+                        recipeId);
+                return false;
+            }
+            if (execution == CachedPurePlanExecution.ASYNCHRONOUS) {
+                LegacyExecutionMetrics.Reason reason = canExecuteSynchronously(steps)
+                        ? LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD
+                        : LegacyExecutionMetrics.rejectedGraphReason(steps);
+                launchAsyncChain(player, steps, reason,
                         network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                         inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode);
             } else {
@@ -969,7 +991,7 @@ public final class GenericCraftPacket {
                 reusableCatalystOutputIds,
                 RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
-        if (!route.backgroundCompatible() || route.catalystRouteAvailable()) {
+        if (!route.backgroundCompatible()) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-exec] immutable route unavailable recipe={} status={} unresolved={} catalystRoute={}",
                     recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
@@ -996,6 +1018,16 @@ public final class GenericCraftPacket {
                                 "[RSI-exec] pure planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
                                 recipeId, result.status(), result.feasibility(), result.missing(),
                                 result.expandedStates(), result.backtracks(), result.memoHits());
+                        if (shouldRetryTypedPlanning(
+                                result, snapshot.bindingBlockedOutputIds())) {
+                            RSIntegrationMod.LOGGER.info(
+                                    "[RSI-exec] retrying typed execution after pure planner rejection recipe={}",
+                                    recipeId);
+                            tryResolve(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                    inferMode, baseItem, targetOutput, outputDestination,
+                                    machineSelectionMode, storageReference, Map.of(), true);
+                            return;
+                        }
                         String key = missingTouchesBlockedOutput(
                                 result.missing(), snapshot.bindingBlockedOutputIds())
                                 ? "rsi.plan.failure.no_bound_machine"
@@ -1028,7 +1060,7 @@ public final class GenericCraftPacket {
                                 "[RSI-exec] async pure planning failed recipe={} directReservationAttempted=true failure={}",
                                 recipeId, failure.toString(), failure);
                         String key = failure instanceof CraftingPlanningTimeoutException
-                                ? "rsi.plan.failure.time_limit"
+                                ? "rsi.plan.failure.complexity_limit"
                                 : "rsi.plan.failure.missing_materials";
                         player.sendSystemMessage(Component.translatable(key));
                     }
@@ -1052,7 +1084,8 @@ public final class GenericCraftPacket {
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable INetwork network, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable StorageReference storageReference, List<IngredientSpec> scaledSpecs,
-            ItemStack recipeOutput, ModType terminalType) {
+            ItemStack recipeOutput, ModType terminalType,
+            Map<String, ItemStack> materialLocks) {
         if (storageEndpoint == null || !forcedRecipes.isEmpty()
                 || !RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()
                 || recipeOutput == null || recipeOutput.isEmpty()) return false;
@@ -1108,6 +1141,16 @@ public final class GenericCraftPacket {
                                 "[RSI-exec] physical planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
                                 recipeId, result.status(), result.feasibility(), result.missing(),
                                 result.expandedStates(), result.backtracks(), result.memoHits());
+                        if (shouldRetryTypedPlanning(
+                                result, snapshot.bindingBlockedOutputIds())) {
+                            RSIntegrationMod.LOGGER.info(
+                                    "[RSI-exec] retrying typed physical execution after pure planner rejection recipe={}",
+                                    recipeId);
+                            tryResolve(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                    inferMode, baseItem, targetOutput, outputDestination,
+                                    machineSelectionMode, storageReference, materialLocks, true);
+                            return;
+                        }
                         String key = missingTouchesBlockedOutput(
                                 result.missing(), snapshot.bindingBlockedOutputIds())
                                 ? "rsi.plan.failure.no_bound_machine"
@@ -1141,7 +1184,7 @@ public final class GenericCraftPacket {
                                 "[RSI-exec] async physical planning failed recipe={} directReservationAttempted=true failure={}",
                                 recipeId, failure.toString(), failure);
                         String key = failure instanceof CraftingPlanningTimeoutException
-                                ? "rsi.plan.failure.time_limit"
+                                ? "rsi.plan.failure.complexity_limit"
                                 : "rsi.plan.failure.missing_materials";
                         player.sendSystemMessage(Component.translatable(key));
                     }
@@ -1223,6 +1266,9 @@ public final class GenericCraftPacket {
         if (containsNetworkNullFailure(failure)) {
             return Component.translatable("rsi.generic.error.network_unavailable");
         }
+        if (containsPlanningTimeout(failure)) {
+            return Component.translatable("rsi.plan.failure.dynamic_plan_unavailable");
+        }
         String detail = failure.getMessage();
         if (detail == null || detail.isBlank()) detail = failure.getClass().getSimpleName();
         return Component.translatable("rsi.generic.error.craft_failed", recipeId + " - " + detail);
@@ -1237,6 +1283,13 @@ public final class GenericCraftPacket {
                     || (normalized.contains("getitemstoragetracker") && normalized.contains("null"))) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean containsPlanningTimeout(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof CraftingPlanningTimeoutException) return true;
         }
         return false;
     }
@@ -1512,6 +1565,26 @@ public final class GenericCraftPacket {
         return totalExecutions(steps) > Math.max(0, syncOperationThreshold);
     }
 
+    enum CachedPurePlanExecution {
+        SYNCHRONOUS,
+        ASYNCHRONOUS,
+        REPLAN
+    }
+
+    static CachedPurePlanExecution selectCachedPurePlanExecution(
+            List<ResolutionStep> steps, boolean hasStorageEndpoint,
+            int syncOperationThreshold) {
+        if (!canExecuteSynchronously(steps)) {
+            return hasStorageEndpoint
+                    ? CachedPurePlanExecution.ASYNCHRONOUS
+                    : CachedPurePlanExecution.REPLAN;
+        }
+        return hasStorageEndpoint
+                && shouldExecuteGenericChainAsync(steps, syncOperationThreshold)
+                ? CachedPurePlanExecution.ASYNCHRONOUS
+                : CachedPurePlanExecution.SYNCHRONOUS;
+    }
+
     static boolean canExecuteSynchronously(List<ResolutionStep> steps) {
         return steps.stream().allMatch(step -> step.modType() == ModType.GENERIC);
     }
@@ -1660,6 +1733,23 @@ public final class GenericCraftPacket {
                                    MachineSelectionMode machineSelectionMode,
                                    @Nullable StorageReference storageReference,
                                    Map<String, ItemStack> materialLocks) {
+        tryResolve(player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
+                baseItem, targetOutput, outputDestination, machineSelectionMode,
+                storageReference, materialLocks, false);
+    }
+
+    private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
+                                   Map<String, String> forcedRecipes,
+                                   @Nullable ResourceLocation dim,
+                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   int repeatCount, boolean inferMode,
+                                   @Nullable ItemStack baseItem,
+                                   @Nullable ItemStack targetOutput,
+                                   OutputDestination outputDestination,
+                                   MachineSelectionMode machineSelectionMode,
+                                   @Nullable StorageReference storageReference,
+                                   Map<String, ItemStack> materialLocks,
+                                   boolean typedFallbackOnly) {
         // v3.4: convert forced recipe overrides for the resolver (same format as tryBuildPlan).
         Map<ResourceLocation, ResourceLocation> forcedOverrides = null;
         if (!forcedRecipes.isEmpty()) {
@@ -1758,6 +1848,7 @@ public final class GenericCraftPacket {
         }
         if (requiresBoundMachine(recipe, modType)
                 && !hasBindingForExecutionType(player, recipe, modType)) {
+            logBindingRejection("execute-entry", player, recipe, modType, dim, pos);
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", modType.id()));
             return;
@@ -1863,13 +1954,14 @@ public final class GenericCraftPacket {
         }
 
         // Smithing is authorized by its bound table above, then assembled
-        // directly from the concrete extracted inputs below.
-        // A physical machine terminal must always be executed by its machine
-        // delegate.  The multiblock auto-crafting flag controls recursive
-        // intermediate resolution, not whether the terminal is allowed to
-        // bypass the machine.  Likewise, a null network is valid when the
-        // reserved inputs come from the player's inventory.
-        if (isPhysicalMachineRecipe(recipe, modType) && effectiveDim != null && effectivePos != null
+        // directly from the concrete extracted inputs below. Physical machines
+        // and logical virtual recipes both need their typed terminal delegate:
+        // the latter have no block, but may still depend on recursively crafted
+        // inputs (for example Malum void favor consuming a craftable relic).
+        // The auto-crafting flag controls intermediate resolution, not whether
+        // the terminal may fall through to the direct-extraction compatibility loop.
+        if (requiresTypedTerminalExecution(recipe, modType)
+                && effectiveDim != null && effectivePos != null
                 && modType != ModType.byId("smithing")) {
             if (modType != null) {
                 List<IngredientSpec> executionSpecs = specs;
@@ -1934,11 +2026,11 @@ public final class GenericCraftPacket {
                 // GRAPH_SAFE physical recipes are fully represented by immutable values.
                 // Queue their dependency planning before touching the legacy server-thread
                 // resolver; its short compatibility slice must never reject a normal chain.
-                if (queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
+                if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
                         forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
                         targetOutput, outputDestination, machineSelectionMode, network,
                         storageEndpoint, executionStorageReference, graphSpecs, recipeOutput,
-                        modType)) {
+                        modType, materialLocks)) {
                     return;
                 }
                 List<String> missing = new ArrayList<>();
@@ -1954,11 +2046,11 @@ public final class GenericCraftPacket {
                                     forcedOverrides, false, compatibilityResolverBudgetMs(),
                                     new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput), materialLocks);
                 } catch (CraftingPlanningTimeoutException timeout) {
-                    if (queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
+                    if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
                             forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
                             targetOutput, outputDestination, machineSelectionMode, network,
                             storageEndpoint, executionStorageReference, graphSpecs, recipeOutput,
-                            modType)) {
+                            modType, materialLocks)) {
                         return;
                     }
                     throw timeout;
@@ -2055,7 +2147,8 @@ public final class GenericCraftPacket {
             // Every projected crafting-table recipe belongs on the immutable worker.
             // The bounded server-thread resolver below is only a compatibility path
             // for recipes the pure graph cannot represent.
-            if (materialLocks.isEmpty() && queuePureExecutionPlan(player, craftingRecipe, recipeId, forcedRecipes,
+            if (!typedFallbackOnly && materialLocks.isEmpty()
+                    && queuePureExecutionPlan(player, craftingRecipe, recipeId, forcedRecipes,
                     dim, pos, repeatCount, inferMode, baseItem, targetOutput,
                     outputDestination, machineSelectionMode, network, storageEndpoint,
                     executionStorageReference)) {
@@ -2094,7 +2187,7 @@ public final class GenericCraftPacket {
                         graphMissing, null, false, compatibilityResolverBudgetMs(),
                         new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput), materialLocks);
             } catch (CraftingPlanningTimeoutException timeout) {
-                if (queuePureExecutionPlan(player, cr, recipeId, forcedRecipes, dim, pos,
+                if (!typedFallbackOnly && queuePureExecutionPlan(player, cr, recipeId, forcedRecipes, dim, pos,
                         repeatCount, inferMode, baseItem, targetOutput, outputDestination,
                         machineSelectionMode, network, storageEndpoint,
                         executionStorageReference)) {
@@ -2194,7 +2287,7 @@ public final class GenericCraftPacket {
                         compatibilityResolverBudgetMs(),
                         new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput), materialLocks);
             } catch (CraftingPlanningTimeoutException timeout) {
-                if (materialLocks.isEmpty() && queuePureExecutionPlan(
+                if (!typedFallbackOnly && materialLocks.isEmpty() && queuePureExecutionPlan(
                         player, cr2, recipeId, forcedRecipes, dim, pos,
                         repeatCount, inferMode, baseItem, targetOutput, outputDestination,
                         machineSelectionMode, network, storageEndpoint,
@@ -2264,6 +2357,8 @@ public final class GenericCraftPacket {
         // actually running the machine crafting.
         if (isPhysicalMachineRecipe(recipe, modType)
                 && (effectiveDim == null || effectivePos == null)) {
+            logBindingRejection("execute-context", player, recipe, modType,
+                    effectiveDim, effectivePos);
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", modType.id()));
             return;
@@ -2295,11 +2390,12 @@ public final class GenericCraftPacket {
                 if (!directSmithing.available()) {
                     // Smithing inputs are immutable planner data as well. Do not spend the
                     // server-thread compatibility slice before trying the background route.
-                    if (queuePureExecutionPlanForPhysicalRecipe(
+                    if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(
                             player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                             inferMode, baseItem, targetOutput, outputDestination,
                             machineSelectionMode, network, storageEndpoint,
-                            executionStorageReference, smithingSpecs, smithingOutput, modType)) {
+                            executionStorageReference, smithingSpecs, smithingOutput, modType,
+                            materialLocks)) {
                         return;
                     }
                     List<String> missing = new ArrayList<>();
@@ -2309,11 +2405,12 @@ public final class GenericCraftPacket {
                         smithingSpecs, avail, player.serverLevel(), player, network, missing,
                                 forcedOverrides, false, compatibilityResolverBudgetMs(), null, materialLocks);
                     } catch (CraftingPlanningTimeoutException timeout) {
-                        if (queuePureExecutionPlanForPhysicalRecipe(
+                        if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(
                                 player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                                 inferMode, baseItem, targetOutput, outputDestination,
                                 machineSelectionMode, network, storageEndpoint,
-                                executionStorageReference, smithingSpecs, smithingOutput, modType)) {
+                                executionStorageReference, smithingSpecs, smithingOutput, modType,
+                                materialLocks)) {
                             return;
                         }
                         throw timeout;
@@ -2973,6 +3070,7 @@ public final class GenericCraftPacket {
         ModType previewModType = resolveExecutionModType(player, recipe, dim, pos);
         if (requiresBoundMachine(recipe, previewModType)
                 && !hasBindingForExecutionType(player, recipe, previewModType)) {
+            logBindingRejection("preview-entry", player, recipe, previewModType, dim, pos);
             sink.error(Component.translatable("rsi.plan.failure.no_bound_machine"));
             return;
         }
@@ -3482,8 +3580,7 @@ public final class GenericCraftPacket {
         boolean pureRoute = demandTree.backgroundCompatible()
                 && effectiveOverrides.isEmpty()
                 && materialLocks.isEmpty()
-                && !planningSnapshot.mainThreadOnly()
-                && !targetUsesReusableCatalyst;
+                && !planningSnapshot.mainThreadOnly();
         // JEI's vanilla crafting recipes must produce a visible plan response as
         // well.  The pure planner is useful for background demand calculations,
         // but its asynchronous preview path can remain pending for a simple
@@ -3556,14 +3653,22 @@ public final class GenericCraftPacket {
                     recipeId, precomputedPlan.status(), precomputedPlan.feasibility(),
                     precomputedPlan.missing(), precomputedPlan.expandedStates(),
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
-            sink.error(Component.translatable("rsi.plan.failure.time_limit"));
+            sink.error(Component.translatable("rsi.plan.failure.complexity_limit"));
             return;
         }
         boolean requiresTypedCatalystRoute = requiresTypedCatalystRoute(
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
                 precomputedPlan, reusableCatalystOutputIds);
+        boolean requiresTypedIncompleteRoute = shouldRetryTypedPlanning(
+                precomputedPlan, planningSnapshot.bindingBlockedOutputIds());
         boolean selectedPureResolver = terminalPureResult && effectiveOverrides.isEmpty()
-                && !requiresTypedCatalystRoute;
+                && !requiresTypedCatalystRoute
+                && !requiresTypedIncompleteRoute;
+        if (requiresTypedIncompleteRoute) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-plan] retrying typed preview after incomplete pure plan recipe={} missing={}",
+                    recipeId, precomputedPlan.missing());
+        }
         boolean needsTypedResolver = !selectedPureResolver;
         if (needsTypedResolver && !typedResolverAvailable) {
             sink.error(Component.translatable(planningEndpoint == null
@@ -3688,7 +3793,8 @@ public final class GenericCraftPacket {
                         directTerminalPlan, demandTree.status(), demandTree.unresolved(),
                         demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
                         planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty());
-                sink.error(Component.translatable("rsi.plan.failure.time_limit"));
+                sink.error(Component.translatable(
+                        "rsi.plan.failure.dynamic_plan_unavailable"));
                 return;
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error(
@@ -4038,7 +4144,7 @@ public final class GenericCraftPacket {
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
         if (timedOutMissingRoute && precomputedPlan.missing().isEmpty()) {
-            modWarnings.add(Component.translatable("rsi.plan.failure.time_limit"));
+            modWarnings.add(Component.translatable("rsi.plan.failure.complexity_limit"));
         }
         boolean blockingPrerequisiteFailure = false;
         // Items the plan's intermediate steps actually produce. When the target's
@@ -4637,7 +4743,7 @@ public final class GenericCraftPacket {
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT
                 || result.status() == PureRecipePlanner.Status.SEARCH_LIMIT
                 || result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
-            return "rsi.plan.failure.time_limit";
+            return "rsi.plan.failure.complexity_limit";
         }
         return hasPureNbtMismatch(result.missing(), availableItems)
                 ? "rsi.plan.failure.nbt_mismatch"
@@ -4652,6 +4758,14 @@ public final class GenericCraftPacket {
         return missing.stream().anyMatch(demand -> !demand.alternatives().isEmpty()
                 && demand.alternatives().stream().allMatch(material ->
                 blockedOutputIds.contains(material.itemId())));
+    }
+
+    static boolean shouldRetryTypedPlanning(
+            PureRecipePlanner.Result result,
+            Set<ResourceLocation> blockedOutputIds) {
+        return result != null
+                && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
+                && !missingTouchesBlockedOutput(result.missing(), blockedOutputIds);
     }
 
     static boolean requiresTypedCatalystRoute(
@@ -5038,6 +5152,12 @@ public final class GenericCraftPacket {
         return isPhysicalMachineRecipe(recipe, type) && recipe.getType() != null;
     }
 
+    static boolean requiresTypedTerminalExecution(Recipe<?> recipe,
+                                                   @Nullable ModType modType) {
+        return modType != null
+                && (modType.isVirtual() || isPhysicalMachineRecipe(recipe, modType));
+    }
+
     static boolean requiresBoundMachine(@Nullable ModType modType) {
         return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
     }
@@ -5058,6 +5178,24 @@ public final class GenericCraftPacket {
             return AltarBindingRegistry.hasAnyBindingForType(player, executionType);
         }
         return AltarBindingRegistry.hasBindingForRecipe(player, recipe);
+    }
+
+    private static void logBindingRejection(String phase, ServerPlayer player, Recipe<?> recipe,
+                                            @Nullable ModType executionType,
+                                            @Nullable ResourceLocation dim,
+                                            @Nullable net.minecraft.core.BlockPos pos) {
+        ResourceLocation recipeTypeId = recipe.getType() == null
+                ? null : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType());
+        ResourceLocation serializerId = recipe.getSerializer() == null
+                ? null : BuiltInRegistries.RECIPE_SERIALIZER.getKey(recipe.getSerializer());
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-Binding] rejected phase={} recipe={} class={} recipeType={} serializer={} "
+                        + "modType={} craftingRecipe={} physicalMachine={} player={} dim={} pos={}",
+                phase, recipe.getId(), recipe.getClass().getName(), recipeTypeId, serializerId,
+                executionType == null ? "null" : executionType.id(),
+                recipe instanceof CraftingRecipe,
+                isPhysicalMachineRecipe(recipe, executionType),
+                player.getGameProfile().getName(), dim, pos);
     }
 
     private static ItemStack routeRecipeOutput(@Nullable ModType executionType, ItemStack output) {

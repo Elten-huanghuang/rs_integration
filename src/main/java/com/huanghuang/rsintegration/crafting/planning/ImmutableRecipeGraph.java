@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.LinkedHashMap;
@@ -42,19 +43,25 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
     }
 
     public record IngredientRef(List<MaterialRef> alternatives, int count,
-                                NbtMatchMode nbtMatchMode) {
+                                NbtMatchMode nbtMatchMode, DemandRole role) {
         public IngredientRef(List<MaterialRef> alternatives, int count) {
-            this(alternatives, count, NbtMatchMode.EXACT);
+            this(alternatives, count, NbtMatchMode.EXACT, DemandRole.CONSUMED);
+        }
+
+        public IngredientRef(List<MaterialRef> alternatives, int count,
+                             NbtMatchMode nbtMatchMode) {
+            this(alternatives, count, nbtMatchMode, DemandRole.CONSUMED);
         }
 
         public IngredientRef {
             alternatives = List.copyOf(alternatives);
             nbtMatchMode = nbtMatchMode == null ? NbtMatchMode.EXACT : nbtMatchMode;
+            role = role == null ? DemandRole.CONSUMED : role;
             if (alternatives.isEmpty() || count <= 0) throw new IllegalArgumentException("empty ingredient");
         }
 
         public IngredientRef withCount(int newCount) {
-            return new IngredientRef(alternatives, newCount, nbtMatchMode);
+            return new IngredientRef(alternatives, newCount, nbtMatchMode, role);
         }
     }
 

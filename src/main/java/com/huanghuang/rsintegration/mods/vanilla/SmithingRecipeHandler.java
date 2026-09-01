@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
@@ -28,6 +29,17 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
                 || recipe instanceof SmithingTrimRecipe;
     }
 
+    /**
+     * Smithing slots are positional.  CraftTweaker exposes a generic ingredient
+     * list for some smithing recipe implementations, but that list is not a
+     * reliable source of the vanilla template/base/addition order.  Always use
+     * this handler before the generic CraftTweaker probes.
+     */
+    @Override
+    public boolean preferHandlerIngredients() {
+        return true;
+    }
+
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access);
@@ -36,6 +48,11 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
     @Override
     public boolean useClickedPrimaryOutput(Recipe<?> recipe, ItemStack declared, ItemStack clicked) {
         return clicked.hasTag() || ModRecipeHandler.super.useClickedPrimaryOutput(recipe, declared, clicked);
+    }
+
+    @Override
+    public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+        return recipe instanceof SmithingTransformRecipe;
     }
 
     public static ItemStack selectAvailableBase(SmithingTransformRecipe recipe,
@@ -104,6 +121,13 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+        if (recipe instanceof ISmithingRecipeAccessor accessor) {
+            return List.of(
+                    new IngredientSpec(accessor.rsi$getTemplate(), 1),
+                    new IngredientSpec(accessor.rsi$getBase(), 1),
+                    new IngredientSpec(accessor.rsi$getAddition(), 1));
+        }
+
         List<Ingredient> ingredients = new ArrayList<>();
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
