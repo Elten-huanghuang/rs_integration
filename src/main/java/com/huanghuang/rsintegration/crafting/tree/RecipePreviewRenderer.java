@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import mezz.jei.api.constants.VanillaTypes;
@@ -33,6 +34,8 @@ public final class RecipePreviewRenderer {
     private final Map<ResourceLocation, Optional<IDrawable>> iconCache = new HashMap<>();
     private final Map<ResourceLocation, Optional<Component>> titleCache = new HashMap<>();
     private final Minecraft mc;
+    @Nullable
+    private IJeiRuntime cachedJeiRuntime;
 
     // Cached items for synthetic recipe icons
     private net.minecraft.world.item.Item gemCuttingTableItem;
@@ -46,14 +49,29 @@ public final class RecipePreviewRenderer {
     }
 
     public void clear() {
-        cache.clear();
-        iconCache.clear();
-        titleCache.clear();
+        clearJeiCaches();
+        cachedJeiRuntime = RSJeiPlugin.getRuntime();
         gemCuttingTableItem = null;  // Clear cached item on reset
         marketItem = null;
         scrollForgeItem = null;
         arcaneAnvilItem = null;
         goetyDarkAltarItem = null;
+    }
+
+    private void clearJeiCaches() {
+        cache.clear();
+        iconCache.clear();
+        titleCache.clear();
+    }
+
+    @Nullable
+    private IJeiRuntime currentJeiRuntime() {
+        IJeiRuntime current = RSJeiPlugin.getRuntime();
+        if (current != cachedJeiRuntime) {
+            clearJeiCaches();
+            cachedJeiRuntime = current;
+        }
+        return current;
     }
 
     /**
@@ -64,6 +82,10 @@ public final class RecipePreviewRenderer {
                                        ResourceLocation recipeId,
                                        int anchorX, int anchorY, int screenW, int screenH,
                                        int mouseX, int mouseY) {
+        if (RecipeBrowserBridge.renderEmiRecipePreview(gfx, recipeId,
+                anchorX, anchorY, screenW, screenH, mouseX, mouseY)) {
+            return true;
+        }
         Optional<IRecipeLayoutDrawable<?>> opt = getDrawable(recipeId);
         if (opt.isPresent()) {
             renderJeiTooltip(gfx, font, opt.get(), anchorX, anchorY, screenW, screenH, mouseX, mouseY);
@@ -84,6 +106,7 @@ public final class RecipePreviewRenderer {
 
     @Nullable
     private Optional<IRecipeLayoutDrawable<?>> getDrawable(ResourceLocation recipeId) {
+        if (currentJeiRuntime() == null || mc.level == null) return Optional.empty();
         return cache.computeIfAbsent(recipeId, this::createDrawable);
     }
 
@@ -353,8 +376,13 @@ public final class RecipePreviewRenderer {
                 // Registry lookup/rendering must not prevent the recipe tree from drawing.
             }
         }
-        IDrawable icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
-        if (icon == null) return false;
+        IDrawable icon = null;
+        if (currentJeiRuntime() != null && mc.level != null) {
+            icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
+        }
+        if (icon == null) {
+            return RecipeBrowserBridge.drawEmiRecipeCategoryIcon(gfx, recipeId, x, y, size);
+        }
         try {
             int iw = icon.getWidth();
             int ih = icon.getHeight();
@@ -456,6 +484,7 @@ public final class RecipePreviewRenderer {
         if (isVirtualMarketRecipe(recipeId)) {
             return Optional.of(Component.translatable("block.farmingforblockheads.market"));
         }
+        if (currentJeiRuntime() == null || mc.level == null) return Optional.empty();
         return titleCache.computeIfAbsent(recipeId, this::lookupCategoryTitle);
     }
 

@@ -20,6 +20,9 @@ public final class PlanCache {
     private final LongSupplier ttlNanos;
     private final IntSupplier maxEntries;
     private final ConcurrentHashMap<Key, Entry> entries = new ConcurrentHashMap<>();
+    /** Latest plan actually shown to each player, retained until confirmation or replacement. */
+    private final ConcurrentHashMap<UUID, ExecutionLease> executionLeases =
+            new ConcurrentHashMap<>();
 
     public PlanCache() {
         this(PlanCache::configuredTtlNanos, PlanCache::configuredMaxEntries);
@@ -67,16 +70,31 @@ public final class PlanCache {
      */
     public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
                     PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph, long now) {
-        entries.put(key, new Entry(plan, snapshot, purePlan, resolvedGraph, now));
+        Entry entry = new Entry(plan, snapshot, purePlan, resolvedGraph, now);
+        entries.put(key, entry);
+        executionLeases.put(key.playerId(), new ExecutionLease(key, entry));
         prune(now);
+    }
+
+    /**
+     * Consumes the plan currently displayed by this player, independently of
+     * the short preview deduplication TTL. The caller must still revalidate the
+     * snapshot before executing it.
+     */
+    public Entry takeForExecution(Key key) {
+        ExecutionLease lease = executionLeases.get(key.playerId());
+        if (lease == null || !lease.key().equals(key)) return null;
+        return executionLeases.remove(key.playerId(), lease) ? lease.entry() : null;
     }
 
     public void clear() {
         entries.clear();
+        executionLeases.clear();
     }
 
     public void removePlayer(UUID playerId) {
         entries.keySet().removeIf(key -> key.playerId().equals(playerId));
+        executionLeases.remove(playerId);
     }
 
     public int size() {
@@ -130,4 +148,6 @@ public final class PlanCache {
     public record Entry(PlanResponse plan, PlanningSnapshot snapshot,
                         PureRecipePlanner.Result purePlan,
                         CraftPlanGraph resolvedGraph, long createdNanos) {}
+
+    private record ExecutionLease(Key key, Entry entry) {}
 }

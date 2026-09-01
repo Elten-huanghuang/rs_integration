@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
@@ -61,6 +62,42 @@ class PlanCacheTest extends BootstrapTest {
         cache.put(key, plan, snapshot, 100);
         cache.removePlayer(key.playerId());
         assertNull(cache.get(key, 100));
+        assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void displayedPlanRemainsExecutableAfterPreviewDeduplicationExpires() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("visible_plan");
+        PlanResponse plan = plan();
+        PlanningSnapshot snapshot = snapshot(key);
+        CraftPlanGraph typedGraph = new CraftPlanGraph(
+                CraftPlanGraph.CURRENT_VERSION, java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), java.util.List.of(), java.util.List.of());
+
+        cache.put(key, plan, snapshot, null, typedGraph, 100);
+
+        assertNull(cache.get(key, 111));
+        PlanCache.Entry leased = cache.takeForExecution(key);
+        assertNotNull(leased);
+        assertSame(typedGraph, leased.resolvedGraph());
+        assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void newerDisplayedPlanReplacesOnlyThatPlayersExecutionLease() {
+        PlanCache cache = new PlanCache(10);
+        UUID player = UUID.randomUUID();
+        PlanCache.Key oldKey = new PlanCache.Key(player,
+                new ResourceLocation("test", "old"), Map.of(), 1, "");
+        PlanCache.Key currentKey = new PlanCache.Key(player,
+                new ResourceLocation("test", "current"), Map.of(), 1, "");
+
+        cache.put(oldKey, plan(), snapshot(oldKey), 100);
+        cache.put(currentKey, plan(), snapshot(currentKey), 101);
+
+        assertNull(cache.takeForExecution(oldKey));
+        assertNotNull(cache.takeForExecution(currentKey));
     }
 
     @Test
@@ -79,5 +116,20 @@ class PlanCacheTest extends BootstrapTest {
         cache.put(key, plan, snapshot, pure, 1);
 
         assertSame(pure, cache.get(key, 2).purePlan());
+    }
+
+    private static PlanCache.Key key(String path) {
+        return new PlanCache.Key(UUID.randomUUID(),
+                new ResourceLocation("test", path), Map.of(), 1, "");
+    }
+
+    private static PlanResponse plan() {
+        return new PlanResponse(true, "", ItemStack.EMPTY, java.util.List.of(),
+                Map.of(), java.util.List.of(), "test:plan");
+    }
+
+    private static PlanningSnapshot snapshot(PlanCache.Key key) {
+        return new PlanningSnapshot(key.playerId(), 1, 1, key.recipeId(), Map.of(), Map.of(),
+                new ImmutableRecipeGraph(Map.of()), "", "", false);
     }
 }

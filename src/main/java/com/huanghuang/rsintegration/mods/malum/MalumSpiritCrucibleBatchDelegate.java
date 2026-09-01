@@ -540,16 +540,18 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         RSIntegrationMod.LOGGER.warn(
                 "[RSI-Crucible] Core rejected recipe {} after material placement at {}",
                 recipe.getId(), myPos);
+        logRejectedState(be);
         player.sendSystemMessage(Component.translatable(
                 "rsi.malum_crucible.error.recipe_rejected", recipe.getId().toString()));
         return false;
     }
 
-    /** Malum 1.6.6 resolves the active focusing recipe only when core.init() runs. */
+    /** Malum resolves the active focusing recipe only when core.init() runs. */
     static boolean refreshRecipeSelection(Object crucible, Recipe<?> expected) {
         if (crucible == null || expected == null) return false;
         try {
-            java.lang.reflect.Method init = crucible.getClass().getMethod("init");
+            java.lang.reflect.Method init = findNoArgMethod(crucible.getClass(), "init");
+            if (init == null) return false;
             init.setAccessible(true);
             init.invoke(crucible);
 
@@ -567,6 +569,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             if (recipeField == null) return false;
             recipeField.setAccessible(true);
             Object active = recipeField.get(crucible);
+            if (active instanceof java.util.Optional<?> optional) {
+                active = optional.orElse(null);
+            }
             if (!(active instanceof Recipe<?> activeRecipe)) return false;
             return activeRecipe == expected || activeRecipe.getId().equals(expected.getId());
         } catch (ReflectiveOperationException | RuntimeException e) {
@@ -574,19 +579,57 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
+    private static java.lang.reflect.Method findNoArgMethod(Class<?> type, String name) {
+        for (Class<?> current = type; current != null && current != Object.class;
+             current = current.getSuperclass()) {
+            for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+                if (method.getName().equals(name) && method.getParameterCount() == 0) return method;
+            }
+        }
+        return null;
+    }
+
+    private void logRejectedState(BlockEntity be) {
+        Object active = Reflect.getField(be, "recipe").orElse(null);
+        String activeDescription;
+        if (active instanceof java.util.Optional<?> optional) active = optional.orElse(null);
+        if (active instanceof Recipe<?> activeRecipe) {
+            activeDescription = activeRecipe.getId().toString();
+        } else {
+            activeDescription = active == null ? "<none>" : active.getClass().getName();
+        }
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-Crucible] Rejected state: activeRecipe={} catalyst={} spirits={}",
+                activeDescription, describeHandler(invCatalyst), describeHandler(invSpirits));
+    }
+
+    private static String describeHandler(@Nullable IItemHandler handler) {
+        if (handler == null) return "<missing>";
+        List<String> stacks = new ArrayList<>();
+        for (int i = 0; i < handler.getSlots(); i++) {
+            ItemStack stack = handler.getStackInSlot(i);
+            if (!stack.isEmpty()) stacks.add(i + "=" + stack.getItem() + "x" + stack.getCount());
+        }
+        return stacks.isEmpty() ? "<empty>" : String.join(",", stacks);
+    }
+
     /** Mirror Malum's manual crucible interaction after programmatic material placement. */
     static boolean refreshAccelerators(Object crucible, Object level, Object pos) {
         if (crucible == null || level == null || pos == null) return false;
         try {
             java.lang.reflect.Method recalibrate = null;
-            for (java.lang.reflect.Method method : crucible.getClass().getMethods()) {
-                Class<?>[] parameters = method.getParameterTypes();
-                if (method.getName().equals("recalibrateAccelerators")
-                        && parameters.length == 2
-                        && parameters[0].isInstance(level)
-                        && parameters[1].isInstance(pos)) {
-                    recalibrate = method;
-                    break;
+            for (Class<?> current = crucible.getClass();
+                 current != null && current != Object.class && recalibrate == null;
+                 current = current.getSuperclass()) {
+                for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+                    Class<?>[] parameters = method.getParameterTypes();
+                    if (method.getName().equals("recalibrateAccelerators")
+                            && parameters.length == 2
+                            && parameters[0].isInstance(level)
+                            && parameters[1].isInstance(pos)) {
+                        recalibrate = method;
+                        break;
+                    }
                 }
             }
             if (recalibrate == null) return false;
@@ -768,13 +811,14 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private void clearAllSlots() {
-        // Shared ledger handles refund — do not double-insert from crucible slots
-        final boolean refund = !usingSharedLedger;
+        // A committed shared ledger may only refund what was physically recovered
+        // from the machine. Do not discard the stacks before the ledger sees them.
+        final List<ItemStack> recovered = new ArrayList<>();
         if (invCatalyst != null) {
             for (int i = 0; i < invCatalyst.getSlots(); i++) {
                 ItemStack s = invCatalyst.getStackInSlot(i);
                 if (!s.isEmpty()) {
-                    if (refund) returnCrucibleItem(s);
+                    recovered.add(s.copy());
                     setSlot(invCatalyst, i, ItemStack.EMPTY);
                 }
             }
@@ -783,10 +827,15 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             for (int i = 0; i < invSpirits.getSlots(); i++) {
                 ItemStack s = invSpirits.getStackInSlot(i);
                 if (!s.isEmpty()) {
-                    if (refund) returnCrucibleItem(s);
+                    recovered.add(s.copy());
                     setSlot(invSpirits, i, ItemStack.EMPTY);
                 }
             }
+        }
+        if (usingSharedLedger) {
+            recordFailureRecoveredInputs(recovered);
+        } else {
+            for (ItemStack stack : recovered) returnCrucibleItem(stack);
         }
         if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) {
             be.setChanged();
@@ -795,6 +844,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     /** Remove templates placed before commit without minting refunds. */
     private void clearUncommittedPlacements() {
+        // Shared-ledger callers have already committed the physical extraction
+        // before invoking tryStartWithMaterials. Leave slots intact so the
+        // terminal cleanup can recover and audit the exact stacks.
+        if (usingSharedLedger) return;
         if (invCatalyst != null) {
             for (int i = 0; i < invCatalyst.getSlots(); i++) {
                 setSlot(invCatalyst, i, ItemStack.EMPTY);

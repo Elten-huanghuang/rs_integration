@@ -68,6 +68,64 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void sharedCatalystAcrossDifferentLegacyStepsCountsOnce() {
+        ItemStack target = new ItemStack(Items.EMERALD);
+        PlanStep makeIron = new PlanStep(new ResourceLocation("test", "make_iron"),
+                new ItemStack(Items.IRON_NUGGET), 1, List.of(new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(), List.of(DemandRole.CATALYST));
+        PlanStep makeGold = new PlanStep(new ResourceLocation("test", "make_gold"),
+                new ItemStack(Items.GOLD_NUGGET), 1, List.of(new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(), List.of(DemandRole.CATALYST));
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, target, 1,
+                List.of(new ItemStack(Items.IRON_NUGGET), new ItemStack(Items.GOLD_NUGGET)));
+
+        PlanMaterialBill.Result result = summarizeDiamond(
+                target, List.of(makeIron, makeGold, targetStep), 1, 1);
+
+        assertEquals(new PlanResponse.Availability(1, 1),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
+    }
+
+    @Test
+    void catalystPeakKeepsMultipleSlotsRequiredByOneStep() {
+        ItemStack target = new ItemStack(Items.EMERALD);
+        PlanStep needsTwo = new PlanStep(new ResourceLocation("test", "needs_two"),
+                new ItemStack(Items.IRON_NUGGET), 1,
+                List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(),
+                List.of(DemandRole.CATALYST, DemandRole.CATALYST));
+        PlanStep needsOne = new PlanStep(new ResourceLocation("test", "needs_one"),
+                new ItemStack(Items.GOLD_NUGGET), 1, List.of(new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(), List.of(DemandRole.CATALYST));
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, target, 1,
+                List.of(new ItemStack(Items.IRON_NUGGET), new ItemStack(Items.GOLD_NUGGET)));
+
+        PlanMaterialBill.Result result = summarizeDiamond(
+                target, List.of(needsTwo, needsOne, targetStep), 2, 2);
+
+        assertEquals(new PlanResponse.Availability(2, 2),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
+    }
+
+    @Test
+    void consumedDemandIsAddedToReusableCatalystPeak() {
+        ItemStack target = new ItemStack(Items.EMERALD);
+        PlanStep catalystStep = new PlanStep(new ResourceLocation("test", "catalyst_step"),
+                new ItemStack(Items.IRON_NUGGET), 1, List.of(new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(), List.of(DemandRole.CATALYST));
+        PlanStep targetStep = new PlanStep(TARGET_RECIPE, target, 1,
+                List.of(new ItemStack(Items.IRON_NUGGET), new ItemStack(Items.DIAMOND)),
+                List.of(), null, 0, false, 0, 0, List.of(),
+                List.of(DemandRole.CONSUMED, DemandRole.CONSUMED));
+
+        PlanMaterialBill.Result result = summarizeDiamond(
+                target, List.of(catalystStep, targetStep), 2, 2);
+
+        assertEquals(new PlanResponse.Availability(2, 2),
+                result.materials().get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
+    }
+
+    @Test
     void selfAmplifyingTargetDisplaysOneSeedForRepeatedExecutions() {
         ItemStack templateOutput = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
         PlanStep targetStep = new PlanStep(TARGET_RECIPE, templateOutput, 6,
@@ -176,5 +234,17 @@ class PlanMaterialBillTest extends BootstrapTest {
         result.put(firstItem, firstCount);
         result.put(secondItem, secondCount);
         return result;
+    }
+
+    private static PlanMaterialBill.Result summarizeDiamond(ItemStack target,
+                                                             List<PlanStep> steps,
+                                                             int netNeeded,
+                                                             int available) {
+        return PlanMaterialBill.summarize(
+                Map.of(Items.DIAMOND, netNeeded),
+                Map.of(Items.DIAMOND, Ingredient.of(Items.DIAMOND)),
+                Map.of(Items.DIAMOND, available),
+                Map.of(new StackKey(Items.DIAMOND, null), available),
+                target, steps, 1, null, false);
     }
 }

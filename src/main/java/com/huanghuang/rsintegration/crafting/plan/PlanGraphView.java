@@ -143,7 +143,7 @@ public record PlanGraphView(
             return Math.max(1, (quantity + executions - 1) / executions);
         }
 
-        private DemandRole role() {
+        public DemandRole role() {
             DemandRole[] roles = DemandRole.values();
             return roleOrdinal >= 0 && roleOrdinal < roles.length
                     ? roles[roleOrdinal] : DemandRole.CONSUMED;

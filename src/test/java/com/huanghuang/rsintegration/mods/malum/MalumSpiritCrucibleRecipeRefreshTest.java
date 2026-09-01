@@ -31,6 +31,15 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
     }
 
     @Test
+    void refreshSupportsNonPublicInitAndOptionalRecipeField() {
+        Recipe<?> expected = recipe("neutron_nugget");
+        PrivateInitCrucible crucible = new PrivateInitCrucible(expected);
+
+        assertTrue(MalumSpiritCrucibleBatchDelegate.refreshRecipeSelection(crucible, expected));
+        assertTrue(crucible.initialized);
+    }
+
+    @Test
     void refreshRejectsNoMatchInsteadOfWaitingForTimeout() {
         Recipe<?> expected = recipe("neutron_nugget");
 
@@ -102,6 +111,21 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
 
         public void recalibrateAccelerators(Object level, Object pos) {
             acceleratorsRefreshed = level != null && pos != null;
+        }
+    }
+
+    public static final class PrivateInitCrucible {
+        private Object recipe;
+        private final Recipe<?> selected;
+        private boolean initialized;
+
+        private PrivateInitCrucible(Recipe<?> selected) {
+            this.selected = selected;
+        }
+
+        private void init() {
+            initialized = true;
+            recipe = java.util.Optional.ofNullable(selected);
         }
     }
 }

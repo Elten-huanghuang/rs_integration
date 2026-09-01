@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
 
+import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
 
@@ -13,6 +14,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -22,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
 
 /**
  * Registry of {@link ModRecipeHandler} instances, keyed by {@link ModType}.
@@ -31,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link ModRecipeHandler#canHandle} returns true wins.</p>
  */
 public final class ModRecipeHandlers {
+    private static final Logger RESULT_LOGGER = LogUtils.getLogger();
 
     private static final Map<Class<?>, Method> RESULT_METHOD_CACHE = new ConcurrentHashMap<>();
     private static final Map<Class<?>, CraftTweakerOutputAccessor> CT_OUTPUT_ACCESSOR_CACHE = new ConcurrentHashMap<>();
@@ -42,6 +47,7 @@ public final class ModRecipeHandlers {
     /** Global result cache: recipe ID → output ItemStack (or EMPTY sentinel). */
     private static final Map<ResourceLocation, ItemStack> GLOBAL_RESULT_CACHE = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> GLOBAL_EMPTY_CACHE = ConcurrentHashMap.newKeySet();
+    private static final Set<Class<?>> CLIENT_UNSAFE_RESULT_LOGGED = ConcurrentHashMap.newKeySet();
     private static final Map<Class<?>, ModRecipeHandler> HANDLER_CACHE = new ConcurrentHashMap<>();
     /** Prevents infinite recursion when a handler's getResultItem() calls back into tryGetResultItem(). */
     private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
@@ -113,6 +119,8 @@ public final class ModRecipeHandlers {
     public static void clearResultCaches() {
         GLOBAL_RESULT_CACHE.clear();
         GLOBAL_EMPTY_CACHE.clear();
+        CLIENT_UNSAFE_RESULT_LOGGED.clear();
+        RecipeResultMethodSafety.clear();
     }
 
     // ── shared result-item extraction ─────────────────────────────
@@ -129,9 +137,8 @@ public final class ModRecipeHandlers {
             PlanningThreadContext.requireMainThread("third-party recipe result extraction");
         }
         if (recipe instanceof CraftingRecipe cr) {
-            ItemStack result = cr.getResultItem(access);
-            if (!result.isEmpty()) return result.copy();
-            return tryGetCraftTweakerOutput(recipe);
+            return tryGetCraftingResultItem(cr, access,
+                    FMLEnvironment.dist == Dist.DEDICATED_SERVER);
         }
         ResourceLocation id = recipe.getId();
         if (GLOBAL_EMPTY_CACHE.contains(id)) return ItemStack.EMPTY;
@@ -146,6 +153,40 @@ public final class ModRecipeHandlers {
             GLOBAL_RESULT_CACHE.put(id, result.copy());
         }
         return result.copy();
+    }
+
+    static ItemStack tryGetCraftingResultItem(CraftingRecipe recipe, RegistryAccess access,
+                                               boolean dedicatedServer) {
+        if (!dedicatedServer
+                || RecipeResultMethodSafety.mayInvokeOnDedicatedServer(recipe.getClass())) {
+            try {
+                ItemStack result = recipe.getResultItem(access);
+                if (!result.isEmpty()) return result.copy();
+            } catch (RuntimeException | LinkageError failure) {
+                if (!dedicatedServer) throw failure;
+                RecipeResultMethodSafety.markUnsafe(recipe.getClass());
+                logClientUnsafeFallback(recipe.getClass(), failure);
+            }
+        } else {
+            logClientUnsafeFallback(recipe.getClass(), null);
+        }
+
+        ItemStack craftTweakerResult = tryGetCraftTweakerOutput(recipe);
+        if (!craftTweakerResult.isEmpty()) return craftTweakerResult;
+        return tryGetOutputField(recipe);
+    }
+
+    private static void logClientUnsafeFallback(Class<?> recipeClass, Throwable failure) {
+        if (!CLIENT_UNSAFE_RESULT_LOGGED.add(recipeClass)) return;
+        if (failure == null) {
+            RESULT_LOGGER.debug(
+                    "[RecipeCatalog] Avoiding client-unsafe getResultItem for {}; using structural output fallback",
+                    recipeClass.getName());
+        } else {
+            RESULT_LOGGER.debug(
+                    "[RecipeCatalog] getResultItem failed on dedicated server for {}; future calls use structural output fallback",
+                    recipeClass.getName(), failure);
+        }
     }
 
     private static ItemStack tryGetCraftTweakerOutput(Recipe<?> recipe) {

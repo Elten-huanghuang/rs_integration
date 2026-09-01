@@ -28,9 +28,8 @@ public final class SlashBladeRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
-        ModType.register("slashblade",
+        ModType.registerVirtual("slashblade",
                 new String[]{"mods.flammpfeil.slashblade.recipe.SlashBladeShapedRecipe"},
-                new String[0], new String[0],
                 GenericBatchDelegate::new);
     }
 

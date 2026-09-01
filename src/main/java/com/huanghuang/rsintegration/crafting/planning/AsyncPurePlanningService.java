@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
@@ -46,10 +47,15 @@ public final class AsyncPurePlanningService {
                     new PlanningThreadContext.MainThreadPlanningFallbackException("special recipe planning")));
             return;
         }
-        coordinator.submit(snapshot, ignored -> compute(snapshot, repeatCount, maxSteps,
+        PlanningKey key = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
+                snapshot.recipeId(), snapshot.availableItems(), snapshot.forcedRecipes(),
+                snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
+                snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
+                maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
+        coordinator.submitShared(key, snapshot, ignored -> compute(snapshot, repeatCount, maxSteps,
                         maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
-                result -> commit.accept(new CompletedPlan(snapshot, result)), rollback);
+                (callbackSnapshot, result) -> commit.accept(new CompletedPlan(callbackSnapshot, result)), rollback);
     }
 
     private static PureRecipePlanner.Result compute(PlanningSnapshot snapshot, int repeatCount,
@@ -93,4 +99,14 @@ public final class AsyncPurePlanningService {
 
     /** Keeps a background result inseparable from the immutable state that produced it. */
     public record CompletedPlan(PlanningSnapshot snapshot, PureRecipePlanner.Result result) {}
+
+    private record PlanningKey(java.util.UUID playerId, long recipeRevision,
+                               ResourceLocation recipeId,
+                               Map<StackKey, Integer> availableItems,
+                               Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                               ImmutableRecipeGraph recipeGraph, String networkFingerprint,
+                               String bindingFingerprint,
+                               java.util.Set<ResourceLocation> bindingBlockedOutputIds,
+                               boolean mainThreadOnly, int repeatCount, int maxSteps,
+                               int maxSearchStates, int maxMemoizedFailures, int timeoutMs) {}
 }

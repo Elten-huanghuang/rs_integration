@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -71,15 +72,36 @@ public final class BeyondDimensionsMachineHubClient {
     public static void onRender(ScreenEvent.Render.Post event) {
         Screen screen = event.getScreen();
         if (!isTerminal(screen)) return;
-        refreshLocalBindings();
-        renderMachineCenterEntry(event);
-        renderResonanceEntry(event);
-        renderFavoriteStrip(event);
         if (!MachineHub.isVisible()) return;
         int centerX = screen.width / 2;
         int centerY = screen.height / 2;
         MachineHubRenderer.render(event.getGuiGraphics(), centerX + 88, centerY - 80,
                 176, event.getMouseX(), event.getMouseY());
+    }
+
+    /** Draw terminal controls after BD's widgets but before its item tooltip. */
+    public static void renderTerminalControlsBeforeTooltip(Screen screen, GuiGraphics graphics,
+                                                            int mouseX, int mouseY) {
+        if (!isTerminal(screen)) return;
+        refreshLocalBindings();
+        renderMachineCenterEntry(screen, graphics, mouseX, mouseY);
+        renderResonanceEntry(screen, graphics, mouseX, mouseY);
+        renderFavoriteStrip(screen, graphics, mouseX, mouseY);
+    }
+
+    /** Area occupied by BD's favorite-machine strip for recipe-browser avoidance. */
+    public static List<Rect2i> getFavoriteExtraAreas(Screen screen) {
+        if (!isTerminal(screen)) return List.of();
+        refreshLocalBindings();
+        int favoriteCount = getFavoriteMachines().size();
+        if (favoriteCount == 0) return List.of();
+        int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
+        int x = Math.min(left + BD_TAB_X_OFFSET,
+                Math.max(2, screen.width - BD_FAVORITE_WIDTH - 2));
+        int y = resolveBDTop(screen) + 6;
+        int height = favoriteCount * BD_FAVORITE_HEIGHT
+                + (favoriteCount - 1) * BD_FAVORITE_GAP;
+        return List.of(new Rect2i(x, y, BD_FAVORITE_WIDTH, height));
     }
 
     @SubscribeEvent
@@ -94,8 +116,7 @@ public final class BeyondDimensionsMachineHubClient {
         }
     }
 
-    private static void renderMachineCenterEntry(ScreenEvent.Render.Post event) {
-        Screen screen = event.getScreen();
+    private static void renderMachineCenterEntry(Screen screen, GuiGraphics g, int mouseX, int mouseY) {
         int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
         int top = resolveBDTop(screen);
         machineCenterX = Math.max(0, left - 18);
@@ -105,45 +126,36 @@ public final class BeyondDimensionsMachineHubClient {
         // native control so it never covers the primary-network button.
         machineCenterY = top + 6 + 18 * 8;
         boolean hovered = !MachineTabHandler.getAllMachines().isEmpty()
-                && event.getMouseX() >= machineCenterX
-                && event.getMouseX() < machineCenterX + MACHINE_CENTER_SIZE
-                && event.getMouseY() >= machineCenterY
-                && event.getMouseY() < machineCenterY + MACHINE_CENTER_SIZE;
+                && mouseX >= machineCenterX
+                && mouseX < machineCenterX + MACHINE_CENTER_SIZE
+                && mouseY >= machineCenterY
+                && mouseY < machineCenterY + MACHINE_CENTER_SIZE;
         MachineTabHandler.setMachineCenterHovered(hovered);
-        GuiGraphics g = event.getGuiGraphics();
-        g.pose().pushPose();
-        g.pose().translate(0, 0, 460);
         int iconX = machineCenterX + BD_LEFT_ICON_X_OFFSET;
         int iconY = machineCenterY + BD_LEFT_ICON_Y_OFFSET;
         g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, iconX, iconY, 0, 0,
                 BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
         g.blit(MACHINE_CENTER_ICON, iconX, iconY, 0, 0,
                 BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
-        g.pose().popPose();
     }
 
     /** BD terminal slot 10: opens the generator's independent BD resonance space. */
-    private static void renderResonanceEntry(ScreenEvent.Render.Post event) {
-        Screen screen = event.getScreen();
+    private static void renderResonanceEntry(Screen screen, GuiGraphics g, int mouseX, int mouseY) {
         int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
         resonanceBackpackX = Math.max(0, left - 18);
         resonanceBackpackY = machineCenterY + 18;
         boolean available = ModItems.DIMENSIONAL_RESONANCE_DISK != null;
         boolean hovered = available
-                && event.getMouseX() >= resonanceBackpackX
-                && event.getMouseX() < resonanceBackpackX + MACHINE_CENTER_SIZE
-                && event.getMouseY() >= resonanceBackpackY
-                && event.getMouseY() < resonanceBackpackY + MACHINE_CENTER_SIZE;
+                && mouseX >= resonanceBackpackX
+                && mouseX < resonanceBackpackX + MACHINE_CENTER_SIZE
+                && mouseY >= resonanceBackpackY
+                && mouseY < resonanceBackpackY + MACHINE_CENTER_SIZE;
         MachineTabHandler.setResonanceBackpackHovered(hovered);
         if (!available) return;
-        GuiGraphics g = event.getGuiGraphics();
-        g.pose().pushPose();
-        g.pose().translate(0, 0, 460);
         g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, resonanceBackpackX, resonanceBackpackY,
                 0, 0, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
         ItemStack icon = new ItemStack(ModItems.DIMENSIONAL_RESONANCE_DISK.get());
         g.renderItem(icon, resonanceBackpackX, resonanceBackpackY);
-        g.pose().popPose();
     }
 
     private static boolean handleMachineCenterClick(ScreenEvent.MouseButtonPressed.Pre event) {
@@ -202,43 +214,34 @@ public final class BeyondDimensionsMachineHubClient {
     }
 
     /** Draw BD-local machine favorites to the right of the terminal surface. */
-    private static void renderFavoriteStrip(ScreenEvent.Render.Post event) {
+    private static void renderFavoriteStrip(Screen screen, GuiGraphics g, int mouseX, int mouseY) {
         List<BindingInfo> favorites = getFavoriteMachines();
         if (favorites.isEmpty()) return;
-        Screen screen = event.getScreen();
         int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
         int top = resolveBDTop(screen);
         int x = Math.min(left + BD_TAB_X_OFFSET,
                 Math.max(2, screen.width - BD_FAVORITE_WIDTH - 2));
         int y = top + 6;
-        GuiGraphics g = event.getGuiGraphics();
-        g.pose().pushPose();
-        g.pose().translate(0, 0, 460);
-        try {
-            for (int i = 0; i < favorites.size(); i++) {
-                int sy = y + i * (BD_FAVORITE_HEIGHT + BD_FAVORITE_GAP);
-                boolean hovered = event.getMouseX() >= x && event.getMouseX() < x + BD_FAVORITE_WIDTH
-                        && event.getMouseY() >= sy && event.getMouseY() < sy + BD_FAVORITE_HEIGHT;
-                g.blit(BD_RIGHT_TAB, x, sy, 0, 0,
-                        BD_FAVORITE_WIDTH, BD_FAVORITE_HEIGHT,
-                        BD_FAVORITE_WIDTH, BD_FAVORITE_HEIGHT);
-                int iconX = x + BD_RIGHT_ICON_X_OFFSET;
-                int iconY = sy + BD_RIGHT_ICON_Y_OFFSET;
-                g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, iconX, iconY, 0, 0,
-                        BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
-                ItemStack icon = com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer
-                        .resolveIcon(favorites.get(i));
-                if (icon.isEmpty()) icon = new ItemStack(net.minecraft.world.item.Items.BARRIER);
-                g.renderItem(icon, iconX, iconY);
-                g.renderItemDecorations(Minecraft.getInstance().font, icon, iconX, iconY);
-                if (hovered) {
-                    g.renderTooltip(Minecraft.getInstance().font,
-                            Component.translatable(favorites.get(i).displayName()),
-                            event.getMouseX(), event.getMouseY());
-                }
+        for (int i = 0; i < favorites.size(); i++) {
+            int sy = y + i * (BD_FAVORITE_HEIGHT + BD_FAVORITE_GAP);
+            boolean hovered = mouseX >= x && mouseX < x + BD_FAVORITE_WIDTH
+                    && mouseY >= sy && mouseY < sy + BD_FAVORITE_HEIGHT;
+            g.blit(BD_RIGHT_TAB, x, sy, 0, 0,
+                    BD_FAVORITE_WIDTH, BD_FAVORITE_HEIGHT,
+                    BD_FAVORITE_WIDTH, BD_FAVORITE_HEIGHT);
+            int iconX = x + BD_RIGHT_ICON_X_OFFSET;
+            int iconY = sy + BD_RIGHT_ICON_Y_OFFSET;
+            g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, iconX, iconY, 0, 0,
+                    BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
+            ItemStack icon = com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer
+                    .resolveIcon(favorites.get(i));
+            if (icon.isEmpty()) icon = new ItemStack(net.minecraft.world.item.Items.BARRIER);
+            g.renderItem(icon, iconX, iconY);
+            g.renderItemDecorations(Minecraft.getInstance().font, icon, iconX, iconY);
+            if (hovered) {
+                g.renderTooltip(Minecraft.getInstance().font,
+                        Component.translatable(favorites.get(i).displayName()), mouseX, mouseY);
             }
-        } finally {
-            g.pose().popPose();
         }
     }
 

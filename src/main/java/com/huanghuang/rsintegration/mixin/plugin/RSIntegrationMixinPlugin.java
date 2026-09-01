@@ -292,6 +292,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
+        if (mixinClassName.contains("beyonddimensions.BDBaseGuiOverlayMixin")) {
+            return isClassPresent("com.wintercogs.beyonddimensions.client.gui.BDBaseGUI")
+                    && (hasMethod(targetClassName, "renderTooltip")
+                    || hasMethod(targetClassName, "m_280072_"));
+        }
         if (mixinClassName.contains("refinedstorage.GridTransferMessageAccessor")) {
             return hasField(targetClassName, "recipe");
         }

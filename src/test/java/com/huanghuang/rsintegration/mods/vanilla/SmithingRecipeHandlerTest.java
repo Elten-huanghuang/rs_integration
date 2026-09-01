@@ -58,6 +58,11 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
         assertEquals("selected", previewOutput.getTag().getString("rsi_test_variant"));
     }
 
+    @Test
+    void transformOutputNbtIsDeclaredAsRuntimeDependent() {
+        assertTrue(new SmithingRecipeHandler().hasRuntimeDependentPrimaryNbt(recipe()));
+    }
+
     private static SmithingTransformRecipe recipe() {
         return new SmithingTransformRecipe(
                 new ResourceLocation("test", "tagged_chestplate_upgrade"),

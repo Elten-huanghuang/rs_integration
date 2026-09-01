@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -76,7 +77,6 @@ public final class PureDemandTreeInspector {
 
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
                 reusableCatalystOutputIds, pureIncompatibleOutputIds);
-        walker.catalystRouteAvailable = targetUsesReusableCatalyst;
         Coverage targetCoverage = Coverage.COVERED;
         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                 SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount))) {
@@ -172,6 +172,9 @@ public final class PureDemandTreeInspector {
         }
 
         private Coverage coverIngredient(IngredientRef ingredient) {
+            if (ingredient.role() == DemandRole.CATALYST) {
+                return coverCatalyst(ingredient);
+            }
             int mark = ledger.mark();
             if (consumeAcrossAlternatives(ingredient) == 0) return Coverage.COVERED;
 
@@ -201,6 +204,33 @@ public final class PureDemandTreeInspector {
             // A catalyst-capable producer is a compatibility fallback, not a reason to
             // discard a pure route that was already proven usable. Only request typed
             // planning after every immutable alternative failed.
+            noteCatalystOpportunity(ingredient);
+            if (firstUnresolved == null) firstUnresolved = first(ingredient);
+            return best;
+        }
+
+        private Coverage coverCatalyst(IngredientRef ingredient) {
+            int mark = ledger.mark();
+            int remaining = ingredient.count() - ledger.countAcrossAlternatives(ingredient);
+            if (remaining <= 0) return Coverage.COVERED;
+
+            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
+            for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
+                ledger.rollback(mark);
+                Coverage coverage = coverMaterial(alternative, remaining);
+                if (coverage == Coverage.COVERED) {
+                    ledger.add(alternative, remaining);
+                    return Coverage.COVERED;
+                }
+                if (coverage == Coverage.NODE_LIMIT) {
+                    best = Coverage.NODE_LIMIT;
+                    break;
+                }
+                if (coverage == Coverage.MISSING_MATERIALS) {
+                    best = Coverage.MISSING_MATERIALS;
+                }
+            }
+            ledger.rollback(mark);
             noteCatalystOpportunity(ingredient);
             if (firstUnresolved == null) firstUnresolved = first(ingredient);
             return best;
@@ -267,7 +297,7 @@ public final class PureDemandTreeInspector {
                     Coverage candidateCoverage = Coverage.COVERED;
                     for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                             candidate.inputs())) {
-                        long scaled = (long) input.count() * batches;
+                        long scaled = scaledInputCount(input, batches);
                         if (scaled > Integer.MAX_VALUE) {
                             candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
                             break;
@@ -342,7 +372,8 @@ public final class PureDemandTreeInspector {
         private boolean isUnseededReverseConversion(RecipeNode candidate, MaterialRef wanted,
                                                     int batches) {
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
-                long required = (long) input.count() * batches;
+                if (input.role() == DemandRole.CATALYST) continue;
+                long required = scaledInputCount(input, batches);
                 if (required <= ledger.countAcrossAlternatives(input)) continue;
                 boolean sawProducer = false;
                 boolean reverseOnly = true;
@@ -441,8 +472,22 @@ public final class PureDemandTreeInspector {
                 int previous = stock.getOrDefault(material, 0);
                 if (previous == count) return;
                 changes.add(new Change(material, previous));
-                if (count <= 0) stock.remove(material);
-                else stock.put(material, count);
+                if (count <= 0) {
+                    stock.remove(material);
+                } else {
+                    stock.put(material, count);
+                    if (!order.contains(material)) {
+                        order.add(material);
+                        byItem.computeIfAbsent(material.itemId(), ignored -> new ArrayList<>())
+                                .add(material);
+                    }
+                }
+            }
+
+            private void add(MaterialRef material, int count) {
+                if (count <= 0) return;
+                long combined = (long) stock.getOrDefault(material, 0) + count;
+                set(material, (int) Math.min(Integer.MAX_VALUE, combined));
             }
 
             private void rollback(int mark) {
@@ -453,5 +498,10 @@ public final class PureDemandTreeInspector {
                 }
             }
         }
+    }
+
+    private static long scaledInputCount(IngredientRef input, long batches) {
+        return input.role() == DemandRole.CATALYST
+                ? input.count() : (long) input.count() * batches;
     }
 }

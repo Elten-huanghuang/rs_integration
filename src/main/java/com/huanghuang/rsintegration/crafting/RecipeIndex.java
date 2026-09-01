@@ -295,10 +295,10 @@ public final class RecipeIndex {
             if (type == null) type = handler.modType();
             if (!handler.indexPrimaryOutput(recipe)) return IndexOutcome.EMPTY_RESULT;
             result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
-        } else if (recipe instanceof CraftingRecipe crafting
+        } else if (recipe instanceof CraftingRecipe
                 && ModType.classifyRecipe(recipe) == null) {
             type = ModType.GENERIC;
-            result = crafting.getResultItem(level.registryAccess());
+            result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
         } else {
             return IndexOutcome.UNKNOWN;
         }

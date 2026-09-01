@@ -23,9 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
     @Test
-    void rejectsReusableCatalystBecausePureGraphCannotPreserveItsRole() {
-        assertNull(ImmutableRecipeGraphProjector.projectIngredient(new IngredientSpec(
-                Ingredient.of(Items.IRON_BLOCK), 1, DemandRole.CATALYST)));
+    void projectsReusableCatalystAndPreservesItsRole() {
+        IngredientRef projected = ImmutableRecipeGraphProjector.projectIngredient(
+                new IngredientSpec(Ingredient.of(Items.IRON_BLOCK), 1,
+                        DemandRole.CATALYST));
+
+        assertNotNull(projected);
+        assertEquals(DemandRole.CATALYST, projected.role());
+        assertEquals(1, projected.count());
     }
 
     @Test
@@ -36,6 +41,7 @@ class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
 
         assertNotNull(projected);
         assertEquals(3, projected.count());
+        assertEquals(DemandRole.CONTAINER_RETURNING, projected.role());
         assertEquals(new ResourceLocation("minecraft", "water_bucket"),
                 projected.alternatives().get(0).itemId());
     }

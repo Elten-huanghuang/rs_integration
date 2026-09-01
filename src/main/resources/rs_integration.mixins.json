@@ -80,6 +80,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "beyonddimensions.BDBaseGuiOverlayMixin",
     "beyonddimensions.DimensionsNetGuiAutoEatMixin",
     "apotheosis.EnchLibraryScreenMixin",
     "apotheosis.ReforgingMenuRestockMixin",
