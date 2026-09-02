@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
@@ -26,10 +27,8 @@ class NativeSubmissionHookTest {
             "dev/ftb/mods/ftbquests/quest/reward/ItemReward.class";
     private static final String CLAIM_ALL_REWARDS_CLASS =
             "dev/ftb/mods/ftbquests/net/ClaimAllRewardsMessage.class";
-    private static final String SUBMIT_CALLBACK_DESCRIPTOR =
-            "(Ldev/ftb/mods/ftbquests/quest/task/Task;"
-                    + "Ldev/ftb/mods/ftbquests/quest/TeamData;"
-                    + "Lnet/minecraft/server/level/ServerPlayer;)V";
+    private static final String SUBMIT_HANDLE_DESCRIPTOR =
+            "(Ldev/architectury/networking/NetworkManager$PacketContext;)V";
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources",
             "rs_integration.mixins.json");
     private static final Path SERVICE = Path.of("src", "main", "java", "com", "huanghuang",
@@ -48,37 +47,93 @@ class NativeSubmissionHookTest {
                 "ItemTask.submitTask is also called by automatic inventory detection");
         assertTrue(service.contains("reserveUpToFromMainInventoryThenNetwork"),
                 "one transaction must own inventory-first and RS-fallback consumption");
-        assertTrue(service.contains("if (display.isEmpty()) return false;"),
+        assertTrue(service.contains("QuestInventorySubmissionContext.open()"),
+                "only RSI's physical settlement may suppress inventory-listener re-entry");
+        assertTrue(service.contains("reason=no-display-item"),
                 "an unavailable filter preview must fall back to FTB's native submit path");
+        assertTrue(service.contains("if (reserved <= 0)"));
+        assertTrue(service.contains("return false;\n            }"),
+                "a zero-reservation ledger attempt must not cancel native inventory submission");
         assertFalse(service.contains("afterNativeSubmission"),
                 "post-native settlement can reuse inventory-counted progress");
+
+        String submitMixin = Files.readString(Path.of("src", "main", "java", "com", "huanghuang",
+                "rsintegration", "mixin", "ftbquests", "SubmitTaskMessageMixin.java"),
+                StandardCharsets.UTF_8);
+        assertTrue(submitMixin.contains("method = \"handle\""),
+                "custom settlement must hook FTB's stable explicit-submit entry point");
+        assertTrue(submitMixin.contains("file.withPlayerContext(player"),
+                "custom item submission must retain FTB's player context");
+        assertTrue(submitMixin.contains("if (handled[0]) ci.cancel()"),
+                "the native packet may only be cancelled after RSI owns the submission");
+        assertFalse(submitMixin.contains("ci.cancel();\n        file.withPlayerContext"),
+                "the original packet must remain live while RSI decides whether to handle it");
+        assertFalse(submitMixin.contains("task.submitTask(data, player)"),
+                "fallback must continue the original version-specific packet handler");
+        assertFalse(submitMixin.contains("getMethod(\"getPlayer\")"),
+                "reflecting on Architectury's runtime context implementation is version-fragile");
+
+        String inventoryMixin = Files.readString(Path.of("src", "main", "java", "com", "huanghuang",
+                "rsintegration", "mixin", "ftbquests", "InventoryTaskAutoSubmissionMixin.java"),
+                StandardCharsets.UTF_8);
+        assertTrue(inventoryMixin.contains("QuestInventorySubmissionContext.isSuppressed()"),
+                "native FTB inventory submission must remain enabled outside RSI settlement");
     }
 
     @Test
-    void supportedFtbVersionsExposeTheExplicitSubmitCallback() throws IOException {
+    void supportedFtbVersionsExposeTheExplicitSubmitEntryPoint() throws IOException {
         List<Path> jars = List.of(
                 Path.of("libs", "ftb-quests-forge-2001.4.13.jar"),
+                Path.of("libs", "[FTB任务-魔改] ftb-quests-forge-2001.4.20.jar"),
                 Path.of("libs", "[FTB 任务] ftb-quests-forge-2001.4.22.jar"));
         for (Path jar : jars) {
-            AtomicBoolean found = new AtomicBoolean();
+            AtomicBoolean foundHandle = new AtomicBoolean();
+            AtomicBoolean foundTaskId = new AtomicBoolean();
+            AtomicBoolean foundLockCheck = new AtomicBoolean();
             try (ZipFile zip = new ZipFile(jar.toFile())) {
                 var entry = zip.getEntry(MESSAGE_CLASS);
                 assertTrue(entry != null, () -> jar + " is missing " + MESSAGE_CLASS);
                 try (var input = zip.getInputStream(entry)) {
                     new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
                         @Override
-                        public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                                         String signature, String[] exceptions) {
-                            if (name.equals("lambda$handle$0")
-                                    && descriptor.equals(SUBMIT_CALLBACK_DESCRIPTOR)) {
-                                found.set(true);
+                        public FieldVisitor visitField(
+                                int access, String name, String descriptor,
+                                String signature, Object value) {
+                            if (name.equals("taskId") && descriptor.equals("J")) {
+                                foundTaskId.set(true);
                             }
                             return null;
                         }
-                    }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+                        @Override
+                        public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                         String signature, String[] exceptions) {
+                            if (name.equals("handle")
+                                    && descriptor.equals(SUBMIT_HANDLE_DESCRIPTOR)) {
+                                foundHandle.set(true);
+                                return new MethodVisitor(Opcodes.ASM9) {
+                                    @Override
+                                    public void visitMethodInsn(
+                                            int opcode, String owner, String methodName,
+                                            String methodDescriptor, boolean isInterface) {
+                                        if (opcode == Opcodes.INVOKEVIRTUAL
+                                                && owner.equals(
+                                                "dev/ftb/mods/ftbquests/quest/TeamData")
+                                                && methodName.equals("isLocked")
+                                                && methodDescriptor.equals("()Z")) {
+                                            foundLockCheck.set(true);
+                                        }
+                                    }
+                                };
+                            }
+                            return null;
+                        }
+                    }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                 }
             }
-            assertTrue(found.get(), () -> jar + " changed its explicit-submit callback contract");
+            assertTrue(foundHandle.get(), () -> jar + " changed its explicit-submit entry contract");
+            assertTrue(foundTaskId.get(), () -> jar + " changed its submit-task id field contract");
+            assertTrue(foundLockCheck.get(), () -> jar + " changed its submit lock-check contract");
             assertInventoryListenerContract(jar);
             assertItemRewardContract(jar);
             assertClaimAllRewardsContract(jar);

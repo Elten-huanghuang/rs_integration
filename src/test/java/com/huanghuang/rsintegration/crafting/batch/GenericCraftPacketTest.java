@@ -8,6 +8,20 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
@@ -39,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GenericCraftPacketTest extends BootstrapTest {
 
@@ -47,6 +62,133 @@ class GenericCraftPacketTest extends BootstrapTest {
         CommentedConfig config = CommentedConfig.inMemory();
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+    }
+
+    @Test
+    void preparationAllowsUnresolvedTerminalRootsButRejectsUnresolvedNodeInputs() {
+        NodeId nodeId = new NodeId(0);
+        OutputPortId outputId = new OutputPortId(nodeId, 0);
+        MaterialKey planks = MaterialKey.of(new ItemStack(Items.OAK_PLANKS));
+        CraftNode safeNode = new CraftNode(nodeId, new ResourceLocation("test", "planks"),
+                ModType.GENERIC.id(), null, 1, List.of(), List.of(), false, null, null,
+                List.of(), List.of(new OutputDeclaration(outputId, planks, 4,
+                        OutputKind.PRIMARY)));
+        RootDemand missingTerminal = new RootDemand(Ingredient.of(Items.DIAMOND), 1, 1,
+                new ItemStack(Items.DIAMOND), List.of());
+        CraftPlanGraph safe = new CraftPlanGraph(1, List.of(safeNode), List.of(),
+                List.of(missingTerminal), List.of(), List.of(nodeId));
+        assertTrue(GenericCraftPacket.isPreparationGraphExecutable(safe));
+
+        InputPortId inputId = new InputPortId(nodeId, 0);
+        CraftNode blockedNode = new CraftNode(nodeId, new ResourceLocation("test", "planks"),
+                ModType.GENERIC.id(), null, 1, List.of(), List.of(), false, null, null,
+                List.of(new InputDemand(inputId, Ingredient.of(Items.STICK), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.STICK))),
+                List.of(new OutputDeclaration(outputId, planks, 4, OutputKind.PRIMARY)));
+        CraftPlanGraph blocked = new CraftPlanGraph(1, List.of(blockedNode), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.OAK_PLANKS), 4, 0,
+                        new ItemStack(Items.OAK_PLANKS), List.of(new RootAllocation(
+                        new MaterialSource.ProducerOutput(outputId), planks, 4)))),
+                List.of(new UnresolvedDemand(inputId, Ingredient.of(Items.STICK), 1,
+                        new ItemStack(Items.STICK))), List.of(nodeId));
+        assertFalse(GenericCraftPacket.isPreparationGraphExecutable(blocked));
+    }
+
+    @Test
+    void preparationPrunesBlockedBranchAndKeepsIndependentDependencyChain() {
+        NodeId rawNodeId = new NodeId(0);
+        NodeId safeNodeId = new NodeId(1);
+        NodeId blockedNodeId = new NodeId(2);
+        NodeId downstreamNodeId = new NodeId(3);
+        OutputPortId rawOutputId = new OutputPortId(rawNodeId, 0);
+        OutputPortId safeOutputId = new OutputPortId(safeNodeId, 0);
+        OutputPortId blockedOutputId = new OutputPortId(blockedNodeId, 0);
+        OutputPortId downstreamOutputId = new OutputPortId(downstreamNodeId, 0);
+        MaterialKey planks = MaterialKey.of(new ItemStack(Items.OAK_PLANKS));
+        MaterialKey sticks = MaterialKey.of(new ItemStack(Items.STICK));
+        MaterialKey gold = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+
+        CraftNode rawNode = graphNode(rawNodeId, "raw", List.of(),
+                new OutputDeclaration(rawOutputId, planks, 2, OutputKind.PRIMARY));
+        InputPortId safeInputId = new InputPortId(safeNodeId, 0);
+        CraftNode safeNode = graphNode(safeNodeId, "safe",
+                List.of(new InputDemand(safeInputId, Ingredient.of(Items.OAK_PLANKS), 2,
+                        DemandRole.CONSUMED, new ItemStack(Items.OAK_PLANKS))),
+                new OutputDeclaration(safeOutputId, sticks, 4, OutputKind.PRIMARY));
+        InputPortId blockedInputId = new InputPortId(blockedNodeId, 0);
+        InputPortId blockedPreparedInputId = new InputPortId(blockedNodeId, 1);
+        CraftNode blockedNode = graphNode(blockedNodeId, "blocked",
+                List.of(
+                        new InputDemand(blockedInputId, Ingredient.of(Items.IRON_INGOT), 1,
+                                DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
+                        new InputDemand(blockedPreparedInputId, Ingredient.of(Items.STICK), 4,
+                                DemandRole.CONSUMED, new ItemStack(Items.STICK))),
+                new OutputDeclaration(blockedOutputId, gold, 1, OutputKind.PRIMARY));
+        InputPortId downstreamInputId = new InputPortId(downstreamNodeId, 0);
+        CraftNode downstreamNode = graphNode(downstreamNodeId, "downstream",
+                List.of(new InputDemand(downstreamInputId, Ingredient.of(Items.GOLD_INGOT), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT))),
+                new OutputDeclaration(downstreamOutputId, diamond, 1, OutputKind.PRIMARY));
+
+        CraftPlanGraph graph = new CraftPlanGraph(1,
+                List.of(rawNode, safeNode, blockedNode, downstreamNode),
+                List.of(
+                        new com.huanghuang.rsintegration.crafting.graph.MaterialAllocation(
+                                new com.huanghuang.rsintegration.crafting.graph.AllocationId(0),
+                                safeInputId, new MaterialSource.ProducerOutput(rawOutputId), planks, 2),
+                        new com.huanghuang.rsintegration.crafting.graph.MaterialAllocation(
+                                new com.huanghuang.rsintegration.crafting.graph.AllocationId(1),
+                                blockedPreparedInputId,
+                                new MaterialSource.ProducerOutput(safeOutputId), sticks, 4),
+                        new com.huanghuang.rsintegration.crafting.graph.MaterialAllocation(
+                                new com.huanghuang.rsintegration.crafting.graph.AllocationId(2),
+                                downstreamInputId,
+                                new MaterialSource.ProducerOutput(blockedOutputId), gold, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.DIAMOND), 1, 0,
+                                new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
+                                new MaterialSource.ProducerOutput(downstreamOutputId), diamond, 1)))),
+                List.of(new UnresolvedDemand(blockedInputId, Ingredient.of(Items.IRON_INGOT),
+                        1, new ItemStack(Items.IRON_INGOT))),
+                List.of(rawNodeId, safeNodeId, blockedNodeId, downstreamNodeId));
+        CraftPlanValidator.validate(graph);
+
+        CraftPlanGraph pruned = GenericCraftPacket.pruneBlockedPreparationGraph(graph);
+
+        assertEquals(List.of(rawNodeId, safeNodeId), pruned.topologicalOrder());
+        assertEquals(2, pruned.nodes().size());
+        assertEquals(1, pruned.allocations().size());
+        assertTrue(pruned.unresolvedDemands().isEmpty());
+        assertEquals(1, pruned.rootDemands().size());
+        assertEquals(sticks, pruned.rootDemands().get(0).allocations().get(0).material());
+        assertEquals(4, pruned.rootDemands().get(0).quantity());
+        CraftPlanValidator.validate(pruned);
+    }
+
+    @Test
+    void preparationReturnsNoGraphWhenEveryNodeIsBlocked() {
+        NodeId nodeId = new NodeId(0);
+        InputPortId inputId = new InputPortId(nodeId, 0);
+        OutputPortId outputId = new OutputPortId(nodeId, 0);
+        MaterialKey planks = MaterialKey.of(new ItemStack(Items.OAK_PLANKS));
+        CraftNode node = graphNode(nodeId, "blocked_only",
+                List.of(new InputDemand(inputId, Ingredient.of(Items.STICK), 1,
+                        DemandRole.CONSUMED, new ItemStack(Items.STICK))),
+                new OutputDeclaration(outputId, planks, 1, OutputKind.PRIMARY));
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.OAK_PLANKS), 1, 0,
+                        new ItemStack(Items.OAK_PLANKS), List.of(new RootAllocation(
+                        new MaterialSource.ProducerOutput(outputId), planks, 1)))),
+                List.of(new UnresolvedDemand(inputId, Ingredient.of(Items.STICK), 1,
+                        new ItemStack(Items.STICK))), List.of(nodeId));
+
+        assertNull(GenericCraftPacket.pruneBlockedPreparationGraph(graph));
+    }
+
+    private static CraftNode graphNode(NodeId id, String path, List<InputDemand> inputs,
+                                       OutputDeclaration output) {
+        return new CraftNode(id, new ResourceLocation("test", path), ModType.GENERIC.id(),
+                null, 1, List.of(), List.of(), false, null, null, inputs, List.of(output));
     }
 
     @Test
