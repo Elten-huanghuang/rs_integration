@@ -252,6 +252,7 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Forbidden & Arcanus | Hephaestus Forge, Clibano, smithing/apply-modifier flow |
 | Wizards Reborn | Wissen Crystallizer, Arcane Iterator, Arcane Workbench, and Crystal Ritual, with recipe-type routing for dynamic/KubeJS recipes and Iterator pedestal-capacity validation |
 | Touhou Little Maid | Maid Altar, including automatic P-point replenishment from RS |
+| Wishing Fountain | Formed multiblock binding and recursive biome/structure map wishes; non-item weather wishes remain manual |
 | Embers Rekindled | Alchemy Tablet, including automatic trial-and-error code inference, saved inference results, and deterministic layouts |
 | Aetherworks | Aetherium Anvil and Forge Tool Station, including automatic hammering, material refilling, forge-lever temperature control, and temperature/ember/hit-progress HUDs |
 | The Aether | Freezer, Incubator, and Altar |

@@ -3211,6 +3211,13 @@ public final class AsyncCraftChain {
             try {
                 candidate = createStepDelegate(step);
                 if (candidate == null) continue;
+                if (candidate instanceof AbstractBatchDelegate abd) {
+                    // Preparation can inspect storage-backed availability. The
+                    // legacy flat path used to attach the selected endpoint
+                    // only after preparation, which made non-RS backends (BD)
+                    // appear disconnected and left the step retrying forever.
+                    abd.setStorageEndpoint(storageEndpoint);
+                }
                 IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), m.dim(), m.pos());
                 if (preparation.state() == IBatchDelegate.PreparationState.READY) {

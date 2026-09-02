@@ -113,6 +113,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
     public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
+    public static ForgeConfigSpec.BooleanValue ENABLE_WISHING_FOUNTAIN;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> LYCHEE_RECIPE_ALLOWLIST;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
     public static ForgeConfigSpec.BooleanValue DISABLE_DISTANT_WORLDS_FIRON_FAILURE;
@@ -338,6 +339,10 @@ public final class RSIntegrationConfig {
                 .comment("Enable recursive PMMO salvage through its configured salvage block.",
                         "The requested count is the number of independent salvage attempts, not a guaranteed output count.")
                 .define("enablePmmoSalvage", true);
+        ENABLE_WISHING_FOUNTAIN = c
+                .comment("Enable binding and recursive item-producing wishes through a formed Wishing Fountain.",
+                        "Weather wishes have no item output and remain manual.")
+                .define("enableWishingFountain", true);
         LYCHEE_RECIPE_ALLOWLIST = c
                 .comment("Lychee recipe IDs allowed for virtual RS crafting.",
                         "Only built-in deterministic powder-snow, Greek-fire, Dwarven-oil, and Deep-Aether-poison profiles are accepted.",

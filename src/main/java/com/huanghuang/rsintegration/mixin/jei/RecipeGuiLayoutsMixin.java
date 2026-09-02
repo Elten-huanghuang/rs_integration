@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacke
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
+import com.huanghuang.rsintegration.compat.jei.WishingFountainRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
@@ -181,6 +182,10 @@ public class RecipeGuiLayoutsMixin {
             }
 
             String recipeClassName = recipe.getClass().getName();
+            if (WishingFountainRecipeIdResolver.isWrapper(recipe)
+                    && WishingFountainRecipeIdResolver.resolve(recipe) == null) {
+                continue;
+            }
             if (recipeClassName.equals("snownee.lychee.item_inside.ItemInsideRecipe")
                     && !com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
                     .isSupported(recipe)) {
@@ -990,6 +995,9 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
+
+        ResourceLocation wishingFountainId = WishingFountainRecipeIdResolver.resolve(recipe);
+        if (wishingFountainId != null) return wishingFountainId;
 
         // Sophisticated Storage's grouped JEI records use a synthetic ID, but
         // retain the real server-side crafting recipe in recipe(). Resolve that

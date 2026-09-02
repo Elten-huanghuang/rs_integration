@@ -35,6 +35,7 @@ import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WizardsRebornRSModule;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRSModule;
+import com.huanghuang.rsintegration.mods.wishingfountain.WishingFountainRSModule;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
@@ -107,7 +108,7 @@ public final class RSIntegrationMod {
             "youkaishomecoming_cooking_short", "youkaishomecoming_cooking_small",
             "youkaishomecoming_cuisine", "youkaishomecoming_ferment",
             "youkaishomecoming_kettle", "youkaishomecoming_moka",
-            "youkaishomecoming_steamer");
+            "youkaishomecoming_steamer", "wishing_fountain");
 
     public static final String MOD_ID = "rs_integration";
     public static final String MOD_NAME = "RS Integration";
@@ -195,7 +196,9 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.LYCHEE, RSIntegrationConfig.ENABLE_LYCHEE,
                     () -> LycheeRSModule.INSTANCE),
             new ModuleEntry(ModIds.PMMO, RSIntegrationConfig.ENABLE_PMMO,
-                    () -> PmmoRSModule.INSTANCE)
+                    () -> PmmoRSModule.INSTANCE),
+            new ModuleEntry(ModIds.WISHING_FOUNTAIN, RSIntegrationConfig.ENABLE_WISHING_FOUNTAIN,
+                    () -> WishingFountainRSModule.INSTANCE)
     );
 
     public RSIntegrationMod() {

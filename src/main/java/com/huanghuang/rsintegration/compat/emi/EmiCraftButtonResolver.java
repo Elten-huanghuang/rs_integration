@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
 import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
+import com.huanghuang.rsintegration.compat.jei.WishingFountainRecipeIdResolver;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
@@ -149,6 +150,8 @@ final class EmiCraftButtonResolver {
     @Nullable
     private static ResourceLocation resolveRecipeId(EmiRecipe emiRecipe, Object source,
                                                       @Nullable Recipe<?> backing) {
+        ResourceLocation wishingFountain = WishingFountainRecipeIdResolver.resolve(source);
+        if (wishingFountain != null) return wishingFountain;
         ResourceLocation grouped = SophisticatedStorageRecipeIdResolver.resolve(source);
         if (grouped != null) return grouped;
         if (source instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe salvage) {
