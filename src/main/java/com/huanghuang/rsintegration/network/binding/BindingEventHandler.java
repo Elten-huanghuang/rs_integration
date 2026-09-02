@@ -917,6 +917,12 @@ public final class BindingEventHandler {
             }
         }
 
+        if (className.equals("io.github.poisonsheep.wishingfountain.block.WFBlock")) {
+            BlockPos core = com.huanghuang.rsintegration.mods.wishingfountain
+                    .WishingFountainStructure.resolveCorePosition(level, pos);
+            if (core != null) return core;
+        }
+
         // Youkai's Homecoming: Steamer multiblock (pot + racks + lid).
         // Blocks use DelegateBlock / DelegateBlockImpl / DelegateEntityBlockImpl;
         // the pot is always at the bottom.

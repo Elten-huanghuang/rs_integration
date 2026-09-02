@@ -252,6 +252,7 @@ RS Integration 让 Refined Storage 可以自动使用其他模组的机器。你
 | Forbidden & Arcanus | 赫菲斯托斯锻炉、Clibano、锻造/词条应用流程 |
 | Wizards Reborn | 秘蕴晶化器、奥术迭代器、光韵工作台、水晶仪式；动态/KubeJS 配方按实际类型路由，并在启动前校验迭代器基座数量 |
 | Touhou Little Maid | 女仆祭坛，可从 RS 网络自动补充 P 点物品 |
+| Wishing Fountain | 已成型多方块绑定，以及群系/结构地图许愿的递归合成；无物品产物的天气许愿仍需手动完成 |
 | Embers Rekindled | 炼金台；支持自动试错猜测炼金编码、保存推断结果和确定性布局 |
 | Aetherworks | 天华砧、锻造工具站；支持自动锤炼、自动补料、锻造炉拉杆控温，以及温度/余烬/锤击进度 HUD |
 | The Aether | 冷冻器、孵化器、祭坛 |

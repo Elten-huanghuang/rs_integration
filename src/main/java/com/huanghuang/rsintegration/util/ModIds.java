@@ -47,6 +47,7 @@ public final class ModIds {
     public static final String APPRENTICE_CODEX = "apprenticecodex";
     public static final String ISS_CSW = "iss_csw";
     public static final String PMMO = "pmmo";
+    public static final String WISHING_FOUNTAIN = "wishing_fountain";
 
     // Composite ModType IDs (one mod ->multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
