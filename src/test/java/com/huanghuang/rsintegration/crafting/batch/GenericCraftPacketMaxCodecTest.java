@@ -61,6 +61,38 @@ class GenericCraftPacketMaxCodecTest {
                 GenericCraftPacket.decode(buffer).machineSelectionMode());
     }
 
+    @Test
+    void preparationModeIsExplicitAndRoundTrips() {
+        GenericCraftPacket strict = new GenericCraftPacket(id());
+        FriendlyByteBuf strictBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        strict.encode(strictBuffer);
+        assertFalse(GenericCraftPacket.decode(strictBuffer).isPartialPreparation());
+
+        GenericCraftPacket preparation = new GenericCraftPacket(id())
+                .withPartialPreparation(true);
+        FriendlyByteBuf preparationBuffer = new FriendlyByteBuf(Unpooled.buffer());
+        preparation.encode(preparationBuffer);
+        assertTrue(GenericCraftPacket.decode(preparationBuffer).isPartialPreparation());
+    }
+
+    @Test
+    void dedicatedPreparationPacketForcesExplicitModeAfterRoundTrip() {
+        PrepareIntermediateMaterialsPacket preparation =
+                new PrepareIntermediateMaterialsPacket(new GenericCraftPacket(id()));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        preparation.encode(buffer);
+
+        PrepareIntermediateMaterialsPacket decoded =
+                PrepareIntermediateMaterialsPacket.decode(buffer);
+        assertFalse(decoded.request().isPartialPreparation());
+    }
+
+    @Test
+    void dedicatedPreparationPacketRejectsPreviewRequests() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new PrepareIntermediateMaterialsPacket(new GenericCraftPacket(id(), true)));
+    }
+
     private static ResourceLocation id() {
         return new ResourceLocation("minecraft", "stick");
     }

@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.PrepareIntermediateMaterialsPacket;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
@@ -182,6 +183,11 @@ public final class CraftingPlanScreen extends Screen {
     private StorageReference storageReference;
     private List<StorageNetworkDescriptor> storageNetworks = List.of();
     private int outputSelectorX, outputSelectorY, outputSegmentW, outputSelectorH;
+    private int preparationModeX, preparationModeY, preparationModeW, preparationModeH;
+    /** Per-operation opt-in; strict terminal crafting remains the default. */
+    private boolean partialPreparation;
+    @Nullable
+    private Button confirmButton;
     private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
     // Alternative-recipe dropdown (screen space); open node + row hitboxes.
     private PlanTreeNode dropdownNode;
@@ -520,8 +526,13 @@ public final class CraftingPlanScreen extends Screen {
             outputSelectorH = 20;
             outputSelectorX = width / 2 - outputSegmentW / 2;
             outputSelectorY = btnY - 27;
+            preparationModeW = 124;
+            preparationModeH = 20;
+            preparationModeX = width / 2 - preparationModeW / 2;
+            preparationModeY = outputSelectorY - 24;
         } else {
             outputSelectorH = 0;
+            preparationModeH = 0;
         }
 
         // "Open Machine" button — only when a bound machine position is known
@@ -538,16 +549,16 @@ public final class CraftingPlanScreen extends Screen {
                     .build());
         }
 
-        Button confirmButton = Button.builder(
-                        Component.translatable(selectedPath.isDirty()
-                                ? "rsi.plan.confirm_branches" : "rsi.plan.confirm"),
+        confirmButton = Button.builder(
+                        executionActionLabel(),
                         btn -> onConfirm())
                 .pos(width / 2 - btnW - 10, btnY)
                 .size(selectedPath.isDirty() ? btnW + 20 : btnW, 20)
                 .build();
         confirmButton.setTooltip(Tooltip.create(
                 Component.translatable("rsi.plan.machine_clear_notice")));
-        confirmButton.active = !plan.executionBlocked() || selectedPath.isDirty();
+        confirmButton.active = partialPreparation
+                || !plan.executionBlocked() || selectedPath.isDirty();
         addRenderableWidget(confirmButton);
 
         addRenderableWidget(Button.builder(
@@ -574,6 +585,12 @@ public final class CraftingPlanScreen extends Screen {
     private Component viewToggleLabel() {
         return Component.translatable(
                 viewMode == ViewMode.TREE ? "rsi.plan.view_tree" : "rsi.plan.view_card");
+    }
+
+    private Component executionActionLabel() {
+        if (partialPreparation) return Component.translatable("rsi.plan.prepare.action");
+        return Component.translatable(selectedPath.isDirty()
+                ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
     }
 
     private record RepeatRowLayout(int rowX, int rowW, int cardY, int buttonY,
@@ -712,7 +729,7 @@ public final class CraftingPlanScreen extends Screen {
 
     private void onConfirm() {
         commitRepeatCountInput();
-        if (plan.executionBlocked() && !selectedPath.isDirty()) return;
+        if (!partialPreparation && plan.executionBlocked() && !selectedPath.isDirty()) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds
@@ -786,7 +803,15 @@ public final class CraftingPlanScreen extends Screen {
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
                 .withMaterialLocks(materialLocks)
                 .withStorageReference(storageReference);
-        BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
+        if (!preview && partialPreparation) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Preparation] sending dedicated request recipe={} repeat={} storage={}",
+                    rid, repeatCount, storageReference == null ? "default" : storageReference);
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                    new PrepareIntermediateMaterialsPacket(packet));
+        } else {
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(packet);
+        }
     }
 
     /** Open the active recipe browser for a specific recipe id. */
@@ -1079,6 +1104,7 @@ public final class CraftingPlanScreen extends Screen {
         renderCardPreview(gfx, font);
 
         renderOutputDestinationSelector(gfx, font, mouseX, mouseY);
+        renderPreparationModeSelector(gfx, font, mouseX, mouseY);
         renderMachineCandidateDropdown(gfx, font);
 
         // Deferred tooltip — rendered AFTER all scissors, so Legendary
@@ -1127,6 +1153,28 @@ public final class CraftingPlanScreen extends Screen {
         int arrowW = font.width(" ↔");
         gfx.drawString(font, value + " ↔", outputSelectorX + (outputSegmentW - font.width(value + " ↔")) / 2,
                 textY, textColor, false);
+    }
+
+    private void renderPreparationModeSelector(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
+        if (preparationModeH <= 0 || outputSelectorH <= 0) return;
+        boolean hovered = mouseX >= preparationModeX && mouseX < preparationModeX + preparationModeW
+                && mouseY >= preparationModeY && mouseY < preparationModeY + preparationModeH;
+        int background = partialPreparation ? 0xCC765A24 : 0xCC2F7D4A;
+        if (hovered) background = partialPreparation ? 0xCC98752F : 0xCC3B5948;
+        UIRenderer.rounded(gfx, preparationModeX, preparationModeY,
+                preparationModeW, preparationModeH, 4f, 0xDD101512);
+        UIRenderer.rounded(gfx, preparationModeX + 1, preparationModeY + 1,
+                preparationModeW - 2, preparationModeH - 2, 3f, background);
+        String value = I18n.get(partialPreparation
+                ? "rsi.plan.mode.prepare" : "rsi.plan.mode.strict");
+        gfx.drawString(font, value,
+                preparationModeX + (preparationModeW - font.width(value)) / 2,
+                preparationModeY + (preparationModeH - font.lineHeight) / 2,
+                0xFFF0FFF4, false);
+        if (hovered) {
+            gfx.renderTooltip(font,
+                    Component.translatable("rsi.plan.mode.prepare.tooltip"), mouseX, mouseY);
+        }
     }
 
     /**
@@ -2570,7 +2618,8 @@ public final class CraftingPlanScreen extends Screen {
      */
     private void layoutBottomStack() {
         int repeatAreaH = 38;
-        repeatRowY = height - 51 - repeatAreaH;
+        // Leave separate rows for preparation mode and output destination.
+        repeatRowY = height - 75 - repeatAreaH;
         int effMaterialH = (viewMode == ViewMode.CARD) ? materialAreaHeight : 0;
         materialAreaTop = repeatRowY - effMaterialH;
         missingAreaTop = materialAreaTop - missingAreaHeight;
@@ -2828,8 +2877,23 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         if ((button == 0 || button == 1) && outputSelectorH > 0
+                && mx >= preparationModeX && mx < preparationModeX + preparationModeW
+                && my >= preparationModeY && my < preparationModeY + preparationModeH) {
+            if (button == 0) {
+                partialPreparation = !partialPreparation;
+                if (partialPreparation) selectOutputDestination(OutputDestination.RS_NETWORK);
+                if (confirmButton != null) {
+                    confirmButton.setMessage(executionActionLabel());
+                    confirmButton.active = partialPreparation
+                            || !plan.executionBlocked() || selectedPath.isDirty();
+                }
+            }
+            return true;
+        }
+        if ((button == 0 || button == 1) && outputSelectorH > 0
                 && mx >= outputSelectorX && mx < outputSelectorX + outputSegmentW
                 && my >= outputSelectorY && my < outputSelectorY + outputSelectorH) {
+            if (partialPreparation) return true;
             if (button == 1) {
                 if (!storageNetworks.isEmpty()) {
                     if (outputDestination != OutputDestination.RS_NETWORK) {

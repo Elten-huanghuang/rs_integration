@@ -26,18 +26,32 @@ public final class NativeItemTaskSubmissionService {
 
     /** Returns true when the native submit callback must be cancelled. */
     public static boolean handleExplicitSubmission(ItemTask task, TeamData data, ServerPlayer player) {
-        RSIntegrationMod.LOGGER.debug(
-                "[RSI-FTBQuests] Submit packet task={} locked={} screenOnly={} onlyFromCrafting={} consumes={} completed={}",
-                task.getId(), data == null || data.isLocked(), task.isTaskScreenOnly(),
-                task.isOnlyFromCrafting(), task.consumesResources(),
-                data != null && data.isCompleted(task));
-        if (data == null || data.isLocked() || task.isTaskScreenOnly()
+        boolean locked = data == null || data.isLocked();
+        boolean completed = data != null && data.isCompleted(task);
+        boolean sequenceAllowed = data != null
+                && ((ItemTaskSequenceAccessor) task).rsi$checkTaskSequence(data);
+        long progress = data == null ? 0L : data.getProgress(task);
+        long maxProgress = task.getMaxProgress();
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-FTBQuests] Submit packet task={} locked={} screenOnly={} onlyFromCrafting={} consumes={} completed={} sequenceAllowed={} progress={}/{}",
+                task.getId(), locked, task.isTaskScreenOnly(), task.isOnlyFromCrafting(),
+                task.consumesResources(), completed, sequenceAllowed, progress, maxProgress);
+        if (locked || task.isTaskScreenOnly()
                 || task.isOnlyFromCrafting() || !task.consumesResources()
-                || data.isCompleted(task)
-                || !((ItemTaskSequenceAccessor) task).rsi$checkTaskSequence(data)) return false;
+                || completed || !sequenceAllowed) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-FTBQuests] Native fallback task={} reason=eligibility",
+                    task.getId());
+            return false;
+        }
 
-        long remaining = Math.max(0L, task.getMaxProgress() - data.getProgress(task));
-        if (remaining <= 0L) return false;
+        long remaining = Math.max(0L, maxProgress - progress);
+        if (remaining <= 0L) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-FTBQuests] Native fallback task={} reason=no-remaining-progress",
+                    task.getId());
+            return false;
+        }
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-FTBQuests] Explicit transaction task={} progress={}, remaining={}",
                 task.getId(), data.getProgress(task), remaining);
@@ -47,13 +61,31 @@ public final class NativeItemTaskSubmissionService {
         // populated yet. In that case the native FTB callback is still
         // able to scan the player's inventory with ItemTask#test; do not
         // cancel it just because RSI cannot produce a missing-item preview.
-        if (display.isEmpty()) return false;
+        if (display.isEmpty()) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-FTBQuests] Native fallback task={} reason=no-display-item",
+                    task.getId());
+            return false;
+        }
         if (remaining > Integer.MAX_VALUE) {
             sendMissing(player, display, remaining);
             return true;
         }
 
-        CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        CraftStorageEndpoint endpoint = null;
+        try {
+            endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        } catch (RuntimeException | LinkageError exception) {
+            // Storage discovery is optional for explicit FTB submission. Keep
+            // the inventory transaction available when a backend is broken.
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-FTBQuests] Storage discovery failed for task {}; using inventory only",
+                    task.getId(), exception);
+        }
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-FTBQuests] Prepared task={} display={} endpoint={}",
+                task.getId(), display.getHoverName().getString(), endpoint == null ? "none"
+                        : endpoint.session().reference().backendId());
         INetwork network = endpoint != null && "refinedstorage".equals(
                 endpoint.session().reference().backendId().value())
                 ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
@@ -67,15 +99,15 @@ public final class NativeItemTaskSubmissionService {
             transactionEndpoint = null;
             network = null;
         }
-        submitTransaction(task, data, player, transactionEndpoint, network,
+        return submitTransaction(task, data, player, transactionEndpoint, network,
                 (int) remaining, display);
-        return true;
     }
 
-    private static void submitTransaction(ItemTask task, TeamData data, ServerPlayer player,
-                                          @Nullable CraftStorageEndpoint endpoint,
-                                          @Nullable INetwork network, int count,
-                                          ItemStack display) {
+    /** Returns false only when no mutation occurred and FTB may safely retry natively. */
+    private static boolean submitTransaction(ItemTask task, TeamData data, ServerPlayer player,
+                                             @Nullable CraftStorageEndpoint endpoint,
+                                             @Nullable INetwork network, int count,
+                                             ItemStack display) {
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setStorageEndpoint(endpoint);
             int mark = ledger.reservationMark();
@@ -83,13 +115,27 @@ public final class NativeItemTaskSubmissionService {
             int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
                     ingredient, count, player, network);
             if (reserved <= 0) {
-                sendMissing(player, display, count);
-                return;
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-FTBQuests] No ledger match for task={} endpoint={}; trying native inventory submission",
+                        task.getId(), endpoint == null ? "none"
+                                : endpoint.session().reference().backendId());
+                return false;
             }
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-FTBQuests] Reserved task={} requested={} reserved={} endpoint={}",
+                    task.getId(), count, reserved, endpoint == null ? "none"
+                            : endpoint.session().reference().backendId());
             ExtractionLedger.ReservationToken token = ledger.tokenSince(mark);
-            if (!ledger.commit(network, player)) {
-                sendMissing(player, display, count);
-                return;
+            boolean committed;
+            try (QuestInventorySubmissionContext.Scope ignored =
+                         QuestInventorySubmissionContext.open()) {
+                committed = ledger.commit(network, player);
+            }
+            if (!committed) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-FTBQuests] Ledger commit rejected task={}; trying native inventory submission",
+                        task.getId());
+                return false;
             }
 
             // Inventory extraction can synchronously trigger other FTB callbacks. Re-check
@@ -100,7 +146,7 @@ public final class NativeItemTaskSubmissionService {
                         "[RSI-FTBQuests] Team data locked after reserving task {}; refunding {} item(s)",
                         task.getId(), reserved);
                 ledger.refundCommitted(token, network, player);
-                return;
+                return true;
             }
 
             long before = data.getProgress(task);
@@ -113,7 +159,7 @@ public final class NativeItemTaskSubmissionService {
                 ledger.refundCommitted(token, network, player);
                 sendMissing(player, display,
                         Math.max(0L, task.getMaxProgress() - before));
-                return;
+                return true;
             }
             long after;
             boolean reachedCompletion;
@@ -132,16 +178,19 @@ public final class NativeItemTaskSubmissionService {
                     ledger.refundCommitted(token, network, player);
                     sendMissing(player, display,
                             Math.max(0L, task.getMaxProgress() - after));
-                    return;
+                    return true;
                 }
                 // Preserve the established partial-progress behavior. The task
                 // has already accepted part of the reservation.
                 ledger.settleCommitted(token);
                 sendMissing(player, display,
                         Math.max(0L, task.getMaxProgress() - after));
-                return;
+                return true;
             }
             ledger.settleCommitted(token);
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-FTBQuests] Settled task={} progress={} -> {} completed={}",
+                    task.getId(), before, after, reachedCompletion);
             if (reachedCompletion) {
                 // Run FTB's normal auto-claim/reset only after the ledger has
                 // irrevocably settled the consumed items.
@@ -150,11 +199,13 @@ public final class NativeItemTaskSubmissionService {
             long stillMissing = reachedCompletion
                     ? 0L : Math.max(0L, task.getMaxProgress() - after);
             if (stillMissing > 0L) sendMissing(player, display, stillMissing);
+            return true;
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.error(
                     "[RSI-FTBQuests] Explicit transaction failed for task {}", task.getId(), exception);
             sendMissing(player, display,
                     Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+            return true;
         }
     }
 

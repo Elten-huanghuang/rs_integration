@@ -10,9 +10,9 @@
 
 RS Integration lets Refined Storage operate machines from other mods. Choose an item in JEI and it checks materials, resolves prerequisite recipes, operates bound machines, and returns the result to the RS network.
 
-**Current version: 1.3.4 | Minecraft 1.20.1**
+**Current version: 1.4.1 | Minecraft 1.20.1**
 
-[1.3.4 release notes](docs/RELEASE_NOTES_1.3.4.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
+[1.4.1 release notes](docs/RELEASE_NOTES_1.4.1.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
 
 ## Requirements
 
@@ -24,15 +24,12 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 | JEI | Required on the client for recipe actions and plan previews |
 | Other integrations | Optional; modules load only when their target mod is present |
 
-## Version 1.3.4 Highlights
+## Version 1.4.1 Highlights
 
-- **Reliable recursive planning**: inventory-aware demand inspection now prunes compression/decompression loops and broad material variants, with separate pure, typed, and resolver budgets. Prefab-style wood chains receive a longer background planning budget without blocking the server thread.
-- **Correct output settlement**: runtime-NBT outputs from Goety, Wizards Reborn, smithing, and other dynamic recipes are matched by their actual produced stacks, preventing false output-shortage failures and preserving refunds.
-- **KubeJS-aware material semantics**: custom crafting recipes distinguish consumed inputs, returned containers, reusable catalysts, copy templates, and runtime outputs, so a 64-craft request no longer expands one reusable catalyst into 64 recursive requests.
-- **More machine compatibility**: MythicBotany Mana Infuser, Ars Nouveau Scribes' Table glyph recursion, all four Improved Botania Pools mana pools, Immortaler's Delight's old and new Enchantal Cooler variants, hot spring buckets in Resonance Disks, and stricter Botania/Avaritia machine routes are supported.
-- **Safer remote crafting**: delayed Ars starts, Goety altar candidate selection, Iron's Spell Books output validation, FTB Quest rejection refunds, machine GUI snapshots, and parallel resource cleanup now handle failure and retry paths transactionally.
-- **Better graph batching**: generic machines, Iron Furnaces, vanilla cooking wrappers, and Botania Pure Daisy operations advertise their real batch capacities to graph scheduling instead of falling back to one operation at a time.
-- **Better workflow tools**: RS search history, machine favorites, meaningful-progress timeout resets, and synchronized machine management state make repeated crafting and machine selection faster.
+- **Intermediate preparation mode**: from the plan screen, prepare only independently craftable intermediate products, return them to storage, and leave the final target untouched.
+- **Safer recursive execution**: blocked branches are pruned while independent preparation chains continue; explicit preparation packets keep the normal strict crafting path unchanged.
+- **Reliable FTB Quests submission**: explicit submit clicks use inventory-first, storage-fallback transactions, suppress only RSI settlement re-entry, and safely fall back to FTB's native handler when no mutation occurs.
+- **Clearer diagnostics**: preparation and quest submission now report eligibility, reservation, partial progress, missing materials, and failure reasons in both English and Chinese.
 
 ## Main Features
 

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
 
+import com.huanghuang.rsintegration.compat.ftbquests.QuestInventorySubmissionContext;
 import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
 import dev.ftb.mods.ftbquests.quest.task.Task;
@@ -10,7 +11,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/** Prevents background inventory scans from granting unpaid consuming progress. */
+/** Prevents only RSI's own inventory settlement from re-entering FTB submission. */
 @Mixin(value = FTBQuestsInventoryListener.class, remap = false)
 public abstract class InventoryTaskAutoSubmissionMixin {
     @Redirect(
@@ -23,7 +24,8 @@ public abstract class InventoryTaskAutoSubmissionMixin {
             remap = false, require = 0)
     private static void rsi$skipUnpaidConsumingProgress(Task task, TeamData data,
                                                         ServerPlayer player, ItemStack stack) {
-        if (task instanceof ItemTask itemTask
+        if (QuestInventorySubmissionContext.isSuppressed()
+                && task instanceof ItemTask itemTask
                 && itemTask.consumesResources() && !itemTask.isOnlyFromCrafting()) {
             return;
         }

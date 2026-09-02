@@ -36,6 +36,12 @@ public final class BatchCraftNetworkHandler {
                 CraftProgressDeltaPacket::encode, CraftProgressDeltaPacket::decode,
                 CraftProgressDeltaPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PREPARE_INTERMEDIATE_MATERIALS,
+                PrepareIntermediateMaterialsPacket.class,
+                PrepareIntermediateMaterialsPacket::encode,
+                PrepareIntermediateMaterialsPacket::decode,
+                PrepareIntermediateMaterialsPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.CRAFT_CANCEL, CraftCancelPacket.class,
                 CraftCancelPacket::encode, CraftCancelPacket::decode, CraftCancelPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
