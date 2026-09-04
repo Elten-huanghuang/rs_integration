@@ -1069,7 +1069,15 @@ public final class PureRecipePlanner {
             this.graph = graph;
             Set<MaterialRef> present = new HashSet<>();
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() > 0) present.add(entry.getKey());
+                if (entry.getValue() == null || entry.getValue() <= 0) continue;
+                present.add(entry.getKey());
+                // ANY/PARTIAL smithing ingredients can consume a tagged stack while the
+                // immutable graph keeps the ingredient/output identity tagless. Register the
+                // value-only alias as a reachability seed so an Unbreakable wooden sword can
+                // reach the normal wooden -> stone -> ... upgrade chain.
+                if (!entry.getKey().nbt().isEmpty()) {
+                    present.add(new MaterialRef(entry.getKey().itemId(), ""));
+                }
             }
             this.seeds = Set.copyOf(present);
             Map<MaterialRef, Integer> materialResult = new HashMap<>();
