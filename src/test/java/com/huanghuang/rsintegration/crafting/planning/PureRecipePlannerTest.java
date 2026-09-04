@@ -59,6 +59,58 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void taggedWoodenSwordCanTraverseSmithingUpgradeChain() {
+        MaterialRef woodenSword = material("wooden_sword");
+        MaterialRef taggedWoodenSword = new MaterialRef(woodenSword.itemId(), "{Unbreakable:1b}");
+        MaterialRef stoneSword = material("stone_sword");
+        MaterialRef ironSword = material("iron_sword");
+        MaterialRef diamondSword = material("diamond_sword");
+        MaterialRef netheriteSword = material("netherite_sword");
+        MaterialRef immemorialSword = material("immemorialsword");
+        MaterialRef soulBlade = material("soul_blade");
+        MaterialRef template = material("upgrade_template");
+        MaterialRef stone = material("stone");
+        MaterialRef ironBlock = material("iron_block");
+        MaterialRef diamondBlock = material("diamond_block");
+        MaterialRef netheriteIngot = material("netherite_ingot");
+        MaterialRef immemorialIngot = material("immemorial_ingot");
+        MaterialRef soulIngot = material("soul_ingot");
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        recipes.put(stoneSword, List.of(smithing("wood_to_stone", stoneSword,
+                ingredientAny(woodenSword), ingredient(stone, 1), ingredient(template, 1))));
+        recipes.put(ironSword, List.of(smithing("stone_to_iron", ironSword,
+                ingredientAny(stoneSword), ingredient(ironBlock, 1), ingredient(template, 1))));
+        recipes.put(diamondSword, List.of(smithing("iron_to_diamond", diamondSword,
+                ingredientAny(ironSword), ingredient(diamondBlock, 1), ingredient(template, 1))));
+        recipes.put(netheriteSword, List.of(smithing("diamond_to_netherite", netheriteSword,
+                ingredientAny(diamondSword), ingredient(netheriteIngot, 1), ingredient(template, 1))));
+        recipes.put(immemorialSword, List.of(smithing("make_immemorial", immemorialSword,
+                ingredientAny(netheriteSword), ingredient(immemorialIngot, 1), ingredient(template, 1))));
+        recipes.put(soulBlade, List.of(smithing("make_soul_blade", soulBlade,
+                ingredientAny(immemorialSword), ingredient(soulIngot, 1), ingredient(template, 1))));
+
+        Map<MaterialRef, Integer> stock = Map.of(
+                taggedWoodenSword, 1, stone, 1, ironBlock, 1, diamondBlock, 1,
+                netheriteIngot, 1, immemorialIngot, 1, soulIngot, 1, template, 6);
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), stock,
+                List.of(new IngredientRef(List.of(soulBlade), 1, NbtMatchMode.ANY)), 30);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(6, result.steps().size());
+    }
+
+    @Test
+    void anyDemandConsumesTaggedStockVariant() {
+        MaterialRef plain = material("plain_sword");
+        MaterialRef tagged = new MaterialRef(plain.itemId(), "{Unbreakable:1b}");
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of()), Map.of(tagged, 1),
+                List.of(new IngredientRef(List.of(plain), 1, NbtMatchMode.ANY)), 10);
+        assertTrue(result.feasible(), result.toString());
+    }
+
+    @Test
     void reusableCatalystIsNotScaledOrConsumedAcrossBatches() {
         MaterialRef copper = material("copper");
         MaterialRef hammer = material("hammer");
@@ -807,6 +859,15 @@ class PureRecipePlannerTest {
 
     private static IngredientRef ingredient(MaterialRef material, int count) {
         return new IngredientRef(List.of(material), count);
+    }
+
+    private static IngredientRef ingredientAny(MaterialRef material) {
+        return new IngredientRef(List.of(material), 1, NbtMatchMode.ANY);
+    }
+
+    private static RecipeNode smithing(String id, MaterialRef output, IngredientRef... inputs) {
+        return new RecipeNode(id(id), output, 1, List.of(inputs), "smithing",
+                new ResourceLocation("minecraft", "smithing"));
     }
 
     private static IngredientRef catalyst(MaterialRef material, int count) {
