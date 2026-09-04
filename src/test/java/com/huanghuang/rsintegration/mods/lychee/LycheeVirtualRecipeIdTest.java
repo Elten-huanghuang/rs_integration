@@ -122,9 +122,15 @@ class LycheeVirtualRecipeIdTest extends BootstrapTest {
     }
 
     @Test
-    void recognizesImmortalersDelightHotSpringBucketWithoutChangingExistingBits() {
+    void recognizesCatalystBucketAliasesWithoutChangingExistingBits() {
         assertEquals(1, LycheeVirtualCatalysts.POWDER_SNOW_BUCKET);
         assertEquals(1 << 3, LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET);
+        assertEquals(LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET,
+                LycheeVirtualCatalysts.catalystForItemId(
+                        new ResourceLocation("deep_aether", "poison_bucket")));
+        assertEquals(LycheeVirtualCatalysts.DEEP_AETHER_POISON_BUCKET,
+                LycheeVirtualCatalysts.catalystForItemId(
+                        new ResourceLocation("aether", "skyroot_poison_bucket")));
         assertEquals(LycheeVirtualCatalysts.HOT_SPRING_BUCKET,
                 LycheeVirtualCatalysts.catalystForItemId(
                         new ResourceLocation("immortalers_delight", "hot_spring_bucket")));

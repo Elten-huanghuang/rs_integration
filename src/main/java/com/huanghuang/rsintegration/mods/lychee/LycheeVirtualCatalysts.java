@@ -31,6 +31,8 @@ public final class LycheeVirtualCatalysts {
             new ResourceLocation("embers", "dwarven_oil_bucket");
     private static final ResourceLocation DEEP_AETHER_POISON_BUCKET_ID =
             new ResourceLocation("deep_aether", "poison_bucket");
+    private static final ResourceLocation AETHER_SKYROOT_POISON_BUCKET_ID =
+            new ResourceLocation("aether", "skyroot_poison_bucket");
     private static final ResourceLocation HOT_SPRING_BUCKET_ID =
             new ResourceLocation("immortalers_delight", "hot_spring_bucket");
 
@@ -80,7 +82,10 @@ public final class LycheeVirtualCatalysts {
         if (POWDER_SNOW_BUCKET_ID.equals(id)) return POWDER_SNOW_BUCKET;
         if (GREEK_FIRE_BUCKET_ID.equals(id)) return GREEK_FIRE_BUCKET;
         if (DWARVEN_OIL_BUCKET_ID.equals(id)) return DWARVEN_OIL_BUCKET;
-        if (DEEP_AETHER_POISON_BUCKET_ID.equals(id)) return DEEP_AETHER_POISON_BUCKET;
+        if (DEEP_AETHER_POISON_BUCKET_ID.equals(id)
+                || AETHER_SKYROOT_POISON_BUCKET_ID.equals(id)) {
+            return DEEP_AETHER_POISON_BUCKET;
+        }
         if (HOT_SPRING_BUCKET_ID.equals(id)) return HOT_SPRING_BUCKET;
         return 0;
     }

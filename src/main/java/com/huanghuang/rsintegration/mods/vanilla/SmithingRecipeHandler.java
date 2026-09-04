@@ -103,6 +103,31 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         return List.copyOf(exact);
     }
 
+    /**
+     * SmithingTransformRecipe copies the base stack's tag into its output.
+     * When a downstream recipe requests a tagged output (for example an
+     * Unbreakable sword), carry that requirement into the base ingredient so
+     * recursive planning cannot silently choose a tagless upgrade.
+     */
+    public static List<IngredientSpec> requireDemandedOutputTag(
+            SmithingTransformRecipe recipe, List<IngredientSpec> specs,
+            @Nullable ItemStack demandedOutput) {
+        if (demandedOutput == null || demandedOutput.isEmpty()
+                || !demandedOutput.hasTag() || specs == null || specs.size() < 2) {
+            return specs;
+        }
+        IngredientSpec original = specs.get(1);
+        if (original == null || original.isEmpty()) return specs;
+        ItemStack[] bases = original.ingredient().getItems();
+        for (ItemStack base : bases) {
+            if (base == null || base.isEmpty()) continue;
+            ItemStack taggedBase = base.copyWithCount(1);
+            taggedBase.setTag(demandedOutput.getTag().copy());
+            return requireExactBase(recipe, specs, taggedBase);
+        }
+        return specs;
+    }
+
     private static ItemStack first(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty()) return stack.copyWithCount(1);

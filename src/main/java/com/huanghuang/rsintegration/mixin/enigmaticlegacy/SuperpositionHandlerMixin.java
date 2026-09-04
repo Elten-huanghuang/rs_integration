@@ -32,7 +32,7 @@ public abstract class SuperpositionHandlerMixin {
         if (rl == null) return;
         String key = rl.toString();
         if (rsi$seenItems.add(key)) {
-            RSIntegrationMod.LOGGER.info("[RSI-hasItem] queried: {}", key);
+            RSIntegrationMod.LOGGER.debug("[RSI-hasItem] queried: {}", key);
         }
     }
 
@@ -46,7 +46,7 @@ public abstract class SuperpositionHandlerMixin {
         cir.setReturnValue(true);
         if (rsi$diagCount < 5) {
             rsi$diagCount++;
-            RSIntegrationMod.LOGGER.info("[RSI-hasItem] FOUND {} in resonance storage for {}",
+            RSIntegrationMod.LOGGER.debug("[RSI-hasItem] FOUND {} in resonance storage for {}",
                     target, sp.getName().getString());
         }
     }

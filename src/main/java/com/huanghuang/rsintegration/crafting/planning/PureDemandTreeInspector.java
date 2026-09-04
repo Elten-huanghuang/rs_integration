@@ -275,7 +275,7 @@ public final class PureDemandTreeInspector {
                 return Coverage.NODE_LIMIT;
             }
 
-            List<RecipeNode> candidates = graph.recipesByOutput().getOrDefault(material, List.of());
+            List<RecipeNode> candidates = candidatesForMaterial(material);
             if (candidates.isEmpty()) {
                 if (firstUnresolved == null) firstUnresolved = material;
                 return pureIncompatibleOutputIds.contains(material.itemId())
@@ -357,6 +357,19 @@ public final class PureDemandTreeInspector {
             List<RecipeNode> ordered = new ArrayList<>(candidates);
             ordered.sort(java.util.Comparator.comparingDouble(this::inputStockCoverage).reversed());
             return ordered;
+        }
+
+        private List<RecipeNode> candidatesForMaterial(MaterialRef material) {
+            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
+                    .getOrDefault(material, List.of()));
+            if (!material.nbt().isEmpty()) {
+                MaterialRef tagless = new MaterialRef(material.itemId(), "");
+                for (RecipeNode candidate : graph.recipesByOutput()
+                        .getOrDefault(tagless, List.of())) {
+                    if ("smithing".equals(candidate.modTypeId())) candidates.add(candidate);
+                }
+            }
+            return candidates;
         }
 
         private double inputStockCoverage(RecipeNode candidate) {

@@ -310,7 +310,12 @@ public final class PureRecipePlanner {
                         continuation.add(new DemandTask(ingredient));
                         continuation.addAll(rest);
                     }
-                    List<Task> branch = recipeBranch(candidate, scheduledBatches,
+                    // Vanilla smithing copies the base item's NBT at execution
+                    // time. The immutable graph stores its declared tagless
+                    // result, so materialize the demanded NBT variant for the
+                    // planner's stock ledger only.
+                    RecipeNode plannedCandidate = withDemandedOutput(candidate, wanted);
+                    List<Task> branch = recipeBranch(plannedCandidate, scheduledBatches,
                             consumeCount, continuation);
                     if (branch == null) continue;
                     resolving.add(wanted);
@@ -449,8 +454,19 @@ public final class PureRecipePlanner {
         }
 
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted, boolean pruneUnseeded) {
-            List<RecipeNode> candidates = graph.recipesByOutput()
-                    .getOrDefault(wanted, List.of());
+            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
+                    .getOrDefault(wanted, List.of()));
+            // SmithingTransformRecipe/SmithingTrimRecipe outputs inherit the
+            // base stack's NBT, but their graph node is necessarily tagless.
+            // Offer that node as a producer for a tagged demand and restore
+            // the demanded output when scheduling it above.
+            if (!wanted.nbt().isEmpty()) {
+                MaterialRef tagless = new MaterialRef(wanted.itemId(), "");
+                for (RecipeNode candidate : graph.recipesByOutput()
+                        .getOrDefault(tagless, List.of())) {
+                    if ("smithing".equals(candidate.modTypeId())) candidates.add(candidate);
+                }
+            }
             List<RecipeNode> ordered = candidates.stream()
                     .filter(candidate -> !pruneUnseeded || reachability.canReach(candidate))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
@@ -463,6 +479,16 @@ public final class PureRecipePlanner {
                     ? coverage.thenComparingInt(reachability::depth)
                     : coverage);
             return ordered;
+        }
+
+        private static RecipeNode withDemandedOutput(RecipeNode candidate, MaterialRef wanted) {
+            if (!wanted.nbt().isEmpty() && "smithing".equals(candidate.modTypeId())
+                    && candidate.output().itemId().equals(wanted.itemId())
+                    && candidate.output().nbt().isEmpty()) {
+                return new RecipeNode(candidate.recipeId(), wanted, candidate.outputCount(),
+                        candidate.inputs(), candidate.modTypeId(), candidate.recipeTypeId());
+            }
+            return candidate;
         }
 
         private double inputStockCoverage(RecipeNode candidate) {
@@ -929,6 +955,7 @@ public final class PureRecipePlanner {
     private static final class SeededReachability {
         private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
 
+        private final ImmutableRecipeGraph graph;
         private final Set<MaterialRef> seeds;
         private final Map<MaterialRef, Integer> materialDepth;
         private final Map<RecipeNode, Integer> recipeDepth;
@@ -936,6 +963,7 @@ public final class PureRecipePlanner {
         private SeededReachability(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Integer> available,
                                    Runnable budgetCheck) {
+            this.graph = graph;
             Set<MaterialRef> present = new HashSet<>();
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
                 if (entry.getValue() != null && entry.getValue() > 0) present.add(entry.getKey());
@@ -1004,7 +1032,12 @@ public final class PureRecipePlanner {
         }
 
         private boolean canReach(MaterialRef material) {
-            return seeds.contains(material) || materialDepth.containsKey(material);
+            if (seeds.contains(material) || materialDepth.containsKey(material)) return true;
+            if (material.nbt().isEmpty()) return false;
+            MaterialRef tagless = new MaterialRef(material.itemId(), "");
+            return graph.recipesByOutput().getOrDefault(tagless, List.of()).stream()
+                    .anyMatch(recipe -> "smithing".equals(recipe.modTypeId())
+                            && recipeDepth.containsKey(recipe));
         }
 
         private boolean canReach(RecipeNode recipe) {

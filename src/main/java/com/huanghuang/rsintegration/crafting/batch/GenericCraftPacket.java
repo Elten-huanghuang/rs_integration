@@ -175,7 +175,7 @@ public final class GenericCraftPacket {
                     : CraftPacketUtils.describeIngredient(missing.ingredient()).getString();
             String nbtMode = missing == null ? "unknown"
                     : ImmutableRecipeGraphProjector.nbtMatchMode(missing.ingredient()).name();
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-DirectReserve] unavailable recipe={} ingredientIndex={} material={} missing={} nbtMode={}",
                     recipeId, index, material, allocation.missingCount(), nbtMode);
             return new DirectReservationCheck(false, material, nbtMode);
@@ -194,7 +194,7 @@ public final class GenericCraftPacket {
                     probe.rollback(player);
                     String material = String.valueOf(BuiltInRegistries.ITEM.getKey(template.getItem()))
                             + (template.hasTag() ? template.getTag() : "");
-                    RSIntegrationMod.LOGGER.info(
+                    RSIntegrationMod.LOGGER.debug(
                             "[RSI-DirectReserve] live reservation rejected recipe={} material={} count={} directAllocation=true",
                             recipeId, material, fragment.count());
                     return new DirectReservationCheck(false, material, "EXACT_ALLOCATION");
@@ -202,7 +202,7 @@ public final class GenericCraftPacket {
             }
             probe.rollback(player);
         }
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-DirectReserve] ready recipe={} specs={} fragments={} plannerBypassed=true",
                 recipeId, specs.size(), allocation.allocations().size());
         return new DirectReservationCheck(true, "", "");
@@ -850,6 +850,10 @@ public final class GenericCraftPacket {
             Recipe<?> recipe = player.serverLevel().getRecipeManager()
                     .byKey(node.recipeId()).orElse(null);
             if (recipe == null || !requiresBoundMachine(recipe, type)) return true;
+            // Keep vanilla smithing nodes in the planning graph so recursive
+            // previews can show the complete upgrade chain. Execution still
+            // requires a bound smithing table at the terminal entry point.
+            if (isSmithingRecipe(recipe)) return true;
             return hasBindingForExecutionType(player, recipe, type);
         });
     }
@@ -2258,7 +2262,7 @@ public final class GenericCraftPacket {
                         storageEndpoint.session().reference().networkId());
             }
         }
-        RSIntegrationMod.LOGGER.info(
+        RSIntegrationMod.LOGGER.debug(
                 "[RSI-ExecAvail] recipe={} preparation={} network={} endpoint={} reference={} destination={}",
                 recipeId, partialPreparation, network != null,
                 storageEndpoint == null ? "none" : storageEndpoint.session().reference().backendId(),
@@ -3448,6 +3452,7 @@ public final class GenericCraftPacket {
         }
         ModType previewModType = resolveExecutionModType(player, recipe, dim, pos);
         if (requiresBoundMachine(recipe, previewModType)
+                && !isSmithingRecipe(recipe)
                 && !hasBindingForExecutionType(player, recipe, previewModType)) {
             logBindingRejection("preview-entry", player, recipe, previewModType, dim, pos);
             sink.error(Component.translatable("rsi.plan.failure.no_bound_machine"));
@@ -4442,7 +4447,7 @@ public final class GenericCraftPacket {
                     // switch button even though the resolver could use either.
                     boolean hasMachine = AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
                     RSIntegrationMod.debug("[RSI-OR]   alt {}: hasMachine={}", altId, hasMachine);
-                    if (hasMachine) {
+                    if (isSmithingRecipe(altRecipe) || hasMachine) {
                         alternatives.add(altId);
                         alternativeModTypes.add(altMod);
                     }
@@ -4640,7 +4645,8 @@ public final class GenericCraftPacket {
                     // forge ritual, spirit crucible…) that the player can't actually run.
                     // Selecting this branch performs a fresh recursive plan, so
                     // current inventory must not decide whether the button exists.
-                    if (AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
+                    if (isSmithingRecipe(e.recipe())
+                            || AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
                         targetAlts.add(e.recipe().getId());
                         targetAltModTypes.add(e.modType().id());
                     }
@@ -4839,6 +4845,21 @@ public final class GenericCraftPacket {
                 : new LinkedHashMap<>(materialBill.materials());
         Map<IngredientKey, Integer> leftovers = materialBill.leftovers();
         boolean feasible = directTerminalPlan || materialBill.feasible();
+        boolean missingExecutionBinding = false;
+        for (PlanStep step : steps) {
+            Recipe<?> stepRecipe = resolveRecipe(player.serverLevel(), step.recipeId());
+            if (stepRecipe == null) continue;
+            ModType stepType = step.modType() != null
+                    ? step.modType() : ModType.classifyRecipe(stepRecipe);
+            if (requiresBoundMachine(stepRecipe, stepType)
+                    && !hasBindingForExecutionType(player, stepRecipe, stepType)) {
+                missingExecutionBinding = true;
+                break;
+            }
+        }
+        // A plan may still be displayed without a bound physical machine, but
+        // it must never be advertised as executable in that state.
+        if (missingExecutionBinding) feasible = false;
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
@@ -4946,8 +4967,8 @@ public final class GenericCraftPacket {
                     .anyMatch(a -> !a.isEnough())) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.missing_materials"));
-            } else if (recipeModType != null
-                    && !boundMachineTypes.contains(recipeModType.id())) {
+            } else if (missingExecutionBinding || (recipeModType != null
+                    && !boundMachineTypes.contains(recipeModType.id()))) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.no_bound_machine"));
             }
@@ -5593,6 +5614,10 @@ public final class GenericCraftPacket {
         return recipe instanceof SmithingTransformRecipe
                 || recipe instanceof SmithingTrimRecipe
                 || requiresBoundMachine(modType);
+    }
+
+    private static boolean isSmithingRecipe(Recipe<?> recipe) {
+        return recipe instanceof SmithingTransformRecipe || recipe instanceof SmithingTrimRecipe;
     }
 
     static boolean isSelfAmplifyingRecipe(Recipe<?> recipe,

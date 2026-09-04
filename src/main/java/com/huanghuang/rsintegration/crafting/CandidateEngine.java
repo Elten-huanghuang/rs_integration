@@ -14,6 +14,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -241,7 +242,33 @@ final class CandidateEngine {
         }
         ItemStack output = ModRecipeHandlers.tryGetResultItem(
                 entry.recipe(), ctx.level.registryAccess());
-        return MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
+        output = MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
+        return inheritSmithingBaseTag(entry.recipe(), output, demand);
+    }
+
+    /**
+     * Vanilla smithing transform recipes copy the base stack's tag to the
+     * result at assemble-time, while {@code getResultItem()} only exposes the
+     * tagless declared result.  Preserve the requested NBT during candidate
+     * discovery so strict ingredients such as an Unbreakable sword can still
+     * resolve their smithing upgrade chain.
+     */
+    static ItemStack inheritSmithingBaseTag(Recipe<?> recipe, ItemStack output,
+                                            Ingredient demand) {
+        if (output == null || output.isEmpty() || output.hasTag() || demand == null
+                || demand.isEmpty()) return output;
+        if (!(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)
+                && !(recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe)) {
+            return output;
+        }
+        for (ItemStack requested : demand.getItems()) {
+            if (requested == null || requested.isEmpty() || !requested.hasTag()
+                    || requested.getItem() != output.getItem()) continue;
+            ItemStack tagged = output.copy();
+            tagged.setTag(requested.getTag().copy());
+            return tagged;
+        }
+        return output;
     }
 
     @javax.annotation.Nullable
@@ -305,10 +332,11 @@ final class CandidateEngine {
                 && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, ctx.player)) {
             return false;
         }
+        // Binding is an execution authorization, not a prerequisite for
+        // discovering the vanilla smithing upgrade chain.
         if (entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
                 || entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
-            if (ctx.player == null) return false;
-            return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
+            return true;
         }
         if (entry.modType() == ModType.GENERIC || entry.modType().isVirtual()) return true;
         if (ctx.player == null) return false;

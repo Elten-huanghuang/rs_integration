@@ -63,6 +63,19 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
         assertTrue(new SmithingRecipeHandler().hasRuntimeDependentPrimaryNbt(recipe()));
     }
 
+    @Test
+    void demandedOutputTagPinsTheSmithingBaseVariant() {
+        SmithingTransformRecipe recipe = recipe();
+        ItemStack demanded = new ItemStack(Items.NETHERITE_CHESTPLATE);
+        demanded.getOrCreateTag().putString("rsi_test_variant", "selected");
+
+        List<IngredientSpec> exact = SmithingRecipeHandler.requireDemandedOutputTag(
+                recipe, new SmithingRecipeHandler().getIngredients(recipe), demanded);
+
+        assertTrue(exact.get(1).ingredient().test(taggedChestplate("selected")));
+        assertFalse(exact.get(1).ingredient().test(taggedChestplate("other")));
+    }
+
     private static SmithingTransformRecipe recipe() {
         return new SmithingTransformRecipe(
                 new ResourceLocation("test", "tagged_chestplate_upgrade"),
