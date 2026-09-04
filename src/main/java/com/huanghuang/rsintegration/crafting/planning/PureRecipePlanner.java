@@ -252,6 +252,15 @@ public final class PureRecipePlanner {
                     backtracks++;
                 }
             } else {
+                if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT) {
+                    Map<MaterialRef, Integer> consumedVariants =
+                            consumeMatchingVariants(ingredient, rest);
+                    if (consumedVariants != null) {
+                        if (solve(rest)) return true;
+                        consumedVariants.forEach(this::setStock);
+                        backtracks++;
+                    }
+                }
                 for (MaterialRef alternative : orderedAlternatives) {
                     int have = stock.getOrDefault(alternative, 0);
                     if (have < ingredient.count()) continue;
@@ -274,17 +283,24 @@ public final class PureRecipePlanner {
                 checkBudget();
                 if (resolving.contains(wanted)) continue;
                 int have = stock.getOrDefault(wanted, 0);
-                long present = catalyst ? stockAcross(ingredient) : have;
+                long present = catalyst || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                        ? stockAcross(ingredient) : have;
                 int needed = (int) Math.max(0L, (long) ingredient.count() - present);
                 if (needed <= 0) continue;
                 boolean broadFamily = ingredient.alternatives().size() > 1;
                 boolean allowTaggedOutputVariants = ingredient.nbtMatchMode() != NbtMatchMode.EXACT
                         && wanted.nbt().isEmpty();
-                if (!broadFamily && !reachability.canReach(wanted, allowTaggedOutputVariants)) {
-                    continue;
-                }
                 for (RecipeNode candidate : inventoryFirstCandidates(
                         wanted, !broadFamily, allowTaggedOutputVariants)) {
+                    boolean dynamicNbtOutput = allowTaggedOutputVariants
+                            || (!wanted.nbt().isEmpty()
+                            && candidate.output().nbt().isEmpty()
+                            && "smithing".equals(candidate.modTypeId()));
+                    // Keep a structurally valid NBT producer for partial expansion even when
+                    // one of its raw inputs is currently absent. Ordinary recipes still use
+                    // seeded reachability to avoid traversing conversion rings blindly.
+                    if (!broadFamily && !reachability.canReach(wanted, allowTaggedOutputVariants)
+                            && !dynamicNbtOutput) continue;
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -393,6 +409,39 @@ public final class PureRecipePlanner {
             if (contributors > 1) return previous;
             previous.forEach(this::setStock);
             return null;
+        }
+
+        private Map<MaterialRef, Integer> consumeMatchingVariants(
+                IngredientRef ingredient, List<Task> rest) {
+            List<MaterialRef> stocked = stock.keySet().stream()
+                    .filter(material -> stock.getOrDefault(material, 0) > 0
+                            && matchesIngredient(material, ingredient))
+                    .sorted(Comparator
+                            .comparingLong((MaterialRef material) ->
+                                    (long) stock.getOrDefault(material, 0)
+                                            - singletonDemand(rest, material))
+                            .reversed()
+                            .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
+                    .toList();
+            long total = 0L;
+            for (MaterialRef material : stocked) {
+                total += stock.getOrDefault(material, 0);
+                if (total >= ingredient.count()) break;
+            }
+            if (total < ingredient.count()) return null;
+
+            int remaining = ingredient.count();
+            Map<MaterialRef, Integer> previous = new HashMap<>();
+            for (MaterialRef material : stocked) {
+                int have = stock.getOrDefault(material, 0);
+                int take = Math.min(have, remaining);
+                if (take <= 0) continue;
+                previous.put(material, have);
+                setStock(material, have - take);
+                remaining -= take;
+                if (remaining == 0) break;
+            }
+            return previous;
         }
 
         private static long singletonDemand(List<Task> tasks, MaterialRef material) {
@@ -556,11 +605,25 @@ public final class PureRecipePlanner {
 
         private long stockAcross(IngredientRef ingredient) {
             long total = 0L;
-            for (MaterialRef alternative : ingredient.alternatives()) {
-                total += stock.getOrDefault(alternative, 0);
+            for (Map.Entry<MaterialRef, Integer> entry : stock.entrySet()) {
+                if (!matchesIngredient(entry.getKey(), ingredient)) continue;
+                total += entry.getValue();
                 if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
             }
             return total;
+        }
+
+        private static boolean matchesIngredient(MaterialRef stocked, IngredientRef ingredient) {
+            for (MaterialRef requested : ingredient.alternatives()) {
+                if (!stocked.itemId().equals(requested.itemId())) continue;
+                if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
+                if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
+                        && stocked.nbt().equals(requested.nbt())) return true;
+                if (ingredient.nbtMatchMode() == NbtMatchMode.PARTIAL
+                        && ImmutableRecipeGraphProjector.partialNbtMatches(
+                        requested.nbt(), stocked.nbt())) return true;
+            }
+            return false;
         }
 
         /**
@@ -819,8 +882,8 @@ public final class PureRecipePlanner {
             List<PartialChoice> choices = new ArrayList<>();
             for (MaterialRef alternative : ingredient.alternatives()) {
                 budgetCheck.run();
-                for (RecipeNode recipe : graph.recipesByOutput()
-                        .getOrDefault(alternative, List.of())) {
+                for (RecipeNode recipe : partialCandidates(alternative,
+                        ingredient.nbtMatchMode())) {
                     budgetCheck.run();
                     choices.add(new PartialChoice(alternative, recipe));
                 }
@@ -830,6 +893,27 @@ public final class PureRecipePlanner {
                     .reversed()
                     .thenComparing(choice -> choice.recipe().recipeId().toString()));
             return choices;
+        }
+
+        private List<RecipeNode> partialCandidates(MaterialRef wanted, NbtMatchMode matchMode) {
+            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
+                    .getOrDefault(wanted, List.of()));
+            if (!wanted.nbt().isEmpty()) {
+                MaterialRef tagless = new MaterialRef(wanted.itemId(), "");
+                for (RecipeNode candidate : graph.recipesByOutput()
+                        .getOrDefault(tagless, List.of())) {
+                    if ("smithing".equals(candidate.modTypeId())
+                            && !candidates.contains(candidate)) candidates.add(candidate);
+                }
+            } else if (matchMode != NbtMatchMode.EXACT) {
+                graph.recipesByOutput().forEach((output, variants) -> {
+                    if (!output.itemId().equals(wanted.itemId()) || output.nbt().isEmpty()) return;
+                    for (RecipeNode candidate : variants) {
+                        if (!candidates.contains(candidate)) candidates.add(candidate);
+                    }
+                });
+            }
+            return candidates;
         }
 
         private double inputStockCoverage(RecipeNode recipe) {
