@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -178,6 +179,12 @@ final class StepExecutor {
             }
         }
 
+        if (demandedOutput != null
+                && entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            specs = SmithingRecipeHandler.requireDemandedOutputTag(
+                    smithing, specs, demandedOutput);
+        }
+
         specs = narrowMaterialLocks(entry.recipe().getId(), specs, ctx);
 
         if (specs == null || specs.isEmpty()) {
@@ -218,6 +225,14 @@ final class StepExecutor {
         }
         // Preserve exact hidden outputs, but leave runtime-derived NBT open.
         result = CraftingResolver.resolveDeclaredOutput(entry.recipe(), result);
+        // Smithing recipes copy the base item's NBT at assemble-time. The
+        // static result is tagless, so restore the exact demanded variant for
+        // graph accounting and for strict-NBT downstream inputs.
+        if (demandedOutput != null && !demandedOutput.isEmpty()) {
+            result = CandidateEngine.inheritSmithingBaseTag(
+                    entry.recipe(), result,
+                    CraftingResolver.ingredientOf(demandedOutput, demandedOutput.hasTag()));
+        }
         result = MinersDelightCopperPotSupport.adaptResult(entry.modType(), result);
         registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 

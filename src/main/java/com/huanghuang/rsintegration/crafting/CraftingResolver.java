@@ -689,6 +689,13 @@ public final class CraftingResolver {
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
             out = resolveDeclaredOutput(candidate.recipe(), out);
+            // resolveDeclaredOutput intentionally clears runtime-derived NBT
+            // for smithing handlers.  Here the requested ingredient already
+            // pins the exact base variant, so restore that variant before the
+            // resolver records/consumes the produced output.  Without this,
+            // strict CraftTweaker inputs such as soul_blade{Unbreakable:1}
+            // are reported as missing even though the smithing route exists.
+            out = CandidateEngine.inheritSmithingBaseTag(candidate.recipe(), out, ingredient);
             out = MinersDelightCopperPotSupport.adaptResult(candidate.modType(), out);
             if (out.isEmpty() || out.getCount() <= 0) {
                 continue;

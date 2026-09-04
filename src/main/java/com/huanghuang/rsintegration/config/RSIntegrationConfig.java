@@ -730,7 +730,7 @@ public final class RSIntegrationConfig {
                         "Limits how many nested sub-recipes the resolver can chain.",
                         "Increase for deep modpack recipe chains; decrease for strict server limits.",
                         "Range: 4-32.")
-                .defineInRange("craftingMaxDepth", 8, 4, 32);
+                .defineInRange("craftingMaxDepth", 16, 4, 32);
         CRAFTING_MAX_STEPS = s
                 .comment("Maximum total crafting steps in a single resolution plan.",
                         "Prevents runaway plans from consuming excessive server resources.",

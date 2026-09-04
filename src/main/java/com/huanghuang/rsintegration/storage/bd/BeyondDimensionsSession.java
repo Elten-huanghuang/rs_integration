@@ -207,8 +207,14 @@ final class BeyondDimensionsSession implements StorageSession {
                     StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
         }
         if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
+        boolean waterBucket = filledContainer.is(net.minecraft.world.item.Items.WATER_BUCKET);
+        boolean lavaBucket = filledContainer.is(net.minecraft.world.item.Items.LAVA_BUCKET);
+        if (!waterBucket && !lavaBucket) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
+        }
         Fluid fluid = BuiltInRegistries.FLUID.get(new net.minecraft.resources.ResourceLocation("minecraft",
-                filledContainer.getItem() == net.minecraft.world.item.Items.WATER_BUCKET ? "water" : "lava"));
+                waterBucket ? "water" : "lava"));
         if (fluid == null || fluid == Fluids.EMPTY) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,
                     StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
@@ -216,6 +222,23 @@ final class BeyondDimensionsSession implements StorageSession {
         StoragePermissionResult permission = checkPermission(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return permissionFailureExtraction(mode(simulate), amount, permission);
         try {
+            // A filled bucket may be stored as a normal item in BD.  Prefer
+            // that representation before attempting the derived
+            // empty-bucket + fluid conversion.  The reservation path calls
+            // this method in simulate mode and the commit path calls it in
+            // perform mode, so both phases make the same choice.
+            StorageItemKey filledKey = itemKey(filledContainer);
+            StorageOperationResult directProbe = extractNative(
+                    player, filledKey, amount, true, false);
+            if (directProbe.status() == StorageOperationStatus.SUCCESS) {
+                if (simulate) return directProbe;
+                // Probe first so a partially stocked item can still use the
+                // derived conversion without consuming that partial amount.
+                StorageOperationResult direct = extractNative(
+                        player, filledKey, amount, false, false);
+                if (direct.status() != StorageOperationStatus.NOT_FOUND) return direct;
+            }
+
             Object nativeStorage = storage();
             Class<?> keyType = Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey");
             var extract = nativeStorage.getClass().getMethod("extract", keyType, long.class, boolean.class, boolean.class);
