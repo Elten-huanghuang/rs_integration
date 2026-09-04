@@ -41,6 +41,24 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void valueOnlyDemandCanUseTaggedOutputVariant() {
+        MaterialRef sword = material("awakened_sword");
+        MaterialRef raw = material("sword_raw");
+        MaterialRef taggedSword = new MaterialRef(sword.itemId(), "{Unbreakable:1b}");
+        RecipeNode recipe = recipe("make_tagged_sword", taggedSword, 1, ingredient(raw, 1));
+        IngredientRef valueOnlySword = new IngredientRef(List.of(sword), 1,
+                NbtMatchMode.ANY, DemandRole.CONSUMED);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(taggedSword, List.of(recipe))),
+                Map.of(raw, 1), List.of(valueOnlySword), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("make_tagged_sword"), 1)), result.steps());
+    }
+
+    @Test
     void reusableCatalystIsNotScaledOrConsumedAcrossBatches() {
         MaterialRef copper = material("copper");
         MaterialRef hammer = material("hammer");

@@ -362,6 +362,16 @@ public final class PureDemandTreeInspector {
         private List<RecipeNode> candidatesForMaterial(MaterialRef material) {
             List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
                     .getOrDefault(material, List.of()));
+            // Tagless demands are value-only in the inspector. Include concrete NBT output
+            // variants so a CraftTweaker recipe such as Unbreakable:1 is still expanded.
+            if (material.nbt().isEmpty()) {
+                graph.recipesByOutput().forEach((output, variants) -> {
+                    if (!output.itemId().equals(material.itemId()) || output.nbt().isEmpty()) return;
+                    for (RecipeNode candidate : variants) {
+                        if (!candidates.contains(candidate)) candidates.add(candidate);
+                    }
+                });
+            }
             if (!material.nbt().isEmpty()) {
                 MaterialRef tagless = new MaterialRef(material.itemId(), "");
                 for (RecipeNode candidate : graph.recipesByOutput()
