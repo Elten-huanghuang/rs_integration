@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 
@@ -277,8 +278,13 @@ public final class PureRecipePlanner {
                 int needed = (int) Math.max(0L, (long) ingredient.count() - present);
                 if (needed <= 0) continue;
                 boolean broadFamily = ingredient.alternatives().size() > 1;
-                if (!broadFamily && !reachability.canReach(wanted)) continue;
-                for (RecipeNode candidate : inventoryFirstCandidates(wanted, !broadFamily)) {
+                boolean allowTaggedOutputVariants = ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                        && wanted.nbt().isEmpty();
+                if (!broadFamily && !reachability.canReach(wanted, allowTaggedOutputVariants)) {
+                    continue;
+                }
+                for (RecipeNode candidate : inventoryFirstCandidates(
+                        wanted, !broadFamily, allowTaggedOutputVariants)) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -453,9 +459,22 @@ public final class PureRecipePlanner {
             return 1;
         }
 
-        private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted, boolean pruneUnseeded) {
+        private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
+                                                           boolean pruneUnseeded,
+                                                           boolean allowTaggedVariants) {
             List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
                     .getOrDefault(wanted, List.of()));
+            // A value-only/ANY ingredient may accept a tagged output variant even when
+            // its declared alternative is tagless. CraftTweaker recipes can intentionally
+            // add runtime tags (for example Unbreakable:1) to an otherwise ordinary item.
+            if (allowTaggedVariants && wanted.nbt().isEmpty()) {
+                graph.recipesByOutput().forEach((output, variants) -> {
+                    if (!output.itemId().equals(wanted.itemId()) || output.nbt().isEmpty()) return;
+                    for (RecipeNode candidate : variants) {
+                        if (!candidates.contains(candidate)) candidates.add(candidate);
+                    }
+                });
+            }
             // SmithingTransformRecipe/SmithingTrimRecipe outputs inherit the
             // base stack's NBT, but their graph node is necessarily tagless.
             // Offer that node as a producer for a tagged demand and restore
@@ -1032,7 +1051,18 @@ public final class PureRecipePlanner {
         }
 
         private boolean canReach(MaterialRef material) {
+            return canReach(material, false);
+        }
+
+        private boolean canReach(MaterialRef material, boolean allowTaggedVariants) {
             if (seeds.contains(material) || materialDepth.containsKey(material)) return true;
+            if (allowTaggedVariants && material.nbt().isEmpty()) {
+                return graph.recipesByOutput().entrySet().stream()
+                        .filter(entry -> entry.getKey().itemId().equals(material.itemId())
+                                && !entry.getKey().nbt().isEmpty())
+                        .flatMap(entry -> entry.getValue().stream())
+                        .anyMatch(recipeDepth::containsKey);
+            }
             if (material.nbt().isEmpty()) return false;
             MaterialRef tagless = new MaterialRef(material.itemId(), "");
             return graph.recipesByOutput().getOrDefault(tagless, List.of()).stream()
