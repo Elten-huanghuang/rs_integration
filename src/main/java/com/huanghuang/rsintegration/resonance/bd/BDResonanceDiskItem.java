@@ -105,7 +105,7 @@ public final class BDResonanceDiskItem extends Item {
                 .aqua()
                 .bold()
                 .build());
-        for (int line = 1; line <= 6; line++) {
+        for (int line = 1; line <= 8; line++) {
             tooltip.add(TextBuilder.of("• ").darkAqua()
                     .append(TextBuilder.translate("rsi.resonance.bd.tooltip.detail_" + line)
                             .gray())

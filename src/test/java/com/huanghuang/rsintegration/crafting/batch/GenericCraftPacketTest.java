@@ -855,4 +855,18 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(-1));
         assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(99));
     }
+
+    @Test
+    void packetRoundTripPreservesPlayerInventoryDestination() {
+        GenericCraftPacket original = new GenericCraftPacket(
+                new ResourceLocation("test", "player_output"), false, Map.of(),
+                null, null, 1, false, null, new ItemStack(Items.DIAMOND),
+                42L, OutputDestination.PLAYER_INVENTORY);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        original.encode(buffer);
+        GenericCraftPacket decoded = GenericCraftPacket.decode(buffer);
+
+        assertEquals(OutputDestination.PLAYER_INVENTORY, decoded.outputDestination());
+    }
 }

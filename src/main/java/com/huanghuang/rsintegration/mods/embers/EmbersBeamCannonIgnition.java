@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 final class EmbersBeamCannonIgnition {
     static final double REQUIRED_EMBER = 1000.0;
     static final int MAX_DISTANCE = 64;
+    static final int ENERGY_WAIT_TICKS = 10 * 20;
 
     private EmbersBeamCannonIgnition() {}
 

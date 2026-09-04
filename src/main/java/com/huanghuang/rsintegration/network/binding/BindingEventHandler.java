@@ -833,6 +833,16 @@ public final class BindingEventHandler {
     }
 
     static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
+        // CrockPot's birdcage is a two-block-tall machine. Its block entity only
+        // exists in the lower half, so normalize upper-half clicks before binding.
+        if (className.equals("com.sihenzhang.crockpot.block.BirdcageBlock")) {
+            for (var property : level.getBlockState(pos).getProperties()) {
+                if ("half".equals(property.getName())
+                        && "upper".equals(String.valueOf(level.getBlockState(pos).getValue(property)))) {
+                    return pos.below();
+                }
+            }
+        }
         if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
             BlockPos pmmoRoot = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure
                     .resolveRoot(level, pos);

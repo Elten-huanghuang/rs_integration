@@ -61,6 +61,28 @@ class AsyncPurePlanningServiceTest {
     }
 
     @Test
+    void repeatedPhysicalTerminalPlansEveryIntermediateInput() {
+        MaterialRef commonInk = new MaterialRef(id("common_ink"), "");
+        MaterialRef uncommonInk = new MaterialRef(id("uncommon_ink"), "");
+        MaterialRef rareInk = new MaterialRef(id("rare_ink"), "");
+        RecipeNode makeUncommon = new RecipeNode(id("make_uncommon"), uncommonInk, 1,
+                List.of(new IngredientRef(List.of(commonInk), 1)));
+        RecipeNode makeRare = new RecipeNode(id("make_rare"), rareInk, 1,
+                List.of(new IngredientRef(List.of(uncommonInk), 1)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                uncommonInk, List.of(makeUncommon), rareInk, List.of(makeRare)));
+
+        List<IngredientRef> roots = com.huanghuang.rsintegration.crafting
+                .SelfAmplifyingRecipePolicy.scaleTargetInputs(makeRare, 3);
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(commonInk, 3), roots, 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("make_uncommon"), 3)),
+                result.steps());
+    }
+
+    @Test
     void neutralTerminalConversionCannotConsumeItsOwnOutputFromBroadInput() {
         MaterialRef chest = new MaterialRef(id("chest"), "");
         MaterialRef trappedChest = new MaterialRef(id("trapped_chest"), "");

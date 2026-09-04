@@ -30,6 +30,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        // These Malum mixins call ResonanceDiskAbilityService, whose disk item
+        // implementation extends Refined Storage's StorageDiskItem.  Malum is
+        // optional independently of Refined Storage, so skip the mixins when
+        // the RS item class is absent instead of linking it on the first tick.
+        if (mixinClassName.contains("malum.TouchOfDarknessHandlerMixin")
+                || mixinClassName.contains("malum.VoidConduitBlockEntityMixin")) {
+            return hasResonanceBackend();
+        }
         if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
             return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
                     && hasMethod(targetClassName, "getWidgets");
@@ -82,6 +90,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains("ironfurnaces.BlockIronFurnaceTileBaseMixin")) {
             return isClassPresent("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase");
+        }
+        if (mixinClassName.contains("itemcollectors.CollectorBlockEntityMixin")) {
+            return isClassPresent("com.supermartijn642.itemcollectors.CollectorBlockEntity")
+                    && hasMethod(targetClassName, "update")
+                    && hasMethod(targetClassName, "getAffectedArea");
         }
         // These mixins are attached to non-RS mods but their method bodies
         // contain RS API signatures. Skip them before Mixin can load those
@@ -333,6 +346,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // shouldApplyMixin causes ReEntrantTransformerError.
         String resource = className.replace('.', '/') + ".class";
         return RSIntegrationMixinPlugin.class.getClassLoader().getResource(resource) != null;
+    }
+
+    static boolean hasResonanceBackend() {
+        return isClassPresent("com.refinedmods.refinedstorage.item.StorageDiskItem")
+                || isClassPresent("com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet");
     }
 
     private static boolean hasField(String className, String fieldName) {

@@ -86,13 +86,13 @@ public final class FtbQuestSubmissionService {
 
         List<CraftingResolver.ResolutionStep> steps = projectSteps(plan);
         if (steps.isEmpty()) {
-            FtbQuestSubmissionExecutor.submit(player, questId, endpoint, network);
+            FtbQuestSubmissionExecutor.submit(player, questId, endpoint);
             return;
         }
 
         if (steps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
             if (CraftPacketUtils.executeCraftingSteps(player, steps, network, endpoint)) {
-                FtbQuestSubmissionExecutor.submit(player, questId, endpoint, network);
+                FtbQuestSubmissionExecutor.submit(player, questId, endpoint);
             } else {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
             }
@@ -106,7 +106,7 @@ public final class FtbQuestSubmissionService {
             ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
             if (current == null) return;
             if (chain.state() == AsyncCraftChain.State.COMPLETED) {
-                FtbQuestSubmissionExecutor.submit(current, questId, endpoint, network);
+                FtbQuestSubmissionExecutor.submit(current, questId, endpoint);
             } else {
                 current.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.crafting_failed",
                         chain.abortReason()));

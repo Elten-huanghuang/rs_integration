@@ -42,4 +42,22 @@ class CraftOutputInterceptorZoneTest extends BootstrapTest {
 
         if (handle != null) handle.drainAndClose();
     }
+
+    @Test
+    void machineOwnedOutputsMayUseOverlappingCaptureZones() {
+        CraftOutputInterceptor.CaptureHandle first = CraftOutputInterceptor.arm(
+                Level.OVERWORLD, new AABB(0, 64, 0, 2, 66, 2),
+                new ItemStack(Items.EGG), true);
+        CraftOutputInterceptor.CaptureHandle second = CraftOutputInterceptor.arm(
+                Level.OVERWORLD, new AABB(1, 64, 0, 3, 66, 2),
+                new ItemStack(Items.EGG), true);
+        try {
+            assertTrue(first != null);
+            assertTrue(second != null);
+            assertEquals(2, CraftOutputInterceptor.activeZoneCount());
+        } finally {
+            if (first != null) first.drainAndClose();
+            if (second != null) second.drainAndClose();
+        }
+    }
 }

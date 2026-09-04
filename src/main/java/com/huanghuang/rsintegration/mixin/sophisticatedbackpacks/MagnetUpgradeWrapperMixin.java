@@ -1,7 +1,9 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.BackpackOperationOwner;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
+import com.mojang.authlib.GameProfile;
 import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
@@ -38,6 +40,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -56,6 +59,14 @@ public abstract class MagnetUpgradeWrapperMixin
     private static volatile boolean rsi$debrisProbed;
     @Unique
     private ItemStack rsi$magnetInput = ItemStack.EMPTY;
+    @Unique
+    private CompoundTag rsi$upgradeTag;
+    @Unique
+    private GameProfile rsi$operationOwner;
+    @Unique
+    private boolean rsi$operationOwnerResolved;
+    @Unique
+    private ServerPlayer rsi$placedBackpackPlayer;
 
     @Unique
     private static boolean rsi$isDebrisEntity(Entity e) {
@@ -86,6 +97,9 @@ public abstract class MagnetUpgradeWrapperMixin
     private void onInit(IStorageWrapper storageWrapper, ItemStack upgrade,
                         Consumer<ItemStack> upgradeSaveHandler, CallbackInfo ci) {
         CompoundTag tag = upgrade.getTag();
+        this.rsi$upgradeTag = tag;
+        this.rsi$operationOwner = BackpackOperationOwner.read(tag).orElse(null);
+        this.rsi$operationOwnerResolved = this.rsi$operationOwner != null;
         this.rsi$storageReference = com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils.readReference(tag);
         if (this.rsi$storageReference != null) {
             if (!tag.contains("disabled")) {
@@ -124,7 +138,7 @@ public abstract class MagnetUpgradeWrapperMixin
     @Unique
     private static void rsi$reportInsertion(ItemStack input, ItemStack remainder) {
         ServerPlayer player = RsOperationPlayerContext.current();
-        if (player == null) {
+        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
             ExternalItemProgressSuppression.consume();
             return;
         }
@@ -140,10 +154,30 @@ public abstract class MagnetUpgradeWrapperMixin
                                       Level level, BlockPos pos, Operation<Integer> original) {
         AABB scanArea = new AABB(pos).inflate(this.upgradeItem.getRadius());
         if (CraftOutputInterceptor.intersectsActiveZone(level, scanArea)) return 0;
-        if (!(entity instanceof ServerPlayer player)) return original.call(instance, entity, level, pos);
+        ServerPlayer player = entity instanceof ServerPlayer serverPlayer ? serverPlayer
+                : rsi$getPlacedBackpackPlayer(level, pos);
+        if (player == null) return original.call(instance, entity, level, pos);
         try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
             return original.call(instance, entity, level, pos);
         }
+    }
+
+    @Unique
+    private ServerPlayer rsi$getPlacedBackpackPlayer(Level level, BlockPos pos) {
+        if (this.rsi$storageReference == null || level.getServer() == null) return null;
+        if (this.rsi$placedBackpackPlayer != null
+                && this.rsi$placedBackpackPlayer.serverLevel() == level) {
+            return this.rsi$placedBackpackPlayer;
+        }
+        if (!this.rsi$operationOwnerResolved) {
+            Optional<GameProfile> recovered = BackpackOperationOwner.resolve(
+                    this.rsi$upgradeTag, this.storageWrapper, level.getServer());
+            this.rsi$operationOwner = recovered.orElse(null);
+            this.rsi$operationOwnerResolved = true;
+        }
+        this.rsi$placedBackpackPlayer = BackpackOperationOwner.createOfflinePlayer(
+                level, pos, this.rsi$operationOwner);
+        return this.rsi$placedBackpackPlayer;
     }
 
     @Inject(method = "pickup", at = @At(value = "HEAD"), remap = false, cancellable = true)

@@ -43,6 +43,7 @@ import com.huanghuang.rsintegration.mods.crabbersdelight.CrabTrapRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
@@ -631,6 +632,10 @@ public final class GenericCraftPacket {
         return machineSelectionMode;
     }
 
+    OutputDestination outputDestination() {
+        return outputDestination;
+    }
+
     public static void handle(GenericCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         handle(packet, contextSupplier, packet.partialPreparation);
     }
@@ -1006,7 +1011,7 @@ public final class GenericCraftPacket {
             @Nullable net.minecraft.core.BlockPos pos, int repeatCount, boolean inferMode,
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
-            @Nullable INetwork network, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable StorageReference storageReference) {
         if (storageEndpoint == null || !forcedRecipes.isEmpty()
                 || !RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return false;
@@ -1027,7 +1032,7 @@ public final class GenericCraftPacket {
         ImmutableRecipeGraph recipeGraph = bindingGraph.graph();
         if (!recipeGraph.recipesById().containsKey(recipeId)) return false;
 
-        Map<StackKey, Integer> available = listAvailable(player, network, storageEndpoint);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         Set<ResourceLocation> reusableCatalystOutputIds =
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
                         ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
@@ -1095,9 +1100,9 @@ public final class GenericCraftPacket {
                     RSIntegrationMod.LOGGER.info(
                             "[RSI-exec] async pure plan ready recipe={} steps={} states={}",
                             recipeId, steps.size(), result.expandedStates());
-                    launchAsyncChain(player, steps,
+                    launchEndpointAsyncChain(player, steps,
                             LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
-                            network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
+                            storageEndpoint, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode);
                 }, failure -> {
@@ -1128,7 +1133,7 @@ public final class GenericCraftPacket {
             @Nullable net.minecraft.core.BlockPos pos, int repeatCount, boolean inferMode,
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
-            @Nullable INetwork network, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable StorageReference storageReference, List<IngredientSpec> scaledSpecs,
             ItemStack recipeOutput, ModType terminalType,
             Map<String, ItemStack> materialLocks) {
@@ -1167,7 +1172,7 @@ public final class GenericCraftPacket {
         projected.computeIfAbsent(outputRef, ignored -> new ArrayList<>()).add(syntheticRoot);
         ImmutableRecipeGraph planningGraph = new ImmutableRecipeGraph(projected);
 
-        Map<StackKey, Integer> available = listAvailable(player, network, storageEndpoint);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         ResourceLocation effectiveDim = dim != null
                 ? dim : player.serverLevel().dimension().location();
         net.minecraft.core.BlockPos effectivePos = pos != null ? pos : player.blockPosition();
@@ -1179,7 +1184,11 @@ public final class GenericCraftPacket {
                         ResourceKey.create(Registries.DIMENSION, effectiveDim), effectivePos),
                 bindingGraph.blockedOutputIds(), false);
 
-        PLAN_REQUESTS.submit(snapshot, 1, player.getServer()::execute,
+        // The synthetic root represents the physical terminal recipe. Plan every
+        // requested execution here so its recursively-produced inputs match the
+        // terminal step appended below; planning one root left later batches
+        // waiting on intermediates that were never scheduled.
+        PLAN_REQUESTS.submit(snapshot, Math.max(1, repeatCount), player.getServer()::execute,
                 RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
                     PureRecipePlanner.Result result = completed.result();
                     if (!result.feasible()) {
@@ -1219,9 +1228,9 @@ public final class GenericCraftPacket {
                     RSIntegrationMod.LOGGER.info(
                             "[RSI-exec] async physical plan ready recipe={} steps={} states={}",
                             recipeId, steps.size(), result.expandedStates());
-                    launchAsyncChain(player, steps,
+                    launchEndpointAsyncChain(player, steps,
                             LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
-                            network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
+                            storageEndpoint, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode);
                 }, failure -> {
@@ -1258,13 +1267,14 @@ public final class GenericCraftPacket {
         tickTypedPreviewRequests(server);
         tickExecutionRequests(server);
         if (RecipeIndex.generationBuildFailed()) {
-            DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request;
-            while ((request = WARM_UP_REQUESTS.poll()) != null) {
+            // Keep even failure notifications incremental. A full warm-up queue
+            // can contain dozens of clicks and draining it here used to create a
+            // server-thread burst exactly when the recipe catalog was unhealthy.
+            DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request = WARM_UP_REQUESTS.poll();
+            if (request != null) {
                 ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
-                if (player != null) {
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.plan.failure.catalog_unavailable"));
-                }
+                if (player != null) player.sendSystemMessage(Component.translatable(
+                        "rsi.plan.failure.catalog_unavailable"));
             }
             return;
         }
@@ -1352,6 +1362,9 @@ public final class GenericCraftPacket {
         // Strip JEI pagination prefix if present (e.g. mod:jei.real_path -> mod:real_path)
         recipeId = unwrapJeiId(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe != null) return recipe;
+
+        recipe = BirdcageEggCatalog.resolve(level, recipeId);
         if (recipe != null) return recipe;
 
         recipe = com.huanghuang.rsintegration.mods.farmersdelight
@@ -1452,6 +1465,34 @@ public final class GenericCraftPacket {
     /** Strip JEI pagination prefix from pseudo-IDs like {@code mod:jei.real_path/page}. */
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
         return com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer.normalize(id);
+    }
+
+    /**
+     * Launches a deferred plan without putting Refined Storage's optional
+     * {@code INetwork} type in the planner callback descriptor. The JVM resolves
+     * every captured invokedynamic type when the callback is created, even when
+     * the captured network value is {@code null} for another storage backend.
+     */
+    private static void launchEndpointAsyncChain(
+            ServerPlayer player, List<ResolutionStep> steps,
+            LegacyExecutionMetrics.Reason legacyReason,
+            CraftStorageEndpoint storageEndpoint, int repeatCount,
+            ResourceLocation recipeId, Map<String, String> forcedRecipes,
+            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            boolean inferMode, @Nullable ItemStack baseItem,
+            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
+            MachineSelectionMode machineSelectionMode) {
+        if ("refinedstorage".equals(
+                storageEndpoint.session().reference().backendId().value())) {
+            launchAsyncChain(player, steps, legacyReason,
+                    CraftStorageEndpoints.legacyNetwork(storageEndpoint), storageEndpoint,
+                    repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem,
+                    targetOutput, outputDestination, machineSelectionMode);
+            return;
+        }
+        launchAsyncChain(player, steps, legacyReason, null, storageEndpoint,
+                repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem,
+                targetOutput, outputDestination, machineSelectionMode);
     }
 
     /** Launch an async craft chain with standard onDone/scheduleNext wiring. */
@@ -2366,8 +2407,8 @@ public final class GenericCraftPacket {
                 // resolver; its short compatibility slice must never reject a normal chain.
                 if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
                         forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
-                        targetOutput, outputDestination, machineSelectionMode, network,
-                        storageEndpoint, executionStorageReference, graphSpecs, recipeOutput,
+                        targetOutput, outputDestination, machineSelectionMode, storageEndpoint,
+                        executionStorageReference, graphSpecs, recipeOutput,
                         modType, materialLocks)) {
                     return;
                 }
@@ -2386,8 +2427,8 @@ public final class GenericCraftPacket {
                 } catch (CraftingPlanningTimeoutException timeout) {
                     if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(player, recipe, recipeId,
                             forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
-                            targetOutput, outputDestination, machineSelectionMode, network,
-                            storageEndpoint, executionStorageReference, graphSpecs, recipeOutput,
+                            targetOutput, outputDestination, machineSelectionMode, storageEndpoint,
+                            executionStorageReference, graphSpecs, recipeOutput,
                             modType, materialLocks)) {
                         return;
                     }
@@ -2488,7 +2529,7 @@ public final class GenericCraftPacket {
             if (!typedFallbackOnly && materialLocks.isEmpty()
                     && queuePureExecutionPlan(player, craftingRecipe, recipeId, forcedRecipes,
                     dim, pos, repeatCount, inferMode, baseItem, targetOutput,
-                    outputDestination, machineSelectionMode, network, storageEndpoint,
+                    outputDestination, machineSelectionMode, storageEndpoint,
                     executionStorageReference)) {
                 return;
             }
@@ -2527,7 +2568,7 @@ public final class GenericCraftPacket {
             } catch (CraftingPlanningTimeoutException timeout) {
                 if (!typedFallbackOnly && queuePureExecutionPlan(player, cr, recipeId, forcedRecipes, dim, pos,
                         repeatCount, inferMode, baseItem, targetOutput, outputDestination,
-                        machineSelectionMode, network, storageEndpoint,
+                        machineSelectionMode, storageEndpoint,
                         executionStorageReference)) {
                     return;
                 }
@@ -2628,7 +2669,7 @@ public final class GenericCraftPacket {
                 if (!typedFallbackOnly && materialLocks.isEmpty() && queuePureExecutionPlan(
                         player, cr2, recipeId, forcedRecipes, dim, pos,
                         repeatCount, inferMode, baseItem, targetOutput, outputDestination,
-                        machineSelectionMode, network, storageEndpoint,
+                        machineSelectionMode, storageEndpoint,
                         executionStorageReference)) {
                     return;
                 }
@@ -2731,7 +2772,7 @@ public final class GenericCraftPacket {
                     if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(
                             player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                             inferMode, baseItem, targetOutput, outputDestination,
-                            machineSelectionMode, network, storageEndpoint,
+                            machineSelectionMode, storageEndpoint,
                             executionStorageReference, smithingSpecs, smithingOutput, modType,
                             materialLocks)) {
                         return;
@@ -2746,7 +2787,7 @@ public final class GenericCraftPacket {
                         if (!typedFallbackOnly && queuePureExecutionPlanForPhysicalRecipe(
                                 player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                                 inferMode, baseItem, targetOutput, outputDestination,
-                                machineSelectionMode, network, storageEndpoint,
+                                machineSelectionMode, storageEndpoint,
                                 executionStorageReference, smithingSpecs, smithingOutput, modType,
                                 materialLocks)) {
                             return;

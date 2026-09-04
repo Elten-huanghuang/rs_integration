@@ -3,7 +3,9 @@ package com.huanghuang.rsintegration.mixin.malum;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilityService;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -27,6 +29,34 @@ public class VoidConduitBlockEntityMixin {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-Resonance] Resonance disk unlocked Malum void-favor crafting at {}",
                     ((BlockEntity) (Object) this).getBlockPos());
+            if (com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+                    .isDisk(stack)) {
+                notifyBdOwner(serverLevel, stack);
+            }
+        }
+    }
+
+    private void notifyBdOwner(ServerLevel level, ItemStack stack) {
+        ServerPlayer recipient = null;
+        var diskId = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+                .getDiskId(stack);
+        if (diskId != null) {
+            var record = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData
+                    .get(level.getServer()).find(diskId);
+            if (record != null && record.owner() != null) {
+                recipient = level.getServer().getPlayerList().getPlayer(record.owner());
+            }
+        }
+        if (recipient == null) {
+            BlockEntity conduit = (BlockEntity) (Object) this;
+            var nearby = level.getNearestPlayer(conduit.getBlockPos().getX() + 0.5D,
+                    conduit.getBlockPos().getY() + 0.5D,
+                    conduit.getBlockPos().getZ() + 0.5D, 16.0D, false);
+            if (nearby instanceof ServerPlayer serverPlayer) recipient = serverPlayer;
+        }
+        if (recipient != null) {
+            recipient.sendSystemMessage(Component.translatable(
+                    "rsi.resonance.void_favor_unlocked"));
         }
     }
 }

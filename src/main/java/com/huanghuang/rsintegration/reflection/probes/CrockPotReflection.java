@@ -13,6 +13,8 @@ public final class CrockPotReflection {
     public static volatile Class<?> foodCategoryClass;
     public static volatile Class<?> foodValuesClass;
     public static volatile Class<?> foodValuesDefinitionClass;
+    public static volatile Class<?> birdcageBlockEntityClass;
+    public static volatile Class<?> parrotFeedingRecipeClass;
 
 
     static {
@@ -21,6 +23,8 @@ public final class CrockPotReflection {
         register("com.sihenzhang.crockpot.base.FoodValues", "foodValuesClass", true);
         // Moved from base to recipe package in CrockPot 1.0.4; still exposes static getFoodValues(ItemStack, Level).
         register("com.sihenzhang.crockpot.recipe.FoodValuesDefinition", "foodValuesDefinitionClass", true);
+        register("com.sihenzhang.crockpot.block.entity.BirdcageBlockEntity", "birdcageBlockEntityClass", true);
+        register("com.sihenzhang.crockpot.recipe.ParrotFeedingRecipe", "parrotFeedingRecipeClass", true);
     }
 
     private static void register(String className, String fieldName, boolean required) {

@@ -183,6 +183,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             tag.remove("RSBlockDimension");
         }
         StorageBackpackUtils.writeReference(tag, reference);
+        BackpackOperationOwner.write(tag, player.getGameProfile());
         player.displayClientMessage(
                 Component.translatable("item.sophisticatedbackpacks.rs_network.bound"), true);
         return InteractionResult.sidedSuccess(false);

@@ -47,6 +47,8 @@ extends AbstractBatchDelegate {
     private Object tablet;
     private List<PedestalInfo> pedestals;
     private boolean craftStarted;
+    private boolean waitingForEmber;
+    private long emberWaitDeadline;
     @Nullable
     private EreAlchemyLock.Lease lockLease;
     @Nullable
@@ -247,6 +249,14 @@ extends AbstractBatchDelegate {
             }
             EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
                     this.level, this.machinePos, (BlockEntity) this.tablet);
+            if (ignition == EmbersBeamCannonIgnition.Result.INSUFFICIENT_EMBER) {
+                this.waitingForEmber = true;
+                this.emberWaitDeadline = this.level.getGameTime()
+                        + EmbersBeamCannonIgnition.ENERGY_WAIT_TICKS;
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Embers] Beam Cannon is below 1000 Ember; waiting up to 10 seconds");
+                return true;
+            }
             if (ignition != EmbersBeamCannonIgnition.Result.STARTED) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Beam Cannon ignition failed: {}", ignition);
                 player.sendSystemMessage(Component.translatable(ignition.translationKey()));
@@ -264,6 +274,39 @@ extends AbstractBatchDelegate {
             releaseAlchemyLease();
             return false;
         }
+    }
+
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (this.waitingForEmber) {
+            EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
+                    level, this.machinePos, be);
+            if (ignition == EmbersBeamCannonIgnition.Result.STARTED) {
+                this.waitingForEmber = false;
+                this.craftStarted = true;
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Embers] Beam Cannon reached 1000 Ember and started the Alchemy Tablet");
+                return workingObservation();
+            }
+            if (ignition == EmbersBeamCannonIgnition.Result.INSUFFICIENT_EMBER) {
+                if (level.getGameTime() < this.emberWaitDeadline) {
+                    return workingObservation();
+                }
+                if (this.player != null) {
+                    this.player.sendSystemMessage(Component.translatable(ignition.translationKey()));
+                }
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Embers] Beam Cannon still below 1000 Ember after 10 seconds");
+                return failObservation("Beam Cannon did not reach 1000 Ember within 10 seconds");
+            }
+            if (this.player != null) {
+                this.player.sendSystemMessage(Component.translatable(ignition.translationKey()));
+            }
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Embers] Beam Cannon ignition failed while waiting for Ember: {}", ignition);
+            return failObservation("Beam Cannon ignition failed: " + ignition);
+        }
+        return super.observeMachineCraft(level, be);
     }
 
     @Override
@@ -295,6 +338,7 @@ extends AbstractBatchDelegate {
     public ItemStack collectResult(ServerPlayer player) {
         releaseAlchemyLease();
         this.craftStarted = false;
+        this.waitingForEmber = false;
         if (this.tablet == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Embers] collectResult: tablet is null");
             return ItemStack.EMPTY;
@@ -365,6 +409,7 @@ extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         releaseAlchemyLease();
         this.craftStarted = false;
+        this.waitingForEmber = false;
         this.clearAllSlots();
     }
 

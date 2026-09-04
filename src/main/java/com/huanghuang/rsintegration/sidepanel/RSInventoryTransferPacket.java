@@ -137,9 +137,12 @@ public final class RSInventoryTransferPacket {
                 new PlayerOffhandInvWrapper(player.getInventory()));
 
         var cacheList = network.getItemStorageCache().getList();
-        var cacheStacks = cacheList != null
-                ? cacheList.getStacks().stream().map(e -> e.getStack()).toList()
-                : List.<ItemStack>of();
+        List<ItemStack> cacheStacks = new ArrayList<>();
+        if (cacheList != null) {
+            for (var entry : cacheList.getStacks()) {
+                cacheStacks.add(entry.getStack());
+            }
+        }
 
         int transferred = 0;
         int missing = 0;

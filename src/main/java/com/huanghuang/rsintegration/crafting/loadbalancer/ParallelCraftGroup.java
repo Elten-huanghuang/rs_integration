@@ -464,6 +464,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 handleFailedStart(worker, "worker start failed at " + worker.machine.pos());
                 return false;
             }
+            // Deferred-output machines only learn the concrete item while
+            // starting. Their operation session was acquired before that, so
+            // attach a companion interceptor now to claim delayed world drops.
+            armCaptureAfterStart(worker, delegate);
             worker.hasStartedOperation = true;
             return true;
         } catch (Exception e) {
@@ -1005,7 +1009,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         OperationResourceCoordinator.CaptureRequest capture = expected != null
                 && !expected.isEmpty() && region != null
                  ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected,
-                         "malum".equals(modType.id()))
+                         "malum".equals(modType.id())
+                                 || delegate.allowsOverlappingOutputCaptureOrigins())
                  : null;
         List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
         BlockPos operationMachinePos = delegate.getOperationMachinePos(worker.machine.pos());
@@ -1037,22 +1042,34 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         var region = delegate.getOutputCaptureRegion();
         if (region == null) return;
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, worker.machine.dim());
-        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(dimension, region, expected);
+        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
+                dimension, region, expected,
+                delegate.allowsOverlappingOutputCaptureOrigins());
         if (handle == null) return;
         worker.operationSession = null;
         legacyCaptureHandles.put(worker.id, handle);
     }
 
+    private void armCaptureAfterStart(WorkerSlot worker, IBatchDelegate delegate) {
+        if (legacyCaptureHandles.containsKey(worker.id)) return;
+        ItemStack expected = delegate.getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return;
+        var region = delegate.getOutputCaptureRegion();
+        if (region == null) return;
+        ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, worker.machine.dim());
+        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
+                dimension, region, expected,
+                delegate.allowsOverlappingOutputCaptureOrigins());
+        if (handle != null) legacyCaptureHandles.put(worker.id, handle);
+    }
+
     private boolean hasCapturedExpectedOutput(WorkerSlot worker) {
         ItemStack expected = worker.delegate.getExpectedOutput();
         if (expected == null || expected.isEmpty()) return false;
-        List<ItemStack> captured;
-        if (worker.operationSession != null) {
-            captured = worker.operationSession.capturedSnapshot();
-        } else {
-            CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.get(worker.id);
-            captured = handle == null ? List.of() : handle.snapshot();
-        }
+        List<ItemStack> captured = new ArrayList<>();
+        if (worker.operationSession != null) captured.addAll(worker.operationSession.capturedSnapshot());
+        CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.get(worker.id);
+        if (handle != null) captured.addAll(handle.snapshot());
         return containsExpectedWorldOutput(captured, expected);
     }
 
@@ -1067,9 +1084,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private List<ItemStack> drainCapture(WorkerSlot worker) {
-        if (worker.operationSession != null) return worker.operationSession.drainCapture();
+        List<ItemStack> captured = new ArrayList<>();
+        if (worker.operationSession != null) captured.addAll(worker.operationSession.drainCapture());
         CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.remove(worker.id);
-        return handle == null ? List.of() : handle.drainAndClose();
+        if (handle != null) captured.addAll(handle.drainAndClose());
+        return List.copyOf(captured);
     }
 
     private void closeOperationResources(WorkerSlot worker) {

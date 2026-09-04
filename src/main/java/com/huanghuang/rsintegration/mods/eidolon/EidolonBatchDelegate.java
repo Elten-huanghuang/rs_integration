@@ -20,6 +20,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -33,7 +35,9 @@ import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Batch delegate for Eidolon Worktable and Crucible. */
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
@@ -70,6 +74,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private Object brazier;              // BrazierTileEntity (null except ritual mode)
     private ItemStack pendingResult;      // Stored result for collectResult()
     private boolean craftCompleted;       // Flag set after instant craft
+    private final List<RitualInputSlot> installedRitualInputs = new ArrayList<>();
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -490,41 +495,31 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
 
-        // Extract reagent from RS
-        Ingredient reagent = getRitualReagent();
-        if (reagent == null || reagent.isEmpty()) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] No reagent in ritual recipe: {}", recipe.getId());
+        if (!hasRequiredRitualHealth(level, player)) return false;
+        List<IngredientSpec> required = getRitualRequiredMaterials();
+        if (required == null || required.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] No inputs in ritual recipe: {}", recipe.getId());
             return false;
         }
-        ItemStack reagentStack = CraftPacketUtils.ensureMaterialAvailable(
-                player, myDim, myPos, reagent, 1, ledger);
-        if (reagentStack.isEmpty()) return false;
+        List<ItemStack> materials = new ArrayList<>(required.size());
+        for (IngredientSpec spec : required) {
+            ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
+                    player, myDim, myPos, spec.ingredient(), spec.count(), ledger);
+            if (stack.isEmpty()) return false;
+            materials.add(stack);
+        }
+        if (!prepareRitualStructure(level, materials)) {
+            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_structure_mismatch"));
+            return false;
+        }
 
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Ritual ledger commit failed");
+            clearInstalledRitualInputs();
             return false;
         }
-
-        // Place reagent on brazier
-        try {
-            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
-            setStack.invoke(brazier, reagentStack.copy());
-            ((BlockEntity) brazier).setChanged();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
-            refundAll();
-            ledger = null;
-            return false;
-        }
-
-        // Start burning
-        try {
-            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
-                    "startBurning", net.minecraft.world.entity.player.Player.class,
-                    Level.class, BlockPos.class);
-            startBurning.invoke(brazier, player, level, myPos);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to start brazier burning", e);
+        if (!placeReagentAndStartRitual(level, materials.get(0), player)) {
+            clearInstalledRitualInputs();
             refundAll();
             ledger = null;
             return false;
@@ -539,7 +534,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         this.craftCompleted = false;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Ritual started: recipe={} reagent={}",
-                recipe.getId(), reagentStack.getHoverName().getString());
+                recipe.getId(), materials.get(0).getHoverName().getString());
         return true;
     }
 
@@ -550,6 +545,35 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getRitualReagent failed", e);
             return null;
+        }
+    }
+
+    /**
+     * Eidolon discovers ritual recipes from the item providers already placed around
+     * the brazier. Check that structure before committing the reagent to storage.
+     */
+    private boolean matchesSelectedRitual(ServerLevel level, ItemStack reagentStack) {
+        if (brazier == null || recipe == null || EidolonReflection.ritualRecipeClass == null
+                || EidolonReflection.brazierTileEntityClass == null) return false;
+        java.lang.reflect.Method setStack = null;
+        try {
+            setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            setStack.invoke(brazier, reagentStack.copyWithCount(1));
+            java.lang.reflect.Method matches = EidolonReflection.ritualRecipeClass.getMethod(
+                    "matches", EidolonReflection.brazierTileEntityClass, Level.class);
+            return Boolean.TRUE.equals(matches.invoke(recipe, brazier, level));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to validate ritual structure", e);
+            return false;
+        } finally {
+            if (setStack != null) {
+                try {
+                    setStack.invoke(brazier, ItemStack.EMPTY);
+                    ((BlockEntity) brazier).setChanged();
+                } catch (Exception e) {
+                    RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to clear ritual validation reagent", e);
+                }
+            }
         }
     }
 
@@ -613,26 +637,13 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
 
-        // First material is reagent
-        ItemStack reagentStack = materials.get(0).copy();
-        reagentStack.setCount(1);
-        try {
-            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
-            setStack.invoke(brazier, reagentStack);
-            ((BlockEntity) brazier).setChanged();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to place reagent on brazier", e);
+        if (!hasRequiredRitualHealth(level, player)) return false;
+        if (!prepareRitualStructure(level, materials)) {
+            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.ritual_structure_mismatch"));
             return false;
         }
-
-        // Start burning
-        try {
-            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
-                    "startBurning", net.minecraft.world.entity.player.Player.class,
-                    Level.class, BlockPos.class);
-            startBurning.invoke(brazier, player, level, myPos);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to start brazier burning", e);
+        if (!placeReagentAndStartRitual(level, materials.get(0), player)) {
+            clearInstalledRitualInputs();
             return false;
         }
 
@@ -643,6 +654,214 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
         this.craftCompleted = false;
         return true;
+    }
+
+    /**
+     * Place the network-reserved sacrificial inputs into empty Eidolon providers.
+     * RitualRecipe requires the complete provider list to match exactly, so inputs
+     * already placed by a player are deliberately not overwritten.
+     */
+    private boolean prepareRitualStructure(ServerLevel level, List<ItemStack> materials) {
+        List<IngredientSpec> required = getRitualRequiredMaterials();
+        if (required == null || materials.size() < required.size() || materials.isEmpty()) return false;
+        clearInstalledRitualInputs();
+        int[] index = {1}; // Reagent is installed on the brazier only after validation.
+        try {
+            if (!placeRitualInputs(level, getRitualPedestalItems(), materials, index, false)
+                    || !placeRitualInputs(level, getRitualFocusItems(), materials, index, true)) {
+                clearInstalledRitualInputs();
+                return false;
+            }
+            ItemStack reagent = materials.get(0).copyWithCount(1);
+            if (!matchesSelectedRitual(level, reagent)) {
+                clearInstalledRitualInputs();
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to populate ritual structure", e);
+            clearInstalledRitualInputs();
+            return false;
+        }
+    }
+
+    private boolean placeRitualInputs(ServerLevel level, List<Ingredient> ingredients,
+                                      List<ItemStack> materials, int[] index, boolean focus) throws Exception {
+        if (ingredients == null || ingredients.isEmpty()) return true;
+        List<?> providers = findRitualProviders(level, focus);
+        Set<Object> used = new HashSet<>();
+        for (Ingredient ingredient : ingredients) {
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            if (index[0] >= materials.size()) return false;
+            Object provider = findEmptyProvider(providers, used);
+            if (provider == null) return false;
+            ItemStack stack = materials.get(index[0]++).copyWithCount(1);
+            if (!ingredient.test(stack)) return false;
+            writeRitualProvider(provider, focus, stack);
+            used.add(provider);
+            installedRitualInputs.add(new RitualInputSlot(provider, focus, stack));
+        }
+        return true;
+    }
+
+    private List<?> findRitualProviders(ServerLevel level, boolean focus) throws Exception {
+        Class<?> ritual = Class.forName("elucent.eidolon.api.ritual.Ritual");
+        Class<?> provider = Class.forName(focus
+                ? "elucent.eidolon.api.ritual.IRitualItemFocus"
+                : "elucent.eidolon.api.ritual.IRitualItemProvider");
+        Object bounds = ritualDefaultBounds(ritual);
+        @SuppressWarnings("unchecked")
+        List<?> providers = (List<?>) ritual.getMethod("getTilesWithinAABB", Class.class, Level.class,
+                        Class.forName("net.minecraft.world.phys.AABB"))
+                .invoke(null, provider, level, bounds);
+        if (focus) return providers;
+        Class<?> focusProvider = Class.forName("elucent.eidolon.api.ritual.IRitualItemFocus");
+        List<Object> nonFocus = new ArrayList<>();
+        for (Object candidate : providers) if (!focusProvider.isInstance(candidate)) nonFocus.add(candidate);
+        return nonFocus;
+    }
+
+    private Object findEmptyProvider(List<?> providers, Set<Object> used) throws Exception {
+        for (Object provider : providers) {
+            if (used.contains(provider)) continue;
+            ItemStack stack = (ItemStack) provider.getClass().getMethod("provide").invoke(provider);
+            if (stack == null || stack.isEmpty()) return provider;
+        }
+        return null;
+    }
+
+    private void writeRitualProvider(Object provider, boolean focus, ItemStack stack) throws Exception {
+        if (focus) {
+            provider.getClass().getMethod("replace", ItemStack.class).invoke(provider, stack);
+        } else {
+            try {
+                // SingleItemTile-based pedestals expose a public setter.
+                provider.getClass().getMethod("setStack", ItemStack.class).invoke(provider, stack);
+            } catch (NoSuchMethodException noSetter) {
+                // HandTileEntity is also an IRitualItemProvider, but intentionally
+                // exposes only provide()/take(). Its stack needs this compatibility
+                // path so a hand pedestal can receive an RSI-reserved sacrifice.
+                java.lang.reflect.Field itemStack = findField(provider.getClass(), "stack");
+                itemStack.setAccessible(true);
+                itemStack.set(provider, stack.copy());
+                provider.getClass().getMethod("sync").invoke(provider);
+            }
+        }
+        if (provider instanceof BlockEntity blockEntity) blockEntity.setChanged();
+    }
+
+    private static java.lang.reflect.Field findField(Class<?> type, String name) throws NoSuchFieldException {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                // Keep looking through TileEntityBase and the provider's parents.
+            }
+        }
+        throw new NoSuchFieldException(type.getName() + '.' + name);
+    }
+
+    private boolean hasRequiredRitualHealth(ServerLevel level, ServerPlayer player) {
+        float required = ritualHealthRequirement();
+        if (required <= 0.0F) return true;
+        try {
+            Class<?> ritual = Class.forName("elucent.eidolon.api.ritual.Ritual");
+            net.minecraft.world.phys.AABB bounds = (net.minecraft.world.phys.AABB) ritualDefaultBounds(ritual);
+            float available = 0.0F;
+            for (Mob mob : level.getEntitiesOfClass(Mob.class, bounds, mob -> !mob.isInvulnerable())) {
+                available += mob.getHealth();
+            }
+            for (Player nearbyPlayer : level.getEntitiesOfClass(Player.class, bounds)) {
+                available += nearbyPlayer.getHealth();
+            }
+            if (available >= required) return true;
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.eidolon.error.insufficient_ritual_health", required, available));
+            return false;
+        } catch (Exception e) {
+            // Do not reject a ritual just because a future Eidolon release changes
+            // its reflection surface; Eidolon still performs its own authoritative check.
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] Failed to inspect ritual health requirement", e);
+            return true;
+        }
+    }
+
+    private Object ritualDefaultBounds(Class<?> ritualClass) throws ReflectiveOperationException {
+        return ritualClass.getMethod("getDefaultBounds", BlockPos.class).invoke(null, myPos);
+    }
+
+    private float ritualHealthRequirement() {
+        try {
+            java.lang.reflect.Field health = EidolonReflection.ritualRecipeClass
+                    .getDeclaredField("healthRequirement");
+            health.setAccessible(true);
+            return health.getFloat(recipe);
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] No readable ritual health requirement", e);
+            return 0.0F;
+        }
+    }
+
+    private boolean placeReagentAndStartRitual(ServerLevel level, ItemStack reagent, ServerPlayer player) {
+        try {
+            ItemStack oneReagent = reagent.copyWithCount(1);
+            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            setStack.invoke(brazier, oneReagent);
+            ((BlockEntity) brazier).setChanged();
+            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
+                    "startBurning", net.minecraft.world.entity.player.Player.class, Level.class, BlockPos.class);
+            startBurning.invoke(brazier, player, level, myPos);
+            return true;
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to start brazier ritual", e);
+            try {
+                brazier.getClass().getMethod("setStack", ItemStack.class).invoke(brazier, ItemStack.EMPTY);
+            } catch (Exception ignored) {}
+            return false;
+        }
+    }
+
+    private void clearInstalledRitualInputs() {
+        for (RitualInputSlot slot : installedRitualInputs) {
+            try {
+                ItemStack current = (ItemStack) slot.provider.getClass().getMethod("provide").invoke(slot.provider);
+                if (current != null && ItemStack.isSameItemSameTags(current, slot.stack)) {
+                    writeRitualProvider(slot.provider, slot.focus, ItemStack.EMPTY);
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-Eidolon] Failed to clear ritual input", e);
+            }
+        }
+        installedRitualInputs.clear();
+    }
+
+    private List<IngredientSpec> getRitualRequiredMaterials() {
+        Ingredient reagent = getRitualReagent();
+        if (reagent == null || reagent.isEmpty()) return null;
+        List<IngredientSpec> result = new ArrayList<>();
+        result.add(new IngredientSpec(reagent, 1));
+        addRitualIngredientSpecs(result, getRitualPedestalItems());
+        addRitualIngredientSpecs(result, getRitualFocusItems());
+        return result;
+    }
+
+    private static void addRitualIngredientSpecs(List<IngredientSpec> result, List<Ingredient> ingredients) {
+        if (ingredients == null) return;
+        for (Ingredient ingredient : ingredients) {
+            if (ingredient != null && !ingredient.isEmpty()) result.add(new IngredientSpec(ingredient, 1));
+        }
+    }
+
+    private static final class RitualInputSlot {
+        private final Object provider;
+        private final boolean focus;
+        private final ItemStack stack;
+
+        private RitualInputSlot(Object provider, boolean focus, ItemStack stack) {
+            this.provider = provider;
+            this.focus = focus;
+            this.stack = stack.copy();
+        }
     }
 
     // ── Worktable ingredient helpers ────────────────────────────
@@ -676,25 +895,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
         if (isRitual) {
-            List<IngredientSpec> specs = new ArrayList<>();
-            Ingredient reagent = getRitualReagent();
-            if (reagent != null && !reagent.isEmpty()) specs.add(new IngredientSpec(reagent, 1));
-            List<Ingredient> pedestal = getRitualPedestalItems();
-            if (pedestal != null) {
-                for (Ingredient ing : pedestal)
-                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-            }
-            List<Ingredient> focus = getRitualFocusItems();
-            if (focus != null) {
-                for (Ingredient ing : focus)
-                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-            }
-            List<Ingredient> invariant = getRitualInvariantItems();
-            if (invariant != null) {
-                for (Ingredient ing : invariant)
-                    if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-            }
-            return specs.isEmpty() ? null : specs;
+            return getRitualRequiredMaterials();
         }
         if (isWorktable) {
             // Both core and extras are consumed by default;
@@ -732,8 +933,8 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         useSharedLedger(sharedLedger);
 
-        // Ritual mode: materials were pre-extracted by chain.
-        // First item is reagent, rest are pedestal/focus items (not consumed).
+        // Ritual mode: materials were pre-extracted by chain in reagent,
+        // pedestal, then focus order. All of them are Eidolon consumables.
         if (isRitual) {
             return tryStartRitualWithMaterials(player, materials);
         }
@@ -950,6 +1151,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         refundAll();
         if (isRitual) {
+            clearInstalledRitualInputs();
             cleanupBrazier();
         } else if (!isWorktable && crucible != null) {
             try {
@@ -967,6 +1169,9 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
         if (isRitual) cleanupBrazier();
+        // Eidolon has consumed the ritual requirements by this point. Forget the
+        // bookkeeping without touching any provider that a player may have reused.
+        installedRitualInputs.clear();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
         resetState();

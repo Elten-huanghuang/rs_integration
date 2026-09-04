@@ -778,6 +778,12 @@ public final class AltarBindingRegistry {
         if ("mythicbotany_mana_infuser".equals(type.id())) {
             return null;
         }
+        // CrockPot's birdcage has one physical workstation. Its native
+        // parrot_feeding/ folder describes the operation, not a separately
+        // bindable machine (whose binding key is simply "birdcage").
+        if ("crockpot_birdcage".equals(type.id())) {
+            return null;
+        }
         if (ModIds.WIZARDS_REBORN.equals(type.id())) {
             if ("crystal_infusion".equals(hint)) {
                 return "crystal_ritual";
@@ -842,6 +848,12 @@ public final class AltarBindingRegistry {
             return "smoker";
         }
         if (ModIds.CROCKPOT.equals(type.id())) {
+            return null;
+        }
+        // Eidolon ritual recipes are conventionally stored under rituals/,
+        // while their physical machine is a Brazier or Crucible. The folder is
+        // recipe grouping rather than a machine subtype.
+        if (ModIds.EIDOLON.equals(type.id())) {
             return null;
         }
         // TACZ gun smith table handles all recipe types (gun/ammo/attachments).

@@ -31,4 +31,17 @@ class EmbersBeamCannonIgnitionContractTest {
         assertTrue(source.contains("REQUIRED_EMBER = 1000.0"));
         assertTrue(source.contains("\"fire\""));
     }
+
+    @Test
+    void lowEmberWaitsTenSecondsBeforeFailingTheCraft() throws IOException {
+        String ignition = Files.readString(EMBERS_SOURCE.resolve("EmbersBeamCannonIgnition.java"));
+        String batch = Files.readString(EMBERS_SOURCE.resolve("EreAlchemyBatchDelegate.java"));
+        String infer = Files.readString(EMBERS_SOURCE.resolve("EreAlchemyInferDelegate.java"));
+
+        assertTrue(ignition.contains("ENERGY_WAIT_TICKS = 10 * 20"));
+        assertTrue(batch.contains("waitingForEmber"));
+        assertTrue(batch.contains("level.getGameTime() < this.emberWaitDeadline"));
+        assertTrue(infer.contains("WAITING_FOR_EMBER"));
+        assertTrue(infer.contains("level.getGameTime() < this.emberWaitDeadline"));
+    }
 }
