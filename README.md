@@ -20,16 +20,9 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 |---|---|
 | Minecraft | 1.20.1 |
 | Forge | 47+ |
-| Refined Storage | 1.12+; required |
+| Refined Storage | 1.12+; Optional |
 | JEI | Required on the client for recipe actions and plan previews |
 | Other integrations | Optional; modules load only when their target mod is present |
-
-## Version 1.4.1 Highlights
-
-- **Intermediate preparation mode**: from the plan screen, prepare only independently craftable intermediate products, return them to storage, and leave the final target untouched.
-- **Safer recursive execution**: blocked branches are pruned while independent preparation chains continue; explicit preparation packets keep the normal strict crafting path unchanged.
-- **Reliable FTB Quests submission**: explicit submit clicks use inventory-first, storage-fallback transactions, suppress only RSI settlement re-entry, and safely fall back to FTB's native handler when no mutation occurs.
-- **Clearer diagnostics**: preparation and quest submission now report eligibility, reservation, partial progress, missing materials, and failure reasons in both English and Chinese.
 
 ## Main Features
 

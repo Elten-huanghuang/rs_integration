@@ -84,6 +84,20 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void birdcageRecipeFolderIsNotTreatedAsMachineSubtype() {
+        registerLeafType("crockpot_birdcage");
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "parrot_feeding", ModType.byId("crockpot_birdcage")));
+    }
+
+    @Test
+    void eidolonRitualFolderDoesNotRejectBoundBrazier() {
+        registerLeafType(ModIds.EIDOLON);
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "rituals", ModType.byId(ModIds.EIDOLON)));
+    }
+
+    @Test
     void kubeJsGeneratedFolderIsNeverTreatedAsMachineSubtype() {
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));

@@ -16,6 +16,8 @@ final class RsiRefinedStorageInsertObserver implements StorageInsertObserver {
     public void beforePerform(ServerPlayer player, StorageReference reference,
                               ItemStack acceptedEstimate) {
         MaterialSources.invalidateFor(player);
-        player.containerMenu.broadcastChanges();
+        if (!(player instanceof net.minecraftforge.common.util.FakePlayer)) {
+            player.containerMenu.broadcastChanges();
+        }
     }
 }

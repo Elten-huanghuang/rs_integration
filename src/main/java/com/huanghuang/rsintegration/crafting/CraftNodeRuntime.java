@@ -89,6 +89,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         this.capture = handle;
     }
 
+    boolean hasCaptureScope() {
+        return capture != null
+                || (operationSession != null && operationSession.hasCaptureScope());
+    }
+
     void attachOutputs(NodeOutputAccumulator outputs) {
         // Some JEI recipes use an item stack only as a clickable representation
         // of a world mutation. Such a delegate proves success from machine state

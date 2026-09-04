@@ -218,7 +218,10 @@ public final class AsyncCraftManager {
             }
         }
         if (!snapshot.isEmpty()) roundRobinCursor = (start + 1) % snapshot.size();
-        for (Runnable callback; (callback = completionQueue.poll()) != null;) {
+        int callbacksRemaining = configuredCompletionCallbacksPerTick();
+        for (Runnable callback; callbacksRemaining > 0
+                && System.nanoTime() - tickStart < tickBudgetNanos
+                && (callback = completionQueue.poll()) != null; callbacksRemaining--) {
             try { callback.run(); }
             catch (RuntimeException | LinkageError e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
         }
@@ -256,6 +259,14 @@ public final class AsyncCraftManager {
                     * 1_000_000L;
         } catch (Exception ignored) {
             return RSIntegrationConfig.DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS * 1_000_000L;
+        }
+    }
+
+    private static int configuredCompletionCallbacksPerTick() {
+        try {
+            return Math.max(1, RSIntegrationConfig.CRAFTING_COMPLETION_CALLBACKS_PER_TICK.get());
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK;
         }
     }
 

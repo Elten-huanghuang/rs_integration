@@ -38,6 +38,9 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
     public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
     public static final int DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS = 8;
+    public static final int DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH = 32;
+    public static final int DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK = 16;
+    public static final int DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK = 1;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
             CraftingPreviewPolicy.DEFAULT_RATE_LIMIT_MS;
     public static final int DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS =
@@ -220,6 +223,9 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_OPERATIONS_PER_DISPATCH;
+    public static ForgeConfigSpec.IntValue CRAFTING_SETTLEMENT_STACKS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_COMPLETION_CALLBACKS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
@@ -862,6 +868,24 @@ public final class RSIntegrationConfig {
                         "Range: 1-40.")
                 .defineInRange("craftingServerTickBudgetMs",
                         DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS, 1, 40);
+        CRAFTING_OPERATIONS_PER_DISPATCH = s
+                .comment("Maximum recipe operations RSI may reserve and commit in one non-vanilla dispatch.",
+                        "Larger graph nodes automatically use the flat, tick-sliced executor.",
+                        "This bounds ledger entries, storage calls, and batch output work per dispatch. Range: 1-256.")
+                .defineInRange("craftingOperationsPerDispatch",
+                        DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH, 1, 256);
+        CRAFTING_SETTLEMENT_STACKS_PER_TICK = s
+                .comment("Maximum distinct completed-product stacks RSI may deliver per crafting chain each tick.",
+                        "Large recursive jobs settle over multiple ticks instead of blocking terminal interaction.",
+                        "Range: 1-256.")
+                .defineInRange("craftingSettlementStacksPerTick",
+                        DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK, 1, 256);
+        CRAFTING_COMPLETION_CALLBACKS_PER_TICK = s
+                .comment("Maximum completed-chain callbacks RSI runs per server tick.",
+                        "Callbacks may schedule the next batch; limiting them preserves server responsiveness.",
+                        "Range: 1-32.")
+                .defineInRange("craftingCompletionCallbacksPerTick",
+                        DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK, 1, 32);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
                 .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
                         "Set to 1 for serial execution (safest); increase for multi-machine speedup.",

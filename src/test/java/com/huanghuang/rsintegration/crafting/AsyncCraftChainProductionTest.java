@@ -152,6 +152,28 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void oversizedMachineGraphNodeUsesTickSlicedFlatExecution() {
+        var machine = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", "machine"), ModType.CUSTOM_GUI,
+                new ResourceLocation("test", "machine"), List.of(), List.of(), false, 33);
+
+        assertTrue(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
+                List.of(machine), 8, 32));
+        assertFalse(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
+                List.of(machine), 8, 33));
+    }
+
+    @Test
+    void oversizedVanillaGraphNodeUsesItsStricterTickLimit() {
+        var vanilla = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"), List.of(), List.of(), false, 9);
+
+        assertTrue(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
+                List.of(vanilla), 8, 32));
+    }
+
+    @Test
     void graphNodeTargetKeepsIntermediateEnchantLevel() {
         ItemStack efficiencyFour = EnchantedBookItem.createForEnchantment(
                 new EnchantmentInstance(Enchantments.BLOCK_EFFICIENCY, 4));
@@ -203,5 +225,28 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
         assertTrue(AsyncCraftChain.matchesGraphFinalOutput(graph, runtimeOutput));
         assertFalse(AsyncCraftChain.matchesGraphFinalOutput(graph,
                 new ItemStack(Items.IRON_SWORD)));
+    }
+
+    @Test
+    void completeGraphRootStillRoutesRuntimeNbtOutputForFlatFallback() {
+        MaterialKey declared = new MaterialKey(Items.DIAMOND_SWORD, null);
+        MaterialSource source = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(0), 0));
+        CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+                List.of(), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.DIAMOND_SWORD), 1, 0,
+                        new ItemStack(Items.DIAMOND_SWORD),
+                        List.of(new RootAllocation(source, declared, 1)))),
+                List.of(), List.of());
+        ItemStack runtimeOutput = new ItemStack(Items.DIAMOND_SWORD);
+        runtimeOutput.getOrCreateTag().putString("malum_runtime_state", "changed");
+
+        ItemStack clickedOutput = new ItemStack(Items.DIAMOND_SWORD);
+        clickedOutput.getOrCreateTag().putString("preview_state", "different");
+
+        assertTrue(AsyncCraftChain.matchesFinalTarget(
+                runtimeOutput, graph, true, clickedOutput));
+        assertFalse(AsyncCraftChain.matchesFinalTarget(
+                runtimeOutput, graph, false, clickedOutput));
     }
 }

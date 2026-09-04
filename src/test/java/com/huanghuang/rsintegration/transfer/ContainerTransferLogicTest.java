@@ -63,6 +63,14 @@ class ContainerTransferLogicTest {
     }
 
     @Test
+    void recognizesBetterBeyondDimensionsVirtualSlotsInjectedIntoAnyMenu() {
+        assertTrue(ContainerTransferLogic.isBetterBeyondDimensionsNetworkSlotClass(
+                "net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot"));
+        assertFalse(ContainerTransferLogic.isBetterBeyondDimensionsNetworkSlotClass(
+                "net.minecraft.world.inventory.Slot"));
+    }
+
+    @Test
     void identifiesSophisticatedBackpackUpgradeSlots() {
         assertTrue(ContainerTransferLogic.isUpgradeSlotClass(
                 "net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase$StorageUpgradeSlot"));

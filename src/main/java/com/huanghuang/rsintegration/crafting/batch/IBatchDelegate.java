@@ -431,6 +431,15 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Whether capture regions from different machine origins may overlap.
+     * The interceptor assigns a newborn item to the nearest region. Keep this
+     * false unless the delegate's output position is tied to its machine.
+     */
+    default boolean allowsOverlappingOutputCaptureOrigins() {
+        return false;
+    }
+
+    /**
      * True when {@link #collectAllResults(ServerPlayer)} can authoritatively
      * remove the completed product from a machine slot even though a defensive
      * world-output capture is also armed. World-spawning delegates remain false

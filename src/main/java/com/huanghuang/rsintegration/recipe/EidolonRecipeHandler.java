@@ -56,49 +56,21 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
             }
         }
 
-        // RitualRecipe: public fields reagent, pedestalItems, focusItems, invariantItems
+        // RitualRecipe: reagent, pedestal items and focus items are all consumed by
+        // Eidolon as ritual requirements. Invariant items deliberately remain out of
+        // the network plan because they are persistent structure requirements.
         try {
             Class<?> ritualClass = Class.forName("elucent.eidolon.recipe.RitualRecipe");
             if (ritualClass.isInstance(recipe)) {
-                List<IngredientSpec> result = new ArrayList<>();
                 try {
-                    java.lang.reflect.Field f = ritualClass.getField("reagent");
-                    Ingredient ing = (Ingredient) f.get(recipe);
-                    if (ing != null && !ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
+                    Ingredient reagent = (Ingredient) ritualClass.getField("reagent").get(recipe);
+                    List<Ingredient> pedestalItems = readRitualItems(ritualClass, recipe, "pedestalItems");
+                    List<Ingredient> focusItems = readRitualItems(ritualClass, recipe, "focusItems");
+                    return ritualNetworkIngredients(reagent, pedestalItems, focusItems);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
                 }
-                try {
-                    java.lang.reflect.Field f = ritualClass.getField("pedestalItems");
-                    @SuppressWarnings("unchecked")
-                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
-                    if (items != null)
-                        for (Ingredient ing : items)
-                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
-                }
-                try {
-                    java.lang.reflect.Field f = ritualClass.getField("focusItems");
-                    @SuppressWarnings("unchecked")
-                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
-                    if (items != null)
-                        for (Ingredient ing : items)
-                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
-                }
-                try {
-                    java.lang.reflect.Field f = ritualClass.getField("invariantItems");
-                    @SuppressWarnings("unchecked")
-                    List<Ingredient> items = (List<Ingredient>) f.get(recipe);
-                    if (items != null)
-                        for (Ingredient ing : items)
-                            if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
-                }
-                if (!result.isEmpty()) return result;
+                return null;
             }
         } catch (ClassNotFoundException e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
@@ -118,6 +90,32 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
             if (!ing.isEmpty()) result.add(new IngredientSpec(ing, 1));
         }
         return result.isEmpty() ? null : result;
+    }
+
+    static List<IngredientSpec> ritualNetworkIngredients(Ingredient reagent,
+                                                           List<Ingredient> pedestalItems,
+                                                           List<Ingredient> focusItems) {
+        List<IngredientSpec> result = new ArrayList<>();
+        addRitualIngredient(result, reagent);
+        addRitualIngredients(result, pedestalItems);
+        addRitualIngredients(result, focusItems);
+        return result.isEmpty() ? null : result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Ingredient> readRitualItems(Class<?> ritualClass, Recipe<?> recipe,
+                                                     String fieldName) throws IllegalAccessException, NoSuchFieldException {
+        Object value = ritualClass.getField(fieldName).get(recipe);
+        return value instanceof List<?> items ? (List<Ingredient>) items : List.of();
+    }
+
+    private static void addRitualIngredients(List<IngredientSpec> result, List<Ingredient> ingredients) {
+        if (ingredients == null) return;
+        for (Ingredient ingredient : ingredients) addRitualIngredient(result, ingredient);
+    }
+
+    private static void addRitualIngredient(List<IngredientSpec> result, Ingredient ingredient) {
+        if (ingredient != null && !ingredient.isEmpty()) result.add(new IngredientSpec(ingredient, 1));
     }
 
     private static List<IngredientSpec> readWorktableArrays(Recipe<?> recipe) {

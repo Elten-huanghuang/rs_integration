@@ -69,6 +69,7 @@ extends AbstractBatchDelegate {
     private int attemptCount;
     private int consecutiveZeroBlackPins;
     private int waitStartTick;
+    private long emberWaitDeadline;
     private ItemStack successResult = ItemStack.EMPTY;
     private boolean succeeded;
     private EreAlchemyMaterials firstAttemptMaterials;
@@ -281,7 +282,6 @@ extends AbstractBatchDelegate {
         }
         ++this.attemptCount;
         this.waitStartTick = this.level.getServer().getTickCount();
-        this.phase = Phase.PLACED;
         // Stop using sharedLedger after first placement — the chain has already
         // committed it. Retries extract directly from the network instead.
         this.usingSharedLedger = false;
@@ -297,6 +297,36 @@ extends AbstractBatchDelegate {
         }
         if (this.phase == Phase.INIT) {
             return false;
+        }
+        if (this.phase == Phase.WAITING_FOR_EMBER) {
+            EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
+                    level, this.machinePos, be);
+            if (ignition == EmbersBeamCannonIgnition.Result.STARTED) {
+                this.phase = Phase.PLACED;
+                this.waitStartTick = level.getServer().getTickCount();
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Embers-Infer] Beam Cannon reached 1000 Ember; attempt {} started",
+                        this.attemptCount);
+                return false;
+            }
+            if (ignition == EmbersBeamCannonIgnition.Result.INSUFFICIENT_EMBER) {
+                if (level.getGameTime() < this.emberWaitDeadline) {
+                    return false;
+                }
+                if (this.player != null) {
+                    this.player.sendSystemMessage(Component.translatable(ignition.translationKey()));
+                }
+                warnOnce("ember_wait_timeout",
+                        "[RSI-Embers-Infer] Beam Cannon still below 1000 Ember after 10 seconds");
+            } else {
+                if (this.player != null) {
+                    this.player.sendSystemMessage(Component.translatable(ignition.translationKey()));
+                }
+                warnOnce("ember_wait_failed",
+                        "[RSI-Embers-Infer] Beam Cannon ignition failed while waiting: {}", ignition);
+            }
+            this.phase = Phase.DONE_FAILED;
+            return true;
         }
         if (this.phase == Phase.PLACED || this.phase == Phase.WAITING) {
             var progressOpt = Reflect.getIntField(this.tablet, "progress");
@@ -703,6 +733,14 @@ extends AbstractBatchDelegate {
             }
             EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
                     this.level, this.machinePos, (BlockEntity) this.tablet);
+            if (ignition == EmbersBeamCannonIgnition.Result.INSUFFICIENT_EMBER) {
+                this.phase = Phase.WAITING_FOR_EMBER;
+                this.emberWaitDeadline = this.level.getGameTime()
+                        + EmbersBeamCannonIgnition.ENERGY_WAIT_TICKS;
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Embers-Infer] Beam Cannon is below 1000 Ember; waiting up to 10 seconds");
+                return true;
+            }
             if (ignition != EmbersBeamCannonIgnition.Result.STARTED) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Beam Cannon ignition failed: {}", ignition);
                 if (this.player != null) {
@@ -711,6 +749,7 @@ extends AbstractBatchDelegate {
                 this.clearAndRefundSurvivors();
                 return false;
             }
+            this.phase = Phase.PLACED;
             return true;
         }
         catch (Exception e) {
@@ -927,6 +966,7 @@ extends AbstractBatchDelegate {
 
     private static enum Phase {
         INIT,
+        WAITING_FOR_EMBER,
         PLACED,
         WAITING,
         DONE_SUCCESS,

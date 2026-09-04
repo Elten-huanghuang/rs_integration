@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.mixin.enigmaticaddons.ArtificialFlowerMixin;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import com.huanghuang.rsintegration.mixin.wizardterracurios.BuffItemMixin;
@@ -19,6 +20,7 @@ import com.huanghuang.rsintegration.resonance.backpack.ResonanceSlot;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -39,6 +43,116 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OptionalDependencyBytecodeTest {
+    private static final String RS_NETWORK_TYPE =
+            "com/refinedmods/refinedstorage/api/network/INetwork";
+    private static final String RS_PACKAGE = "com/refinedmods/refinedstorage";
+    private static final Set<String> RS_ISOLATED_CALLBACK_CLASSES = Set.of(
+            "com/huanghuang/rsintegration/compat/emi/RSEmiOptionalHooks",
+            "com/huanghuang/rsintegration/mixin/sophisticatedbackpacks/InventoryInteractionHelperMixin",
+            "com/huanghuang/rsintegration/network/binding/RSAltarBindingResolver",
+            "com/huanghuang/rsintegration/sidepanel/RSSidePanelNetworkHandler",
+            "com/huanghuang/rsintegration/storage/rs/NativeRefinedStorageDriver",
+            "com/huanghuang/rsintegration/util/TrackedNetworkInsertion");
+
+    @Test
+    void commonCallbacksDoNotCaptureRefinedStorageNetwork() throws IOException {
+        Path classRoot = Path.of("build", "classes", "java", "main");
+        assertTrue(Files.isDirectory(classRoot),
+                () -> "compile the mod before running this test: " + classRoot.toAbsolutePath());
+        TreeSet<String> offenders = new TreeSet<>();
+
+        try (Stream<Path> classes = Files.walk(classRoot)) {
+            classes.filter(path -> path.toString().endsWith(".class")).forEach(path -> {
+                byte[] bytes;
+                try {
+                    bytes = Files.readAllBytes(path);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                String className = classRoot.relativize(path).toString()
+                        .replace('\\', '/').replace(".class", "");
+                if (RS_ISOLATED_CALLBACK_CLASSES.stream()
+                        .anyMatch(className::startsWith)) return;
+                new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        return new MethodVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visitInvokeDynamicInsn(String dynamicName,
+                                                               String dynamicDescriptor,
+                                                               Handle bootstrapMethodHandle,
+                                                               Object... bootstrapMethodArguments) {
+                                if (!"java/lang/invoke/LambdaMetafactory".equals(
+                                        bootstrapMethodHandle.getOwner())) return;
+                                if (dynamicDescriptor.contains(RS_PACKAGE)) {
+                                    offenders.add(className + "#" + name
+                                            + " dynamic " + dynamicDescriptor);
+                                }
+                                for (Object argument : bootstrapMethodArguments) {
+                                    if (argument instanceof Handle handle
+                                            && handle.getDesc().contains(RS_PACKAGE)) {
+                                        offenders.add(className + "#" + name
+                                            + " target " + handle.getName() + handle.getDesc());
+                                    }
+                                }
+                            }
+                        };
+                    }
+                }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            });
+        }
+
+        assertEquals(List.of(), new ArrayList<>(offenders),
+                "callbacks that capture optional RS types:\n"
+                        + String.join("\n", offenders));
+    }
+
+    @Test
+    void deferredEndpointPlannerCallbacksDoNotCaptureRefinedStorageNetwork() throws IOException {
+        AtomicBoolean foundPurePlanner = new AtomicBoolean();
+        AtomicBoolean foundPhysicalPlanner = new AtomicBoolean();
+        List<String> offenders = new ArrayList<>();
+
+        new ClassReader(classBytes(GenericCraftPacket.class)).accept(
+                new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        boolean planner = "queuePureExecutionPlan".equals(name)
+                                || "queuePureExecutionPlanForPhysicalRecipe".equals(name);
+                        if (!planner) return null;
+                        if ("queuePureExecutionPlan".equals(name)) foundPurePlanner.set(true);
+                        else foundPhysicalPlanner.set(true);
+                        if (descriptor.contains(RS_NETWORK_TYPE)) {
+                            offenders.add(name + " method descriptor");
+                        }
+                        return new MethodVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visitInvokeDynamicInsn(String dynamicName,
+                                                               String dynamicDescriptor,
+                                                               Handle bootstrapMethodHandle,
+                                                               Object... bootstrapMethodArguments) {
+                                if (dynamicDescriptor.contains(RS_NETWORK_TYPE)) {
+                                    offenders.add(name + " invokedynamic descriptor");
+                                }
+                                for (Object argument : bootstrapMethodArguments) {
+                                    if (argument instanceof Handle handle
+                                            && handle.getDesc().contains(RS_NETWORK_TYPE)) {
+                                        offenders.add(name + " callback implementation descriptor");
+                                    }
+                                }
+                            }
+                        };
+                    }
+                }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        assertTrue(foundPurePlanner.get());
+        assertTrue(foundPhysicalPlanner.get());
+        assertEquals(List.of(), offenders,
+                "deferred storage-endpoint callbacks must not resolve optional RS types");
+    }
+
     @Test
     void sharedResonanceRuntimeDoesNotLinkRefinedStorageTypes() throws IOException {
         assertNoTypeReference(PassiveEffectEngine.class,

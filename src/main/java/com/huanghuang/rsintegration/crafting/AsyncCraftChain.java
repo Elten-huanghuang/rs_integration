@@ -149,6 +149,9 @@ public final class AsyncCraftChain {
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
+    /** Final delivery is deliberately cursor-based so a deep chain cannot monopolize one tick. */
+    private boolean finalSettlementPrepared;
+    private int finalSettlementCursor;
 
     /**
      * The concrete output the player asked for, captured from the JEI ghost
@@ -177,6 +180,8 @@ public final class AsyncCraftChain {
 
     @Nullable
     private final CraftPlanGraph graph;
+    /** True when {@link #graph} includes the requested terminal recipe and its root output. */
+    private boolean graphDeclaresFinalOutput;
     @Nullable
     private final DagScheduler graphScheduler;
     private boolean useGraphExecution;
@@ -203,6 +208,7 @@ public final class AsyncCraftChain {
     private final OperationBudget craftOperationBudget;
     private final OperationBudget globalOperationBudget;
     private final MachineLeaseRegistry machineLeases;
+    private final CaptureLeaseRegistry captureLeases;
     private final OperationResourceCoordinator operationResources;
     private final OperationExecutionKernel operationKernel;
     private int progressTickCounter;
@@ -257,6 +263,7 @@ public final class AsyncCraftChain {
         // terminal operation is represented as a real graph node.
         GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(true,
                 terminalStep == null ? null : terminalStep.modType());
+        this.graphDeclaresFinalOutput = false;
         this.useGraphExecution = executionDecision.useGraphExecutor();
         RSIntegrationMod.LOGGER.debug(ctx.format(
                 "Using {} execution for graph plan: reason={} detail={} terminalStep={}"),
@@ -322,6 +329,7 @@ public final class AsyncCraftChain {
         AsyncCraftManager manager = AsyncCraftManager.getInstance();
         this.globalOperationBudget = manager.operationBudget();
         this.machineLeases = manager.machineLeases();
+        this.captureLeases = manager.captureLeases();
         this.operationResources = manager.operationResources();
         this.operationKernel = manager.operationKernel();
         int globalTimeoutSeconds;
@@ -331,6 +339,7 @@ public final class AsyncCraftChain {
                 Math.max(1, globalTimeoutSeconds) * 20);
         if (graph != null) {
             this.graph = graph;
+            this.graphDeclaresFinalOutput = true;
             this.graphScheduler = new DagScheduler(graph);
             this.graphMaterials = new MaterialBroker();
             this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
@@ -339,20 +348,22 @@ public final class AsyncCraftChain {
             GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
                     steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList());
             int atomicVanillaLimit = configuredAtomicVanillaGraphLimit();
-            boolean oversizedVanillaNode = steps.stream().anyMatch(step ->
-                    step.modType() == ModType.GENERIC
-                            && step.executions() > atomicVanillaLimit);
-            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedVanillaNode;
+            int dispatchOperationLimit = configuredOperationsPerDispatch();
+            boolean oversizedNode = requiresFlatExecutionForOversizedNode(
+                    steps, atomicVanillaLimit, dispatchOperationLimit);
+            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedNode;
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "Using {} execution for self-contained graph: reason={} detail={}"),
                     useGraphExecution ? "graph" : "flat",
-                    oversizedVanillaNode ? "VANILLA_NODE_REQUIRES_TICK_SLICING"
+                    oversizedNode ? "NODE_REQUIRES_TICK_SLICING"
                             : executionDecision.reason(),
-                    oversizedVanillaNode
-                            ? "vanilla node exceeds atomic per-tick limit " + atomicVanillaLimit
+                    oversizedNode
+                            ? "node exceeds its atomic dispatch limit (vanilla="
+                                    + atomicVanillaLimit + ", machine=" + dispatchOperationLimit + ")"
                             : executionDecision.detail());
         } else {
             this.graph = null;
+            this.graphDeclaresFinalOutput = false;
             this.graphScheduler = null;
             this.graphMaterials = null;
             this.graphAdmissions = null;
@@ -756,8 +767,7 @@ public final class AsyncCraftChain {
         // All done
         if (currentStepIdx >= steps.size()) {
             state = State.COMPLETING;
-            finish(online);
-            return true;
+            return finish(online);
         }
 
         // Execute next step(s)
@@ -903,8 +913,7 @@ public final class AsyncCraftChain {
         // All nodes succeeded -deliver
         if (graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
-            finish(online);
-            return true;
+            return finish(online);
         }
 
         // Check after this tick's machine observations and settlements so an
@@ -1598,7 +1607,8 @@ public final class AsyncCraftChain {
                         && !expected.isEmpty() && region != null
                         ? new OperationResourceCoordinator.CaptureRequest(
                         prepared.machine().dim(), region, expected,
-                        "malum".equals(prepared.step().modType().id())) : null;
+                        "malum".equals(prepared.step().modType().id())
+                                || delegate.allowsOverlappingOutputCaptureOrigins()) : null;
                 if (expected != null && !expected.isEmpty() && region == null) {
                     return GraphDispatchResult.fatal("delegate expects a world output without a capture region");
                 }
@@ -1662,6 +1672,8 @@ public final class AsyncCraftChain {
                 runtime.markStartFailed("delegate rejected graph dispatch after start attempt: delegate="
                         + delegate.getClass().getSimpleName()
                         + " recipe=" + prepared.step().recipeId());
+            } else {
+                attachDeferredGraphCapture(runtime, startDelegate, prepared.machine(), nodeId);
             }
             return GraphDispatchResult.started(runtime);
         } catch (RuntimeException exception) {
@@ -1697,6 +1709,46 @@ public final class AsyncCraftChain {
         return delegate != null
                 && (graphSpecs == null || graphSpecs.isEmpty())
                 && delegate.requiresPrivateLedgerGraphDispatch();
+    }
+
+    /**
+     * Attach capture for delegates whose concrete world output is learned only
+     * while starting. The operation scope is intentionally acquired before
+     * start, so its original capture request can be empty for these machines.
+     */
+    private void attachDeferredGraphCapture(CraftNodeRuntime runtime,
+                                            IBatchDelegate delegate,
+                                            BoundMachine machine,
+                                            NodeId nodeId) {
+        if (runtime == null || delegate == null || machine == null) return;
+        ItemStack expected = delegate.getExpectedOutput();
+        AABB region = delegate.getOutputCaptureRegion();
+        if (expected == null || expected.isEmpty() || region == null) return;
+        if (runtime.hasCaptureScope()) return;
+
+        CaptureLeaseRegistry.Lease lease = captureLeases.tryAcquire(
+                machine.dim(), region, MaterialKey.of(expected),
+                new CaptureLeaseRegistry.Owner(craftId, nodeId, 0),
+                delegate.allowsOverlappingOutputCaptureOrigins());
+        if (lease == null) {
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "Deferred graph output capture unavailable for node={} recipe={} machine={}"),
+                    nodeId, delegate.getClass().getSimpleName(), machine.pos());
+            return;
+        }
+        ResourceKey<Level> dimension = ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+        CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
+                dimension, region, expected,
+                delegate.allowsOverlappingOutputCaptureOrigins());
+        if (handle == null) {
+            captureLeases.release(lease);
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "Deferred graph interceptor unavailable for node={} machine={}"),
+                    nodeId, machine.pos());
+            return;
+        }
+        runtime.attachCapture(CaptureSession.arm(captureLeases, lease, handle));
     }
 
     private GraphDispatchResult dispatchPrivateLedgerGraphNode(
@@ -2774,6 +2826,23 @@ public final class AsyncCraftChain {
         }
     }
 
+    private static int configuredOperationsPerDispatch() {
+        try {
+            return Math.max(1, RSIntegrationConfig.CRAFTING_OPERATIONS_PER_DISPATCH.get());
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH;
+        }
+    }
+
+    static boolean requiresFlatExecutionForOversizedNode(
+            List<CraftingResolver.ResolutionStep> steps, int vanillaOperationLimit,
+            int dispatchOperationLimit) {
+        int vanillaLimit = Math.max(1, vanillaOperationLimit);
+        int machineLimit = Math.max(1, dispatchOperationLimit);
+        return steps.stream().anyMatch(step -> step.executions()
+                > (step.modType() == ModType.GENERIC ? vanillaLimit : machineLimit));
+    }
+
     /**
      * Execute vanilla crafting steps inline, using the chain's virtual inventory
      * and ledger so intermediate outputs feed forward across the entire chain.
@@ -3126,6 +3195,14 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: only {} bound machine(s)"), machines.size());
         } else if (step.executions() <= 1) {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: executions={}"), step.executions());
+        } else if (stepRemaining > configuredOperationsPerDispatch()) {
+            // A ParallelCraftGroup reserves one material/token slice per queued
+            // operation. Keep large orders on the bounded single-worker path;
+            // otherwise one tick materializes every operation before any machine
+            // begins processing it.
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "[LB] skipped: {} remaining operations exceed dispatch limit {}"),
+                    stepRemaining, configuredOperationsPerDispatch());
         } else {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] attempting parallel: {} machines, {} executions"),
                     machines.size(), step.executions());
@@ -3268,11 +3345,12 @@ public final class AsyncCraftChain {
 
         final IBatchDelegate startedDelegate = delegate;
         try {
-            int flatBatch = startedDelegate.prepareFlatBatch(stepRemaining);
-            if (flatBatch <= 0 || flatBatch > stepRemaining) {
+            int allowedBatch = Math.min(stepRemaining, configuredOperationsPerDispatch());
+            int flatBatch = startedDelegate.prepareFlatBatch(allowedBatch);
+            if (flatBatch <= 0 || flatBatch > allowedBatch) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Delegate selected invalid flat batch size {} for {} remaining operation(s)"),
-                        flatBatch, stepRemaining);
+                        "Delegate selected invalid flat batch size {} for {} permitted operation(s)"),
+                        flatBatch, allowedBatch);
                 releasePreparationQuietly(startedDelegate);
                 return null;
             }
@@ -3351,6 +3429,10 @@ public final class AsyncCraftChain {
                     // abort() refunds the ledger, so we must NOT refund here
                     return null;
                 }
+                // Some machines (notably CrockPot's birdcage) determine their
+                // output only while starting. Arm a second capture after that
+                // point so its delayed world drop cannot be picked up first.
+                armOutputCapture(startedDelegate, online);
             } else {
                 // Private-ledger path: tryStartSingleCraft's ensureMaterialAvailable
                 // only sees network + player inventory, NOT virtualInventory. In a
@@ -3403,6 +3485,7 @@ public final class AsyncCraftChain {
 }
                     return null;
                 }
+                armOutputCapture(startedDelegate, online);
             }
         } catch (Exception e) {
             List<ItemStack> escaped = disarmOutputCapture();
@@ -3925,18 +4008,22 @@ public final class AsyncCraftChain {
                 ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
                 : online.level().dimension();
 
-        this.captureHandle = CraftOutputInterceptor.arm(dim, region, expected);
+        if (captureHandle == null) {
+            this.captureHandle = CraftOutputInterceptor.arm(dim, region, expected,
+                    delegate.allowsOverlappingOutputCaptureOrigins());
+        }
     }
 
     private boolean hasCapturedOutput() {
-        return flatOperationSession != null
-                ? flatOperationSession.hasCaptured()
-                : captureHandle != null && captureHandle.hasCaptured();
+        return (flatOperationSession != null && flatOperationSession.hasCaptured())
+                || (captureHandle != null && captureHandle.hasCaptured());
     }
 
     private List<ItemStack> capturedOutputSnapshot() {
-        if (flatOperationSession != null) return flatOperationSession.capturedSnapshot();
-        return captureHandle == null ? List.of() : captureHandle.snapshot();
+        List<ItemStack> captured = new ArrayList<>();
+        if (flatOperationSession != null) captured.addAll(flatOperationSession.capturedSnapshot());
+        if (captureHandle != null) captured.addAll(captureHandle.snapshot());
+        return List.copyOf(captured);
     }
 
     private boolean hasCapturedExpectedCount(ItemStack expected) {
@@ -3955,7 +4042,8 @@ public final class AsyncCraftChain {
         AABB region = delegate.getOutputCaptureRegion();
         OperationResourceCoordinator.CaptureRequest capture = expected != null && !expected.isEmpty()
                 && region != null
-                ? new OperationResourceCoordinator.CaptureRequest(machine.dim(), region, expected)
+                ? new OperationResourceCoordinator.CaptureRequest(machine.dim(), region, expected,
+                        delegate.allowsOverlappingOutputCaptureOrigins())
                 : null;
         BlockPos operationMachinePos = delegate.getOperationMachinePos(machine.pos());
         MachineLeaseRegistry.MachineKey key = new MachineLeaseRegistry.MachineKey(
@@ -3973,11 +4061,13 @@ public final class AsyncCraftChain {
 
     /** Tear down the active capture zone and return whatever it grabbed. */
     private List<ItemStack> disarmOutputCapture() {
+        List<ItemStack> captured = new ArrayList<>();
         OperationExecutionKernel.Session session = flatOperationSession;
-        if (session != null) return session.drainCapture();
+        if (session != null) captured.addAll(session.drainCapture());
         CraftOutputInterceptor.CaptureHandle handle = captureHandle;
         captureHandle = null;
-        return handle == null ? List.of() : handle.drainAndClose();
+        if (handle != null) captured.addAll(handle.drainAndClose());
+        return List.copyOf(captured);
     }
 
     /**
@@ -4147,24 +4237,27 @@ public final class AsyncCraftChain {
 
     //  lifecycle
 
-    private void finish(ServerPlayer online) {
-        if (useGraphExecution && graphMaterials != null) {
+    private boolean finish(ServerPlayer online) {
+        if (!finalSettlementPrepared && useGraphExecution && graphMaterials != null) {
             for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
                 addToVirtualInventory(stack);
             }
         }
-        if (!commitLedger(ledger, online)) {
+        if (!finalSettlementPrepared && !commitLedger(ledger, online)) {
             RSIntegrationMod.LOGGER.warn(ctx.format("Commit failed for player {} after {} steps"),
                     online.getName().getString(), steps.size());
             online.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
             abort("Final commit failed",
                     Component.translatable("rsi.async.abort.final_commit_failed"));
-            return;
+            return true;
         }
+        finalSettlementPrepared = true;
 
-        if (storageEndpoint != null) {
-            for (ItemStack vi : virtualInventory) {
-                if (!vi.isEmpty()) {
+        int stackBudget = finalSettlementStacksPerTick();
+        while (finalSettlementCursor < virtualInventory.size() && stackBudget-- > 0) {
+            ItemStack vi = virtualInventory.get(finalSettlementCursor++);
+            if (!vi.isEmpty()) {
+                if (storageEndpoint != null) {
                     boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
                             && matchesFinalTarget(vi);
                     ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
@@ -4180,11 +4273,7 @@ public final class AsyncCraftChain {
                     if (!leftover.isEmpty()) {
                         safeGiveToPlayer(online, leftover);
                     }
-                }
-            }
-        } else {
-            for (ItemStack vi : virtualInventory) {
-                if (!vi.isEmpty()) {
+                } else {
                     // Keep the standalone path identical to the RS player's
                     // inventory destination: insert first, then deliver only
                     // a genuine remainder.  ItemHandlerHelper can trigger
@@ -4197,17 +4286,42 @@ public final class AsyncCraftChain {
             }
         }
 
+        if (finalSettlementCursor < virtualInventory.size()) {
+            maybeSendProgress(online, false);
+            return false;
+        }
+
         state = State.COMPLETED;
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "->OMPLETED steps=" + steps.size());
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
         sendTerminalProgress(online);
         fireOnDone();
+        return true;
+    }
+
+    private static int finalSettlementStacksPerTick() {
+        try {
+            return Math.max(1, RSIntegrationConfig.CRAFTING_SETTLEMENT_STACKS_PER_TICK.get());
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK;
+        }
     }
 
     private boolean matchesFinalTarget(ItemStack stack) {
+        return matchesFinalTarget(stack, graph, graphDeclaresFinalOutput, targetOutput);
+    }
+
+    static boolean matchesFinalTarget(ItemStack stack, @Nullable CraftPlanGraph graph,
+                                      boolean graphDeclaresFinalOutput,
+                                      @Nullable ItemStack targetOutput) {
         if (stack.isEmpty()) return false;
-        if (useGraphExecution && graph != null) {
+        // A complete graph remains the authoritative output declaration even
+        // when its adapters require legacy flat execution. Restrict this to
+        // self-contained graphs: compatibility graphs describe only terminal
+        // inputs, so their roots are intermediate materials rather than the
+        // requested product.
+        if (graphDeclaresFinalOutput && graph != null) {
             return matchesGraphFinalOutput(graph, stack);
         }
         if (targetOutput == null || targetOutput.isEmpty()) return false;

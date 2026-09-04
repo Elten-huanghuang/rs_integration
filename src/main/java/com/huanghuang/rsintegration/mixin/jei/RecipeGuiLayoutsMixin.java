@@ -877,6 +877,9 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
+        if (rsi$isBirdcageEggDisplay(recipe)) {
+            return "crockpot_birdcage";
+        }
         if (recipe instanceof com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe) {
             return "apotheosis_gem_cutting";
         }
@@ -995,6 +998,9 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ResourceLocation getRecipeId(Object recipe) {
         String className = recipe.getClass().getName();
+
+        ResourceLocation birdcageEggId = rsi$birdcageEggRecipeId(recipe);
+        if (birdcageEggId != null) return birdcageEggId;
 
         ResourceLocation wishingFountainId = WishingFountainRecipeIdResolver.resolve(recipe);
         if (wishingFountainId != null) return wishingFountainId;
@@ -1551,6 +1557,31 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
+    private static boolean rsi$isBirdcageEggDisplay(Object recipe) {
+        return recipe != null && recipe.getClass().getName().equals(
+                "com.sihenzhang.crockpot.integration.jei.ParrotLayingEggsRecipeCategory$ParrotLayingEggsRecipeWrapper");
+    }
+
+    /**
+     * CrockPot exposes meat-to-egg entries only as JEI wrappers. Their minimum
+     * output distinguishes ordinary meat (1..1) from monster meat (0..1).
+     */
+    @Unique
+    private static ResourceLocation rsi$birdcageEggRecipeId(Object recipe) {
+        if (!rsi$isBirdcageEggDisplay(recipe)) return null;
+        try {
+            java.lang.reflect.Field min = recipe.getClass().getDeclaredField("min");
+            min.setAccessible(true);
+            return min.getInt(recipe) > 0
+                    ? com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog.MEAT_EGG_ID
+                    : com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog.MONSTER_MEAT_EGG_ID;
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Birdcage egg display ID recovery failed", e);
+            return null;
+        }
+    }
+
+    @Unique
     private static Runnable createHandler(Object recipe, ResourceLocation recipeId,
                                            ResourceLocation dim, BlockPos machinePos, String filter,
                                            @javax.annotation.Nullable ItemStack faSmithingBase,
@@ -1884,6 +1915,9 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ModType computeModType(Object recipe) {
         String className = recipe.getClass().getName();
+        if (rsi$isBirdcageEggDisplay(recipe)) {
+            return ModType.byId("crockpot_birdcage");
+        }
         if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
             return ModType.byId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID);
         }

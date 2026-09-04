@@ -32,11 +32,12 @@ public final class FtbQuestSubmissionExecutor {
     private FtbQuestSubmissionExecutor() {}
 
     public static void submit(ServerPlayer player, long questId, INetwork network) {
-        submit(player, questId, network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network), network);
+        submit(player, questId,
+                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
     }
 
     public static void submit(ServerPlayer player, long questId,
-                               CraftStorageEndpoint endpoint, @Nullable INetwork network) {
+                               CraftStorageEndpoint endpoint) {
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
         if (file == null || file.isLoading() || data == null || data.isLocked()) {
@@ -51,14 +52,18 @@ public final class FtbQuestSubmissionExecutor {
             return;
         }
         try {
-            file.withPlayerContext(player, () -> submitLocked(player, data, quest, endpoint, network));
+            file.withPlayerContext(player,
+                    () -> submitLocked(player, data, quest, endpoint));
         } finally {
             ACTIVE.remove(key);
         }
     }
 
     private static void submitLocked(ServerPlayer player, TeamData data, Quest quest,
-                                     CraftStorageEndpoint endpoint, @Nullable INetwork network) {
+                                     CraftStorageEndpoint endpoint) {
+        INetwork network = endpoint != null && "refinedstorage".equals(
+                endpoint.session().reference().backendId().value())
+                ? CraftStorageEndpoints.legacyNetwork(endpoint) : null;
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.inspect(quest, data, true);
         if (!snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));

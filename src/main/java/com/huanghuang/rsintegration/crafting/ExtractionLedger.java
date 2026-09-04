@@ -563,27 +563,7 @@ public final class ExtractionLedger implements AutoCloseable {
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> networkTemplates = new LinkedHashMap<>();
         LinkedHashMap<CraftingResolver.StackKey, Integer> networkCounts = new LinkedHashMap<>();
         if (network != null || storageEndpoint != null) {
-            List<ItemStack> stored = networkEntryCache.computeIfAbsent(network, n -> {
-                if (storageEndpoint != null) {
-                    return storageEndpoint.snapshot(player).snapshot()
-                            .map(snapshot -> snapshot.items().stream().map(item -> {
-                                ItemStack stack = item.stack();
-                                stack.setCount((int) Math.min(Integer.MAX_VALUE, item.amount()));
-                                return stack;
-                            }).toList())
-                            .orElseGet(List::of);
-                }
-                List<ItemStack> list = new ArrayList<>();
-                if (n == null) return list;
-                var cache = n.getItemStorageCache();
-                if (cache != null) {
-                    for (var entry : cache.getList().getStacks()) {
-                        ItemStack stack = entry.getStack();
-                        if (!stack.isEmpty()) list.add(stack);
-                    }
-                }
-                return list;
-            });
+            List<ItemStack> stored = networkEntries(network, player);
             collectMatchingAvailability(stored, ingredient, pendingNet,
                     networkTemplates, networkCounts);
         }
@@ -1427,26 +1407,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack findAvailableInNetwork(INetwork network, Ingredient ingredient, int needed,
                                              @Nullable ServerPlayer player) {
         try {
-            List<ItemStack> stacks = networkEntryCache.computeIfAbsent(network, n -> {
-                if (storageEndpoint != null && player != null) {
-                    return storageEndpoint.snapshot(player).snapshot()
-                            .map(snapshot -> snapshot.items().stream().map(item -> {
-                                ItemStack stack = item.stack();
-                                stack.setCount((int) Math.min(Integer.MAX_VALUE, item.amount()));
-                                return stack;
-                            }).toList())
-                            .orElseGet(List::of);
-                }
-                List<ItemStack> list = new ArrayList<>();
-                var cache = n.getItemStorageCache();
-                if (cache != null) {
-                    for (var entry : cache.getList().getStacks()) {
-                        ItemStack s = entry.getStack();
-                        if (!s.isEmpty()) list.add(s);
-                    }
-                }
-                return list;
-            });
+            List<ItemStack> stacks = networkEntries(network, player);
             if (stacks.isEmpty()) return ItemStack.EMPTY;
             if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
                 stacks = new ArrayList<>(stacks);
@@ -2037,6 +1998,36 @@ public final class ExtractionLedger implements AutoCloseable {
                 entriesById.remove(removed.id);
             }
         }
+    }
+
+    private List<ItemStack> networkEntries(@Nullable INetwork network,
+                                           @Nullable ServerPlayer player) {
+        List<ItemStack> cached = networkEntryCache.get(network);
+        if (cached != null) return cached;
+
+        List<ItemStack> loaded;
+        if (storageEndpoint != null && player != null) {
+            loaded = storageEndpoint.snapshot(player).snapshot()
+                    .map(snapshot -> snapshot.items().stream().map(item -> {
+                        ItemStack stack = item.stack();
+                        stack.setCount((int) Math.min(Integer.MAX_VALUE, item.amount()));
+                        return stack;
+                    }).toList())
+                    .orElseGet(List::of);
+        } else {
+            loaded = new ArrayList<>();
+            if (network != null) {
+                var cache = network.getItemStorageCache();
+                if (cache != null) {
+                    for (var entry : cache.getList().getStacks()) {
+                        ItemStack stack = entry.getStack();
+                        if (!stack.isEmpty()) loaded.add(stack);
+                    }
+                }
+            }
+        }
+        networkEntryCache.put(network, loaded);
+        return loaded;
     }
 
     private void decrementPending(Entry entry) {

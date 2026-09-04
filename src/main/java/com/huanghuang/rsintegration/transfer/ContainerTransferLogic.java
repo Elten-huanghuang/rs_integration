@@ -37,6 +37,15 @@ final class ContainerTransferLogic {
             "com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer";
     private static final String BD_STORAGE_MENU_PREFIX =
             "com.wintercogs.beyonddimensions.common.menu.Dimensions";
+    /**
+     * Better Beyond Dimensions injects these network-backed display slots into
+     * otherwise ordinary menus (chests, backpacks, machines). They render a
+     * copy of network contents, so treating them as source inventory slots
+     * would insert the display stack into the destination without removing a
+     * real container item.
+     */
+    private static final String BBD_NETWORK_SLOT =
+            "net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot";
     private static final String STORAGE_UPGRADE_SLOT =
             "net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase$StorageUpgradeSlot";
     private static final String BACKPACK_UPGRADE_SLOT =
@@ -84,6 +93,7 @@ final class ContainerTransferLogic {
         boolean hasCrafting = hasCraftingContainer(menu);
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
+            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
             if (isPlayerInventorySlot(player, menu, slotIndex, slot) || isUpgradeSlot(slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
             if (slot.container instanceof CraftingContainer) continue;
@@ -151,6 +161,7 @@ final class ContainerTransferLogic {
 
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
+            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
             if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
             if (isUpgradeSlot(slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
@@ -224,6 +235,7 @@ final class ContainerTransferLogic {
 
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
+            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
             if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
             if (hasCrafting && isResultSlot(slot)) continue;
             if (slot.container instanceof CraftingContainer) continue;
@@ -459,6 +471,21 @@ final class ContainerTransferLogic {
         return !menuClassName.endsWith("DimensionsNetMenu")
                 && !menuClassName.endsWith("DimensionsCraftMenu")
                 && !menuClassName.endsWith("DimensionsCraftMenuTerminal");
+    }
+
+    /** Identifies BBD's virtual network slot without linking the optional jar. */
+    static boolean isBetterBeyondDimensionsNetworkSlot(Slot slot) {
+        if (slot == null) return false;
+        Class<?> type = slot.getClass();
+        while (type != null && type != Object.class) {
+            if (isBetterBeyondDimensionsNetworkSlotClass(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    static boolean isBetterBeyondDimensionsNetworkSlotClass(String className) {
+        return BBD_NETWORK_SLOT.equals(className);
     }
 
     private static boolean isBoundToBeyondDimensionsNetwork(ItemStack stack,

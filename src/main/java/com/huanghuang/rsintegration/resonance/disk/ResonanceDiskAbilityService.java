@@ -8,6 +8,7 @@ import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.ModList;
 
 public final class ResonanceDiskAbilityService {
 
@@ -39,7 +40,22 @@ public final class ResonanceDiskAbilityService {
     }
 
     public static UnlockResult unlockDiskStack(ServerLevel level, ItemStack stack, int ability) {
-        if (!(stack.getItem() instanceof ResonanceDiskItem diskItem)
+        // BD resonance disks have their own UUID-owned persistence and do not
+        // depend on Refined Storage's StorageDiskItem hierarchy.
+        if (com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess.isDisk(stack)) {
+            var diskId = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+                    .getDiskId(stack);
+            if (diskId == null) return UnlockResult.NO_RESONANCE_DISK;
+            var data = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData
+                    .get(level.getServer());
+            return data.unlock(diskId, ability)
+                    ? UnlockResult.UNLOCKED : UnlockResult.ALREADY_UNLOCKED;
+        }
+
+        // Do not resolve ResonanceDiskItem when RS is absent: it subclasses
+        // StorageDiskItem, which is not present in BD-only or Malum-only packs.
+        if (!ModList.get().isLoaded("refinedstorage")
+                || !(stack.getItem() instanceof ResonanceDiskItem diskItem)
                 || !diskItem.isValid(stack)) {
             return UnlockResult.NO_RESONANCE_DISK;
         }
