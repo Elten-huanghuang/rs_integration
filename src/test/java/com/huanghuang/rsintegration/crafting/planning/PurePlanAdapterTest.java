@@ -12,7 +12,24 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class PurePlanAdapterTest {
+class PurePlanAdapterTest extends com.huanghuang.rsintegration.testutil.BootstrapTest {
+    @Test
+    void keepsThePlannedUnbreakableStateForThePhysicalSmithingDelegate() {
+        MaterialRef output = new MaterialRef(new ResourceLocation("minecraft:stone_sword"), "");
+        MaterialRef demanded = new MaterialRef(output.itemId(), "{Unbreakable:1}");
+        RecipeNode recipe = new RecipeNode(id("smithing"), output, 1, List.of(), "smithing",
+                new ResourceLocation("minecraft:smithing"));
+        var result = new PureRecipePlanner.Result(true,
+                List.of(new PureRecipePlanner.PlannedStep(recipe.recipeId(), 1, demanded)), List.of(), Map.of());
+
+        var steps = PurePlanAdapter.toResolutionSteps(result,
+                new ImmutableRecipeGraph(Map.of(output, List.of(recipe))));
+
+        org.junit.jupiter.api.Assertions.assertNotNull(steps.get(0).syntheticOutput());
+        org.junit.jupiter.api.Assertions.assertTrue(steps.get(0).syntheticOutput().getTag()
+                .getBoolean("Unbreakable"));
+        org.junit.jupiter.api.Assertions.assertNull(steps.get(0).syntheticInput());
+    }
     @Test
     void preservesTypedIntermediateExecutionRoute() {
         MaterialRef cost = material("cost");

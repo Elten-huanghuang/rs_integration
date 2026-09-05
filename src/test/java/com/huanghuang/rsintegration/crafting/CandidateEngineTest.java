@@ -22,6 +22,58 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CandidateEngineTest extends BootstrapTest {
 
     @Test
+    void typedSmithingCandidatesCarryTheModifiedWoodenSwordAcrossTwoUpgrades() throws Exception {
+        var template = Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE);
+        var addition = Ingredient.of(Items.NETHERITE_INGOT);
+        var stoneRecipe = new net.minecraft.world.item.crafting.SmithingTransformRecipe(
+                new ResourceLocation("test:modified_stone"), template,
+                Ingredient.of(Items.WOODEN_SWORD), addition, new ItemStack(Items.STONE_SWORD));
+        var ironRecipe = new net.minecraft.world.item.crafting.SmithingTransformRecipe(
+                new ResourceLocation("test:modified_iron"), template,
+                Ingredient.of(Items.STONE_SWORD), addition, new ItemStack(Items.IRON_SWORD));
+        ItemStack actual = new ItemStack(Items.WOODEN_SWORD);
+        actual.setTag(net.minecraft.nbt.TagParser.parseTag(
+                "{Unbreakable:1b,RepairCost:8,Damage:0,itemModifier:\"celestial_forge:vicious\"}"));
+        var demand = net.minecraftforge.common.crafting.PartialNBTIngredient.of(Items.IRON_SWORD,
+                net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
+        var index = Map.of(Items.STONE_SWORD, List.of(new RecipeIndex.Entry(stoneRecipe,
+                com.huanghuang.rsintegration.ModType.GENERIC, new ResourceLocation("minecraft:smithing"))));
+        ItemStack inherited = CandidateEngine.findStockedSmithingOutput(ironRecipe,
+                stack -> IngredientMatcher.test(demand, stack),
+                Map.of(new CraftingResolver.StackKey(actual.getItem(), actual.getTag().toString()), 1),
+                index, net.minecraft.core.RegistryAccess.EMPTY, new java.util.HashSet<>(), () -> false);
+        assertTrue(inherited.is(Items.IRON_SWORD));
+        assertEquals(actual.getTag(), inherited.getTag());
+        var pinned = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler.requireDemandedOutputTag(
+                ironRecipe, new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler()
+                        .getIngredients(ironRecipe), inherited);
+        ItemStack stone = new ItemStack(Items.STONE_SWORD);
+        stone.setTag(actual.getTag().copy());
+        assertTrue(IngredientMatcher.test(pinned.get(1).ingredient(), stone));
+        stone.getTag().putString("itemModifier", "celestial_forge:other");
+        org.junit.jupiter.api.Assertions.assertFalse(IngredientMatcher.test(pinned.get(1).ingredient(), stone));
+    }
+
+    @Test
+    void smithingCandidateInheritsDemandEvenWhenDeclaredResultContainsDefaultDamage() {
+        ItemStack declared = new ItemStack(Items.STONE_SWORD);
+        declared.getOrCreateTag().putInt("Damage", 0);
+        var recipe = new net.minecraft.world.item.crafting.SmithingTransformRecipe(
+                new ResourceLocation("minecraft:stone_sword_smithing"),
+                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                Ingredient.of(Items.WOODEN_SWORD), Ingredient.of(Items.STONE), declared);
+        ItemStack required = new ItemStack(Items.STONE_SWORD);
+        required.getOrCreateTag().putInt("Unbreakable", 1);
+        Ingredient demand = net.minecraftforge.common.crafting.StrictNBTIngredient.of(required);
+
+        ItemStack candidate = CandidateEngine.inheritSmithingBaseTag(recipe, declared, demand);
+
+        assertTrue(IngredientMatcher.test(demand, candidate));
+        assertTrue(candidate.getTag().getBoolean("Unbreakable"));
+        assertEquals(0, declared.getTag().getInt("Unbreakable"));
+    }
+
+    @Test
     void timedOutScoringTailUsesNeutralDefaults() {
         ResourceLocation scored = new ResourceLocation("example", "scored");
         ResourceLocation timedOut = new ResourceLocation("example", "timed_out");

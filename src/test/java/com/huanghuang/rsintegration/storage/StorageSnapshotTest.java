@@ -17,6 +17,41 @@ class StorageSnapshotTest extends BootstrapTest {
     private static final StorageBackendId BACKEND = new StorageBackendId("test");
 
     @Test
+    void partialUnbreakableDemandFindsTheActualModifiedSwordInStorage() throws Exception {
+        ItemStack actual = new ItemStack(Items.WOODEN_SWORD);
+        actual.setTag(net.minecraft.nbt.TagParser.parseTag(
+                "{Unbreakable:1b,RepairCost:8,Damage:0,itemModifier:\"celestial_forge:vicious\"}"));
+        ItemStack damaged = actual.copy();
+        damaged.setDamageValue(1);
+        var snapshot = new StorageSnapshot(BACKEND, List.of(
+                new StoredItem(key(actual), 1), new StoredItem(key(damaged), 1)));
+        var demand = net.minecraftforge.common.crafting.PartialNBTIngredient.of(Items.WOODEN_SWORD,
+                net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
+        var matches = snapshot.match(demand).items();
+        assertEquals(1, matches.size());
+        assertEquals(actual.getTag(), matches.get(0).stack().getTag());
+    }
+
+    @Test
+    void unbreakableToolMatchingUsesTheSameSemanticsAsTheExtractionLedger() {
+        ItemStack required = new ItemStack(Items.STONE_SWORD);
+        required.getOrCreateTag().putInt("Unbreakable", 1);
+        ItemStack actual = new ItemStack(Items.STONE_SWORD);
+        actual.getOrCreateTag().putBoolean("Unbreakable", true);
+        actual.setDamageValue(0);
+        ItemStack damaged = actual.copy();
+        damaged.setDamageValue(5);
+        StorageSnapshot snapshot = new StorageSnapshot(BACKEND, List.of(
+                new StoredItem(key(actual), 1), new StoredItem(key(damaged), 1),
+                new StoredItem(key(new ItemStack(Items.STONE_SWORD)), 1)));
+
+        var matches = snapshot.match(net.minecraftforge.common.crafting.StrictNBTIngredient.of(required));
+
+        assertEquals(1, matches.items().size());
+        assertEquals(key(actual), matches.items().get(0).key());
+    }
+
+    @Test
     void exactCountsKeepNbtVariantsSeparateAndUseLongAmounts() {
         ItemStack red = namedDiamond("red");
         ItemStack blue = namedDiamond("blue");

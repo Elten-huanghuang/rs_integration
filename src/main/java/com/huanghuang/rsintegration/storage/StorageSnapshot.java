@@ -90,7 +90,7 @@ public final class StorageSnapshot {
             }
             List<StoredItem> matches = new ArrayList<>();
             for (StoredItem item : items) {
-                if (ingredient.test(item.stack())) {
+                if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, item.stack())) {
                     matches.add(item);
                 }
             }

@@ -782,7 +782,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     for (var ingEntry : neededByIngredient.entrySet()) {
                         if (isContainerFluidIngredient(ingEntry.getKey())) continue;
                         long available = snapshot.items().stream()
-                                .filter(item -> ingEntry.getKey().test(item.stack()))
+                                .filter(item -> IngredientMatcher.test(ingEntry.getKey(), item.stack()))
                                 .mapToLong(com.huanghuang.rsintegration.storage.StoredItem::amount)
                                 .sum();
                         if (available < ingEntry.getValue()) {
@@ -801,7 +801,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     int available = 0;
                     for (var s : cache.getList().getStacks()) {
                         ItemStack stored = s.getStack();
-                        if (!stored.isEmpty() && ingEntry.getKey().test(stored)) {
+                        if (!stored.isEmpty() && IngredientMatcher.test(ingEntry.getKey(), stored)) {
                             available += stored.getCount();
                         }
                     }

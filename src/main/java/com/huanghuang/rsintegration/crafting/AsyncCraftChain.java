@@ -499,7 +499,10 @@ public final class AsyncCraftChain {
      * {@linkplain #isPrimaryStep primary step}.
      */
     private void applyTargetOutput(AbstractBatchDelegate abd) {
-        if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
+        ItemStack planned = steps.get(currentStepIdx).syntheticOutput();
+        if (planned != null && !planned.isEmpty()) {
+            abd.setTargetOutput(planned);
+        } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
             abd.setTargetOutput(targetOutput);
         }
     }
@@ -2903,6 +2906,10 @@ public final class AsyncCraftChain {
                 // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
                 List<IngredientSpec> specs =
                         CraftPacketUtils.extractIngredientSpecs(recipe);
+                if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+                    specs = SmithingRecipeHandler.requireDemandedOutputTag(
+                            smithing, specs, step.syntheticOutput());
+                }
                 if (specs == null || specs.isEmpty()) continue;
                 List<ItemStack> consumedInputs = new ArrayList<>();
 
@@ -2913,7 +2920,7 @@ public final class AsyncCraftChain {
                     var iter = workingInventory.iterator();
                     while (iter.hasNext() && stillNeeded > 0) {
                         ItemStack vi = iter.next();
-                        if (spec.ingredient().test(vi)) {
+                        if (IngredientMatcher.test(spec.ingredient(), vi)) {
                             int take = Math.min(stillNeeded, vi.getCount());
                             if (!captured) consumedInputs.add(vi.copyWithCount(1));
                             captured = true;
@@ -3015,7 +3022,7 @@ public final class AsyncCraftChain {
             boolean captured = false;
             for (int i = 0; i < workingInventory.size() && stillNeeded > 0; i++) {
                 ItemStack available = workingInventory.get(i);
-                if (available.isEmpty() || !ingredient.test(available)) continue;
+                if (available.isEmpty() || !IngredientMatcher.test(ingredient, available)) continue;
                 modifiedSlots.putIfAbsent(i, available.copy());
                 if (!captured && ingIdx < consumed.length) {
                     consumed[ingIdx] = available.copyWithCount(1);
@@ -3678,7 +3685,9 @@ public final class AsyncCraftChain {
 
         this.machineCount = group.getChildCount();
         group.setMachineServer(server);
-        if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
+        if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
+            group.setTargetOutput(step.syntheticOutput());
+        } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
             group.setTargetOutput(targetOutput);
         }
         RSIntegrationMod.LOGGER.info(ctx.format("Load-balanced: {} machines for recipe {}"),
@@ -3899,7 +3908,7 @@ public final class AsyncCraftChain {
             var iter = virtualInventory.iterator();
             while (iter.hasNext() && needed > 0) {
                 ItemStack vi = iter.next();
-                if (spec.ingredient().test(vi)) {
+                if (IngredientMatcher.test(spec.ingredient(), vi)) {
                     int take = Math.min(needed, vi.getCount());
                     ItemStack taken = vi.split(take);
                     if (vi.isEmpty()) iter.remove();

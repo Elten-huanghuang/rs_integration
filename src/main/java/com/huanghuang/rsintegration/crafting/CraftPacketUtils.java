@@ -241,7 +241,7 @@ public final class CraftPacketUtils {
                         var iter = virtualInventory.iterator();
                         while (iter.hasNext() && stillNeeded > 0) {
                             ItemStack vItem = iter.next();
-                            if (ing.test(vItem) && matchesIngredientTags(vItem, ing)) {
+                            if (IngredientMatcher.test(ing, vItem)) {
                                 int take = Math.min(stillNeeded, vItem.getCount());
                                 consumed[idx] = vItem.copyWithCount(1);
                                 vItem.shrink(take);
@@ -341,7 +341,7 @@ public final class CraftPacketUtils {
                         var iter = virtualInventory.iterator();
                         while (iter.hasNext() && stillNeeded > 0) {
                             ItemStack vItem = iter.next();
-                            if (spec.ingredient().test(vItem) && matchesIngredientTags(vItem, spec.ingredient())) {
+                            if (IngredientMatcher.test(spec.ingredient(), vItem)) {
                                 int take = Math.min(stillNeeded, vItem.getCount());
                                 vItem.shrink(take);
                                 stillNeeded -= take;
@@ -418,29 +418,6 @@ public final class CraftPacketUtils {
 
             return true;
         }
-    }
-
-    /**
-     * When a virtual inventory item carries NBT, verify that at least one
-     * variant of the ingredient also specifies matching tags.  Some mod
-     * ingredients match on item type alone (ignoring NBT), and feeding a
-     * tag-mismatched intermediate item to a real machine would cause the
-     * recipe to fail — detection here avoids "the plan said OK but the
-     * machine rejected it" bugs.
-     */
-    private static boolean matchesIngredientTags(ItemStack candidate, Ingredient ingredient) {
-        if (!candidate.hasTag()) return true;
-        for (ItemStack opt : ingredient.getItems()) {
-            if (ItemStack.isSameItemSameTags(candidate, opt)) return true;
-        }
-        // Custom ingredients (e.g. SlashBladeIngredient) use ingredient.test()
-        // for real NBT validation but return bare template items from getItems().
-        // ingredient.test() already passed — trust it if the item type matches.
-        Item candidateItem = candidate.getItem();
-        for (ItemStack opt : ingredient.getItems()) {
-            if (opt.getItem() == candidateItem) return true;
-        }
-        return false;
     }
 
     private static void addToVirtual(List<ItemStack> virtualInventory, ItemStack result) {
@@ -589,7 +566,7 @@ public final class CraftPacketUtils {
         // First pass: verify enough total items exist
         int total = 0;
         for (ItemStack stack : player.getInventory().items) {
-            if (ingredient.test(stack) && stack.getCount() > 0) {
+            if (IngredientMatcher.test(ingredient, stack) && stack.getCount() > 0) {
                 total += stack.getCount();
                 if (total >= count) break;
             }
@@ -600,7 +577,7 @@ public final class CraftPacketUtils {
         ItemStack aggregated = ItemStack.EMPTY;
         int stillNeeded = count;
         for (ItemStack stack : player.getInventory().items) {
-            if (ingredient.test(stack) && stack.getCount() > 0) {
+            if (IngredientMatcher.test(ingredient, stack) && stack.getCount() > 0) {
                 int take = Math.min(stillNeeded, stack.getCount());
                 if (aggregated.isEmpty()) {
                     aggregated = stack.split(take);

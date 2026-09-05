@@ -331,7 +331,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        return CraftPacketUtils.extractIngredientSpecs(recipe);
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        return recipe instanceof SmithingTransformRecipe smithing
+                ? SmithingRecipeHandler.requireDemandedOutputTag(smithing, specs, targetOutput) : specs;
     }
 
     @Override
@@ -365,7 +367,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             return tryStartCampfireWithMaterials(materials);
         } else {
             // Virtual: materials already committed by chain, compute result directly
-            this.pendingResult = computeResult();
+            this.pendingResult = recipe instanceof SmithingTransformRecipe smithing
+                    ? SmithingRecipeHandler.assembleTransform(smithing, materials, myLevel.registryAccess())
+                    : computeResult();
             if (this.pendingResult.isEmpty()) return false;
             this.craftDone = true;
             return true;
@@ -630,7 +634,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean tryStartVirtual(ServerPlayer player) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
         this.pendingResult = computeResult();
@@ -651,6 +655,15 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             extracted.add(stack);
+        }
+
+        if (recipe instanceof SmithingTransformRecipe smithing) {
+            this.pendingResult = SmithingRecipeHandler.assembleTransform(
+                    smithing, extracted, myLevel.registryAccess());
+            if (this.pendingResult.isEmpty()) {
+                if (!usingSharedLedger) ledger.rollback(player);
+                return false;
+            }
         }
 
         // Commit private ledger

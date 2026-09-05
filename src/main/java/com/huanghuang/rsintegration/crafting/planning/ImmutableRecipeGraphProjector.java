@@ -15,7 +15,6 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMa
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -134,6 +133,7 @@ public final class ImmutableRecipeGraphProjector {
      */
     public static ImmutableRecipeGraph bindAvailability(
             ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+        graph = bindSmithingStates(graph, available);
         Map<ResourceLocation, List<MaterialRef>> availableByItem = new java.util.HashMap<>();
         for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
@@ -142,6 +142,7 @@ public final class ImmutableRecipeGraphProjector {
         }
         Map<IngredientRef, IngredientRef> boundIngredients = new java.util.HashMap<>();
         Map<MaterialRef, List<RecipeNode>> projected = new java.util.LinkedHashMap<>();
+        Map<ResourceLocation, RecipeNode> indexed = new java.util.HashMap<>();
         for (Map.Entry<MaterialRef, List<RecipeNode>> entry : graph.recipesByOutput().entrySet()) {
             List<RecipeNode> recipes = new ArrayList<>(entry.getValue().size());
             for (RecipeNode recipe : entry.getValue()) {
@@ -149,13 +150,66 @@ public final class ImmutableRecipeGraphProjector {
                         .map(input -> boundIngredients.computeIfAbsent(input,
                                 key -> bindIngredientIndexed(key, availableByItem)))
                         .toList();
-                recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
+                RecipeNode bound = new RecipeNode(recipe.recipeId(), recipe.output(),
                         recipe.outputCount(), inputs, recipe.modTypeId(),
-                        recipe.recipeTypeId()));
+                        recipe.recipeTypeId());
+                recipes.add(bound);
+                if (recipe.equals(graph.recipesById().get(recipe.recipeId()))) {
+                    indexed.put(recipe.recipeId(), bound);
+                }
             }
             projected.put(entry.getKey(), recipes);
         }
-        return new ImmutableRecipeGraph(projected);
+        return new ImmutableRecipeGraph(projected, indexed);
+    }
+
+    static ImmutableRecipeGraph bindSmithingStates(
+            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+        Map<ResourceLocation, List<RecipeNode>> upgrades = new java.util.HashMap<>();
+        for (RecipeNode recipe : graph.recipesById().values()) {
+            if (!"smithing".equals(recipe.modTypeId()) || recipe.inputs().size() != 3) continue;
+            Set<ResourceLocation> baseItems = new LinkedHashSet<>();
+            for (MaterialRef base : recipe.inputs().get(1).alternatives()) baseItems.add(base.itemId());
+            for (ResourceLocation item : baseItems) {
+                upgrades.computeIfAbsent(item, ignored -> new ArrayList<>()).add(recipe);
+            }
+        }
+        if (upgrades.isEmpty()) return graph;
+        Set<MaterialRef> seen = new LinkedHashSet<>();
+        available.forEach((material, count) -> {
+            if (count != null && count > 0 && !material.nbt().isEmpty()) seen.add(material);
+        });
+        graph.recipesByOutput().keySet().stream().filter(material -> !material.nbt().isEmpty())
+                .forEach(seen::add);
+        java.util.ArrayDeque<MaterialRef> pending = new java.util.ArrayDeque<>(seen);
+        Map<MaterialRef, List<RecipeNode>> additions = new java.util.LinkedHashMap<>();
+        while (!pending.isEmpty()) {
+            PlanningThreadContext.throwIfCancelled();
+            MaterialRef actualBase = pending.removeFirst();
+            for (RecipeNode recipe : upgrades.getOrDefault(actualBase.itemId(), List.of())) {
+                IngredientRef base = recipe.inputs().get(1);
+                if (!matchesIngredient(actualBase, base)) continue;
+                MaterialRef output = new MaterialRef(recipe.output().itemId(), actualBase.nbt());
+                List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
+                inputs.set(1, new IngredientRef(List.of(actualBase), base.count(),
+                        NbtMatchMode.EXACT, base.role()));
+                RecipeNode specialized = new RecipeNode(recipe.recipeId(), output,
+                        recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId());
+                if (!graph.recipesByOutput().getOrDefault(output, List.of()).contains(specialized)) {
+                    List<RecipeNode> variants = additions.computeIfAbsent(output, ignored -> new ArrayList<>());
+                    if (!variants.contains(specialized)) variants.add(specialized);
+                }
+                if (seen.add(output)) pending.addLast(output);
+            }
+        }
+        if (additions.isEmpty()) return graph;
+        Map<MaterialRef, List<RecipeNode>> projected = new java.util.LinkedHashMap<>(graph.recipesByOutput());
+        additions.forEach((output, variants) -> {
+            List<RecipeNode> combined = new ArrayList<>(projected.getOrDefault(output, List.of()));
+            combined.addAll(variants);
+            projected.put(output, combined);
+        });
+        return new ImmutableRecipeGraph(projected, graph.recipesById());
     }
 
     static IngredientRef bindIngredient(IngredientRef ingredient,
@@ -172,13 +226,14 @@ public final class ImmutableRecipeGraphProjector {
     private static IngredientRef bindIngredientIndexed(
             IngredientRef ingredient,
             Map<ResourceLocation, List<MaterialRef>> availableByItem) {
-        if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT) return ingredient;
         Set<MaterialRef> alternatives = new LinkedHashSet<>(ingredient.alternatives());
         for (MaterialRef expected : ingredient.alternatives()) {
             for (MaterialRef actual : availableByItem.getOrDefault(
                     expected.itemId(), List.of())) {
                 if (ingredient.nbtMatchMode() == NbtMatchMode.ANY
-                        || partialNbtMatches(expected.nbt(), actual.nbt())) {
+                        || (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
+                        ? exactNbtMatches(expected.nbt(), actual.nbt())
+                        : partialNbtMatches(expected.nbt(), actual.nbt()))) {
                     alternatives.add(actual);
                 }
             }
@@ -193,10 +248,75 @@ public final class ImmutableRecipeGraphProjector {
                     ? null : TagParser.parseTag(expectedSnbt);
             CompoundTag actual = actualSnbt == null || actualSnbt.isBlank()
                     ? null : TagParser.parseTag(actualSnbt);
-            return expected == null || actual != null && NbtUtils.compareNbt(expected, actual, true);
+            return IngredientMatcher.nbtMatches(expected, actual, true);
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    /** Exact matching counterpart that accepts the two vanilla/CraftTweaker
+     * serializations of a pristine unbreakable tool. */
+    static boolean exactNbtMatches(String expectedSnbt, String actualSnbt) {
+        if (java.util.Objects.equals(expectedSnbt, actualSnbt)) return true;
+        try {
+            CompoundTag expected = expectedSnbt == null || expectedSnbt.isBlank()
+                    ? null : TagParser.parseTag(expectedSnbt);
+            CompoundTag actual = actualSnbt == null || actualSnbt.isBlank()
+                    ? null : TagParser.parseTag(actualSnbt);
+            return IngredientMatcher.nbtMatches(expected, actual, false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    static boolean matchesIngredient(MaterialRef actual, IngredientRef ingredient) {
+        for (MaterialRef expected : ingredient.alternatives()) {
+            if (!actual.itemId().equals(expected.itemId())) continue;
+            if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
+            if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
+                    ? exactNbtMatches(expected.nbt(), actual.nbt())
+                    : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
+        }
+        return false;
+    }
+
+    static RecipeNode withDemandedOutput(RecipeNode recipe, MaterialRef wanted,
+                                         NbtMatchMode mode) {
+        if (wanted.nbt().isEmpty() || !"smithing".equals(recipe.modTypeId())
+                || !recipe.output().itemId().equals(wanted.itemId())
+                || recipe.inputs().size() != 3) return recipe;
+        List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
+        IngredientRef base = inputs.get(1);
+        List<MaterialRef> bases = base.alternatives().stream()
+                .map(material -> new MaterialRef(material.itemId(), wanted.nbt()))
+                .filter(material -> matchesIngredient(material, base)).toList();
+        if (bases.isEmpty()) return null;
+        inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT, base.role()));
+        return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
+                recipe.modTypeId(), recipe.recipeTypeId());
+    }
+
+    static List<RecipeNode> candidates(ImmutableRecipeGraph graph, MaterialRef wanted,
+                                       NbtMatchMode mode) {
+        if (mode == NbtMatchMode.EXACT && wanted.nbt().isEmpty()) {
+            return graph.recipesByOutput().getOrDefault(wanted, List.of());
+        }
+        IngredientRef demand = new IngredientRef(List.of(wanted), 1, mode);
+        List<RecipeNode> candidates = new ArrayList<>();
+        graph.recipesByOutput().forEach((output, recipes) -> {
+            if (!output.itemId().equals(wanted.itemId())) return;
+            for (RecipeNode recipe : recipes) {
+                if (matchesIngredient(output, demand)) {
+                    candidates.add(recipe);
+                } else if (!wanted.nbt().isEmpty() && "smithing".equals(recipe.modTypeId())) {
+                    RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
+                    if (specialized != null && matchesIngredient(specialized.output(), demand)) {
+                        candidates.add(specialized);
+                    }
+                }
+            }
+        });
+        return candidates;
     }
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
@@ -220,6 +340,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static boolean isPartialNbtIngredient(Ingredient ingredient) {
+        if (ingredient instanceof net.minecraftforge.common.crafting.PartialNBTIngredient) return true;
         for (Class<?> type = ingredient.getClass(); type != null; type = type.getSuperclass()) {
             if (isPartialNbtIngredientClass(type.getName())) return true;
         }

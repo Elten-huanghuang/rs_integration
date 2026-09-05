@@ -243,7 +243,57 @@ final class CandidateEngine {
         ItemStack output = ModRecipeHandlers.tryGetResultItem(
                 entry.recipe(), ctx.level.registryAccess());
         output = MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
-        return inheritSmithingBaseTag(entry.recipe(), output, demand);
+        return inheritSmithingBaseTag(entry.recipe(), output, demand, ctx);
+    }
+
+    static ItemStack inheritSmithingBaseTag(Recipe<?> recipe, ItemStack output,
+                                            Ingredient demand, ResolutionContext ctx) {
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing
+                && IngredientMatcher.requiresNbt(demand)) {
+            ItemStack inherited = findStockedSmithingOutput(smithing,
+                    stack -> IngredientMatcher.test(demand, stack), ctx.counts, ctx.index,
+                    ctx.level.registryAccess(), new HashSet<>(), ctx::timedOut);
+            if (!inherited.isEmpty()) return inherited;
+        }
+        return inheritSmithingBaseTag(recipe, output, demand);
+    }
+
+    static ItemStack findStockedSmithingOutput(
+            net.minecraft.world.item.crafting.SmithingTransformRecipe recipe,
+            java.util.function.Predicate<ItemStack> accepts,
+            Map<CraftingResolver.StackKey, Integer> available,
+            Map<Item, List<RecipeIndex.Entry>> index, net.minecraft.core.RegistryAccess access,
+            Set<ResourceLocation> visited, java.util.function.BooleanSupplier timedOut) {
+        if (timedOut.getAsBoolean() || visited.size() >= 64 || !visited.add(recipe.getId())) {
+            return ItemStack.EMPTY;
+        }
+        for (var stored : available.entrySet()) {
+            if (timedOut.getAsBoolean()) return ItemStack.EMPTY;
+            if (stored.getValue() <= 0) continue;
+            ItemStack base = stored.getKey().toStack();
+            if (!recipe.isBaseIngredient(base)) continue;
+            ItemStack assembled = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+                    .assembleWithBase(recipe, base, access);
+            if (!assembled.isEmpty() && accepts.test(assembled)) return assembled;
+        }
+        var specs = new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler().getIngredients(recipe);
+        if (specs == null || specs.size() != 3) return ItemStack.EMPTY;
+        for (ItemStack base : specs.get(1).ingredient().getItems()) {
+            for (RecipeIndex.Entry entry : index.getOrDefault(base.getItem(), List.of())) {
+                if (!(entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe upstream)) continue;
+                ItemStack inheritedBase = findStockedSmithingOutput(upstream, candidate -> {
+                    if (!recipe.isBaseIngredient(candidate)) return false;
+                    ItemStack assembled = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+                            .assembleWithBase(recipe, candidate, access);
+                    return !assembled.isEmpty() && accepts.test(assembled);
+                }, available, index, access, visited, timedOut);
+                if (!inheritedBase.isEmpty()) {
+                    return com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+                            .assembleWithBase(recipe, inheritedBase, access);
+                }
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     /**
@@ -255,10 +305,9 @@ final class CandidateEngine {
      */
     static ItemStack inheritSmithingBaseTag(Recipe<?> recipe, ItemStack output,
                                             Ingredient demand) {
-        if (output == null || output.isEmpty() || output.hasTag() || demand == null
+        if (output == null || output.isEmpty() || demand == null
                 || demand.isEmpty()) return output;
-        if (!(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)
-                && !(recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe)) {
+        if (!(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)) {
             return output;
         }
         for (ItemStack requested : demand.getItems()) {
@@ -606,7 +655,7 @@ final class CandidateEngine {
                                               Ingredient ingredient, boolean ingredientAllNbt,
                                               boolean nbtStrict,
                                               @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
-        if (output.isEmpty() || (!ingredient.test(output)
+        if (output.isEmpty() || (!IngredientMatcher.test(ingredient, output)
                 && !matchesSemanticSpellScroll(ingredient, output))) {
             boolean slashBladeChain = false;
             if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {

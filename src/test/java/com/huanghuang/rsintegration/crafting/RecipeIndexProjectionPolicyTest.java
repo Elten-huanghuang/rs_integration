@@ -21,6 +21,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeIndexProjectionPolicyTest extends BootstrapTest {
     @Test
+    void soulBladeTransformPassesCatalogPolicyAndKeepsPositionalBaseInProjection() {
+        var recipe = new net.minecraft.world.item.crafting.SmithingTransformRecipe(
+                new ResourceLocation("callfromthedepth_:soulblade"),
+                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                Ingredient.of(Items.DIAMOND_SWORD), Ingredient.of(Items.NETHERITE_INGOT),
+                new ItemStack(Items.NETHERITE_SWORD));
+        var handler = new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler();
+        assertTrue(RecipeIndex.isTypedPureProjectionCandidate(handler, handler.modType(), recipe));
+        var projected = com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.projectRecipe(
+                recipe.getId(), recipe.getResultItem(RegistryAccess.EMPTY), handler.getIngredients(recipe),
+                handler.modType().id(), new ResourceLocation("minecraft:smithing"),
+                !handler.hasRuntimeDependentPrimaryNbt(recipe));
+        org.junit.jupiter.api.Assertions.assertNotNull(projected);
+        org.junit.jupiter.api.Assertions.assertEquals(recipe.getId(), projected.recipeId());
+        org.junit.jupiter.api.Assertions.assertEquals(new ResourceLocation("minecraft:diamond_sword"),
+                projected.inputs().get(1).alternatives().get(0).itemId());
+        assertTrue(projected.output().nbt().isEmpty());
+    }
+    @Test
     void onlyDeterministicGraphSafeTypesEnterTypedPureGraph() {
         Recipe<?> recipe = new ShapelessRecipe(
                 new ResourceLocation("test", "typed_projection"), "",

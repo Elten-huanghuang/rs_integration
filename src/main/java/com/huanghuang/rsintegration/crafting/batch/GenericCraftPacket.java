@@ -74,6 +74,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
@@ -2947,7 +2948,7 @@ public final class GenericCraftPacket {
                         }
                         consumed[i] = ItemStack.EMPTY;
                         for (ItemStack p : pool) {
-                            if (!p.isEmpty() && ing.test(p)) {
+                            if (!p.isEmpty() && IngredientMatcher.test(ing, p)) {
                                 consumed[i] = p.split(1);
                                 break;
                             }
@@ -3013,7 +3014,7 @@ public final class GenericCraftPacket {
                             Ingredient ing = ings.get(i);
                             if (ing.isEmpty()) continue;
                             for (ItemStack p : pool) {
-                                if (!p.isEmpty() && ing.test(p)) {
+                                if (!p.isEmpty() && IngredientMatcher.test(ing, p)) {
                                     slotAligned[i] = p.copyWithCount(1);
                                     p.shrink(1);
                                     break;
@@ -4310,6 +4311,8 @@ public final class GenericCraftPacket {
                     && representative.syntheticOutput() != null) {
                 mergeKey += "|" + IngredientKey.of(representative.syntheticInput()).hashCode()
                         + "|" + IngredientKey.of(representative.syntheticOutput()).hashCode();
+            } else if (representative != null && representative.syntheticOutput() != null) {
+                mergeKey += "|state:" + representative.syntheticOutput().getTag();
             }
             Integer idx = mergeIndex.get(mergeKey);
             if (idx != null) {
@@ -4340,6 +4343,10 @@ public final class GenericCraftPacket {
             }
             ItemStack output = RecipeIndex.tryGetResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
+            if (stepRecipe instanceof SmithingTransformRecipe && mergedRs != null
+                    && mergedRs.syntheticOutput() != null) {
+                output = mergedRs.syntheticOutput().copy();
+            }
             ModType stepModType = mergedRs != null ? mergedRs.modType()
                     : modTypeByRecipe.get(stepId);
             output = routeRecipeOutput(stepModType, output);
@@ -4393,6 +4400,10 @@ public final class GenericCraftPacket {
                 // per-ingredient counts (extractIngredients drops counts and
                 // returns empty for wrappers like FaRitualWrapper).
                 List<IngredientSpec> modSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                if (stepRecipe instanceof SmithingTransformRecipe smithing && mergedRs != null) {
+                    modSpecs = SmithingRecipeHandler.requireDemandedOutputTag(
+                            smithing, modSpecs, mergedRs.syntheticOutput());
+                }
                 modSpecs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
                         stepModType, modSpecs, stepRecipe,
                         player.serverLevel().registryAccess());
@@ -5218,7 +5229,7 @@ public final class GenericCraftPacket {
         Ingredient costIngredient = Ingredient.of(cost);
         long matching = 0L;
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            if (entry.getValue() > 0 && costIngredient.test(entry.getKey().toStack())) {
+            if (entry.getValue() > 0 && IngredientMatcher.test(costIngredient, entry.getKey().toStack())) {
                 matching = Math.min(Integer.MAX_VALUE, matching + entry.getValue());
             }
         }
