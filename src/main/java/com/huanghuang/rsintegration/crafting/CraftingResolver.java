@@ -695,7 +695,7 @@ public final class CraftingResolver {
             // resolver records/consumes the produced output.  Without this,
             // strict CraftTweaker inputs such as soul_blade{Unbreakable:1}
             // are reported as missing even though the smithing route exists.
-            out = CandidateEngine.inheritSmithingBaseTag(candidate.recipe(), out, ingredient);
+            out = CandidateEngine.inheritSmithingBaseTag(candidate.recipe(), out, ingredient, ctx);
             out = MinersDelightCopperPotSupport.adaptResult(candidate.modType(), out);
             if (out.isEmpty() || out.getCount() <= 0) {
                 continue;
@@ -1048,7 +1048,7 @@ public final class CraftingResolver {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), ctx.level.registryAccess());
             for (ItemStack stack : repaired) {
                 Ingredient ing = ingredientOf(stack, stack.hasTag());
-                if (ing.test(output) && ctx.countMatching(ing) <= 0) return true;
+                if (IngredientMatcher.test(ing, output) && ctx.countMatching(ing) <= 0) return true;
             }
             return false;
         }
@@ -1061,7 +1061,7 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.role() != DemandRole.CATALYST && spec.ingredient().test(output)) {
+            if (spec.role() != DemandRole.CATALYST && IngredientMatcher.test(spec.ingredient(), output)) {
                 selfConsumed += spec.count();
             }
         }
@@ -1069,7 +1069,7 @@ public final class CraftingResolver {
 
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.ingredient().test(output) && ctx.countMatching(spec.ingredient()) <= 0)
+            if (IngredientMatcher.test(spec.ingredient(), output) && ctx.countMatching(spec.ingredient()) <= 0)
                 return true;
         }
         return false;
@@ -1080,7 +1080,7 @@ public final class CraftingResolver {
         boolean anyMissing = false;
         for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(recipe)) {
             if (spec.isEmpty()) continue;
-            if (spec.ingredient().test(output)) {
+            if (IngredientMatcher.test(spec.ingredient(), output)) {
                 if (spec.role() != DemandRole.CATALYST) selfConsumed += spec.count();
                 if (ctx.countMatching(spec.ingredient()) <= 0) anyMissing = true;
             }
@@ -1102,7 +1102,7 @@ public final class CraftingResolver {
             int selfConsumed = 0;
             for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
                 if (spec.isEmpty() || spec.role() == DemandRole.CATALYST) continue;
-                if (spec.ingredient().test(output)) {
+                if (IngredientMatcher.test(spec.ingredient(), output)) {
                     selfConsumed += spec.count();
                 }
             }
@@ -1114,7 +1114,7 @@ public final class CraftingResolver {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), access);
             for (ItemStack stack : repaired) {
                 Ingredient ing = ingredientOf(stack, stack.hasTag());
-                if (ing.test(output)) selfConsumed += stack.getCount();
+                if (IngredientMatcher.test(ing, output)) selfConsumed += stack.getCount();
             }
             return selfConsumed;
         }
@@ -1122,7 +1122,7 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.role() != DemandRole.CATALYST && spec.ingredient().test(output))
+            if (spec.role() != DemandRole.CATALYST && IngredientMatcher.test(spec.ingredient(), output))
                 selfConsumed += spec.count();
         }
         return selfConsumed;

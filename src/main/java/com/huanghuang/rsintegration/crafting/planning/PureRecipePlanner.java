@@ -61,6 +61,7 @@ public final class PureRecipePlanner {
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos,
                           LongSupplier nanoTime) {
+        graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime);
@@ -129,7 +130,11 @@ public final class PureRecipePlanner {
         }
     }
 
-    public record PlannedStep(ResourceLocation recipeId, int batches) {}
+    public record PlannedStep(ResourceLocation recipeId, int batches, MaterialRef demandedOutput) {
+        public PlannedStep(ResourceLocation recipeId, int batches) {
+            this(recipeId, batches, null);
+        }
+    }
 
     public record Result(Feasibility feasibility, List<PlannedStep> steps,
                          List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
@@ -252,7 +257,8 @@ public final class PureRecipePlanner {
                     backtracks++;
                 }
             } else {
-                if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT) {
+                if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                        || ingredient.alternatives().stream().anyMatch(material -> !material.nbt().isEmpty())) {
                     Map<MaterialRef, Integer> consumedVariants =
                             consumeMatchingVariants(ingredient, rest);
                     if (consumedVariants != null) {
@@ -288,19 +294,8 @@ public final class PureRecipePlanner {
                 int needed = (int) Math.max(0L, (long) ingredient.count() - present);
                 if (needed <= 0) continue;
                 boolean broadFamily = ingredient.alternatives().size() > 1;
-                boolean allowTaggedOutputVariants = ingredient.nbtMatchMode() != NbtMatchMode.EXACT
-                        && wanted.nbt().isEmpty();
                 for (RecipeNode candidate : inventoryFirstCandidates(
-                        wanted, !broadFamily, allowTaggedOutputVariants)) {
-                    boolean dynamicNbtOutput = allowTaggedOutputVariants
-                            || (!wanted.nbt().isEmpty()
-                            && candidate.output().nbt().isEmpty()
-                            && "smithing".equals(candidate.modTypeId()));
-                    // Keep a structurally valid NBT producer for partial expansion even when
-                    // one of its raw inputs is currently absent. Ordinary recipes still use
-                    // seeded reachability to avoid traversing conversion rings blindly.
-                    if (!broadFamily && !reachability.canReach(wanted, allowTaggedOutputVariants)
-                            && !dynamicNbtOutput) continue;
+                        wanted, !broadFamily, ingredient.nbtMatchMode())) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
@@ -332,12 +327,7 @@ public final class PureRecipePlanner {
                         continuation.add(new DemandTask(ingredient));
                         continuation.addAll(rest);
                     }
-                    // Vanilla smithing copies the base item's NBT at execution
-                    // time. The immutable graph stores its declared tagless
-                    // result, so materialize the demanded NBT variant for the
-                    // planner's stock ledger only.
-                    RecipeNode plannedCandidate = withDemandedOutput(candidate, wanted);
-                    List<Task> branch = recipeBranch(plannedCandidate, scheduledBatches,
+                    List<Task> branch = recipeBranch(candidate, scheduledBatches,
                             consumeCount, continuation);
                     if (branch == null) continue;
                     resolving.add(wanted);
@@ -465,7 +455,10 @@ public final class PureRecipePlanner {
             }
             resolving.remove(completed.output());
             setStock(completed.output(), (int) afterProduction - completed.consumeCount());
-            steps.add(new PlannedStep(completed.recipeId(), completed.batches()));
+            RecipeNode source = graph.recipesById().get(completed.recipeId());
+            MaterialRef demanded = source != null && "smithing".equals(source.modTypeId())
+                    && !completed.output().nbt().isEmpty() ? completed.output() : null;
+            steps.add(new PlannedStep(completed.recipeId(), completed.batches(), demanded));
             if (solve(rest)) return true;
             steps.remove(steps.size() - 1);
             setStock(completed.output(), before);
@@ -510,31 +503,8 @@ public final class PureRecipePlanner {
 
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
                                                            boolean pruneUnseeded,
-                                                           boolean allowTaggedVariants) {
-            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
-                    .getOrDefault(wanted, List.of()));
-            // A value-only/ANY ingredient may accept a tagged output variant even when
-            // its declared alternative is tagless. CraftTweaker recipes can intentionally
-            // add runtime tags (for example Unbreakable:1) to an otherwise ordinary item.
-            if (allowTaggedVariants && wanted.nbt().isEmpty()) {
-                graph.recipesByOutput().forEach((output, variants) -> {
-                    if (!output.itemId().equals(wanted.itemId()) || output.nbt().isEmpty()) return;
-                    for (RecipeNode candidate : variants) {
-                        if (!candidates.contains(candidate)) candidates.add(candidate);
-                    }
-                });
-            }
-            // SmithingTransformRecipe/SmithingTrimRecipe outputs inherit the
-            // base stack's NBT, but their graph node is necessarily tagless.
-            // Offer that node as a producer for a tagged demand and restore
-            // the demanded output when scheduling it above.
-            if (!wanted.nbt().isEmpty()) {
-                MaterialRef tagless = new MaterialRef(wanted.itemId(), "");
-                for (RecipeNode candidate : graph.recipesByOutput()
-                        .getOrDefault(tagless, List.of())) {
-                    if ("smithing".equals(candidate.modTypeId())) candidates.add(candidate);
-                }
-            }
+                                                           NbtMatchMode mode) {
+            List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, wanted, mode);
             List<RecipeNode> ordered = candidates.stream()
                     .filter(candidate -> !pruneUnseeded || reachability.canReach(candidate))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
@@ -547,16 +517,6 @@ public final class PureRecipePlanner {
                     ? coverage.thenComparingInt(reachability::depth)
                     : coverage);
             return ordered;
-        }
-
-        private static RecipeNode withDemandedOutput(RecipeNode candidate, MaterialRef wanted) {
-            if (!wanted.nbt().isEmpty() && "smithing".equals(candidate.modTypeId())
-                    && candidate.output().itemId().equals(wanted.itemId())
-                    && candidate.output().nbt().isEmpty()) {
-                return new RecipeNode(candidate.recipeId(), wanted, candidate.outputCount(),
-                        candidate.inputs(), candidate.modTypeId(), candidate.recipeTypeId());
-            }
-            return candidate;
         }
 
         private double inputStockCoverage(RecipeNode candidate) {
@@ -614,16 +574,7 @@ public final class PureRecipePlanner {
         }
 
         private static boolean matchesIngredient(MaterialRef stocked, IngredientRef ingredient) {
-            for (MaterialRef requested : ingredient.alternatives()) {
-                if (!stocked.itemId().equals(requested.itemId())) continue;
-                if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
-                if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
-                        && stocked.nbt().equals(requested.nbt())) return true;
-                if (ingredient.nbtMatchMode() == NbtMatchMode.PARTIAL
-                        && ImmutableRecipeGraphProjector.partialNbtMatches(
-                        requested.nbt(), stocked.nbt())) return true;
-            }
-            return false;
+            return ImmutableRecipeGraphProjector.matchesIngredient(stocked, ingredient);
         }
 
         /**
@@ -843,7 +794,9 @@ public final class PureRecipePlanner {
                 } finally {
                     visiting.remove(choice.output());
                 }
-                steps.add(new PlannedStep(recipe.recipeId(), batches));
+                steps.add(new PlannedStep(recipe.recipeId(), batches,
+                        "smithing".equals(recipe.modTypeId()) && !recipe.output().nbt().isEmpty()
+                                ? recipe.output() : null));
                 long surplus = (long) recipe.outputCount() * batches
                         - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
                 if (surplus > 0L) {
@@ -860,7 +813,9 @@ public final class PureRecipePlanner {
 
         private int consumeAvailable(IngredientRef ingredient) {
             int remaining = ingredient.count();
-            List<MaterialRef> ordered = new ArrayList<>(ingredient.alternatives());
+            List<MaterialRef> ordered = stock.keySet().stream()
+                    .filter(material -> ImmutableRecipeGraphProjector.matchesIngredient(material, ingredient))
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
             ordered.sort(Comparator
                     .comparingInt((MaterialRef material) -> stock.getOrDefault(material, 0))
                     .reversed());
@@ -896,24 +851,7 @@ public final class PureRecipePlanner {
         }
 
         private List<RecipeNode> partialCandidates(MaterialRef wanted, NbtMatchMode matchMode) {
-            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
-                    .getOrDefault(wanted, List.of()));
-            if (!wanted.nbt().isEmpty()) {
-                MaterialRef tagless = new MaterialRef(wanted.itemId(), "");
-                for (RecipeNode candidate : graph.recipesByOutput()
-                        .getOrDefault(tagless, List.of())) {
-                    if ("smithing".equals(candidate.modTypeId())
-                            && !candidates.contains(candidate)) candidates.add(candidate);
-                }
-            } else if (matchMode != NbtMatchMode.EXACT) {
-                graph.recipesByOutput().forEach((output, variants) -> {
-                    if (!output.itemId().equals(wanted.itemId()) || output.nbt().isEmpty()) return;
-                    for (RecipeNode candidate : variants) {
-                        if (!candidates.contains(candidate)) candidates.add(candidate);
-                    }
-                });
-            }
-            return candidates;
+            return ImmutableRecipeGraphProjector.candidates(graph, wanted, matchMode);
         }
 
         private double inputStockCoverage(RecipeNode recipe) {
@@ -1071,18 +1009,12 @@ public final class PureRecipePlanner {
             for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
                 if (entry.getValue() == null || entry.getValue() <= 0) continue;
                 present.add(entry.getKey());
-                // ANY/PARTIAL smithing ingredients can consume a tagged stack while the
-                // immutable graph keeps the ingredient/output identity tagless. Register the
-                // value-only alias as a reachability seed so an Unbreakable wooden sword can
-                // reach the normal wooden -> stone -> ... upgrade chain.
-                if (!entry.getKey().nbt().isEmpty()) {
-                    present.add(new MaterialRef(entry.getKey().itemId(), ""));
-                }
             }
             this.seeds = Set.copyOf(present);
             Map<MaterialRef, Integer> materialResult = new HashMap<>();
             Map<RecipeNode, Integer> recipeResult = new IdentityHashMap<>();
-            Map<MaterialRef, List<InputRef>> dependents = new HashMap<>();
+            Map<ResourceLocation, List<InputRef>> dependents = new HashMap<>();
+            Set<ResourceLocation> inheritedOutputs = new HashSet<>();
             Map<RecipeNode, int[]> inputSatisfied = new IdentityHashMap<>();
             Map<RecipeNode, int[]> inputDepths = new IdentityHashMap<>();
             java.util.ArrayDeque<MaterialRef> queue = new java.util.ArrayDeque<>();
@@ -1092,12 +1024,17 @@ public final class PureRecipePlanner {
             }
             for (List<RecipeNode> candidates : graph.recipesByOutput().values()) {
                 for (RecipeNode recipe : candidates) {
+                    if ("smithing".equals(recipe.modTypeId()) && recipe.inputs().size() == 3) {
+                        inheritedOutputs.add(recipe.output().itemId());
+                    }
                     int inputCount = recipe.inputs().size();
                     inputSatisfied.put(recipe, new int[inputCount]);
                     inputDepths.put(recipe, new int[inputCount]);
                     for (int inputIndex = 0; inputIndex < inputCount; inputIndex++) {
+                        Set<ResourceLocation> indexedItems = new HashSet<>();
                         for (MaterialRef alternative : recipe.inputs().get(inputIndex).alternatives()) {
-                            dependents.computeIfAbsent(alternative, ignored -> new ArrayList<>())
+                            if (!indexedItems.add(alternative.itemId())) continue;
+                            dependents.computeIfAbsent(alternative.itemId(), ignored -> new ArrayList<>())
                                     .add(new InputRef(recipe, inputIndex));
                         }
                     }
@@ -1115,7 +1052,11 @@ public final class PureRecipePlanner {
                 PlanningThreadContext.throwIfCancelled();
                 MaterialRef material = queue.removeFirst();
                 int depth = materialResult.getOrDefault(material, 0);
-                for (InputRef ref : dependents.getOrDefault(material, List.of())) {
+                for (InputRef ref : dependents.getOrDefault(material.itemId(), List.of())) {
+                    if (!ImmutableRecipeGraphProjector.matchesIngredient(material,
+                            ref.recipe().inputs().get(ref.inputIndex()))
+                            && !(material.nbt().isEmpty()
+                            && inheritedOutputs.contains(material.itemId()))) continue;
                     int[] satisfied = inputSatisfied.get(ref.recipe());
                     int[] depths = inputDepths.get(ref.recipe());
                     if (depths[ref.inputIndex()] == 0 || depth < depths[ref.inputIndex()]) {
@@ -1142,32 +1083,14 @@ public final class PureRecipePlanner {
             this.recipeDepth = new IdentityHashMap<>(recipeResult);
         }
 
-        private boolean canReach(MaterialRef material) {
-            return canReach(material, false);
-        }
-
-        private boolean canReach(MaterialRef material, boolean allowTaggedVariants) {
-            if (seeds.contains(material) || materialDepth.containsKey(material)) return true;
-            if (allowTaggedVariants && material.nbt().isEmpty()) {
-                return graph.recipesByOutput().entrySet().stream()
-                        .filter(entry -> entry.getKey().itemId().equals(material.itemId())
-                                && !entry.getKey().nbt().isEmpty())
-                        .flatMap(entry -> entry.getValue().stream())
-                        .anyMatch(recipeDepth::containsKey);
-            }
-            if (material.nbt().isEmpty()) return false;
-            MaterialRef tagless = new MaterialRef(material.itemId(), "");
-            return graph.recipesByOutput().getOrDefault(tagless, List.of()).stream()
-                    .anyMatch(recipe -> "smithing".equals(recipe.modTypeId())
-                            && recipeDepth.containsKey(recipe));
-        }
-
         private boolean canReach(RecipeNode recipe) {
-            return recipeDepth.containsKey(recipe);
+            return recipeDepth.containsKey(recipe)
+                    || recipeDepth.containsKey(graph.recipesById().get(recipe.recipeId()));
         }
 
         private int depth(RecipeNode recipe) {
-            return recipeDepth.getOrDefault(recipe, UNREACHABLE_DEPTH);
+            return recipeDepth.getOrDefault(recipe, recipeDepth.getOrDefault(
+                    graph.recipesById().get(recipe.recipeId()), UNREACHABLE_DEPTH));
         }
 
         private record InputRef(RecipeNode recipe, int inputIndex) {}

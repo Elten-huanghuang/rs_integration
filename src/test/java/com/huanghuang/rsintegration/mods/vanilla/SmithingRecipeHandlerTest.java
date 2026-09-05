@@ -22,6 +22,55 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SmithingRecipeHandlerTest extends BootstrapTest {
 
     @Test
+    void actualAssemblyPreservesRepairCostAndModifierInsteadOfRebuildingABareTool() throws Exception {
+        ItemStack base = new ItemStack(Items.WOODEN_SWORD);
+        base.setTag(net.minecraft.nbt.TagParser.parseTag(
+                "{Unbreakable:1b,RepairCost:8,Damage:0,itemModifier:\"celestial_forge:vicious\"}"));
+        CompoundTag original = base.getTag().copy();
+        for (var item : List.of(Items.STONE_SWORD, Items.IRON_SWORD,
+                Items.DIAMOND_SWORD, Items.NETHERITE_SWORD)) {
+            var recipe = new SmithingTransformRecipe(new ResourceLocation("test:modified_upgrade"),
+                    Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                    Ingredient.of(base.getItem()), Ingredient.of(Items.NETHERITE_INGOT), new ItemStack(item));
+            base = SmithingRecipeHandler.assembleWithBase(recipe, base, RegistryAccess.EMPTY);
+            assertEquals(original, base.getTag());
+        }
+    }
+
+    @Test
+    void eachActualVanillaAssemblyCopiesTheUnbreakableBaseState() {
+        var upgrades = List.of(Items.STONE_SWORD, Items.IRON_SWORD,
+                Items.DIAMOND_SWORD, Items.NETHERITE_SWORD);
+        ItemStack base = new ItemStack(Items.WOODEN_SWORD);
+        base.getOrCreateTag().putBoolean("Unbreakable", true);
+        base.setDamageValue(0);
+        for (var outputItem : upgrades) {
+            var transform = new SmithingTransformRecipe(
+                    new ResourceLocation("test", "upgrade_" + upgrades.indexOf(outputItem)),
+                    Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                    Ingredient.of(base.getItem()), Ingredient.of(Items.NETHERITE_INGOT),
+                    new ItemStack(outputItem));
+            ItemStack demanded = new ItemStack(outputItem);
+            demanded.getOrCreateTag().putInt("Unbreakable", 1);
+            var specs = requireDemanded(transform, demanded);
+            assertTrue(com.huanghuang.rsintegration.crafting.IngredientMatcher.test(
+                    specs.get(1).ingredient(), base));
+            assertFalse(com.huanghuang.rsintegration.crafting.IngredientMatcher.test(
+                    specs.get(1).ingredient(), new ItemStack(base.getItem())));
+            base = SmithingRecipeHandler.assembleTransform(transform, List.of(
+                    new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), base,
+                    new ItemStack(Items.NETHERITE_INGOT)), RegistryAccess.EMPTY);
+            assertTrue(base.getTag().getBoolean("Unbreakable"));
+            assertEquals(0, base.getDamageValue());
+        }
+    }
+
+    private static List<IngredientSpec> requireDemanded(SmithingTransformRecipe recipe, ItemStack output) {
+        return SmithingRecipeHandler.requireDemandedOutputTag(recipe,
+                new SmithingRecipeHandler().getIngredients(recipe), output);
+    }
+
+    @Test
     void actualBaseNbtIsRenderedAndPreservedByAssembly() {
         SmithingTransformRecipe recipe = recipe();
         ItemStack base = taggedChestplate("bound-variant");

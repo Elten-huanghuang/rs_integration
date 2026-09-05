@@ -106,7 +106,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
         this.pendingSecondary.clear();
 
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] No ingredients for recipe: {}", recipe.getId());
             return false;
@@ -202,8 +202,11 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Override
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
-        return GoetySoulTotemCrafting.requireBatchCharge(
-                CraftPacketUtils.extractIngredientSpecs(recipe), preparedGraphExecutions);
+        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            specs = SmithingRecipeHandler.requireDemandedOutputTag(smithing, specs, targetOutput);
+        }
+        return GoetySoulTotemCrafting.requireBatchCharge(specs, preparedGraphExecutions);
     }
 
     @Override

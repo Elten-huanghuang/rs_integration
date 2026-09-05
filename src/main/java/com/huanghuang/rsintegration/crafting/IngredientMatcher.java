@@ -3,6 +3,9 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.Items;
@@ -39,10 +42,29 @@ public final class IngredientMatcher {
     }
 
     public static boolean test(Ingredient ingredient, ItemStack actual) {
+        boolean statefulTool = false;
         for (ItemStack template : ingredient.getItems()) {
             if (matchesWaterBottleIgnoringPurity(template, actual)) return true;
             if (matchesSpellScrollSemantics(template, actual)) return true;
+            if (template.getItem() == actual.getItem() && template.getMaxDamage() > 0
+                    && isUnbreakable(template.getTag()) && requiresNbt(ingredient)) {
+                statefulTool = true;
+                if (!isUnbreakable(actual.getTag())) continue;
+                if (isDefaultDamage(template.getTag()) && !isDefaultDamage(actual.getTag())) continue;
+                ItemStack normalized = actual.copy();
+                CompoundTag tag = normalized.getTag();
+                tag.put("Unbreakable", template.getTag().get("Unbreakable").copy());
+                if (isDefaultDamage(template.getTag()) && isDefaultDamage(tag)) {
+                    if (template.getTag().contains("Damage")) {
+                        tag.put("Damage", template.getTag().get("Damage").copy());
+                    } else {
+                        tag.remove("Damage");
+                    }
+                }
+                if (ingredient.test(normalized)) return true;
+            }
         }
+        if (statefulTool) return false;
         if (ingredient.test(actual)) return true;
         if (actual.isEmpty() || !EARTH_HEART.equals(ForgeRegistries.ITEMS.getKey(actual.getItem()))) {
             return false;
@@ -60,6 +82,41 @@ public final class IngredientMatcher {
             }
         }
         return false;
+    }
+
+    /**
+     * Starter/tool loot commonly serializes an otherwise pristine item as
+     * {@code {Damage:0,Unbreakable:1}}, while CraftTweaker's strict template
+     * contains only {@code {Unbreakable:1}}. Treat those two representations as
+     * equal without weakening any other strict NBT ingredient.
+     */
+    public static boolean nbtMatches(CompoundTag expected, CompoundTag actual, boolean partial) {
+        if (isUnbreakable(expected)) {
+            if (!isUnbreakable(actual)) return false;
+            boolean pristine = isDefaultDamage(expected);
+            if (pristine && !isDefaultDamage(actual)) return false;
+            expected = expected.copy();
+            actual = actual.copy();
+            expected.putBoolean("Unbreakable", true);
+            actual.putBoolean("Unbreakable", true);
+            if (pristine) {
+                expected.remove("Damage");
+                actual.remove("Damage");
+            }
+        }
+        return partial ? NbtUtils.compareNbt(expected, actual, true)
+                : Objects.equals(expected, actual);
+    }
+
+    private static boolean isUnbreakable(CompoundTag tag) {
+        return tag != null && (tag.contains("Unbreakable", Tag.TAG_BYTE)
+                || tag.contains("Unbreakable", Tag.TAG_INT)) && tag.getInt("Unbreakable") != 0;
+    }
+
+    private static boolean isDefaultDamage(CompoundTag tag) {
+        if (!tag.contains("Damage")) return true;
+        return tag.contains("Damage", Tag.TAG_ANY_NUMERIC)
+                && ((net.minecraft.nbt.NumericTag) tag.get("Damage")).getAsDouble() == 0;
     }
 
     /** Iron 3.15 rewrote scroll-container NBT while retaining spell identity. */

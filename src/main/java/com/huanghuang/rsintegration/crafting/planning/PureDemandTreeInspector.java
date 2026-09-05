@@ -67,6 +67,7 @@ public final class PureDemandTreeInspector {
                                  Set<ResourceLocation> reusableCatalystOutputIds,
                                  Set<ResourceLocation> reusableCatalystRecipeIds,
                                  Set<ResourceLocation> pureIncompatibleOutputIds) {
+        graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds != null
                 && reusableCatalystRecipeIds.contains(targetRecipeId);
         RecipeNode target = graph.recipesById().get(targetRecipeId);
@@ -183,8 +184,8 @@ public final class PureDemandTreeInspector {
                     >= LARGE_ALTERNATIVE_THRESHOLD;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
-                int remaining = consumeMatching(alternative, ingredient.count());
-                Coverage coverage = coverMaterial(alternative, remaining);
+                int remaining = consumeMatching(alternative, ingredient.count(), ingredient.nbtMatchMode());
+                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
                 if (coverage == Coverage.COVERED) return coverage;
                 if (coverage == Coverage.NODE_LIMIT) {
                     best = Coverage.NODE_LIMIT;
@@ -217,7 +218,7 @@ public final class PureDemandTreeInspector {
             Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
-                Coverage coverage = coverMaterial(alternative, remaining);
+                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
                 if (coverage == Coverage.COVERED) {
                     ledger.add(alternative, remaining);
                     return Coverage.COVERED;
@@ -241,7 +242,7 @@ public final class PureDemandTreeInspector {
             int remaining = ingredient.count();
             for (MaterialRef stocked : ledger.order()) {
                 int available = ledger.count(stocked);
-                if (available <= 0 || !matchesAny(stocked, ingredient.alternatives())) continue;
+                if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked, ingredient)) continue;
                 int take = Math.min(available, remaining);
                 ledger.set(stocked, available - take);
                 remaining -= take;
@@ -251,11 +252,13 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private int consumeMatching(MaterialRef requested, int count) {
+        private int consumeMatching(MaterialRef requested, int count,
+                                    ImmutableRecipeGraph.NbtMatchMode mode) {
             int remaining = count;
             for (MaterialRef stocked : ledger.byItem(requested.itemId())) {
                 int available = ledger.count(stocked);
-                if (available <= 0 || !matches(stocked, requested)) continue;
+                if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked,
+                        new IngredientRef(List.of(requested), count, mode))) continue;
                 int take = Math.min(available, remaining);
                 ledger.set(stocked, available - take);
                 remaining -= take;
@@ -264,7 +267,8 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private Coverage coverMaterial(MaterialRef material, int count) {
+        private Coverage coverMaterial(MaterialRef material, int count,
+                                       ImmutableRecipeGraph.NbtMatchMode mode) {
             if (count <= 0) return Coverage.COVERED;
             if (nodeLimitReached) return Coverage.NODE_LIMIT;
             // A closed conversion ring cannot create missing stock. It is still a normal
@@ -275,7 +279,7 @@ public final class PureDemandTreeInspector {
                 return Coverage.NODE_LIMIT;
             }
 
-            List<RecipeNode> candidates = candidatesForMaterial(material);
+            List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, material, mode);
             if (candidates.isEmpty()) {
                 if (firstUnresolved == null) firstUnresolved = material;
                 return pureIncompatibleOutputIds.contains(material.itemId())
@@ -321,6 +325,10 @@ public final class PureDemandTreeInspector {
                     // Candidate recipes are OR branches, so any fully projected shortage path
                     // makes this material safe for the background planner.
                     if (candidateCoverage == Coverage.MISSING_MATERIALS) {
+                        if (!material.nbt().isEmpty() || "smithing".equals(candidate.modTypeId())) {
+                            best = Coverage.MISSING_MATERIALS;
+                            continue;
+                        }
                         // This inspector chooses the planner, not the final recipe. Once one
                         // candidate is representable by the pure graph, searching every
                         // compression/decompression sibling only risks walking conversion rings.
@@ -357,29 +365,6 @@ public final class PureDemandTreeInspector {
             List<RecipeNode> ordered = new ArrayList<>(candidates);
             ordered.sort(java.util.Comparator.comparingDouble(this::inputStockCoverage).reversed());
             return ordered;
-        }
-
-        private List<RecipeNode> candidatesForMaterial(MaterialRef material) {
-            List<RecipeNode> candidates = new ArrayList<>(graph.recipesByOutput()
-                    .getOrDefault(material, List.of()));
-            // Tagless demands are value-only in the inspector. Include concrete NBT output
-            // variants so a CraftTweaker recipe such as Unbreakable:1 is still expanded.
-            if (material.nbt().isEmpty()) {
-                graph.recipesByOutput().forEach((output, variants) -> {
-                    if (!output.itemId().equals(material.itemId()) || output.nbt().isEmpty()) return;
-                    for (RecipeNode candidate : variants) {
-                        if (!candidates.contains(candidate)) candidates.add(candidate);
-                    }
-                });
-            }
-            if (!material.nbt().isEmpty()) {
-                MaterialRef tagless = new MaterialRef(material.itemId(), "");
-                for (RecipeNode candidate : graph.recipesByOutput()
-                        .getOrDefault(tagless, List.of())) {
-                    if ("smithing".equals(candidate.modTypeId())) candidates.add(candidate);
-                }
-            }
-            return candidates;
         }
 
         private double inputStockCoverage(RecipeNode candidate) {
@@ -434,18 +419,6 @@ public final class PureDemandTreeInspector {
                     .allMatch(material -> reusableCatalystOutputIds.contains(material.itemId()));
         }
 
-        private static boolean matchesAny(MaterialRef stocked, List<MaterialRef> alternatives) {
-            for (MaterialRef requested : alternatives) {
-                if (matches(stocked, requested)) return true;
-            }
-            return false;
-        }
-
-        private static boolean matches(MaterialRef stocked, MaterialRef requested) {
-            return stocked.itemId().equals(requested.itemId())
-                    && (requested.nbt().isEmpty() || stocked.nbt().equals(requested.nbt()));
-        }
-
         /** Mutable inventory with rollback checkpoints; keys and item buckets are immutable. */
         private static final class Ledger {
             private record Change(MaterialRef material, int previousCount) {}
@@ -476,7 +449,7 @@ public final class PureDemandTreeInspector {
                 int remaining = ingredient.count();
                 for (MaterialRef stocked : order) {
                     int available = count(stocked);
-                    if (available <= 0 || !matchesAny(stocked, ingredient.alternatives())) continue;
+                    if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked, ingredient)) continue;
                     remaining -= Math.min(available, remaining);
                     if (remaining == 0) break;
                 }

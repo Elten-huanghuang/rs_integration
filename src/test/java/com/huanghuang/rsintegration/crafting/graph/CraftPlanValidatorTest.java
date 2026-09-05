@@ -11,6 +11,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -22,6 +23,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftPlanValidatorTest extends BootstrapTest {
+
+    @Test
+    void matchesUnbreakableToolWithDefaultDamageTag() {
+        ItemStack expected = new ItemStack(Items.WOODEN_SWORD);
+        CompoundTag expectedTag = new CompoundTag();
+        expectedTag.putInt("Unbreakable", 1);
+        expected.setTag(expectedTag);
+        ItemStack stored = new ItemStack(Items.WOODEN_SWORD);
+        CompoundTag storedTag = new CompoundTag();
+        storedTag.putInt("Damage", 0);
+        storedTag.putBoolean("Unbreakable", true);
+        stored.setTag(storedTag);
+
+        assertTrue(IngredientMatcher.test(StrictNBTIngredient.of(expected), stored));
+        assertFalse(IngredientMatcher.test(StrictNBTIngredient.of(expected),
+                new ItemStack(Items.WOODEN_SWORD)));
+    }
 
     @Test
     void acceptsDiamondWithQuantifiedSharedOutput() {
