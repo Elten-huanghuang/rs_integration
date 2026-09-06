@@ -79,6 +79,22 @@ public interface ModRecipeHandler {
     }
 
     /**
+     * Whether this recipe exposes a complete value-only input/output contract.
+     * Such recipes may be projected once during catalog construction and
+     * planned off-thread; machine interaction still remains on the server thread.
+     * The default is intentionally conservative for handlers that implement
+     * this interface directly. Prefix-based handlers inherit the stricter
+     * default from {@link AbstractRecipeHandler}.
+     */
+    default boolean supportsBackgroundPlanning(@Nonnull Recipe<?> recipe) {
+        if (!hasDeterministicPrimaryOutput(recipe) || hasRuntimeDependentPrimaryNbt(recipe)) {
+            return false;
+        }
+        List<IngredientSpec> specs = getIngredients(recipe);
+        return specs != null && !specs.isEmpty();
+    }
+
+    /**
      * Whether the JEI stack clicked by the player selects a concrete output
      * variant that cannot be recovered from the recipe's declared result alone.
      */

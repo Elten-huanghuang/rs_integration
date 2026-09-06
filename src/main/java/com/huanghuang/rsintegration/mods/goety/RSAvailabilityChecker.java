@@ -165,17 +165,17 @@ public final class RSAvailabilityChecker {
 
     private static boolean rsi$matchesPedestalItem(List<ItemStack> pedestalItems, Ingredient ingredient) {
         for (ItemStack stack : pedestalItems) {
-            if (ingredient.test(stack)) return true;
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) return true;
         }
         return false;
     }
 
     private static boolean rsi$hasInPlayerInv(ServerPlayer player, Ingredient ingredient) {
         for (ItemStack stack : player.getInventory().items) {
-            if (ingredient.test(stack) && !stack.isEmpty()) return true;
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack) && !stack.isEmpty()) return true;
         }
         for (ItemStack stack : player.getInventory().offhand) {
-            if (ingredient.test(stack) && !stack.isEmpty()) return true;
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack) && !stack.isEmpty()) return true;
         }
         return false;
     }

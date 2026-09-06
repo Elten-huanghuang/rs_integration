@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -440,7 +442,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         for (net.minecraft.world.item.ItemStack extracted : result.extractedStacks()) {
             if (extracted == null || extracted.isEmpty()) continue;
             if (combined.isEmpty()) combined = extracted.copy();
-            else if (net.minecraft.world.item.ItemStack.isSameItemSameTags(combined, extracted)) {
+            else if (MaterialMatcher.equivalentRuntimeFragment(combined, extracted)) {
                 combined.grow(extracted.getCount());
             }
         }

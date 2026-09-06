@@ -69,6 +69,33 @@ class AsyncMaxCraftablePlanningServiceTest {
         assertEquals(0, result.maximum());
     }
 
+    @Test
+    void maximumProbesReusePreparationWithoutChangingTheMaximum() {
+        MaterialRef log = material("oak_log");
+        MaterialRef plank = material("oak_planks");
+        MaterialRef stick = material("stick");
+        RecipeNode planks = recipe("planks", plank, 4, ingredient(log, 1));
+        RecipeNode sticks = recipe("sticks", stick, 4, ingredient(plank, 2));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(plank, List.of(planks), stick, List.of(sticks)));
+        PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
+                sticks.recipeId(), Map.of(new StackKey(Items.OAK_LOG, null), 10), Map.of(),
+                graph, "network", "bindings", false);
+        var expected = PlanningLookupCache.run(new PlanningLookupCache.Limits(0, 0, 0, 0),
+                () -> AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 65_536, 8_192));
+        PlanningLookupCache.run(() -> {
+            var actual = AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 65_536, 8_192);
+            assertEquals(expected, actual);
+            assertTrue(actual.determined());
+            assertEquals(20, actual.maximum());
+            var stats = PlanningLookupCache.preparationStats(PlanningLookupCache.PreparationStage.SMITHING);
+            assertEquals(2, stats.builds());
+            assertTrue(stats.hits() > 1);
+            System.out.printf("[RSI-max-preparation] maximum=%d smithingBuilds=%d reused=%d%n",
+                    actual.maximum(), stats.builds(), stats.hits());
+            return null;
+        });
+    }
+
     private static RecipeNode recipe(String id, MaterialRef output, int outputCount,
                                      IngredientRef... inputs) {
         return new RecipeNode(new ResourceLocation("test", id), output, outputCount,

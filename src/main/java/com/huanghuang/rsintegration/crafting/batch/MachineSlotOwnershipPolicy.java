@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import net.minecraft.world.item.ItemStack;
 
 /** Pure slot-delta accounting shared by machine delegates. */
@@ -14,12 +15,12 @@ public final class MachineSlotOwnershipPolicy {
                                           int addedCount, ItemStack current) {
         if (addedCount <= 0 || supplied == null || supplied.isEmpty()
                 || current == null || current.isEmpty()
-                || !ItemStack.isSameItemSameTags(supplied, current)) {
+                || !MaterialMatcher.equivalentRuntimeFragment(supplied, current)) {
             return 0;
         }
         int baselineCount = 0;
         if (baseline != null && !baseline.isEmpty()) {
-            if (!ItemStack.isSameItemSameTags(baseline, current)) return 0;
+            if (!MaterialMatcher.equivalentRuntimeFragment(baseline, current)) return 0;
             baselineCount = baseline.getCount();
         }
         return Math.min(addedCount, Math.max(0, current.getCount() - baselineCount));

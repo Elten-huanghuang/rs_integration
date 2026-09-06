@@ -24,6 +24,11 @@ public final class VanillaMachineRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
+    public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
+        return canHandle(recipe);
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access);
     }

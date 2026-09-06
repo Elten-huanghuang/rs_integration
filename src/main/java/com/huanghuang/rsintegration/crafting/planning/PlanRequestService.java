@@ -86,6 +86,14 @@ public final class PlanRequestService implements AutoCloseable {
         responsePlanning.submit(snapshot, draft, serverExecutor, revalidator, commit, rollback);
     }
 
+    public void submitRouted(PlanningSnapshot snapshot, AsyncPurePlanningService.RouteInputs routing,
+                             int repeatCount, Executor serverExecutor, int maxSteps,
+                             Consumer<AsyncPurePlanningService.RoutedPlan> commit,
+                             Consumer<Throwable> rollback) {
+        purePlanning.submitRouted(snapshot, routing, repeatCount, serverExecutor, maxSteps,
+                maxSearchStates, maxMemoizedFailures, pureTimeoutMs, commit, rollback);
+    }
+
     public void submitMaxCraftable(PlanningSnapshot snapshot, int limit, Executor serverExecutor,
                                    int maxSteps, Consumer<MaxCraftableResult> commit,
                                    Consumer<Throwable> rollback) {

@@ -696,7 +696,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             Object provider = findEmptyProvider(providers, used);
             if (provider == null) return false;
             ItemStack stack = materials.get(index[0]++).copyWithCount(1);
-            if (!ingredient.test(stack)) return false;
+            if (!com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) return false;
             writeRitualProvider(provider, focus, stack);
             used.add(provider);
             installedRitualInputs.add(new RitualInputSlot(provider, focus, stack));

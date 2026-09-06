@@ -48,6 +48,7 @@ public final class MaterialMatcher {
         Objects.requireNonNull(declared, "declared");
         if (stack == null || stack.isEmpty() || stack.getItem() != declared.item()) return false;
         if (declared.tag() == null || matchesExact(declared, stack)) return true;
+        if (IngredientMatcher.matchesProducedOutput(declared.toStack(1), stack)) return true;
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (!new ResourceLocation("irons_spellbooks", "scroll").equals(itemId)) return false;
         try {
@@ -99,8 +100,16 @@ public final class MaterialMatcher {
     }
 
     public static boolean sameRuntimeFragment(ItemStack first, ItemStack second) {
-        return first != null && second != null && !first.isEmpty() && !second.isEmpty()
-                && ItemStack.isSameItemSameTags(first, second);
+        return IngredientMatcher.matchesRuntimeIdentity(first, second);
+    }
+
+    /**
+     * Symmetric identity used only when two physical stacks are merged. A
+     * template may match a richer runtime stack, but two richer stacks with
+     * different metadata must remain separate so their state is not lost.
+     */
+    public static boolean equivalentRuntimeFragment(ItemStack first, ItemStack second) {
+        return sameRuntimeFragment(first, second) && sameRuntimeFragment(second, first);
     }
 
     /** Capture accepts exact NBT when specified and otherwise conservatively accepts the same item. */

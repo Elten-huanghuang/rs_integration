@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import net.minecraft.world.item.Item;
@@ -149,7 +150,7 @@ public final class PlanMaterialBill {
     private static int countExactStack(ItemStack expected, Map<StackKey, Integer> available) {
         int total = 0;
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            if (ItemStack.isSameItemSameTags(entry.getKey().toStack(), expected)) {
+            if (MaterialMatcher.equivalentRuntimeFragment(entry.getKey().toStack(), expected)) {
                 total += entry.getValue();
             }
         }

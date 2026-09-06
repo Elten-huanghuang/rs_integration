@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
@@ -14,7 +16,7 @@ public final class PhysicalInputRecovery {
         return recovered != null && expected != null
                 && !recovered.isEmpty() && !expected.isEmpty()
                 && recovered.getCount() >= expected.getCount()
-                && ItemStack.isSameItemSameTags(recovered, expected);
+                && MaterialMatcher.sameRuntimeFragment(expected, recovered);
     }
 
     public static boolean recoveredExpectedSlots(@Nullable List<ItemStack> recovered,

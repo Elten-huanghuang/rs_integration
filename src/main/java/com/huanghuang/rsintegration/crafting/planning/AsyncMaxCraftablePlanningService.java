@@ -38,6 +38,13 @@ final class AsyncMaxCraftablePlanningService {
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
                                    int maxSearchStates, int maxMemoizedFailures,
                                    int timeoutMs) {
+        return PlanningLookupCache.run(() -> computeInScope(snapshot, limit, maxSteps,
+                maxSearchStates, maxMemoizedFailures, timeoutMs));
+    }
+
+    private static CompletedSearch computeInScope(PlanningSnapshot snapshot, int limit, int maxSteps,
+                                                  int maxSearchStates, int maxMemoizedFailures,
+                                                  int timeoutMs) {
         Map<MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
         ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(

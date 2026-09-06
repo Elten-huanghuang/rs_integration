@@ -91,4 +91,37 @@ class TypedPreviewAdmissionQueueTest {
         return new TypedPreviewAdmissionQueue.Request(
                 player, generation, queuedNanos, task, () -> {}, ignored -> {});
     }
+
+    @Test
+    void expandedGraceDoesNotDelayAnImmediatelyAvailableRequest() {
+        var queue = new TypedPreviewAdmissionQueue(32);
+        var events = new ArrayList<String>();
+        queue.offer(request(UUID.randomUUID(), 1, 0, () -> events.add("ran")));
+        long grace = com.huanghuang.rsintegration.config.RSIntegrationConfig
+                .DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS * 1_000_000L;
+        assertEquals(1, queue.run(1, 0, grace, ignored -> true));
+        assertEquals(List.of("ran"), events);
+    }
+
+    @Test
+    void defaultGraceCanAdmitFullQueueAtOneRequestPerFiftyMillisecondTick() {
+        assertEquals(List.of(20, 12), runBurst(1_000));
+        assertEquals(List.of(32, 0), runBurst(com.huanghuang.rsintegration.config.RSIntegrationConfig
+                .DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS));
+    }
+
+    private static List<Integer> runBurst(int graceMillis) {
+        var queue = new TypedPreviewAdmissionQueue(32);
+        var ran = new java.util.concurrent.atomic.AtomicInteger();
+        var expired = new java.util.concurrent.atomic.AtomicInteger();
+        for (int index = 0; index < 32; index++) {
+            queue.offer(new TypedPreviewAdmissionQueue.Request(UUID.randomUUID(), 1, 0,
+                    ran::incrementAndGet, expired::incrementAndGet,
+                    failure -> { throw new AssertionError(failure); }));
+        }
+        for (int tick = 1; tick <= 32; tick++) {
+            queue.run(1, tick * 50_000_000L, graceMillis * 1_000_000L, ignored -> true);
+        }
+        return List.of(ran.get(), expired.get());
+    }
 }

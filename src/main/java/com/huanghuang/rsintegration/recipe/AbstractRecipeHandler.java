@@ -22,6 +22,17 @@ public abstract class AbstractRecipeHandler implements ModRecipeHandler {
         PREFIX_CACHE.put(handlerClass, prefixes);
     }
 
+    /**
+     * A class-prefix handler is not enough evidence that a machine recipe is
+     * safe to project off-thread.  Subclasses must opt in after verifying that
+     * the recipe's inputs and output do not depend on a live block entity,
+     * world state, capability, or random result.
+     */
+    @Override
+    public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
+        return false;
+    }
+
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         String[] prefixes = PREFIX_CACHE.get(this.getClass());

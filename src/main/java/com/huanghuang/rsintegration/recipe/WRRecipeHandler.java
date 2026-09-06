@@ -28,6 +28,37 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("wizards_reborn"); }
 
     @Override
+    public boolean cacheByRecipeClass() {
+        // CraftTweaker wraps recipes of different WR machine families in one
+        // recipe class; the namespace/path is part of the dispatch key.
+        return false;
+    }
+
+    @Override
+    public boolean canHandle(Recipe<?> recipe) {
+        return isArcaneWorkbenchRecipeId(recipe) || super.canHandle(recipe);
+    }
+
+    /** Stable datapack/KubeJS identity for CT-wrapped Arcane Workbench recipes. */
+    public static boolean isArcaneWorkbenchRecipeId(Recipe<?> recipe) {
+        return recipe != null && isArcaneWorkbenchRecipeId(recipe.getId());
+    }
+
+    public static boolean isArcaneWorkbenchRecipeId(net.minecraft.resources.ResourceLocation id) {
+        return id != null && "wizards_reborn".equals(id.getNamespace())
+                && id.getPath().startsWith("arcane_workbench/");
+    }
+
+    @Override
+    public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
+        // Arcane Workbench recipes have fixed item inputs and a declared output.
+        // Crystal rituals and infusion recipes depend on a live ritual area;
+        // Arcane Iterator output can depend on the current enchantment level.
+        return recipe.getClass().getName().endsWith("ArcaneWorkbenchRecipe")
+                || isArcaneWorkbenchRecipeId(recipe);
+    }
+
+    @Override
     public boolean useClickedPrimaryOutput(Recipe<?> recipe, ItemStack declared, ItemStack clicked) {
         return recipe.getClass().getName().endsWith("ArcaneIteratorRecipe")
                 || super.useClickedPrimaryOutput(recipe, declared, clicked);

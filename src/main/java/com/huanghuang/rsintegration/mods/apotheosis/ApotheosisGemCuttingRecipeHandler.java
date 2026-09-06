@@ -7,7 +7,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
 import javax.annotation.Nonnull;
 import java.util.List;
@@ -15,6 +15,9 @@ import java.util.List;
 public final class ApotheosisGemCuttingRecipeHandler implements ModRecipeHandler {
     @Override public @Nonnull ModType modType() { return ModType.byId(ApotheosisRSModule.GEM_CUTTING_TYPE); }
     @Override public boolean canHandle(@Nonnull Recipe<?> recipe) { return recipe instanceof ApotheosisGemCuttingRecipe; }
+    @Override public boolean supportsBackgroundPlanning(@Nonnull Recipe<?> recipe) {
+        return recipe instanceof ApotheosisGemCuttingRecipe;
+    }
     @Override public @Nonnull ItemStack getResultItem(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access) {
         return recipe.getResultItem(access).copy();
     }
@@ -22,7 +25,7 @@ public final class ApotheosisGemCuttingRecipeHandler implements ModRecipeHandler
         ApotheosisGemCuttingRecipe cutting = (ApotheosisGemCuttingRecipe) recipe;
         ItemStack gem = cutting.inputGem();
         return List.of(
-                new IngredientSpec(StrictNBTIngredient.of(gem), 2),
+                new IngredientSpec(PartialNBTIngredient.of(gem.getItem(), gem.getTag() == null ? new net.minecraft.nbt.CompoundTag() : gem.getTag()), 2),
                 new IngredientSpec(Ingredient.of(net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
                         new net.minecraft.resources.ResourceLocation("apotheosis", "gem_dust"))), cutting.dustCost()),
                 new IngredientSpec(Ingredient.of(cutting.material()), cutting.material().getCount()));

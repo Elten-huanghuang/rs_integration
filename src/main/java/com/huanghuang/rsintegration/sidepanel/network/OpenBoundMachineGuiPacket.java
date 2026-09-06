@@ -337,7 +337,7 @@ public final class OpenBoundMachineGuiPacket {
         for (var entry : stacks) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            if (ingredient.test(stack)) {
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) {
                 ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                         .extractExactLegacy(network, player, stack.copyWithCount(1), 1, false);
                 if (!extracted.isEmpty()) return extracted;
@@ -612,7 +612,7 @@ public final class OpenBoundMachineGuiPacket {
             if (remaining <= 0) break;
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            if (ingredient.test(stack)) {
+            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) {
                 int toExtract = Math.min(remaining, stack.getCount());
                     ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
                             .extractExactLegacy(network, player, stack.copyWithCount(1), toExtract, false);

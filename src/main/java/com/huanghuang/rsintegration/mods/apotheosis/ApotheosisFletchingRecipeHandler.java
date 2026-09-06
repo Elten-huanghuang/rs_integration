@@ -29,6 +29,11 @@ public final class ApotheosisFletchingRecipeHandler implements ModRecipeHandler 
     }
 
     @Override
+    public boolean supportsBackgroundPlanning(@Nonnull Recipe<?> recipe) {
+        return canHandle(recipe);
+    }
+
+    @Override
     public @Nonnull ItemStack getResultItem(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access) {
         return recipe.getResultItem(access).copy();
     }

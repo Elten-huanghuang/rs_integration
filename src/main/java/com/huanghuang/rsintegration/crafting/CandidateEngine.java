@@ -264,19 +264,34 @@ final class CandidateEngine {
             Map<CraftingResolver.StackKey, Integer> available,
             Map<Item, List<RecipeIndex.Entry>> index, net.minecraft.core.RegistryAccess access,
             Set<ResourceLocation> visited, java.util.function.BooleanSupplier timedOut) {
+        return findStockedSmithingOutput(recipe, accepts, new InventoryCandidateLookup(available),
+                index, access, visited, timedOut);
+    }
+
+    static ItemStack findStockedSmithingOutput(
+            net.minecraft.world.item.crafting.SmithingTransformRecipe recipe,
+            java.util.function.Predicate<ItemStack> accepts,
+            InventoryCandidateLookup available,
+            Map<Item, List<RecipeIndex.Entry>> index, net.minecraft.core.RegistryAccess access,
+            Set<ResourceLocation> visited, java.util.function.BooleanSupplier timedOut) {
         if (timedOut.getAsBoolean() || visited.size() >= 64 || !visited.add(recipe.getId())) {
             return ItemStack.EMPTY;
         }
-        for (var stored : available.entrySet()) {
+        var handler = new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler();
+        var specs = recipe.getClass() == net.minecraft.world.item.crafting.SmithingTransformRecipe.class
+                ? handler.getIngredients(recipe) : null;
+        var stockKeys = specs != null && specs.size() == 3
+                ? available.keysFor(specs.get(1).ingredient()) : available.allKeys();
+        for (var stored : stockKeys) {
             if (timedOut.getAsBoolean()) return ItemStack.EMPTY;
-            if (stored.getValue() <= 0) continue;
-            ItemStack base = stored.getKey().toStack();
+            if (available.count(stored) <= 0) continue;
+            ItemStack base = stored.toStack();
             if (!recipe.isBaseIngredient(base)) continue;
             ItemStack assembled = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
                     .assembleWithBase(recipe, base, access);
             if (!assembled.isEmpty() && accepts.test(assembled)) return assembled;
         }
-        var specs = new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler().getIngredients(recipe);
+        if (specs == null) specs = handler.getIngredients(recipe);
         if (specs == null || specs.size() != 3) return ItemStack.EMPTY;
         for (ItemStack base : specs.get(1).ingredient().getItems()) {
             for (RecipeIndex.Entry entry : index.getOrDefault(base.getItem(), List.of())) {
@@ -713,7 +728,7 @@ final class CandidateEngine {
 
     private static boolean anyIngredientItemMatchesNbt(Ingredient ingredient, ItemStack output) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, output)) return true;
+            if (!stack.isEmpty() && MaterialMatcher.equivalentRuntimeFragment(stack, output)) return true;
         }
         return false;
     }

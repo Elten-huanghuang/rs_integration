@@ -26,6 +26,12 @@ public final class IngredientMatcher {
 
     private IngredientMatcher() {}
 
+    static boolean hasCompleteItemList(Ingredient ingredient) {
+        Class<?> type = ingredient.getClass();
+        return type == Ingredient.class || type == StrictNBTIngredient.class
+                || type == net.minecraftforge.common.crafting.PartialNBTIngredient.class;
+    }
+
     /**
      * Match a graph material without losing state that cannot be reconstructed as
      * a fully initialized mod ItemStack (notably SlashBlade capability state).
@@ -62,10 +68,17 @@ public final class IngredientMatcher {
                     }
                 }
                 if (ingredient.test(normalized)) return true;
+                // StrictNBTIngredient is still strict for ordinary tagged
+                // items. A pristine unbreakable tool is the exception: its
+                // RepairCost, itemModifier, and similar fields are runtime
+                // state that smithing deliberately carries forward. Require
+                // every template field, but do not reject extra runtime data.
+                if (nbtMatches(template.getTag(), actual.getTag(), true)) return true;
             }
         }
         if (statefulTool) return false;
         if (ingredient.test(actual)) return true;
+        if (matchesTaglessPristineTool(ingredient, actual)) return true;
         if (actual.isEmpty() || !EARTH_HEART.equals(ForgeRegistries.ITEMS.getKey(actual.getItem()))) {
             return false;
         }
@@ -79,6 +92,26 @@ public final class IngredientMatcher {
             if (template.getTag().contains("isTainted")
                     && template.getTag().getBoolean("isTainted")) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Some machine ingredients implement a tagless item predicate by delegating
+     * to a strict stack comparison. Runtime metadata on a pristine unbreakable
+     * tool must not make that ordinary item ingredient reject the tool.
+     */
+    private static boolean matchesTaglessPristineTool(Ingredient ingredient, ItemStack actual) {
+        if (actual.isEmpty() || actual.getMaxDamage() <= 0 || !isUnbreakable(actual.getTag())
+                || !isDefaultDamage(actual.getTag()) || requiresNbt(ingredient)) return false;
+        for (ItemStack template : ingredient.getItems()) {
+            if (template.isEmpty() || template.getItem() != actual.getItem()
+                    || template.hasTag()) continue;
+            try {
+                if (ingredient.test(new ItemStack(template.getItem()))) return true;
+            } catch (RuntimeException | LinkageError ignored) {
+                return false;
             }
         }
         return false;
@@ -104,8 +137,54 @@ public final class IngredientMatcher {
                 actual.remove("Damage");
             }
         }
-        return partial ? NbtUtils.compareNbt(expected, actual, true)
+        return partial ? matchesPartialTag(expected, actual)
                 : Objects.equals(expected, actual);
+    }
+
+    private static boolean matchesPartialTag(CompoundTag expected, CompoundTag actual) {
+        if (expected == null || actual == null) return expected == actual;
+        for (String key : expected.getAllKeys()) {
+            if (!actual.contains(key)) return false;
+            Tag expectedValue = expected.get(key);
+            Tag actualValue = actual.get(key);
+            if ("Unbreakable".equals(key)) {
+                if (!(expectedValue instanceof net.minecraft.nbt.NumericTag expectedNumeric)
+                        || !(actualValue instanceof net.minecraft.nbt.NumericTag actualNumeric)
+                        || expectedNumeric.getAsInt() != actualNumeric.getAsInt()) return false;
+            } else if (expectedValue instanceof CompoundTag expectedCompound
+                    && actualValue instanceof CompoundTag actualCompound) {
+                if (!matchesPartialTag(expectedCompound, actualCompound)) return false;
+            } else if (!NbtUtils.compareNbt(expectedValue, actualValue, true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Match a produced stack against a player-selected output template. A
+     * pristine unbreakable tool may legitimately retain runtime state such as
+     * RepairCost or an item modifier while it is upgraded; that state must not
+     * make the final product fall through to storage. Other tagged outputs stay
+     * exact, and a damaged tool never matches a pristine template.
+     */
+    public static boolean matchesProducedOutput(ItemStack expected, ItemStack actual) {
+        if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()
+                || expected.getItem() != actual.getItem()) return false;
+        if (!expected.hasTag()) return true;
+        if (ItemStack.isSameItemSameTags(expected, actual)) return true;
+        return expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())
+                && nbtMatches(expected.getTag(), actual.getTag(), true);
+    }
+
+    /** Compare a concrete stack while preserving semantic equality for pristine tools. */
+    public static boolean matchesRuntimeIdentity(ItemStack expected, ItemStack actual) {
+        if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()
+                || expected.getItem() != actual.getItem()) return false;
+        if (expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())) {
+            return matchesProducedOutput(expected, actual);
+        }
+        return ItemStack.isSameItemSameTags(expected, actual);
     }
 
     private static boolean isUnbreakable(CompoundTag tag) {

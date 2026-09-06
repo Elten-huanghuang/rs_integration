@@ -55,6 +55,14 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         return recipe instanceof SmithingTransformRecipe;
     }
 
+    @Override
+    public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
+        // SmithingTransformRecipe copies the selected base tag into its output.
+        // ImmutableRecipeGraphProjector binds that state from the snapshot before
+        // recursive search, so this is deterministic despite runtime-dependent NBT.
+        return recipe instanceof SmithingTransformRecipe;
+    }
+
     public static ItemStack selectAvailableBase(SmithingTransformRecipe recipe,
                                                 java.util.Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Integer> available,
                                                 int needed) {

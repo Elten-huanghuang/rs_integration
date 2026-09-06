@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
@@ -603,7 +604,7 @@ public final class RSIntegrationNetwork {
             var snapshot = new java.util.ArrayList<ItemStack>();
             for (var entry : list.getStacks()) {
                 ItemStack stored = entry.getStack();
-                if (!stored.isEmpty() && ingredient.test(stored)) {
+                if (!stored.isEmpty() && MaterialMatcher.matchesIngredient(ingredient, stored)) {
                     snapshot.add(stored.copy());
                 }
             }
@@ -682,11 +683,11 @@ public final class RSIntegrationNetwork {
             if (extracted.isEmpty()) {
                 return extracted;
             }
-            if (ItemStack.isSameItemSameTags(extracted, template)
+            if (MaterialMatcher.sameRuntimeFragment(template, extracted)
                     && extracted.getCount() >= count) {
                 return extracted;
             }
-            if (ItemStack.isSameItemSameTags(extracted, template)) {
+            if (MaterialMatcher.sameRuntimeFragment(template, extracted)) {
                 RSIntegrationMod.LOGGER.warn("[RSI] extractExactFromNetwork: partial extraction — requested {} but only got {}",
                         count, extracted.getCount());
                 if (!simulate) {
@@ -734,7 +735,7 @@ public final class RSIntegrationNetwork {
             for (var entry : list.getStacks()) {
                 ItemStack stored = entry.getStack();
                 if (stored.isEmpty()) continue;
-                if (ingredient.test(stored)) {
+                if (MaterialMatcher.matchesIngredient(ingredient, stored)) {
                     return true;
                 }
             }

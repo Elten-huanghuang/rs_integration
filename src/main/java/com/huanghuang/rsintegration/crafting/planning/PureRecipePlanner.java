@@ -61,6 +61,14 @@ public final class PureRecipePlanner {
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos,
                           LongSupplier nanoTime) {
+        return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
+                maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime));
+    }
+
+    private static Result resolveInScope(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+                                        List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                                        int maxMemoizedFailures, long deadlineNanos,
+                                        LongSupplier nanoTime) {
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
@@ -184,7 +192,7 @@ public final class PureRecipePlanner {
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
-        private final SeededReachability reachability;
+        private SeededReachability reachability;
         private final Map<List<MaterialRef>, BroadFamilyAnalysis> broadFamilyAnalyses =
                 new HashMap<>();
         private static final long FAMILY_COST_UNKNOWN = Long.MAX_VALUE / 4L;
@@ -211,7 +219,7 @@ public final class PureRecipePlanner {
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
             this.nanoTime = java.util.Objects.requireNonNull(nanoTime, "nanoTime");
-            this.reachability = new SeededReachability(graph, available, this::checkBudget);
+
         }
 
         private boolean solve(List<Task> pending) {
@@ -310,7 +318,7 @@ public final class PureRecipePlanner {
                     // Broad tags are pruned by family gain before reachability. In large
                     // modpacks, probing all log/chest variants first can traverse most of the
                     // recipe graph even though their recipes are only neutral conversion rings.
-                    if (broadFamily && !reachability.canReach(candidate)) continue;
+                    if (broadFamily && !reachability().canReach(candidate)) continue;
                     if (selfConsumed == 0
                             && isUnseededReverseConversion(candidate, wanted, batches)) {
                         continue;
@@ -506,7 +514,7 @@ public final class PureRecipePlanner {
                                                            NbtMatchMode mode) {
             List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, wanted, mode);
             List<RecipeNode> ordered = candidates.stream()
-                    .filter(candidate -> !pruneUnseeded || reachability.canReach(candidate))
+                    .filter(candidate -> !pruneUnseeded || hasAllInputsInStock(candidate) || reachability().canReach(candidate))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
             if (ordered.size() < 2) return ordered;
             Comparator<RecipeNode> coverage = Comparator
@@ -514,9 +522,20 @@ public final class PureRecipePlanner {
             // Avoid making the sort itself perform a reachability walk for every recipe of a
             // broad tag. Those candidates are checked lazily after the family-gain guard.
             ordered.sort(pruneUnseeded
-                    ? coverage.thenComparingInt(reachability::depth)
+                    ? coverage.thenComparingInt(reachability()::depth)
                     : coverage);
             return ordered;
+        }
+
+        private boolean hasAllInputsInStock(RecipeNode candidate) {
+            return candidate.inputs().stream().allMatch(input -> stockAcross(input) >= input.count());
+        }
+
+        private SeededReachability reachability() {
+            if (reachability == null) {
+                reachability = new SeededReachability(graph, initialStock, this::checkBudget);
+            }
+            return reachability;
         }
 
         private double inputStockCoverage(RecipeNode candidate) {

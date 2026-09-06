@@ -12,6 +12,7 @@ import java.util.List;
 public final class VanillaBrewingRecipeHandler implements ModRecipeHandler {
     @Override public ModType modType() { return ModType.byId("vanilla_brewing_stand"); }
     @Override public boolean canHandle(Recipe<?> recipe) { return recipe instanceof VanillaBrewingRecipeDefinition; }
+    @Override public boolean supportsBackgroundPlanning(Recipe<?> recipe) { return canHandle(recipe); }
     @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return ((VanillaBrewingRecipeDefinition) recipe).output();
     }

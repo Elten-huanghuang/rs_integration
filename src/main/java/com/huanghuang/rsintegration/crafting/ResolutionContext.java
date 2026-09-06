@@ -430,7 +430,7 @@ final class ResolutionContext {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
         if (!undoCheckpoints.isEmpty()) undoStack.push(new UndoEntry(key, counts.get(key)));
         Integer prev = counts.get(key);
-        counts.merge(key, stack.getCount(), Integer::sum);
+        counts.merge(key, stack.getCount(), MaterialSources::saturatedAdd);
         if (prev == null) indexStack(key);
     }
 
@@ -474,6 +474,14 @@ final class ResolutionContext {
         if (ingredient.isEmpty()) return 0;
 
         int total = 0;
+        if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
+            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
+                if (entry.getValue() > 0 && matches(ingredient, entry.getKey())) {
+                    total += entry.getValue();
+                }
+            }
+            return total;
+        }
         Set<Item> checkedItems = new HashSet<>();
 
         // Inverted-index fast path: for each Item the ingredient accepts,
@@ -487,31 +495,9 @@ final class ResolutionContext {
             if (candidates == null) continue; // nothing of this Item in storage
 
             for (CachedStack candidate : candidates) {
-                // Use the pre-created ItemStack — zero allocation per call
-                if (IngredientMatcher.test(ingredient, candidate.stack)) {
-                    total += counts.getOrDefault(candidate.key, 0);
-                }
-            }
-        }
-        // Some CraftTweaker ingredient wrappers do not expose a reliable display
-        // stack array even though test(actualStack) implements the real NBT rule.
-        // Fall back to the authoritative keyed inventory scan when the fast path
-        // had no item keys, or when every displayed option is NBT-constrained.
-        boolean constrained = checkedItems.isEmpty();
-        if (!constrained) {
-            constrained = true;
-            for (ItemStack template : ingredient.getItems()) {
-                if (!template.isEmpty() && !template.hasTag()) {
-                    constrained = false;
-                    break;
-                }
-            }
-        }
-        if (constrained) {
-            total = 0;
-            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() > 0 && matches(ingredient, entry.getKey())) {
-                    total += entry.getValue();
+                int count = counts.getOrDefault(candidate.key, 0);
+                if (count > 0 && IngredientMatcher.test(ingredient, candidate.stack)) {
+                    total += count;
                 }
             }
         }
@@ -620,7 +606,8 @@ final class ResolutionContext {
     private boolean matches(Ingredient ingredient, CraftingResolver.StackKey key) {
         CachedStack cached = stacksByKey.get(key);
         return cached != null
-                ? IngredientMatcher.test(ingredient, cached.stack)
+                ? IngredientMatcher.test(ingredient, IngredientMatcher.hasCompleteItemList(ingredient)
+                        ? cached.stack : cached.stack.copy())
                 : IngredientMatcher.test(ingredient, key);
     }
 

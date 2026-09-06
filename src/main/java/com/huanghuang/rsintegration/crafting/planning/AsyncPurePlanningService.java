@@ -62,19 +62,82 @@ public final class AsyncPurePlanningService {
                                                      int maxSteps,
                                                      int maxSearchStates, int maxMemoizedFailures,
                                                      int timeoutMs) {
+        PlanningSession session = new PlanningSession(snapshot.requestGeneration(), timeoutMs);
+        return PlanningLookupCache.run(() -> computeInScope(snapshot, repeatCount, maxSteps,
+                maxSearchStates, maxMemoizedFailures, session));
+    }
+
+    public void submitRouted(PlanningSnapshot snapshot, RouteInputs routing, int repeatCount,
+                             Executor serverExecutor, int maxSteps, int maxSearchStates,
+                             int maxMemoizedFailures, int timeoutMs,
+                             Consumer<RoutedPlan> commit, Consumer<Throwable> rollback) {
+        PlanningKey planning = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
+                snapshot.recipeId(), snapshot.availableItems(), snapshot.forcedRecipes(),
+                snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
+                snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
+                maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
+        coordinator.submitShared(new RoutedKey(planning, routing,
+                        List.copyOf(routing.available().entrySet())), snapshot,
+                ignored -> computeRouted(snapshot, routing, repeatCount, maxSteps,
+                        maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
+                current -> current.recipeRevision() == snapshot.recipeRevision(),
+                (current, result) -> commit.accept(new RoutedPlan(current, routing,
+                        result.inspection(), result.plan())), rollback);
+    }
+
+    static RoutedPlan computeRouted(PlanningSnapshot snapshot, RouteInputs routing, int repeatCount,
+                                    int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                                    int timeoutMs) {
+        return PlanningLookupCache.run(() -> {
+            PlanningThreadContext.throwIfCancelled();
+            PlanningSession session = new PlanningSession(snapshot.requestGeneration(), timeoutMs);
+            long started = session.startedNanos();
+            session.phase(PlanningSession.Phase.DEPENDENCY_PROJECTION);
+            ImmutableRecipeGraph scopedGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
+                    snapshot.recipeGraph(), snapshot.recipeId());
+            PureDemandTreeInspector.Result inspection;
+            try {
+                session.phase(PlanningSession.Phase.DEMAND_TREE);
+                inspection = PureDemandTreeInspector.inspectWithDeadline(scopedGraph,
+                        routing.available(), snapshot.recipeId(), repeatCount, routing.maxNodes(),
+                        routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
+                        session.deadlineNanos());
+            } finally {
+                com.huanghuang.rsintegration.command.PerformanceMonitor.recordDemandTreeInspection(
+                        System.nanoTime() - started);
+            }
+            PlanningThreadContext.throwIfCancelled();
+            PureRecipePlanner.Result plan = inspection.backgroundCompatible()
+                    && !snapshot.mainThreadOnly() && snapshot.forcedRecipes().isEmpty()
+                    ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
+                            maxMemoizedFailures, session) : null;
+            return new RoutedPlan(snapshot, routing, inspection, plan);
+        });
+    }
+
+    private static PureRecipePlanner.Result computeInScope(PlanningSnapshot snapshot, int repeatCount,
+                                                            int maxSteps, int maxSearchStates,
+                                                            int maxMemoizedFailures,
+                                                            PlanningSession session) {
         PlanningThreadContext.throwIfCancelled();
+        session.phase(PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
+        session.phase(PlanningSession.Phase.DEPENDENCY_PROJECTION);
+        ImmutableRecipeGraph scopedGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
+                snapshot.recipeGraph(), snapshot.recipeId());
+        session.phase(PlanningSession.Phase.INVENTORY_BINDING);
         ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(
-                snapshot.recipeGraph(), stock);
+                scopedGraph, stock);
         RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }
         List<IngredientRef> roots = SelfAmplifyingRecipePolicy.scaleTargetInputs(
                 target, repeatCount);
+        session.phase(PlanningSession.Phase.RECURSIVE_SEARCH);
         long searchStarted = System.nanoTime();
-        long deadlineNanos = deadlineAfterMillis(searchStarted, timeoutMs);
+        long deadlineNanos = session.deadlineNanos();
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos);
@@ -82,11 +145,13 @@ public final class AsyncPurePlanningService {
         com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT) {
+            PlanningLookupCache.Stats lookupStats = PlanningLookupCache.currentStats();
             RSIntegrationMod.LOGGER.warn(
-                    "[RSI-plan] Pure planning timed out: recipe={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={}",
-                    snapshot.recipeId(), elapsedNanos / 1_000_000L, result.expandedStates(),
+                    "[RSI-plan] Pure planning timed out: recipe={} phase={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={} nbtParses={} outputIndexBuilds={} outputScans={}",
+                    snapshot.recipeId(), session.phase(), elapsedNanos / 1_000_000L, result.expandedStates(),
                     result.backtracks(), result.memoHits(), stock.size(),
-                    planningGraph.recipesById().size());
+                    planningGraph.recipesById().size(), lookupStats.nbtParses(),
+                    lookupStats.outputIndexBuilds(), lookupStats.outputScans());
         }
         return result;
     }
@@ -99,6 +164,32 @@ public final class AsyncPurePlanningService {
 
     /** Keeps a background result inseparable from the immutable state that produced it. */
     public record CompletedPlan(PlanningSnapshot snapshot, PureRecipePlanner.Result result) {}
+
+    public record RouteInputs(Map<ImmutableRecipeGraph.MaterialRef, Integer> available,
+                              int maxNodes, java.util.Set<ResourceLocation> catalystOutputs,
+                              java.util.Set<ResourceLocation> catalystRecipes,
+                              java.util.Set<ResourceLocation> incompatibleOutputs) {
+        public RouteInputs {
+            available = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(available));
+            catalystOutputs = java.util.Set.copyOf(catalystOutputs);
+            catalystRecipes = java.util.Set.copyOf(catalystRecipes);
+            incompatibleOutputs = java.util.Set.copyOf(incompatibleOutputs);
+        }
+
+        public boolean matchesPolicy(int nodes, java.util.Set<ResourceLocation> outputs,
+                                      java.util.Set<ResourceLocation> recipes,
+                                      java.util.Set<ResourceLocation> incompatible) {
+            return maxNodes == nodes && catalystOutputs.equals(outputs)
+                    && catalystRecipes.equals(recipes) && incompatibleOutputs.equals(incompatible);
+        }
+    }
+
+    public record RoutedPlan(PlanningSnapshot snapshot, RouteInputs routing,
+                             PureDemandTreeInspector.Result inspection,
+                             @javax.annotation.Nullable PureRecipePlanner.Result plan) {}
+
+    private record RoutedKey(PlanningKey planning, RouteInputs routing,
+                              List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Integer>> availabilityOrder) {}
 
     private record PlanningKey(java.util.UUID playerId, long recipeRevision,
                                ResourceLocation recipeId,

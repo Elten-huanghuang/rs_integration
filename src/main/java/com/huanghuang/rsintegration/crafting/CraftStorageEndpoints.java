@@ -53,7 +53,7 @@ public final class CraftStorageEndpoints {
         return result.extractedStacks().stream().reduce(ItemStack.EMPTY, (left, right) -> {
             if (left.isEmpty()) return right.copy();
             ItemStack merged = left.copy();
-            if (ItemStack.isSameItemSameTags(merged, right)) merged.grow(right.getCount());
+            if (MaterialMatcher.equivalentRuntimeFragment(merged, right)) merged.grow(right.getCount());
             return merged;
         });
     }
