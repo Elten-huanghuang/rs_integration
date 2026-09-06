@@ -32,6 +32,9 @@ public final class RSIKeyBindings {
     public static KeyMapping KEY_BIND_NEARBY;
     /** Configurable Alt + right-click chord for binding the held network terminal to a machine. */
     public static KeyMapping KEY_BIND_MACHINE;
+    public static KeyMapping KEY_JEI_GIVE_ONE;
+    public static KeyMapping KEY_JEI_GIVE_STACK;
+    public static KeyMapping KEY_JEI_DROP;
 
     private static volatile boolean registered;
 
@@ -87,6 +90,16 @@ public final class RSIKeyBindings {
                 "key.categories.rsi"
         );
 
+        KEY_JEI_GIVE_ONE = new KeyMapping(
+                "key.rsi.jei_give_one", KeyConflictContext.GUI, KeyModifier.CONTROL,
+                InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_LEFT, "key.categories.rsi");
+        KEY_JEI_GIVE_STACK = new KeyMapping(
+                "key.rsi.jei_give_stack", KeyConflictContext.GUI, KeyModifier.CONTROL,
+                InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_RIGHT, "key.categories.rsi");
+        KEY_JEI_DROP = new KeyMapping(
+                "key.rsi.jei_drop", KeyConflictContext.GUI, KeyModifier.CONTROL,
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_Q, "key.categories.rsi");
+
         RSIntegrationMod.MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent e) -> {
                     e.register(KEY_CLEAR_SEARCH);
@@ -95,6 +108,9 @@ public final class RSIKeyBindings {
                     e.register(KEY_SWIPE_EXTRACT);
                     e.register(KEY_BIND_NEARBY);
                     e.register(KEY_BIND_MACHINE);
+                    e.register(KEY_JEI_GIVE_ONE);
+                    e.register(KEY_JEI_GIVE_STACK);
+                    e.register(KEY_JEI_DROP);
                 });
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onKeyInput);
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onMouseInput);

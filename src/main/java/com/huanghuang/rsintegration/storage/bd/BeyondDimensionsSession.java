@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.storage.bd;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.huanghuang.rsintegration.storage.*;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -13,8 +15,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 final class BeyondDimensionsSession implements StorageSession {
+    private static final Cache<String, Boolean> SKIPPED_ITEM_WARNINGS = CacheBuilder.newBuilder()
+            .maximumSize(256).expireAfterWrite(1, TimeUnit.MINUTES).build();
     private final Object network;
     private final StorageReference reference;
 
@@ -39,16 +45,10 @@ final class BeyondDimensionsSession implements StorageSession {
         StoragePermissionResult permission = checkPermission(player, StoragePermission.VIEW);
         if (!permission.allowedAccess()) return snapshotFailure(permission);
         try {
-            List<StoredItem> items = new ArrayList<>();
-            Object list = storage().getClass().getMethod("getStorage").invoke(storage());
-            if (list instanceof Iterable<?> values) for (Object value : values) {
-                Object key = BeyondDimensionsReflection.key(value);
-                if (!BeyondDimensionsReflection.isItemKey(key)) continue;
-                ItemStack stack = BeyondDimensionsReflection.keyStack(key);
-                long amount = BeyondDimensionsReflection.amount(value);
-                if (!stack.isEmpty() && amount > 0) items.add(new StoredItem(itemKey(stack), amount));
-            }
-            return StorageSnapshotResult.success(new StorageSnapshot(reference.backendId(), items));
+            Object nativeStorage = storage();
+            Object list = nativeStorage.getClass().getMethod("getStorage").invoke(nativeStorage);
+            return StorageSnapshotResult.success(readItemSnapshot(reference.backendId(), list,
+                    (stack, failure) -> warnSkippedItem(player, stack, failure)));
         } catch (Exception | LinkageError e) {
             com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
                     "[RSI-Storage] BD item snapshot failed player={} network={} cause={}",
@@ -56,6 +56,41 @@ final class BeyondDimensionsSession implements StorageSession {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
+    }
+
+    static StorageSnapshot readItemSnapshot(StorageBackendId backendId, Object nativeEntries,
+                                           BiConsumer<ItemStack, IllegalArgumentException> skipped) throws Exception {
+        if (!(nativeEntries instanceof Iterable<?> values)) {
+            throw new IllegalArgumentException("BD storage did not return iterable entries");
+        }
+        List<StoredItem> items = new ArrayList<>();
+        for (Object value : values) {
+            Object key = BeyondDimensionsReflection.key(value);
+            if (!BeyondDimensionsReflection.isItemKey(key)) continue;
+            ItemStack stack = BeyondDimensionsReflection.keyStack(key);
+            long amount = BeyondDimensionsReflection.amount(value);
+            if (stack.isEmpty() || amount <= 0) continue;
+            StorageItemKey itemKey;
+            try {
+                itemKey = BeyondDimensionsItemKeys.fromStack(backendId, stack);
+            } catch (IllegalArgumentException failure) {
+                // Exclude only unrepresentable identities, without changing native item NBT.
+                skipped.accept(stack, failure);
+                continue;
+            }
+            items.add(new StoredItem(itemKey, amount));
+        }
+        return new StorageSnapshot(backendId, items);
+    }
+
+    private void warnSkippedItem(ServerPlayer player, ItemStack stack, IllegalArgumentException failure) {
+        var itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        String warningKey = reference.backendId() + ":" + reference.networkId() + ":" + itemId;
+        if (SKIPPED_ITEM_WARNINGS.asMap().putIfAbsent(warningKey, Boolean.TRUE) != null) return;
+        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+                "[RSI-Storage] BD snapshot skipped unsupported item player={} network={} item={} cause={}; "
+                        + "native item unchanged, other items remain available (once per minute per network/item)",
+                player.getGameProfile().getName(), reference.networkId(), itemId, failure.toString());
     }
 
     @Override
