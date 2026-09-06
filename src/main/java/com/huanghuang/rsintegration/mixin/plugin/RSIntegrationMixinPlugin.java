@@ -30,6 +30,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".ironsspellbooks.SpellConfigManagerMixin")) {
+            return readClass(targetClassName, node -> node.methods.stream().anyMatch(method ->
+                    "buildConfigManager".equals(method.name)
+                            && "(Ljava/util/Map;Z)Z".equals(method.desc)))
+                    && readClass("io.redspace.ironsspellbooks.api.spells.AbstractSpell",
+                    node -> node.methods.stream().anyMatch(method ->
+                            "resetRarityWeights".equals(method.name) && "()V".equals(method.desc)));
+        }
         // These Malum mixins call ResonanceDiskAbilityService, whose disk item
         // implementation extends Refined Storage's StorageDiskItem.  Malum is
         // optional independently of Refined Storage, so skip the mixins when

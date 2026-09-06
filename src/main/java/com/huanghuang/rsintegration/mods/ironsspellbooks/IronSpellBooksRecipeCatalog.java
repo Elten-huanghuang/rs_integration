@@ -136,6 +136,18 @@ public final class IronSpellBooksRecipeCatalog {
         }
     }
 
+    public static void onSpellConfigApplied() {
+        synchronized (IronSpellBooksRecipeCatalog.class) {
+            // Match catalog-build -> native-initialization lock order. Never acquire
+            // RecipeIndex's lock here: its worker may be waiting for this catalog.
+            IronSpellRarityCache.resetAll(SpellRegistry.none(), SpellRegistry.REGISTRY.get());
+            catalog = null;
+            com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
+        }
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-IronSpells] Applied spell config: reset native rarity caches and invalidated dynamic recipes");
+    }
+
     /** Detects spell-config changes applied after the dynamic catalog was built. */
     public static boolean hasRuntimeDrift() {
         Catalog cached = catalog;
@@ -349,6 +361,9 @@ public final class IronSpellBooksRecipeCatalog {
             hash = fingerprint(hash, spell.allowCrafting() ? 1 : 0);
             hash = fingerprint(hash, spell.getMinLevel());
             hash = fingerprint(hash, spell.getMaxLevel());
+            for (int level = spell.getMinLevel(); level <= spell.getMaxLevel(); level++) {
+                hash = fingerprint(hash, spell.getRarity(level).getValue());
+            }
             for (InkItem ink : inks) {
                 ResourceLocation inkId = ForgeRegistries.ITEMS.getKey(ink);
                 hash = fingerprint(hash, inkId == null ? "" : inkId.toString());

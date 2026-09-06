@@ -45,6 +45,16 @@ class JeiCheatKeyBindingsContractTest {
     }
 
     @Test
+    void dropShortcutRequestsFullStackInsteadOfDisplayedIngredientCount() throws IOException {
+        String source = Files.readString(JAVA_ROOT.resolve("mods/jei/client/JeiCheatShortcuts.java"));
+        String drop = source.substring(source.indexOf("private static boolean dropItem("),
+                source.indexOf("private static IJeiRuntime activeRuntime("));
+        assertTrue(drop.contains("int count = stack.getMaxStackSize();"));
+        assertTrue(drop.contains("new JeiCheatDropPacket(stack.copyWithCount(count))"));
+        assertFalse(drop.contains("stack.getCount()"));
+    }
+
+    @Test
     void bindingLabelsExistInBothLanguages() throws IOException {
         for (String locale : List.of("en_us", "zh_cn")) {
             var translations = JsonParser.parseString(Files.readString(Path.of(

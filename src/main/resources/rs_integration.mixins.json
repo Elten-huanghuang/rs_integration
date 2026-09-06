@@ -38,6 +38,7 @@
     "refinedstorage.StackUtilsMixin",
     "minecraft.AbstractFurnaceAccessor",
     "ironfurnaces.BlockIronFurnaceTileBaseMixin",
+    "ironsspellbooks.SpellConfigManagerMixin",
     "itemcollectors.CollectorBlockEntityMixin",
     "forbidden.ClibanoMainBlockEntityAccessor",
     "sophisticatedbackpacks.InventoryInteractionHelperMixin",

@@ -29,6 +29,21 @@ class JeiCheatDropPacketTest extends BootstrapTest {
     }
 
     @Test
+    void fullStackRequestKeepsItemLimitAndDoesNotMutateJeiIngredient() {
+        for (var item : new net.minecraft.world.item.Item[]{Items.DIAMOND, Items.ENDER_PEARL, Items.DIAMOND_SWORD}) {
+            ItemStack displayed = new ItemStack(item);
+            displayed.getOrCreateTag().putString("marker", "original");
+            ItemStack request = displayed.copyWithCount(displayed.getMaxStackSize());
+            ItemStack drop = JeiCheatDropPacket.validatedDrop(new JeiCheatDropPacket(request).stack(), true);
+            assertEquals(displayed.getMaxStackSize(), drop.getCount());
+            assertEquals("original", drop.getTag().getString("marker"));
+            drop.getOrCreateTag().putString("marker", "changed");
+            assertEquals("original", displayed.getTag().getString("marker"));
+            assertEquals(1, displayed.getCount());
+        }
+    }
+
+    @Test
     void preservesDisplayCountAndCopiesNbt() {
         ItemStack source = new ItemStack(Items.DIAMOND, 3);
         source.getOrCreateTag().putString("marker", "original");

@@ -96,8 +96,15 @@ public final class RecipeIndex {
 
     /** Rebuilds once when late spell-config synchronization changes ink mappings. */
     public static void refreshDynamicRuntimeIfNeeded(Level level) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
-                || !IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return;
+        // Config publication can invalidate an in-flight generation after its
+        // revision was captured. Retry on subsequent ticks until it is rebuilt;
+        // warmUp's in-flight guard keeps this to one worker at a time.
+        if (!isReady(level)) {
+            if (!generationBuildFailed()) warmUp(level);
+            return;
+        }
+        if (!IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
         RSIntegrationMod.LOGGER.info(
                 "[RecipeCatalog] Iron spell configuration changed; rebuilding dynamic recipes");
         CraftPlanningRevision.bump();
