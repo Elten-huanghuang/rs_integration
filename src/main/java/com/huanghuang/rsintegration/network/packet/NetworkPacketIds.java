@@ -116,4 +116,5 @@ public final class NetworkPacketIds {
     public static final int BD_MACHINE_INSERT = 133;
     public static final int BD_UNBIND_MACHINE = 134;
     public static final int BD_BINDING_SYNC = 135;
+    public static final int JEI_CHEAT_DROP = 136;
 }

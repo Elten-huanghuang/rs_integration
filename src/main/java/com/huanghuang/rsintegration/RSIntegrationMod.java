@@ -611,6 +611,7 @@ public final class RSIntegrationMod {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> com.huanghuang.rsintegration.anvilmemory.AnvilMemoryClient::init);
         ConfigSyncPacket.register();
+        com.huanghuang.rsintegration.mods.jei.JeiCheatDropPacket.register();
 
         // Altar binding registry (BINDINGS cache + scan caches)
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
