@@ -302,7 +302,13 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "workContent");
         }
         if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiAutoEatMixin")) {
+                    return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
+                    && !hasField(targetClassName, "leftButtonSidebar")
+                    && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
+        }
+        if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiSidebarMixin")) {
             return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
+                    && hasField(targetClassName, "leftButtonSidebar")
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("beyonddimensions.BDBaseGuiOverlayMixin")) {

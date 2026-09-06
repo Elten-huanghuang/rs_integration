@@ -83,6 +83,7 @@
   "client": [
     "beyonddimensions.BDBaseGuiOverlayMixin",
     "beyonddimensions.DimensionsNetGuiAutoEatMixin",
+    "beyonddimensions.DimensionsNetGuiSidebarMixin",
     "apotheosis.EnchLibraryScreenMixin",
     "apotheosis.ReforgingMenuRestockMixin",
     "ftbquests.ClearRepeatCooldownMessageMixin",

@@ -18,6 +18,7 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.lang.reflect.Field;
+import java.util.function.Consumer;
 
 @OnlyIn(Dist.CLIENT)
 public final class AutoEatClientEvents {
@@ -67,6 +68,11 @@ public final class AutoEatClientEvents {
     public static void installControlsAfterNativeInit(Screen screen) {
         if (screen == null || !isAutoEatEnabled() || !isStorageScreen(screen)) return;
         installControls(screen, button -> addRenderable(screen, button));
+    }
+
+    public static void installControlsAfterNativeInit(Screen screen, Consumer<Button> adder) {
+        if (screen == null || adder == null || !isAutoEatEnabled() || !isStorageScreen(screen)) return;
+        installControls(screen, button -> adder.accept(button));
     }
 
     private interface ControlAdder {
