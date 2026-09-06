@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
+import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -18,7 +19,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -31,6 +31,7 @@ import java.util.List;
 
 /** Batch delegate for Aetherworks Aetherium Anvil (Forge Anvil). */
 public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
+    private static final AetherworksRecipeHandler RECIPE_HANDLER = new AetherworksRecipeHandler();
 
     // Instance state
     private ServerLevel level;
@@ -133,27 +134,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        if (recipe == null) return null;
-        List<IngredientSpec> specs = new ArrayList<>();
-        try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getDisplayInput");
-            Object result = m.invoke(recipe);
-            if (result instanceof Ingredient ing && !ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1));
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] getDisplayInput failed", e);
-        }
-        try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getAddition");
-            Object result = m.invoke(recipe);
-            if (result instanceof Ingredient ing && !ing.isEmpty()) {
-                specs.add(new IngredientSpec(ing, 1));
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Aetherworks] getAddition reflection failed", e);
-        }
-        return specs.isEmpty() ? null : specs;
+        return recipe == null ? null : RECIPE_HANDLER.getIngredients(recipe);
     }
 
     @Override

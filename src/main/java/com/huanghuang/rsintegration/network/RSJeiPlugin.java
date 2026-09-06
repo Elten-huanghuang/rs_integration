@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
+import com.huanghuang.rsintegration.mods.jei.client.JeiCheatShortcuts;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
@@ -65,6 +66,7 @@ public final class RSJeiPlugin implements IModPlugin {
         }
         if (ClientSyncedConfig.isSynced() ? !ClientSyncedConfig.ENABLE_JEI : !RSIntegrationConfig.ENABLE_JEI.get()) return;
         JeiMarqueeSelector.register();
+        JeiCheatShortcuts.register();
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.onJeiRuntimeAvailable(jeiRuntime);
         }
@@ -80,6 +82,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeUnavailable() {
         JeiMarqueeSelector.unregister();
+        JeiCheatShortcuts.unregister();
         cachedRuntime = null;
         com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
                 .onRuntimeUnavailable();
