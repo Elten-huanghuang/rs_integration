@@ -137,6 +137,8 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
 
     private <T> void execute(Request<T> request, Function<PlanningSnapshot, T> computation) {
         long started = System.nanoTime();
+        PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.QUEUE_WAIT,
+                started - request.submittedNanos);
         T result = null;
         Throwable failure = null;
         try {
@@ -154,10 +156,13 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
 
         T completedResult = result;
         Throwable completedFailure = failure;
+        long handoffStarted = System.nanoTime();
         request.serverExecutor.execute(() -> {
             PlanningSnapshot snapshot = request.callbackSnapshot;
             if (!active.remove(request.snapshot.playerId(), request)) return;
             if (!request.finish()) return;
+            PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.HANDOFF_WAIT,
+                    System.nanoTime() - handoffStarted);
             Throwable cause = unwrap(completedFailure);
             Predicate<PlanningSnapshot> revalidator = request.revalidator;
             BiConsumer<PlanningSnapshot, T> commit = request.commit;
@@ -230,6 +235,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         }
 
         private final Object sharedKey;
+        private final long submittedNanos = System.nanoTime();
         private final PlanningSnapshot snapshot;
         private volatile PlanningSnapshot callbackSnapshot;
         private final Executor serverExecutor;

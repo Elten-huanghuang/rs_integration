@@ -32,7 +32,7 @@ public final class RSIntegrationConfig {
             CraftingPlanningConfig.DEFAULT_TYPED_PREVIEW_TIMEOUT_MS;
     public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY = 32;
     public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK = 1;
-    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = 1_000;
+    public static final int DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = 3_000;
     public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
@@ -777,9 +777,9 @@ public final class RSIntegrationConfig {
                         CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
                         CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
         CRAFTING_PURE_PLANNING_TIMEOUT_MS = s
-                .comment("Wall-clock budget for one background pure-planning request.",
-                        "The clock starts when a worker dequeues the task. Max-craftable probes",
-                        "share one request budget and return unknown when it expires. Range: 50-5000.")
+                .comment("Search-time budget for background pure planning, not a mandatory wait.",
+                        "Ordinary pure search starts its clock after availability preparation; queue and routing time are excluded.",
+                        "Max-craftable probes share their search budget and return unknown when it expires. Range: 50-5000.")
                 .defineInRange("craftingPurePlanningTimeoutMs",
                         DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
@@ -806,6 +806,7 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK, 1, 8);
         CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = s
                 .comment("Maximum time a typed preview may wait in the admission queue.",
+                        "This is an expiry grace period, not an added delay or a larger execution budget.",
                         "Expired requests return the localized planner-busy response. Range: 100-10000.")
                 .defineInRange("craftingTypedPreviewQueueTimeoutMs",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS, 100, 10_000);

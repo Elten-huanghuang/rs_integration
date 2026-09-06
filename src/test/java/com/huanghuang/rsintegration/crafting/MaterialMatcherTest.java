@@ -9,11 +9,20 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialMatcherTest extends BootstrapTest {
+    @Test
+    void largeExternalStockSaturatesInsteadOfWrappingNegative() {
+        assertEquals(Integer.MAX_VALUE,
+                MaterialSources.saturatedAdd(Integer.MAX_VALUE - 10, 100));
+        assertEquals(Integer.MAX_VALUE,
+                MaterialSources.saturatedAdd(Integer.MAX_VALUE, 1));
+        assertEquals(42, MaterialSources.saturatedAdd(40, 2));
+    }
 
     @Test
     void semanticAndExactModesRemainDistinct() {
@@ -60,6 +69,28 @@ class MaterialMatcherTest extends BootstrapTest {
         assertNull(declaration.tag());
         assertTrue(MaterialMatcher.matchesOutputDeclaration(declaration, runtimeOutput));
         assertNotNull(MaterialKey.of(damaged).tag());
+    }
+
+    @Test
+    void pristineUnbreakableOutputRetainsRuntimeStateForDelivery() throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ItemStack expected = new ItemStack(Items.DIAMOND_SWORD);
+        expected.setTag(net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
+        ItemStack actual = expected.copy();
+        actual.getOrCreateTag().putInt("Damage", 0);
+        actual.getOrCreateTag().putInt("RepairCost", 8);
+        actual.getOrCreateTag().putString("itemModifier", "celestial_forge:vicious");
+        ItemStack damaged = actual.copy();
+        damaged.setDamageValue(1);
+
+        assertTrue(IngredientMatcher.matchesProducedOutput(expected, actual));
+        assertFalse(IngredientMatcher.matchesProducedOutput(expected, damaged));
+    }
+
+    @Test
+    void unrelatedTaggedOutputStillRequiresExactTagsForDelivery() {
+        ItemStack expected = tagged("declared");
+        ItemStack actual = tagged("runtime");
+        assertFalse(IngredientMatcher.matchesProducedOutput(expected, actual));
     }
 
     private static ItemStack tagged(String value) {

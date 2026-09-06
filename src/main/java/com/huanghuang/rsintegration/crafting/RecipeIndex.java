@@ -379,7 +379,19 @@ public final class RecipeIndex {
     static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,
                                                    Recipe<?> recipe) {
         return handler != null && type != null && recipe != null
-                && type.graphExecutionAudit() == ModType.GraphExecutionAudit.GRAPH_SAFE
+                && type.graphExecutionAudit() != ModType.GraphExecutionAudit.FLAT_REQUIRED
+                && handler.supportsBackgroundPlanning(recipe);
+    }
+
+    /** Returns whether the immutable recipe graph can represent this recipe's inputs. */
+    public static boolean isBackgroundProjectable(Recipe<?> recipe) {
+        if (recipe == null) return false;
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModType type = ModType.classifyRecipe(recipe);
+        if (type == null && handler != null) type = handler.modType();
+        return handler != null && type != null
+                && type.graphExecutionAudit() != ModType.GraphExecutionAudit.FLAT_REQUIRED
+                && handler.supportsBackgroundPlanning(recipe)
                 && handler.hasDeterministicPrimaryOutput(recipe);
     }
 

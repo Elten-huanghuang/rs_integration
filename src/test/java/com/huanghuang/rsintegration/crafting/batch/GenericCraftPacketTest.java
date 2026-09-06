@@ -330,8 +330,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureRecipePlanner.Feasibility.INFEASIBLE, List.of(), List.of(missing),
                 Map.of(), PureRecipePlanner.Status.UNRESOLVABLE, 3, 2, 0);
 
-        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(incomplete, Set.of()));
-        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(
+        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(incomplete, Set.of()));
+        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(
                 incomplete, Set.of(smithingOutput.itemId())));
 
         PureRecipePlanner.Result complete = new PureRecipePlanner.Result(
@@ -673,6 +673,11 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
+        assertTrue(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(true, false, false, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, true, false, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, true));
         assertTrue(GenericCraftPacket.shouldUseAsyncPurePreview(true, false));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(true, true));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(false, false));

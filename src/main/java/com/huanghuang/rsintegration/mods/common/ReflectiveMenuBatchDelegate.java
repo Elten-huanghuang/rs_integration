@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.common;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
@@ -141,7 +142,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
             IngredientSpec spec = specs.get(i);
             ItemStack material = materials.get(i);
             if (material == null || material.isEmpty() || material.getCount() < spec.count()
-                    || !spec.ingredient().test(material)) { clearMenu(); return false; }
+                    || !IngredientMatcher.test(spec.ingredient(), material)) { clearMenu(); return false; }
             menu.getSlot(menuInputSlotIndex(i)).set(material.copyWithCount(spec.count()));
         }
         menu.slotsChanged(menu.getSlot(0).container);
@@ -168,7 +169,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
     private boolean matchesExpected(ItemStack actual) {
         if (actual.isEmpty() || actual.getCount() != expected.getCount()
                 || !ItemStack.isSameItem(actual, expected)) return false;
-        return !strictResultNbt || ItemStack.isSameItemSameTags(actual, expected);
+        return !strictResultNbt || IngredientMatcher.matchesProducedOutput(expected, actual);
     }
 
     private boolean machineSlotsEmpty() {

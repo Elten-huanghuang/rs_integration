@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.common;
 
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -36,13 +37,13 @@ public final class InventoryDeltaCapture {
     }
 
     private static boolean containsIdentity(List<ItemStack> stacks, ItemStack candidate) {
-        return stacks.stream().anyMatch(stack -> ItemStack.isSameItemSameTags(stack, candidate));
+        return stacks.stream().anyMatch(stack -> MaterialMatcher.equivalentRuntimeFragment(stack, candidate));
     }
 
     private static int count(List<ItemStack> stacks, ItemStack candidate) {
         int total = 0;
         for (ItemStack stack : stacks) {
-            if (ItemStack.isSameItemSameTags(stack, candidate)) total += stack.getCount();
+            if (MaterialMatcher.equivalentRuntimeFragment(stack, candidate)) total += stack.getCount();
         }
         return total;
     }
@@ -51,7 +52,7 @@ public final class InventoryDeltaCapture {
         int remaining = requested;
         for (int i = 0; i < player.getInventory().items.size() && remaining > 0; i++) {
             ItemStack stack = player.getInventory().items.get(i);
-            if (!ItemStack.isSameItemSameTags(stack, candidate)) continue;
+            if (!MaterialMatcher.equivalentRuntimeFragment(stack, candidate)) continue;
             int taken = Math.min(stack.getCount(), remaining);
             stack.shrink(taken);
             remaining -= taken;

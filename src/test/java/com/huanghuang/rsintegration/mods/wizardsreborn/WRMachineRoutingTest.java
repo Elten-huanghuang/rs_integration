@@ -1,9 +1,12 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WRMachineRoutingTest {
     private static final ResourceLocation KUBE_JS_ID = new ResourceLocation(
@@ -54,6 +57,14 @@ class WRMachineRoutingTest {
                 WRBatchDelegate.expectedMachineTypeFromClassName("CrystalInfusionRecipe"));
         assertEquals(WRBatchDelegate.MachineType.ARCANE_ITERATOR,
                 WRBatchDelegate.expectedMachineTypeFromClassName("CrystalRitualRecipe"));
+    }
+
+    @Test
+    void arcaneWorkbenchDatapackIdsAreRecognizedWithoutNativeRecipeClass() {
+        assertTrue(WRRecipeHandler.isArcaneWorkbenchRecipeId(
+                new ResourceLocation("wizards_reborn", "arcane_workbench/avaritia_infinity_sword")));
+        assertFalse(WRRecipeHandler.isArcaneWorkbenchRecipeId(
+                new ResourceLocation("wizards_reborn", "crystal_infusion/irons_spellbooks_gold_crown")));
     }
 
     private static class ArcaneWorkbenchRecipe {}

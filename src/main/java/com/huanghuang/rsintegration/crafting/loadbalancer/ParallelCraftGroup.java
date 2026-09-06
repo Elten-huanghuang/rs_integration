@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -499,7 +500,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 ItemStack stack = operationMaterials.get(operationId).get(materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (first.isEmpty()) first = stack;
-                else if (!ItemStack.isSameItemSameTags(first, stack)) return false;
+                else if (!MaterialMatcher.equivalentRuntimeFragment(first, stack)) return false;
             }
         }
         return true;
@@ -845,7 +846,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 || captured == null || captured.isEmpty()) return 0;
         int matching = captured.stream()
                 .filter(stack -> stack != null && !stack.isEmpty()
-                        && ItemStack.isSameItemSameTags(stack, expectedBatch))
+                        && MaterialMatcher.sameRuntimeFragment(expectedBatch, stack))
                 .mapToInt(ItemStack::getCount)
                 .sum();
         if (matching <= 0) return 0;
@@ -1077,7 +1078,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (expected == null || expected.isEmpty()) return false;
         int count = captured.stream()
                 .filter(stack -> stack != null && !stack.isEmpty()
-                        && ItemStack.isSameItemSameTags(stack, expected))
+                        && MaterialMatcher.sameRuntimeFragment(expected, stack))
                 .mapToInt(ItemStack::getCount)
                 .sum();
         return count >= expected.getCount();

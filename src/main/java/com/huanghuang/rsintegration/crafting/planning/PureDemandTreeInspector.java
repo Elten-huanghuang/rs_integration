@@ -67,6 +67,32 @@ public final class PureDemandTreeInspector {
                                  Set<ResourceLocation> reusableCatalystOutputIds,
                                  Set<ResourceLocation> reusableCatalystRecipeIds,
                                  Set<ResourceLocation> pureIncompatibleOutputIds) {
+        return PlanningLookupCache.run(() -> inspectInScope(graph, available, targetRecipeId,
+                repeatCount, maxNodes, reusableCatalystOutputIds, reusableCatalystRecipeIds,
+                pureIncompatibleOutputIds, Long.MAX_VALUE));
+    }
+
+    static Result inspectWithDeadline(ImmutableRecipeGraph graph,
+                                      Map<MaterialRef, Integer> available,
+                                      ResourceLocation targetRecipeId,
+                                      int repeatCount,
+                                      int maxNodes,
+                                      Set<ResourceLocation> reusableCatalystOutputIds,
+                                      Set<ResourceLocation> reusableCatalystRecipeIds,
+                                      Set<ResourceLocation> pureIncompatibleOutputIds,
+                                      long deadlineNanos) {
+        return PlanningLookupCache.run(() -> inspectInScope(graph, available, targetRecipeId,
+                repeatCount, maxNodes, reusableCatalystOutputIds, reusableCatalystRecipeIds,
+                pureIncompatibleOutputIds, deadlineNanos));
+    }
+
+    private static Result inspectInScope(ImmutableRecipeGraph graph,
+                                         Map<MaterialRef, Integer> available,
+                                         ResourceLocation targetRecipeId, int repeatCount, int maxNodes,
+                                         Set<ResourceLocation> reusableCatalystOutputIds,
+                                         Set<ResourceLocation> reusableCatalystRecipeIds,
+                                         Set<ResourceLocation> pureIncompatibleOutputIds,
+                                         long deadlineNanos) {
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds != null
                 && reusableCatalystRecipeIds.contains(targetRecipeId);
@@ -77,7 +103,7 @@ public final class PureDemandTreeInspector {
         }
 
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
-                reusableCatalystOutputIds, pureIncompatibleOutputIds);
+                reusableCatalystOutputIds, pureIncompatibleOutputIds, deadlineNanos);
         Coverage targetCoverage = Coverage.COVERED;
         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                 SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount))) {
@@ -155,6 +181,7 @@ public final class PureDemandTreeInspector {
         private final Set<ResourceLocation> reusableCatalystOutputIds;
         private final Set<ResourceLocation> pureIncompatibleOutputIds;
         private final int maxNodes;
+        private final long deadlineNanos;
         private int visitedNodes;
         private boolean nodeLimitReached;
         private boolean catalystRouteAvailable;
@@ -162,10 +189,11 @@ public final class PureDemandTreeInspector {
 
         private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
                        int maxNodes, Set<ResourceLocation> reusableCatalystOutputIds,
-                       Set<ResourceLocation> pureIncompatibleOutputIds) {
+                       Set<ResourceLocation> pureIncompatibleOutputIds, long deadlineNanos) {
             this.graph = graph;
             this.ledger = new Ledger(available);
             this.maxNodes = maxNodes;
+            this.deadlineNanos = deadlineNanos;
             this.reusableCatalystOutputIds = reusableCatalystOutputIds == null
                     ? Set.of() : reusableCatalystOutputIds;
             this.pureIncompatibleOutputIds = pureIncompatibleOutputIds == null
@@ -173,6 +201,7 @@ public final class PureDemandTreeInspector {
         }
 
         private Coverage coverIngredient(IngredientRef ingredient) {
+            if (budgetExpired()) return Coverage.NODE_LIMIT;
             if (ingredient.role() == DemandRole.CATALYST) {
                 return coverCatalyst(ingredient);
             }
@@ -237,6 +266,13 @@ public final class PureDemandTreeInspector {
             return best;
         }
 
+        private boolean budgetExpired() {
+            if (deadlineNanos == Long.MAX_VALUE) return false;
+            if ((visitedNodes & 15) != 0) return System.nanoTime() >= deadlineNanos;
+            PlanningThreadContext.throwIfCancelled();
+            return System.nanoTime() >= deadlineNanos;
+        }
+
         private int consumeAcrossAlternatives(IngredientRef ingredient) {
             int mark = ledger.mark();
             int remaining = ingredient.count();
@@ -270,6 +306,7 @@ public final class PureDemandTreeInspector {
         private Coverage coverMaterial(MaterialRef material, int count,
                                        ImmutableRecipeGraph.NbtMatchMode mode) {
             if (count <= 0) return Coverage.COVERED;
+            if (budgetExpired()) return Coverage.NODE_LIMIT;
             if (nodeLimitReached) return Coverage.NODE_LIMIT;
             // A closed conversion ring cannot create missing stock. It is still a normal
             // material shortage, not evidence that main-thread recipe semantics are needed.

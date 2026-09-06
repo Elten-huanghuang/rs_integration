@@ -249,4 +249,18 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
         assertFalse(AsyncCraftChain.matchesFinalTarget(
                 runtimeOutput, graph, false, clickedOutput));
     }
+
+    @Test
+    void flatFallbackRoutesPristineUnbreakableRuntimeOutputToPlayerInventory() throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ItemStack clickedOutput = new ItemStack(Items.DIAMOND_SWORD);
+        clickedOutput.setTag(net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
+        ItemStack runtimeOutput = clickedOutput.copy();
+        runtimeOutput.getOrCreateTag().putInt("Damage", 0);
+        runtimeOutput.getOrCreateTag().putInt("RepairCost", 8);
+        runtimeOutput.getOrCreateTag().putString("itemModifier", "celestial_forge:vicious");
+
+        assertTrue(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, false, clickedOutput));
+        runtimeOutput.setDamageValue(1);
+        assertFalse(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, false, clickedOutput));
+    }
 }

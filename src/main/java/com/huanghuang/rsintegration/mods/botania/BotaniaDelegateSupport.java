@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.botania;
 
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.server.level.ServerLevel;
@@ -24,7 +25,7 @@ final class BotaniaDelegateSupport {
    for (ItemStack stack : result.extractedStacks()) {
     if (stack == null || stack.isEmpty()) continue;
     if (combined.isEmpty()) combined = stack.copy();
-    else if (ItemStack.isSameItemSameTags(combined, stack)) combined.grow(stack.getCount());
+    else if (MaterialMatcher.equivalentRuntimeFragment(combined, stack)) combined.grow(stack.getCount());
    }
    if (combined.isEmpty() || combined.getCount() < spec.count()) {
     if (!combined.isEmpty()) endpoint.insert(player, combined, false);

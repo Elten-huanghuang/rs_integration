@@ -74,6 +74,23 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                 PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1).status());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void lookupOptimizationKeepsTheFullModifiedSwordPlanAndTree(int start) {
+        ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
+        Map<MaterialRef, Integer> stock = stock(start, MODIFIED);
+        var uncachedLimits = new PlanningLookupCache.Limits(0, 0, 0, 0);
+        PureRecipePlanner.Result expected = PlanningLookupCache.run(uncachedLimits, () -> plan(graph, stock));
+        PureRecipePlanner.Result actual = plan(graph, stock);
+        assertTrue(actual.feasible(), actual.toString());
+        assertEquals(expected, actual);
+        PureDemandTreeInspector.Result expectedTree = PlanningLookupCache.run(uncachedLimits,
+                () -> PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
+        assertEquals(PureDemandTreeInspector.Status.COMPLETE, expectedTree.status());
+        assertEquals(expectedTree, PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
+        assertEquals(7 - start, actual.steps().size());
+    }
+
     @Test
     void exactChainAlsoAcceptsEquivalentDefaultDamageWithoutInventingOrdinaryStock() {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.EXACT);
@@ -148,6 +165,62 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
 
     private static PureRecipePlanner.Result plan(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> stock) {
         return PureRecipePlanner.resolve(graph, stock, graph.recipesById().get(FINAL_RECIPE).inputs(), 30);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void combinedBackgroundRoutePreservesFullModifiedSwordChain(int start) {
+        var source = graph(NbtMatchMode.PARTIAL);
+        var paper = material("minecraft:paper", "");
+        var iron = material("minecraft:iron_ingot", "");
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        source.recipesByOutput().forEach((output, nodes) -> recipes.put(output, nodes.stream()
+                .map(node -> new RecipeNode(node.recipeId(), node.output(), node.outputCount(),
+                        node.inputs().stream().map(input -> new IngredientRef(input.alternatives().stream()
+                                .map(material -> material.equals(TEMPLATE) ? paper
+                                        : material.equals(ADDITION) ? iron : material).toList(),
+                                input.count(), input.nbtMatchMode(), input.role())).toList(),
+                        node.modTypeId(), node.recipeTypeId())).toList()));
+        var mapped = new ImmutableRecipeGraph(recipes);
+        var available = Map.of(new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(
+                        start == 0 ? Items.WOODEN_SWORD : Items.STONE_SWORD, MODIFIED), 1,
+                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.PAPER, null), 6,
+                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.IRON_INGOT, null), 6);
+        var snapshot = new PlanningSnapshot(java.util.UUID.randomUUID(), 1, 1, FINAL_RECIPE,
+                available, Map.of(), mapped, "network", "binding", false);
+        var stock = ImmutableRecipeGraphProjector.projectAvailability(available);
+        var routing = new AsyncPurePlanningService.RouteInputs(stock, 512,
+                java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
+        var combined = PlanningThreadContext.runInBackground(() -> AsyncPurePlanningService.computeRouted(
+                snapshot, routing, 1, 30, 65536, 8192, 1500));
+        assertEquals(PureDemandTreeInspector.inspect(mapped, stock, FINAL_RECIPE, 1), combined.inspection());
+        assertEquals(plan(ImmutableRecipeGraphProjector.bindAvailability(mapped, stock), stock), combined.plan());
+        assertTrue(combined.plan().feasible());
+        assertTrue(combined.plan().steps().stream().anyMatch(step -> step.recipeId().toString()
+                .equals("callfromthedepth_:soulblade")));
+        assertFalse(PlanningLookupCache.isActive());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void preparationReusePreservesModifiedSwordPlanningAndInspection(int start) {
+        ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
+        Map<MaterialRef, Integer> stock = stock(start, MODIFIED);
+        var expectedPlan = PlanningLookupCache.run(new PlanningLookupCache.Limits(0, 0, 0, 0),
+                () -> plan(graph, stock));
+        var expectedTree = PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1);
+        PlanningLookupCache.run(() -> {
+            for (int repetition = 0; repetition < 3; repetition++) {
+                assertEquals(expectedPlan, plan(graph, stock));
+                assertEquals(expectedTree, PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
+            }
+            assertTrue(expectedPlan.feasible());
+            assertEquals(PureDemandTreeInspector.Status.COMPLETE, expectedTree.status());
+            var stats = PlanningLookupCache.preparationStats(PlanningLookupCache.PreparationStage.SMITHING);
+            assertEquals(1, stats.builds());
+            assertEquals(5, stats.hits());
+            return null;
+        });
     }
 
     @ParameterizedTest

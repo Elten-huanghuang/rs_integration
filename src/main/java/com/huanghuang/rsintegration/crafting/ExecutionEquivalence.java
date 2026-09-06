@@ -94,6 +94,6 @@ public final class ExecutionEquivalence {
                                      net.minecraft.world.item.ItemStack right) {
         if (left == null || right == null) return left == right;
         return left.getCount() == right.getCount()
-                && net.minecraft.world.item.ItemStack.isSameItemSameTags(left, right);
+                && MaterialMatcher.equivalentRuntimeFragment(left, right);
     }
 }

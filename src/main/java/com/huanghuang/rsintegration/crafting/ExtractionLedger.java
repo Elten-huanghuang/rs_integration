@@ -473,7 +473,8 @@ public final class ExtractionLedger implements AutoCloseable {
         // must run on the Ingredient path as well as the exact-item path,
         // because generic recipe planning normally reaches this method.
         if (storageSupportsFluidContainers(endpoint)
-                && ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
+                && IngredientMatcher.test(ingredient,
+                        new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
             ItemStack template = new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
                     new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
@@ -484,7 +485,8 @@ public final class ExtractionLedger implements AutoCloseable {
             }
         }
         if (storageSupportsFluidContainers(endpoint)
-                && ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+                && IngredientMatcher.test(ingredient,
+                        new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
             ItemStack template = new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
                     new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
@@ -523,7 +525,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (stack.isEmpty() || !IngredientMatcher.test(requested, stack)
                         || !matchesPreferredResonanceIngredient(stack)) continue;
                 if (!exactTemplate.isEmpty()
-                        && !ItemStack.isSameItemSameTags(exactTemplate, stack)) continue;
+                        && !MaterialMatcher.sameRuntimeFragment(exactTemplate, stack)) continue;
                 ResonanceReservationKey key = new ResonanceReservationKey(
                         view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
                 int available = stack.getCount() - pendingResonance.getOrDefault(key, 0);
@@ -819,7 +821,7 @@ public final class ExtractionLedger implements AutoCloseable {
             ItemStack simulated = entry.resonanceView.extractExactView(
                     entry.resonanceSlot, entry.template, entry.count, true);
             if (simulated.getCount() != entry.count
-                    || !ItemStack.isSameItemSameTags(simulated, entry.template)) {
+                    || !MaterialMatcher.sameRuntimeFragment(entry.template, simulated)) {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Ledger] Resonance tool changed before commit: backend={} slot={} expected={}",
                         entry.resonanceView.backendId(), entry.resonanceSlot, entry.template);
@@ -916,8 +918,10 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private static boolean isContainerFluidIngredient(Ingredient ingredient) {
-        return ingredient.test(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))
-                || ingredient.test(new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET));
+        return IngredientMatcher.test(ingredient,
+                new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))
+                || IngredientMatcher.test(ingredient,
+                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET));
     }
 
     private void resetSettlementMirror() {
@@ -1219,7 +1223,7 @@ public final class ExtractionLedger implements AutoCloseable {
         int needed = entry.count;
         for (ItemStack stack : slots) {
             if (IngredientMatcher.test(entry.originalIngredient, stack)
-                    && ItemStack.isSameItemSameTags(stack, entry.template)
+                    && MaterialMatcher.sameRuntimeFragment(entry.template, stack)
                     && stack.getCount() > 0) {
                 int take = Math.min(needed, stack.getCount());
                 ItemStack part = stack.split(take);
@@ -1240,7 +1244,7 @@ public final class ExtractionLedger implements AutoCloseable {
         int remaining = Math.min(limit, entry.count);
         for (ItemStack stack : slots) {
             if (IngredientMatcher.test(entry.originalIngredient, stack)
-                    && ItemStack.isSameItemSameTags(stack, entry.template)
+                    && MaterialMatcher.sameRuntimeFragment(entry.template, stack)
                     && stack.getCount() > 0) {
                 int take = Math.min(remaining, stack.getCount());
                 ItemStack part = stack.split(take);
@@ -1276,7 +1280,7 @@ public final class ExtractionLedger implements AutoCloseable {
             int available = 0;
             for (var entry : cache.getList().getStacks()) {
                 ItemStack stored = entry.getStack();
-                if (!stored.isEmpty() && ItemStack.isSameItemSameTags(stored, template)) {
+                if (!stored.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stored)) {
                     available += stored.getCount();
                 }
             }
@@ -1309,7 +1313,7 @@ public final class ExtractionLedger implements AutoCloseable {
             int available = 0;
             for (var entry : cache.getList().getStacks()) {
                 ItemStack stored = entry.getStack();
-                if (!stored.isEmpty() && ItemStack.isSameItemSameTags(stored, template)) {
+                if (!stored.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stored)) {
                     available += stored.getCount();
                 }
             }
@@ -1328,7 +1332,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
             for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
                 ItemStack stack = stored.stack();
-                if (stack.isEmpty() || !ItemStack.isSameItemSameTags(stack, template)) continue;
+                if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(template, stack)) continue;
                 ResonanceReservationKey key = new ResonanceReservationKey(
                         view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
                 available += Math.max(0,
@@ -1345,7 +1349,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (IItemHandler backpack : findAllBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
                 ItemStack stored = backpack.getStackInSlot(slot);
-                if (ItemStack.isSameItemSameTags(stored, template)) available += stored.getCount();
+                if (MaterialMatcher.sameRuntimeFragment(template, stored)) available += stored.getCount();
             }
         }
         return Math.max(0, available - pendingInv.getOrDefault(key, 0));
@@ -1399,7 +1403,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private static int countExact(List<ItemStack> stacks, ItemStack template) {
         int total = 0;
         for (ItemStack stack : stacks) {
-            if (ItemStack.isSameItemSameTags(stack, template)) total += stack.getCount();
+            if (MaterialMatcher.sameRuntimeFragment(template, stack)) total += stack.getCount();
         }
         return total;
     }
@@ -1728,7 +1732,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 ItemStack inSlot = bp.getStackInSlot(s);
                 if (inSlot.isEmpty() || !IngredientMatcher.test(entry.originalIngredient, inSlot)
                         || !InventoryProtectionPolicy.mayUseFromBackpack(inSlot, entry.originalIngredient)
-                        || !ItemStack.isSameItemSameTags(inSlot, entry.template)) continue;
+                        || !MaterialMatcher.sameRuntimeFragment(entry.template, inSlot)) continue;
                 int take = Math.min(remaining, inSlot.getCount());
                 ItemStack taken = bp.extractItem(s, take, false);
                 if (!taken.isEmpty()) {
@@ -1960,7 +1964,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (ItemStack stack : pool) {
                 if (remaining <= 0) break;
                 if (stack.isEmpty() || expected == null
-                        || !ItemStack.isSameItemSameTags(stack, expected)) continue;
+                        || !MaterialMatcher.sameRuntimeFragment(expected, stack)) continue;
                 int take = Math.min(remaining, stack.getCount());
                 stack.shrink(take);
                 remaining -= take;
@@ -1983,7 +1987,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (int i = entries.size() - 1; i >= 0; i--) {
                 Entry e = entries.get(i);
                 if (!idsToRemove.contains(e.id)
-                        && ItemStack.isSameItemSameTags(e.template, stack)
+                        && MaterialMatcher.sameRuntimeFragment(e.template, stack)
                         && e.count == stack.getCount()) {
                     if (updatePending) decrementPending(e);
                     idsToRemove.add(e.id);

@@ -66,7 +66,7 @@ public final class SelfAmplifyingRecipePolicy {
         ItemStack[] candidates = spec.ingredient().getItems();
         if (candidates.length < 2 || !spec.ingredient().test(output)) return spec;
         List<ItemStack> filtered = Stream.of(candidates)
-                .filter(stack -> !ItemStack.isSameItemSameTags(stack, output))
+                .filter(stack -> !MaterialMatcher.equivalentRuntimeFragment(stack, output))
                 .map(stack -> stack.copyWithCount(1))
                 .toList();
         if (filtered.isEmpty() || filtered.size() == candidates.length) return spec;
@@ -91,7 +91,7 @@ public final class SelfAmplifyingRecipePolicy {
 
     private static boolean isConsumedSelfInput(IngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
-                && spec.ingredient().test(output);
+                && IngredientMatcher.test(spec.ingredient(), output);
     }
 
     private static int selfConsumed(List<IngredientRef> inputs, MaterialRef output) {

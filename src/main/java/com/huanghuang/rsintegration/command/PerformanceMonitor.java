@@ -62,6 +62,13 @@ public final class PerformanceMonitor {
     private static final AtomicLong planningExecutionMaxNanos = new AtomicLong();
     private static final AtomicLong planningWorkerActive = new AtomicLong();
     private static final AtomicLong planningQueueDepth = new AtomicLong();
+    public enum PlanningLatencyPhase { PREPARATION, QUEUE_WAIT, HANDOFF_WAIT }
+    private static final AtomicLongArray planningLatencyCalls =
+            new AtomicLongArray(PlanningLatencyPhase.values().length);
+    private static final AtomicLongArray planningLatencyNanos =
+            new AtomicLongArray(PlanningLatencyPhase.values().length);
+    private static final AtomicLongArray planningLatencyMaxNanos =
+            new AtomicLongArray(PlanningLatencyPhase.values().length);
     private static final AtomicLong purePlanningSearches = new AtomicLong();
     private static final AtomicLong purePlanningExpandedStates = new AtomicLong();
     private static final AtomicLong purePlanningBacktracks = new AtomicLong();
@@ -79,6 +86,14 @@ public final class PerformanceMonitor {
     private static final AtomicLong typedResolverCalls = new AtomicLong();
     private static final AtomicLong typedResolverNanos = new AtomicLong();
     private static final AtomicLong typedResolverMaxNanos = new AtomicLong();
+    private static final AtomicLong planningLookupScopes = new AtomicLong();
+    private static final AtomicLong planningNbtParses = new AtomicLong();
+    private static final AtomicLong planningNbtCacheHits = new AtomicLong();
+    private static final AtomicLong planningOutputIndexBuilds = new AtomicLong();
+    private static final AtomicLong planningOutputScans = new AtomicLong();
+    private static final AtomicLong planningCandidateVariants = new AtomicLong();
+    private static final PreparationStats inventoryPreparation = new PreparationStats();
+    private static final PreparationStats smithingPreparation = new PreparationStats();
     private static final AtomicLong typedPreviewQueued = new AtomicLong();
     private static final AtomicLong typedPreviewReplaced = new AtomicLong();
     private static final AtomicLong typedPreviewRejected = new AtomicLong();
@@ -95,7 +110,45 @@ public final class PerformanceMonitor {
     private static final Map<String, DelegateStats> delegateStats = new ConcurrentHashMap<>();
     private record DelegateStats(AtomicLong calls, AtomicLong totalNanos, AtomicLong maxNanos) {}
 
+    private static final class PreparationStats {
+        private final AtomicLong builds = new AtomicLong();
+        private final AtomicLong hits = new AtomicLong();
+        private final AtomicLong elapsedNanos = new AtomicLong();
+        private final AtomicLong maxNanos = new AtomicLong();
+
+        private String summary() {
+            long buildCount = builds.get();
+            long hitCount = hits.get();
+            long calls = buildCount + hitCount;
+            return buildCount + "/" + hitCount + "/"
+                    + (calls == 0 ? 0 : elapsedNanos.get() / calls / 1000)
+                    + "/" + maxNanos.get() / 1000 + "us";
+        }
+    }
+
     private PerformanceMonitor() {}
+
+    public static void recordPlanningLatency(PlanningLatencyPhase phase, long elapsedNanos) {
+        int index = phase.ordinal();
+        long elapsed = Math.max(0L, elapsedNanos);
+        planningLatencyCalls.incrementAndGet(index);
+        planningLatencyNanos.addAndGet(index, elapsed);
+        planningLatencyMaxNanos.updateAndGet(index, previous -> Math.max(previous, elapsed));
+    }
+
+    public record PlanningLatency(long calls, long totalNanos, long maxNanos) {}
+
+    public static PlanningLatency planningLatency(PlanningLatencyPhase phase) {
+        int index = phase.ordinal();
+        return new PlanningLatency(planningLatencyCalls.get(index), planningLatencyNanos.get(index),
+                planningLatencyMaxNanos.get(index));
+    }
+
+    private static String planningLatencySummary(PlanningLatencyPhase phase) {
+        PlanningLatency timing = planningLatency(phase);
+        return timing.calls() + "/" + (timing.calls() == 0 ? 0
+                : timing.totalNanos() / timing.calls() / 1000) + "/" + timing.maxNanos() / 1000 + "us";
+    }
 
     /** Record a resolution that hit the deadline. */
     public static void recordResolveTimeout() {
@@ -209,10 +262,28 @@ public final class PerformanceMonitor {
         vanillaTickBudget.addAndGet(Math.max(0, budget));
         vanillaDeferredChains.addAndGet(Math.max(0, deferredChains));
     }
+    public static void recordPlanningLookups(long nbtParses, long nbtCacheHits,
+                                              long outputIndexBuilds, long outputScans,
+                                              long candidateVariants) {
+        planningLookupScopes.incrementAndGet();
+        planningNbtParses.addAndGet(nbtParses);
+        planningNbtCacheHits.addAndGet(nbtCacheHits);
+        planningOutputIndexBuilds.addAndGet(outputIndexBuilds);
+        planningOutputScans.addAndGet(outputScans);
+        planningCandidateVariants.addAndGet(candidateVariants);
+    }
     public static void recordTypedPreviewQueued(boolean replaced, int queueDepth) {
         typedPreviewQueued.incrementAndGet();
         if (replaced) typedPreviewReplaced.incrementAndGet();
         typedPreviewQueueDepth.set(Math.max(0, queueDepth));
+    }
+    public static void recordPlanningPreparation(boolean inventory, long builds, long hits,
+                                                  long elapsedNanos, long maxNanos) {
+        PreparationStats stats = inventory ? inventoryPreparation : smithingPreparation;
+        stats.builds.addAndGet(builds);
+        stats.hits.addAndGet(hits);
+        stats.elapsedNanos.addAndGet(elapsedNanos);
+        stats.maxNanos.updateAndGet(previous -> Math.max(previous, maxNanos));
     }
     public static void recordTypedPreviewRejected(int queueDepth) {
         typedPreviewRejected.incrementAndGet();
@@ -310,6 +381,9 @@ public final class PerformanceMonitor {
              + "/" + planningRejected.get() + "/" + planningCancelled.get()
              + " active=" + planningWorkerActive.get()
              + " queued=" + planningQueueDepth.get()
+             + " previewPrepare=" + planningLatencySummary(PlanningLatencyPhase.PREPARATION)
+             + " queueWait=" + planningLatencySummary(PlanningLatencyPhase.QUEUE_WAIT)
+             + " handoffWait=" + planningLatencySummary(PlanningLatencyPhase.HANDOFF_WAIT)
              + " exec=" + (planningCompleted.get() == 0 ? 0
                      : planningExecutionNanos.get() / planningCompleted.get() / 1000)
              + "/" + planningExecutionMaxNanos.get() / 1000 + "us"
@@ -334,6 +408,12 @@ public final class PerformanceMonitor {
              + (typedResolverCalls.get() == 0 ? 0
                      : typedResolverNanos.get() / typedResolverCalls.get() / 1000) + "/"
              + typedResolverMaxNanos.get() / 1000 + "us"
+             + " lookupScopes=" + planningLookupScopes.get()
+             + " lookupNbt=" + planningNbtParses.get() + "/" + planningNbtCacheHits.get()
+             + " lookupOutputs=" + planningOutputIndexBuilds.get() + "/"
+             + planningOutputScans.get() + "/" + planningCandidateVariants.get()
+             + " prepareInventory=" + inventoryPreparation.summary()
+             + " prepareSmithing=" + smithingPreparation.summary()
              + " typedQueue=" + typedPreviewQueued.get() + "/"
              + typedPreviewReplaced.get() + "/" + typedPreviewRejected.get()
              + "/" + typedPreviewAdmitted.get() + " depth=" + typedPreviewQueueDepth.get()

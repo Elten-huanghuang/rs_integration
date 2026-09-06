@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -101,7 +102,7 @@ public record PlanStep(
         if (index < 0 || index >= inputs.size()) return 0;
         int count = Math.max(0, inputs.get(index).getCount());
         if (inputRole(index) == DemandRole.CATALYST) return count;
-        if (isSelfAmplifying() && ItemStack.isSameItemSameTags(inputs.get(index), output)) {
+        if (isSelfAmplifying() && MaterialMatcher.equivalentRuntimeFragment(inputs.get(index), output)) {
             return count;
         }
         long total = (long) count * Math.max(1, executions);
@@ -113,7 +114,7 @@ public record PlanStep(
         for (int i = 0; i < inputs.size(); i++) {
             if (inputRole(i) == DemandRole.CATALYST) continue;
             ItemStack input = inputs.get(i);
-            if (ItemStack.isSameItemSameTags(input, output)) selfConsumed += input.getCount();
+            if (MaterialMatcher.equivalentRuntimeFragment(input, output)) selfConsumed += input.getCount();
         }
         return selfConsumed > 0L && output.getCount() > selfConsumed;
     }

@@ -30,6 +30,11 @@ class PureRecipePlannerPropertyTest {
             PureRecipePlanner.Result actual = PureRecipePlanner.resolve(
                     generated.graph(), generated.available(), generated.roots(),
                     generated.maxSteps(), 200_000, 16_384);
+            PureRecipePlanner.Result uncached = PlanningLookupCache.run(
+                    new PlanningLookupCache.Limits(0, 0, 0, 0), () -> PureRecipePlanner.resolve(
+                            generated.graph(), generated.available(), generated.roots(),
+                            generated.maxSteps(), 200_000, 16_384));
+            assertEquals(uncached, actual, "lookup cache changed plan for case " + caseIndex);
             boolean expected = referenceFeasible(generated);
 
             assertEquals(expected, actual.feasible(), "case " + caseIndex);

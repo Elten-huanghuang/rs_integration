@@ -1388,7 +1388,7 @@ public final class CraftingResolver {
                     Object val = f.get(recipe);
                     if (val instanceof ItemStack stack) {
                         if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
-                            if (!ItemStack.isSameItemSameTags(stack, output)) {
+                            if (!MaterialMatcher.equivalentRuntimeFragment(stack, output)) {
                                 repaired.add(stack.copy());
                             }
                         }
@@ -1396,7 +1396,7 @@ public final class CraftingResolver {
                         for (Object elem : list) {
                             if (elem instanceof ItemStack stack) {
                                 if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
-                                    if (!ItemStack.isSameItemSameTags(stack, output)) {
+                                    if (!MaterialMatcher.equivalentRuntimeFragment(stack, output)) {
                                         repaired.add(stack.copy());
                                     }
                                 }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
@@ -22,8 +23,37 @@ public final class MaterialSources {
     private static final Map<String, Map<StackKey, Integer>> networkCache = new ConcurrentHashMap<>();
     private static final Object cacheLock = new Object();
     private static volatile int lastTick = -1;
+    private static final LogSampler OVERFLOW_LOGS = new LogSampler(60_000L);
 
     private MaterialSources() {}
+
+    static int saturatedAdd(int left, int right) {
+        if (right <= 0) return left;
+        return left > Integer.MAX_VALUE - right ? Integer.MAX_VALUE : left + right;
+    }
+
+    private static void mergeAvailable(Map<StackKey, Integer> counts, StackKey key, long amount,
+                                       String source) {
+        if (amount <= 0) {
+            if (amount < 0 && OVERFLOW_LOGS.allow("negative:" + key.item())) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Materials] rejected negative external quantity: source={} item={} amount={} nbt={}",
+                        source, ForgeRegistries.ITEMS.getKey(key.item()), amount, key.tag());
+            }
+            return;
+        }
+        int before = counts.getOrDefault(key, 0);
+        int added = (int) Math.min(Integer.MAX_VALUE, amount);
+        int after = saturatedAdd(before, added);
+        counts.put(key, after);
+        if ((amount > Integer.MAX_VALUE || after == Integer.MAX_VALUE)
+                && OVERFLOW_LOGS.allow("saturated:" + key.item())) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Materials] quantity saturated for planning: source={} item={} amount={} existing={} planningCount={} limit={}",
+                    source, ForgeRegistries.ITEMS.getKey(key.item()), amount, before, after,
+                    Integer.MAX_VALUE);
+        }
+    }
 
     /**
      * Count all items in a player's main inventory, keyed by
@@ -35,7 +65,7 @@ public final class MaterialSources {
         Inventory inv = player.getInventory();
         for (ItemStack stack : inv.items) {
             if (!stack.isEmpty()) {
-                map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
+                mergeAvailable(map, StackKey.of(stack, true), stack.getCount(), "player_inventory");
             }
         }
         // Count backpack contents (including backpacks in curio slots)
@@ -47,7 +77,7 @@ public final class MaterialSources {
                         ItemStack stack = bp.getStackInSlot(i);
                         if (!stack.isEmpty()
                                 && !InventoryProtectionPolicy.isProtectedBackpackItem(stack)) {
-                            map.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
+                            mergeAvailable(map, StackKey.of(stack, true), stack.getCount(), "backpack");
                         }
                     }
                 }
@@ -68,7 +98,7 @@ public final class MaterialSources {
         for (StackListEntry<ItemStack> entry : entries) {
             ItemStack stack = entry.getStack();
             if (!stack.isEmpty()) {
-                counts.merge(StackKey.of(stack, true), stack.getCount(), Integer::sum);
+                mergeAvailable(counts, StackKey.of(stack, true), stack.getCount(), "refined_storage");
             }
         }
     }
@@ -122,15 +152,15 @@ public final class MaterialSources {
                 Map<StackKey, Integer> existing = networkCache.putIfAbsent(networkKey, networkItems);
                 if (existing != null) networkItems = existing;
             }
-            networkItems.forEach((key, count) -> available.merge(key, count, Integer::sum));
+            networkItems.forEach((key, count) -> mergeAvailable(available, key, count, "refined_storage_cache"));
             Map<StackKey, Integer> snapshot = Map.copyOf(available);
             cache.putIfAbsent(cacheKey, snapshot);
             return snapshot;
         }
         var snapshotResult = endpoint.snapshot(player);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
-                available.merge(StackKey.of(item.stack(), true),
-                        (int) Math.min(Integer.MAX_VALUE, item.amount()), Integer::sum)));
+                mergeAvailable(available, StackKey.of(item.stack(), true), item.amount(),
+                        "storage_snapshot")));
         // A typed-fluid backend may be able to manufacture vanilla fluid
         // containers from stored empty buckets + fluid.  Include this derived
         // availability in the immutable planning view; the ledger performs
@@ -139,8 +169,7 @@ public final class MaterialSources {
                 new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
             long derived = endpoint.session().countDerivedContainer(player, filled);
             if (derived > 0) {
-                available.merge(StackKey.of(filled, true),
-                        (int) Math.min(Integer.MAX_VALUE, derived), Integer::sum);
+                mergeAvailable(available, StackKey.of(filled, true), derived, "derived_container");
             }
         }
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {

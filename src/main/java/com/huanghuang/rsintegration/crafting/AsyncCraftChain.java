@@ -2211,7 +2211,7 @@ public final class AsyncCraftChain {
             for (ItemStack produced : producerPool) {
                 if (remaining <= 0) break;
                 if (produced.isEmpty() || !IngredientMatcher.test(spec.ingredient(), produced)) continue;
-                if (!combined.isEmpty() && !ItemStack.isSameItemSameTags(combined, produced)) continue;
+                if (!combined.isEmpty() && !MaterialMatcher.equivalentRuntimeFragment(combined, produced)) continue;
                 int take = Math.min(remaining, produced.getCount());
                 if (combined.isEmpty()) {
                     combined = produced.copyWithCount(take);
@@ -2258,7 +2258,7 @@ public final class AsyncCraftChain {
                 }
                 if (combined.isEmpty()) {
                     combined = initial.copyWithCount(remaining);
-                } else if (ItemStack.isSameItemSameTags(combined, initial)) {
+                } else if (MaterialMatcher.equivalentRuntimeFragment(combined, initial)) {
                     combined.grow(remaining);
                 } else {
                     ledger.cancelReservationsSince(reservationMark);
@@ -2314,7 +2314,7 @@ public final class AsyncCraftChain {
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
             if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
-            if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) continue;
+            if (exactNbt && !MaterialMatcher.sameRuntimeFragment(selected, stack)) continue;
             int take = Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
@@ -2330,7 +2330,7 @@ public final class AsyncCraftChain {
             if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
             if (selected.isEmpty()) {
                 selected = stack.copyWithCount(1);
-            } else if (exactNbt && !ItemStack.isSameItemSameTags(selected, stack)) {
+            } else if (exactNbt && !MaterialMatcher.sameRuntimeFragment(selected, stack)) {
                 continue;
             }
             available += stack.getCount();
@@ -2343,13 +2343,13 @@ public final class AsyncCraftChain {
     static boolean takeExactMatching(List<ItemStack> pool, ItemStack template, int count) {
         int available = 0;
         for (ItemStack stack : pool) {
-            if (ItemStack.isSameItemSameTags(stack, template)) available += stack.getCount();
+            if (MaterialMatcher.sameRuntimeFragment(stack, template)) available += stack.getCount();
         }
         if (available < count) return false;
         int remaining = count;
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
-            if (!ItemStack.isSameItemSameTags(stack, template)) continue;
+            if (!MaterialMatcher.sameRuntimeFragment(stack, template)) continue;
             int take = Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
@@ -4334,9 +4334,7 @@ public final class AsyncCraftChain {
             return matchesGraphFinalOutput(graph, stack);
         }
         if (targetOutput == null || targetOutput.isEmpty()) return false;
-        return targetOutput.hasTag()
-                ? ItemStack.isSameItemSameTags(stack, targetOutput)
-                : ItemStack.isSameItem(stack, targetOutput);
+        return IngredientMatcher.matchesProducedOutput(targetOutput, stack);
     }
 
     static boolean matchesGraphFinalOutput(CraftPlanGraph graph, ItemStack stack) {

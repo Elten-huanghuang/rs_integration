@@ -13,7 +13,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
 /** A runtime recipe for one concrete gem rarity transition and material choice. */
 public final class ApotheosisGemCuttingRecipe implements Recipe<Container> {
@@ -58,8 +58,8 @@ public final class ApotheosisGemCuttingRecipe implements Recipe<Container> {
     @Override
     public NonNullList<Ingredient> getIngredients() {
         NonNullList<Ingredient> result = NonNullList.create();
-        result.add(StrictNBTIngredient.of(input.copy()));
-        result.add(StrictNBTIngredient.of(input.copy()));
+        result.add(PartialNBTIngredient.of(input.getItem(), input.getTag() == null ? new net.minecraft.nbt.CompoundTag() : input.getTag()));
+        result.add(PartialNBTIngredient.of(input.getItem(), input.getTag() == null ? new net.minecraft.nbt.CompoundTag() : input.getTag()));
         result.add(Ingredient.of(new ItemStack(
                 net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
                         new ResourceLocation("apotheosis", "gem_dust")), dust)));

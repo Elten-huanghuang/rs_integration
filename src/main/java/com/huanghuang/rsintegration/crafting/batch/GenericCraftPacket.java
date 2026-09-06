@@ -74,6 +74,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -85,6 +86,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjec
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
@@ -1041,18 +1043,10 @@ public final class GenericCraftPacket {
         Set<ResourceLocation> reusableCatalystOutputIds =
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
                         ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
-        PureDemandTreeInspector.Result route = PureDemandTreeInspector.inspect(
-                recipeGraph, routingAvailability(available), recipeId, repeatCount,
-                RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
-                reusableCatalystOutputIds,
-                RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
+        var routeInputs = new AsyncPurePlanningService.RouteInputs(
+                routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
+                reusableCatalystOutputIds, RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
-        if (!route.backgroundCompatible()) {
-            RSIntegrationMod.LOGGER.info(
-                    "[RSI-exec] immutable route unavailable recipe={} status={} unresolved={} catalystRoute={}",
-                    recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
-            return false;
-        }
         ResourceLocation effectiveDim = dim != null
                 ? dim : player.serverLevel().dimension().location();
         net.minecraft.core.BlockPos effectivePos = pos != null
@@ -1066,9 +1060,19 @@ public final class GenericCraftPacket {
                                 net.minecraft.core.registries.Registries.DIMENSION, effectiveDim),
                         effectivePos), bindingGraph.blockedOutputIds(), false);
 
-        PLAN_REQUESTS.submit(snapshot, repeatCount, player.getServer()::execute,
+        PLAN_REQUESTS.submitRouted(snapshot, routeInputs, repeatCount, player.getServer()::execute,
                 RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
-                    PureRecipePlanner.Result result = completed.result();
+                    PureDemandTreeInspector.Result route = completed.inspection();
+                    if (!route.backgroundCompatible() || completed.plan() == null) {
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-exec] immutable route unavailable recipe={} status={} unresolved={} catalystRoute={}",
+                                recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
+                        tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                inferMode, baseItem, targetOutput, outputDestination,
+                                machineSelectionMode, storageReference, Map.of());
+                        return;
+                    }
+                    PureRecipePlanner.Result result = completed.plan();
                     if (!result.feasible()) {
                         RSIntegrationMod.LOGGER.warn(
                                 "[RSI-exec] pure planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
@@ -1178,6 +1182,12 @@ public final class GenericCraftPacket {
         ImmutableRecipeGraph planningGraph = new ImmutableRecipeGraph(projected);
 
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
+        var routeInputs = new AsyncPurePlanningService.RouteInputs(
+                routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
+                RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
+                        ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of(),
+                RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
+                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
         ResourceLocation effectiveDim = dim != null
                 ? dim : player.serverLevel().dimension().location();
         net.minecraft.core.BlockPos effectivePos = pos != null ? pos : player.blockPosition();
@@ -1193,9 +1203,19 @@ public final class GenericCraftPacket {
         // requested execution here so its recursively-produced inputs match the
         // terminal step appended below; planning one root left later batches
         // waiting on intermediates that were never scheduled.
-        PLAN_REQUESTS.submit(snapshot, Math.max(1, repeatCount), player.getServer()::execute,
-                RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
-                    PureRecipePlanner.Result result = completed.result();
+        PLAN_REQUESTS.submitRouted(snapshot, routeInputs, Math.max(1, repeatCount),
+                player.getServer()::execute, RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
+                    PureDemandTreeInspector.Result route = completed.inspection();
+                    if (!route.backgroundCompatible() || completed.plan() == null) {
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-exec] immutable physical route unavailable recipe={} status={} unresolved={} catalystRoute={}",
+                                recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
+                        tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                inferMode, baseItem, targetOutput, outputDestination,
+                                machineSelectionMode, storageReference, materialLocks);
+                        return;
+                    }
+                    PureRecipePlanner.Result result = completed.plan();
                     if (!result.feasible()) {
                         RSIntegrationMod.LOGGER.warn(
                                 "[RSI-exec] physical planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
@@ -3223,20 +3243,59 @@ public final class GenericCraftPacket {
     private interface PlanResultSink {
         void success(PlanResponse plan, PlanningSnapshot snapshot);
         void error(Component message);
+        default void notice(Component message) {}
     }
 
-    private static PlanResultSink networkSink(ServerPlayer player, long requestId) {
+    private static final java.util.concurrent.ConcurrentMap<PlanResultKey, PlanResultGate> PLAN_RESULT_GATES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long PLAN_RESULT_GATE_TTL_NANOS = 60_000_000_000L;
+
+    private static PlanResultSink networkSink(ServerPlayer player, long requestId,
+                                              long previewGeneration) {
+        long now = System.nanoTime();
+        PLAN_RESULT_GATES.entrySet().removeIf(entry ->
+                entry.getValue().expired(now, PLAN_RESULT_GATE_TTL_NANOS));
+        PlanResultKey key = new PlanResultKey(player.getUUID(), requestId, previewGeneration);
+        PlanResultGate gate = PLAN_RESULT_GATES.compute(key, (ignored, existing) ->
+                existing == null || existing.expired(now, PLAN_RESULT_GATE_TTL_NANOS)
+                        ? new PlanResultGate(previewGeneration, now) : existing);
         return new PlanResultSink() {
             @Override
             public void success(PlanResponse plan, PlanningSnapshot snapshot) {
+                if (!gate.tryEnterTerminal(previewGeneration)) return;
+                PLAN_RESULT_GATES.remove(key, gate);
                 PlanResponsePublisher.send(player, plan, requestId);
             }
 
             @Override
             public void error(Component message) {
+                if (!gate.tryEnterTerminal(previewGeneration)) return;
+                PLAN_RESULT_GATES.remove(key, gate);
                 PlanResponsePublisher.sendError(player, message, requestId);
             }
+
+            @Override
+            public void notice(Component message) {
+                if (player != null && !player.hasDisconnected() && !player.isRemoved()) {
+                    player.sendSystemMessage(message);
+                }
+            }
         };
+    }
+
+    private record PlanResultKey(UUID playerId, long requestId, long previewGeneration) {}
+
+    private static void clearPlanResultGates(@Nullable UUID playerId) {
+        if (playerId == null) {
+            PLAN_RESULT_GATES.forEach((key, gate) -> gate.cancel());
+            PLAN_RESULT_GATES.clear();
+            return;
+        }
+        PLAN_RESULT_GATES.entrySet().removeIf(entry -> {
+            if (!playerId.equals(entry.getKey().playerId())) return false;
+            entry.getValue().cancel();
+            return true;
+        });
     }
 
     private static boolean isSnapshotActive(ServerPlayer player, PlanningSnapshot snapshot,
@@ -3256,7 +3315,7 @@ public final class GenericCraftPacket {
                     @Override
                     public void success(PlanResponse prepared, PlanningSnapshot snapshot) {
                         if (!prepared.success()) {
-                            networkSink(player, packet.requestId).success(prepared, snapshot);
+                            networkSink(player, packet.requestId, previewGeneration).success(prepared, snapshot);
                             return;
                         }
                         boolean fullyProjected = snapshot.recipeGraph().recipesById()
@@ -3281,7 +3340,7 @@ public final class GenericCraftPacket {
                                 RSIntegrationConfig.CRAFTING_MAX_STEPS.get(),
                                 result -> {
                                     if (!result.determined()) {
-                                        networkSink(player, packet.requestId).error(
+                                        networkSink(player, packet.requestId, previewGeneration).error(
                                                 Component.translatable(
                                                         "rsi.plan.failure.max_craftable_unknown"));
                                     } else if (result.maximum() <= 0) {
@@ -3295,13 +3354,13 @@ public final class GenericCraftPacket {
                                                 result.snapshot());
                                     }
                                 },
-                                failure -> networkSink(player, packet.requestId).error(
+                                failure -> networkSink(player, packet.requestId, previewGeneration).error(
                                         buildFailureMessage(failure, packet.recipeId)));
                     }
 
                     @Override
                     public void error(Component message) {
-                        networkSink(player, packet.requestId).error(message);
+                        networkSink(player, packet.requestId, previewGeneration).error(message);
                     }
                 }, packet.storageReference, packet.materialLocks);
     }
@@ -3315,7 +3374,7 @@ public final class GenericCraftPacket {
                 displayCount, packet.baseItem, packet.targetOutput, packet.requestId,
                 previewGeneration, maximum > 0 ? plan : null, snapshot, true,
                 maximum > 0 ? null : SynchronousFallbackReason.PURE_UNRESOLVABLE,
-                true, networkSink(player, packet.requestId), packet.storageReference,
+                true, networkSink(player, packet.requestId, previewGeneration), packet.storageReference,
                 packet.materialLocks);
     }
 
@@ -3331,14 +3390,14 @@ public final class GenericCraftPacket {
                 tryBuildPlan(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                         1, packet.baseItem, packet.targetOutput, packet.requestId,
                         previewGeneration, null, snapshot, false, null,
-                        true, networkSink(player, packet.requestId), packet.storageReference,
+                        true, networkSink(player, packet.requestId, previewGeneration), packet.storageReference,
                         packet.materialLocks);
                 return;
             }
             tryBuildPlan(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                     maximum, packet.baseItem, packet.targetOutput, packet.requestId,
                     previewGeneration, null, snapshot, false, null,
-                    true, networkSink(player, packet.requestId), packet.storageReference,
+                    true, networkSink(player, packet.requestId, previewGeneration), packet.storageReference,
                     packet.materialLocks);
             return;
         }
@@ -3354,7 +3413,7 @@ public final class GenericCraftPacket {
 
             @Override
             public void error(Component message) {
-                networkSink(player, packet.requestId).error(message);
+                networkSink(player, packet.requestId, previewGeneration).error(message);
             }
         };
         tryBuildPlan(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
@@ -3373,7 +3432,7 @@ public final class GenericCraftPacket {
                                       long previewGeneration) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, null, null, false, null,
-                false, networkSink(player, requestId), null, Map.of());
+                false, networkSink(player, requestId, previewGeneration), null, Map.of());
     }
 
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -3387,7 +3446,7 @@ public final class GenericCraftPacket {
                                       @Nullable StorageReference storageReference) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, null, null, false, null,
-                false, networkSink(player, requestId), storageReference, Map.of());
+                false, networkSink(player, requestId, previewGeneration), storageReference, Map.of());
     }
 
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -3401,7 +3460,7 @@ public final class GenericCraftPacket {
                                       Map<String, ItemStack> materialLocks) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, null, null, false, null,
-                false, networkSink(player, requestId), storageReference, materialLocks);
+                false, networkSink(player, requestId, previewGeneration), storageReference, materialLocks);
     }
 
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -3440,6 +3499,26 @@ public final class GenericCraftPacket {
                                       PlanResultSink sink,
                                       @Nullable StorageReference storageReference,
                                       Map<String, ItemStack> materialLocks) {
+        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
+                clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
+                asyncAttempted, pendingFallbackReason, reuseValidatedSnapshot, sink,
+                storageReference, materialLocks, null);
+    }
+
+    private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
+                                      Map<String, String> forcedRecipes,
+                                      @Nullable ResourceLocation dim,
+                                      @Nullable net.minecraft.core.BlockPos pos, int repeatCount,
+                                      @Nullable ItemStack baseItem, @Nullable ItemStack clickedOutput,
+                                      long requestId, long previewGeneration,
+                                      @Nullable PureRecipePlanner.Result precomputedPlan,
+                                      @Nullable PlanningSnapshot precomputedSnapshot,
+                                      boolean asyncAttempted,
+                                      @Nullable SynchronousFallbackReason pendingFallbackReason,
+                                      boolean reuseValidatedSnapshot, PlanResultSink sink,
+                                      @Nullable StorageReference storageReference,
+                                      Map<String, ItemStack> materialLocks,
+                                      @Nullable AsyncPurePlanningService.RoutedPlan routedPlan) {
         long planStartNanos = System.nanoTime();
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
@@ -3846,7 +3925,9 @@ public final class GenericCraftPacket {
                 available = planningEndpoint == null
                         ? listAvailable(player, network)
                         : MaterialSources.listAllAvailable(player, planningEndpoint);
+                boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 BindingAwareGraph bindingGraph = recipe instanceof CraftingRecipe
+                        || backgroundProjectable
                         ? bindingAwareGraph(player,
                                 ImmutableRecipeGraphProjector.capture(player.serverLevel()))
                         : new BindingAwareGraph(new ImmutableRecipeGraph(Map.of()), Set.of());
@@ -3859,7 +3940,7 @@ public final class GenericCraftPacket {
                                 : PlanningStateValidator.networkFingerprint(selectedStorageReference, available),
                         PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
                         bindingGraph.blockedOutputIds(),
-                        !(recipe instanceof CraftingRecipe));
+                        !(recipe instanceof CraftingRecipe) && !backgroundProjectable);
             } finally {
                 PerformanceMonitor.recordPlanningSnapshot(System.nanoTime() - snapshotStarted);
             }
@@ -3926,8 +4007,9 @@ public final class GenericCraftPacket {
                     recipeId, recipeSpecs.size(), directPreviewAllocation.allocations().size());
         }
 
-        long demandTreeStarted = System.nanoTime();
-        long demandTreeElapsed;
+        PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.PREPARATION,
+                System.nanoTime() - planStartNanos);
+        long demandTreeElapsed = 0L;
         PureDemandTreeInspector.Result demandTree;
         Set<ResourceLocation> reusableCatalystOutputIds =
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
@@ -3935,17 +4017,62 @@ public final class GenericCraftPacket {
         Set<ResourceLocation> reusableCatalystRecipeIds =
                 RecipeIndex.reusableCatalystRecipeIds(player.serverLevel());
         boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds.contains(recipeId);
+        Set<ResourceLocation> pureIncompatibleOutputIds = directTerminalPlan ? Set.of()
+                : RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
+        int demandMaxNodes = RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get();
+        if (!asyncAttempted && shouldSubmitRoutedPreview(directTerminalPlan,
+                planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(), !materialLocks.isEmpty())) {
+            var routing = new AsyncPurePlanningService.RouteInputs(
+                    routingAvailability(planningSnapshot.availableItems()), demandMaxNodes,
+                    reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
+            PLAN_REQUESTS.submitRouted(planningSnapshot, routing, repeatCount, player.getServer()::execute,
+                    RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
+                            tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                    baseItem, clickedOutput, requestId, previewGeneration,
+                                    completed.plan(), completed.snapshot(), true, null,
+                                    reuseValidatedSnapshot, sink, planStorageReference, materialLocks, completed),
+                    failure -> {
+                        if (failure instanceof RejectedExecutionException) {
+                            sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
+                            return;
+                        }
+                        var fallbackReason = SynchronousFallbackReason.fromAsyncFailure(failure);
+                        if (fallbackReason.isEmpty()) return;
+                        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                baseItem, clickedOutput, requestId, previewGeneration,
+                                null, null, true, fallbackReason.orElseThrow(),
+                                reuseValidatedSnapshot, sink, planStorageReference, materialLocks);
+                    });
+            return;
+        }
         if (directTerminalPlan) {
             demandTree = new PureDemandTreeInspector.Result(
                     PureDemandTreeInspector.Status.COMPLETE, 0, null, false);
             demandTreeElapsed = 0L;
+        } else if (planningSnapshot.mainThreadOnly()) {
+            // Dynamic machine recipes cannot be safely inspected through the pure graph.
+            // Do not walk the global graph on the server thread before the typed adapter
+            // gets a chance to inspect the live machine.
+            demandTree = new PureDemandTreeInspector.Result(
+                    PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED, 0,
+                    null, false);
+            demandTreeElapsed = 0L;
+        } else if (routedPlan != null && routedPlan.snapshot().equals(planningSnapshot)
+                && routedPlan.routing().matchesPolicy(demandMaxNodes, reusableCatalystOutputIds,
+                        reusableCatalystRecipeIds, pureIncompatibleOutputIds)) {
+            demandTree = routedPlan.inspection();
         } else {
-            Set<ResourceLocation> pureIncompatibleOutputIds =
-                    RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
+            if (routedPlan != null) {
+                tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                        baseItem, clickedOutput, requestId, previewGeneration,
+                        null, null, false, null, false, sink, planStorageReference, materialLocks);
+                return;
+            }
+            long demandTreeStarted = System.nanoTime();
             try {
                 demandTree = PureDemandTreeInspector.inspect(
                         planningSnapshot.recipeGraph(), routingAvailability(planningSnapshot.availableItems()),
-                        recipeId, repeatCount, RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
+                        recipeId, repeatCount, demandMaxNodes,
                         reusableCatalystOutputIds, reusableCatalystRecipeIds,
                         pureIncompatibleOutputIds);
             } finally {
@@ -3966,11 +4093,6 @@ public final class GenericCraftPacket {
                 && effectiveOverrides.isEmpty()
                 && materialLocks.isEmpty()
                 && !planningSnapshot.mainThreadOnly();
-        // JEI's vanilla crafting recipes must produce a visible plan response as
-        // well.  The pure planner is useful for background demand calculations,
-        // but its asynchronous preview path can remain pending for a simple
-        // workbench recipe when the recipe graph contains many alternatives.  A
-        // typed resolver is bounded and already builds the same response/tree.
         // A live storage endpoint is sufficient for planning.  The legacy
         // INetwork value is intentionally null for non-RS backends, so using
         // it as the availability gate incorrectly rejects BD machine recipes
@@ -3982,43 +4104,9 @@ public final class GenericCraftPacket {
                 recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
                 demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst);
-        // Directly available terminals were handled above. Every remaining
-        // pure-compatible recursive preview belongs on the immutable worker
-        // planner, including CraftTweaker/vanilla CraftingRecipe instances.
-        // Sending those back through the main-thread typed resolver recreates
-        // the old tiny timeout for deep but otherwise valid dependency graphs.
-        boolean useAsyncPurePreview = shouldUseAsyncPurePreview(
-                pureRoute, directTerminalPlan);
-        if (!asyncAttempted && useAsyncPurePreview) {
-            PLAN_REQUESTS.submit(planningSnapshot, repeatCount, player.getServer()::execute,
-                    RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
-                            tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                    baseItem, clickedOutput, requestId, previewGeneration,
-                                    completed.result(), completed.snapshot(), true, null,
-                                    reuseValidatedSnapshot, sink, planStorageReference, materialLocks),
-                    failure -> {
-                        if (failure instanceof RejectedExecutionException) {
-                            sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
-                            return;
-                        }
-                        var fallbackReason = SynchronousFallbackReason.fromAsyncFailure(failure);
-                        if (fallbackReason.isEmpty()) {
-                            RSIntegrationMod.debug("[RSI-plan] Async planning ended without fallback for {}: {}",
-                                    recipeId, failure.toString());
-                            return;
-                        }
-                        RSIntegrationMod.LOGGER.debug("[RSI-plan] Pure planning fallback for {}", recipeId, failure);
-                        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                baseItem, clickedOutput, requestId, previewGeneration,
-                                null, null, true, fallbackReason.orElseThrow(),
-                                reuseValidatedSnapshot, sink, planStorageReference, materialLocks);
-                    });
-            return;
-        }
-
         var synchronousFallbackReason = pendingFallbackReason != null
                 ? java.util.Optional.of(pendingFallbackReason)
-                : asyncAttempted
+                : asyncAttempted && (routedPlan == null || routedPlan.plan() != null)
                         ? java.util.Optional.<SynchronousFallbackReason>empty()
                         : SynchronousFallbackReason.whenPureRouteUnavailable(
                                 planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
@@ -4038,7 +4126,15 @@ public final class GenericCraftPacket {
                     recipeId, precomputedPlan.status(), precomputedPlan.feasibility(),
                     precomputedPlan.missing(), precomputedPlan.expandedStates(),
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
-            sink.error(Component.translatable("rsi.plan.failure.complexity_limit"));
+            if (precomputedPlan.missing().isEmpty()) {
+                sink.error(Component.translatable(
+                        precomputedPlan.status() == PureRecipePlanner.Status.TIME_LIMIT
+                                ? "rsi.plan.failure.planning_timeout"
+                                : "rsi.plan.failure.complexity_limit"));
+            } else {
+                sink.error(Component.translatable("rsi.generic.error.missing_materials",
+                        formatPureMissingMaterials(precomputedPlan.missing())));
+            }
             return;
         }
         boolean requiresTypedCatalystRoute = requiresTypedCatalystRoute(
@@ -4072,7 +4168,7 @@ public final class GenericCraftPacket {
                                     repeatCount, baseItem, clickedOutput, requestId,
                                     previewGeneration, precomputedPlan, queuedSnapshot, true,
                                     pendingFallbackReason, true, sink, planStorageReference,
-                                    materialLocks),
+                                    materialLocks, routedPlan),
                             () -> {
                                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
                                 sink.error(Component.translatable(
@@ -4101,7 +4197,7 @@ public final class GenericCraftPacket {
             for (int lvl = levelBooks.length - 1; lvl >= 1; lvl--) {
                 ItemStack wanted = levelBooks[lvl - 1];
                 int matchingCount = available.entrySet().stream()
-                        .filter(e -> ItemStack.isSameItemSameTags(e.getKey().toStack(), wanted))
+                        .filter(e -> MaterialMatcher.sameRuntimeFragment(e.getKey().toStack(), wanted))
                         .mapToInt(Map.Entry::getValue).sum();
                 if (matchingCount >= repeatCount) {
                     iteratorStartLevel = lvl;
@@ -4120,6 +4216,9 @@ public final class GenericCraftPacket {
             recursiveRecipeSpecs = FarmersDelightRecipeHandler
                     .cuttingBoardGraphIngredients(recipeSpecs);
         }
+        boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
+                ? false
+                : DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available).feasible();
 
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;
@@ -4127,7 +4226,9 @@ public final class GenericCraftPacket {
         boolean usedPurePlan = false;
 
         boolean selectedTypedResolver = false;
-        if (directTerminalPlan && selectedPureResolver) {
+        if ((directTerminalPlan || directRecursiveTerminalPlan) && selectedPureResolver) {
+            resolutionSteps = List.of();
+        } else if (directRecursiveTerminalPlan) {
             resolutionSteps = List.of();
         } else if (canUsePrecomputedPlan(precomputedPlan) && selectedPureResolver) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
@@ -4178,8 +4279,14 @@ public final class GenericCraftPacket {
                         directTerminalPlan, demandTree.status(), demandTree.unresolved(),
                         demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
                         planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty());
-                sink.error(Component.translatable(
-                        "rsi.plan.failure.dynamic_plan_unavailable"));
+                if (missing.isEmpty()) {
+                    sink.error(Component.translatable(
+                            "rsi.plan.failure.dynamic_plan_unavailable"));
+                } else {
+                    sink.error(Component.translatable(
+                            "rsi.generic.error.missing_materials",
+                            CraftPacketUtils.formatMissingSummary(missing)));
+                }
                 return;
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error(
@@ -5137,6 +5244,12 @@ public final class GenericCraftPacket {
         return pureRoute && !directTerminalPlan;
     }
 
+    static boolean shouldSubmitRoutedPreview(boolean directTerminalPlan, boolean mainThreadOnly,
+                                              boolean hasOverrides, boolean hasMaterialLocks) {
+        return shouldUseAsyncPurePreview(!mainThreadOnly && !hasOverrides && !hasMaterialLocks,
+                directTerminalPlan);
+    }
+
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
                                   Map<Item, Integer> itemAvailable) {
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
@@ -5161,6 +5274,17 @@ public final class GenericCraftPacket {
                 : "rsi.plan.failure.missing_materials";
     }
 
+    private static List<String> formatPureMissingMaterials(
+            List<ImmutableRecipeGraph.IngredientRef> missing) {
+        List<String> result = new ArrayList<>();
+        for (ImmutableRecipeGraph.IngredientRef demand : missing) {
+            if (demand == null || demand.alternatives().isEmpty()) continue;
+            String item = demand.alternatives().get(0).itemId().toString();
+            result.add(item + " x" + demand.count());
+        }
+        return result;
+    }
+
     static boolean missingTouchesBlockedOutput(
             List<ImmutableRecipeGraph.IngredientRef> missing,
             Set<ResourceLocation> blockedOutputIds) {
@@ -5176,7 +5300,7 @@ public final class GenericCraftPacket {
             Set<ResourceLocation> blockedOutputIds) {
         return result != null
                 && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
-                && !missingTouchesBlockedOutput(result.missing(), blockedOutputIds);
+                && missingTouchesBlockedOutput(result.missing(), blockedOutputIds);
     }
 
     static boolean requiresTypedCatalystRoute(
@@ -5539,7 +5663,7 @@ public final class GenericCraftPacket {
     }
 
     private static boolean sameRecipeOutput(ItemStack left, ItemStack right) {
-        return ItemStack.isSameItemSameTags(left, right)
+        return MaterialMatcher.equivalentRuntimeFragment(left, right)
                 || (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
                 && com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
                 .sameSpellScroll(left, right));
@@ -5655,6 +5779,7 @@ public final class GenericCraftPacket {
     }
 
     public static void onPlayerLogout(UUID playerId) {
+        clearPlanResultGates(playerId);
         WARM_UP_REQUESTS.removePlayer(playerId);
         EXECUTION_REQUESTS.removePlayer(playerId);
         TYPED_PREVIEW_REQUESTS.remove(playerId);
@@ -5664,6 +5789,7 @@ public final class GenericCraftPacket {
 
     /** Cancels preview workers during server shutdown before world objects are torn down. */
     public static synchronized void cancelAllPlanning() {
+        clearPlanResultGates(null);
         PlanRequestService stopped = PLAN_REQUESTS;
         PLAN_REQUESTS = newDefaultPlanRequestService();
         stopped.close();
@@ -5675,6 +5801,7 @@ public final class GenericCraftPacket {
 
     /** Applies server-configured planner resource limits by replacing the bounded executor. */
     public static synchronized void reloadPlanningConfig() {
+        clearPlanResultGates(null);
         PlanRequestService previous = PLAN_REQUESTS;
         PLAN_REQUESTS = newPlanRequestService();
         previous.close();

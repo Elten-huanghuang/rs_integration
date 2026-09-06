@@ -714,7 +714,8 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> taken = new ArrayList<>();
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
-            if (stack == null || stack.isEmpty() || !ingredient.test(stack)) continue;
+            if (stack == null || stack.isEmpty()
+                    || !com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) continue;
             int amount = Math.min(remaining, stack.getCount());
             taken.add(stack.copyWithCount(amount));
             stack.shrink(amount);
