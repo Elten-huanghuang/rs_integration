@@ -662,7 +662,7 @@
   "key.rsi.bind_nearby": "Bind Nearby Machines",
   "key.rsi.jei_give_one": "JEI: Give One Item",
   "key.rsi.jei_give_stack": "JEI: Give One Stack",
-  "key.rsi.jei_drop": "JEI: Spawn and Drop Item",
+  "key.rsi.jei_drop": "JEI: Spawn and Drop Stack",
   "rsi.binding.nearby.started": "Scanning for machines within %s horizontal and %s vertical blocks",
   "rsi.binding.nearby.finished": "Scan complete: found %s, bound %s, already bound %s, protected %s, invalid structures %s",
   "rsi.binding.nearby.busy": "A nearby machine scan is already running",

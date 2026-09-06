@@ -96,7 +96,7 @@ public final class JeiCheatShortcuts {
     private static boolean dropItem(ItemStack stack) {
         var connection = Minecraft.getInstance().getConnection();
         if (connection == null || !NetworkHandler.CHANNEL.isRemotePresent(connection.getConnection())) return false;
-        int count = Math.min(stack.getCount(), stack.getMaxStackSize());
+        int count = stack.getMaxStackSize();
         if (count <= 0) return false;
         NetworkHandler.CHANNEL.sendToServer(new JeiCheatDropPacket(stack.copyWithCount(count)));
         return true;
