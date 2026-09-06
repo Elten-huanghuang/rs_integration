@@ -83,9 +83,9 @@ public final class BindingEventHandler {
                     .anyMatch(regName.getNamespace()::equals);
             if (!inCustomList) return;
             BlockEntity be = event.getLevel().getBlockEntity(event.getPos());
-            boolean hasMenu = be instanceof MenuProvider;
+            if (!(be instanceof MenuProvider)) return;
             matched = new MachineBindingTarget(regName.getNamespace(), ModType.byId("custom_gui"),
-                    RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS, List.of(), null, hasMenu);
+                    RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS, List.of(), null, true);
         }
 
         ItemStack held = player.getItemInHand(event.getHand());
