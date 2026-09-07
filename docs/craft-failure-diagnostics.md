@@ -263,3 +263,70 @@ Verification for this fix:
   `5408685a8894b94b74796f85e1e3e5462efb9f80f498ee3974cc91374c767fb0`.
 - Existing Mixin target/deprecated API and dependency deobfuscation warnings
   remain. Minecraft/modpack execution has not been tested in this run.
+
+## Same-Type Machine Parallel Dispatch (2026-09-07)
+
+This follow-up applies to the shared physical-machine dispatcher, including
+vanilla furnaces, blast furnaces, smokers, Iron Furnaces and Mana Pools. It does
+not allow several workers to own the same physical block. A single vanilla
+furnace remains sequential; a single Iron Furnaces factory retains its existing
+six-lane/native capacity behavior.
+
+Confirmed code paths and fixes:
+
+- Flat dispatch previously skipped parallel workers when remaining operations
+  exceeded `craftingOperationsPerDispatch` (default 32). It now creates bounded
+  parallel windows, e.g. 100 operations become 32 + 32 + 32 + 4, with workers
+  sharing the queue inside each window. No whole-order allocation is added and
+  no existing tick, machine-lease or concurrent-operation guard is removed.
+- Completion previously zeroed the entire step after a parallel group. It now
+  subtracts the completed window, and progress retains the full order total
+  while accumulating completed operations across windows.
+- Uncommitted material-reservation failure may shrink the parallel window;
+  one-operation work falls back to the existing single-machine path. Failed
+  probes restore virtual materials/reservations without sending missing-material
+  chat messages for a request that can still start. Committed failures never
+  retry through this path.
+- The flat availability filter now consults the delegate for valid bindings
+  without block entities, matching the graph path. Mana Pool catalyst blocks
+  are one concrete example; recipe-specific catalyst validation still runs.
+- Graph and flat parallel groups pass the selected storage endpoint into child
+  delegates before preparation and on subsequent starts. This keeps cooking
+  wrappers and auxiliary material/fuel handling on the task-selected backend.
+- Apprentice Codex essence smokers previously requested the whole small order
+  for their first worker. They now use the existing bounded-even-share policy.
+  Iron Furnaces already uses that policy and its lane capacities are unchanged.
+- Worker limits are applied to successfully prepared machines, not a truncated
+  prefix of bindings. Rejected early candidates no longer hide later usable
+  furnaces/pools in a small order.
+
+New diagnostics: `Load-balanced window` records recipe, prepared worker count,
+window operation count, remaining order operations and dispatch limit. A prepared
+worker count is not proof that all workers physically started simultaneously;
+kernel budgets, leases and output capture conflicts remain authoritative.
+
+Regression tests cover window boundaries 1/2/3/32/33/100, exact completion,
+monotonic progress, the real OperationQueue and execution kernel across multiple
+same-type machine keys, duplicate physical-machine exclusion, endpoint setup
+bytecode ordering, catalyst-aware filtering, and furnace/smoker batch arithmetic.
+These are unit/simulation/contract tests, not a live modpack benchmark. In-game
+acceptance must cover several same-type furnaces, mixed-speed factories, fuel
+from the selected backend, cancellation, final delivery and 20-seed replication.
+Each window waits for its own workers to drain before creating the next; this is
+bounded-window dispatch, not a persistent whole-order sliding pipeline. Mixed
+machine speeds can therefore still leave a tail idle at window boundaries.
+
+Verification for the parallel-dispatch follow-up:
+
+- Expanded directed suite: 170 passed. The final candidate-prefix regression
+  was subsequently included in the full run.
+- `gradlew.bat test build reobfJar verifyReleaseJar --no-daemon` succeeded:
+  1518 tests discovered, 1517 passed, one existing optional-runtime test skipped,
+  zero failures/errors. Eleven regression tests were added in this follow-up.
+- Release remains `build/libs/rs_integration-1.4.2.jar`, 4,414,387 bytes.
+  SHA-256: `8ef22d8303469e92a37d436238685c27ff68e6068de742b494b2115c3b0776e3`.
+  This replaces the earlier amplification-only build at the same path.
+- HTML/XML results remain under `build/reports/tests/test/` and
+  `build/test-results/test/`. No game session or TPS measurement was performed.
+- Existing compile/deprecation warnings remain. No automatic commit, push or
+  installation into the modpack was performed for this follow-up.

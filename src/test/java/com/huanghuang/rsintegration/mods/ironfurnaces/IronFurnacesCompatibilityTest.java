@@ -18,6 +18,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class IronFurnacesCompatibilityTest extends BootstrapTest {
 
     @Test
+    void smallAndWindowedOrdersUseBothFactoryWorkersWithinLaneCapacity() {
+        assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(2, 2, 6));
+        assertEquals(2, IronFurnacesBatchDelegate.parallelWorkerBatchSize(3, 2, 6));
+        assertEquals(6, IronFurnacesBatchDelegate.parallelWorkerBatchSize(32, 2, 6));
+        assertEquals(16, IronFurnacesBatchDelegate.parallelWorkerBatchSize(32, 2, 384));
+        assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(32, 2, 1));
+    }
+
+    @Test
     void factoryBatchSplitsAStackAcrossSixLanes() {
         var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
                 java.util.List.of(new ItemStack(Items.IRON_ORE, 6)));
