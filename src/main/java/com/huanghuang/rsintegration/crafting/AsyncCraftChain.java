@@ -713,7 +713,7 @@ public final class AsyncCraftChain {
                                     Component.translatable("rsi.async.abort.parallel_incomplete"));
                             return true;
                         }
-                        machineCount = group.getChildCount();
+                        machineCount = group.getTotalOperations();
                     }
                     try {
                         currentDelegate.onBatchFinished(online);
@@ -725,11 +725,7 @@ public final class AsyncCraftChain {
                     waitTicks = 0;
                     flatObservedCompletedOperations = 0;
                     ledger.reset();
-                    if (parallelGroup) {
-                        stepRemaining = 0;
-                    } else {
-                        stepRemaining -= machineCount;
-                    }
+                    stepRemaining = remainingAfterFlatBatch(stepRemaining, machineCount);
                     if (stepRemaining <= 0) currentStepIdx++;
                     state = State.EXECUTING;
                     snapshotCommittedVirtual();
@@ -1543,7 +1539,8 @@ public final class AsyncCraftChain {
                 var groupCapability = concurrencyDecision(prepared.step(), delegate).capabilities();
                 ParallelCraftGroup group = new ParallelCraftGroup(workers,
                         prepared.step().modType(), prepared.step().recipeId(), online,
-                        prepared.step().executions(), prepared.step().inferMode(), groupCapability);
+                        prepared.step().executions(), prepared.step().inferMode(), groupCapability,
+                        storageEndpoint);
                 if (validatePreparedDelegate(
                         group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
                     releasePreparationQuietly(delegate);
@@ -2539,16 +2536,15 @@ public final class AsyncCraftChain {
             }
             int totalOps = Math.max(1, step.executions());
             int completedOps = i < currentStepIdx || state == State.COMPLETED ? totalOps : 0;
-            if (i == currentStepIdx && stepRemaining > 0
-                    && !(currentDelegate instanceof ParallelCraftGroup)) {
+            if (i == currentStepIdx && stepRemaining > 0) {
                 completedOps = completedFlatOperations(totalOps, stepRemaining);
             }
             int runningOps = i == currentStepIdx && currentDelegate != null
                     ? Math.min(totalOps, currentDelegate instanceof ParallelCraftGroup group
                             ? group.getRunningOperations() : 1) : 0;
             if (i == currentStepIdx && currentDelegate instanceof ParallelCraftGroup group) {
-                completedOps = group.getCompletedOperations();
-                totalOps = group.getTotalOperations();
+                completedOps = completedFlatWindowOperations(
+                        totalOps, stepRemaining, group.getCompletedOperations());
             }
             String detail = i == currentStepIdx ? abortReason : "";
             result.add(new CraftProgressSnapshot.NodeProgress(i, nodeState,
@@ -2773,6 +2769,24 @@ public final class AsyncCraftChain {
             executeVanillaStepsInline(slice.steps(), online);
         }
         return slice.nextStepIndex();
+    }
+
+    static int flatDispatchWindow(int remainingOperations, int dispatchLimit) {
+        return Math.min(Math.max(0, remainingOperations), Math.max(1, dispatchLimit));
+    }
+
+    static int remainingAfterFlatBatch(int remainingOperations, int completedOperations) {
+        if (completedOperations <= 0 || completedOperations > remainingOperations) {
+            throw new IllegalArgumentException("Completed batch exceeds remaining operations or made no progress");
+        }
+        return remainingOperations - completedOperations;
+    }
+
+    static int completedFlatWindowOperations(int totalOperations, int remainingOperations,
+                                             int completedInWindow) {
+        long completed = (long) completedFlatOperations(totalOperations, remainingOperations)
+                + Math.max(0, completedInWindow);
+        return (int) Math.min(Math.max(1, totalOperations), completed);
     }
 
     static VanillaBatchSlice planVanillaBatchSlice(
@@ -3203,16 +3217,8 @@ public final class AsyncCraftChain {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: inferMode=true"));
         } else if (machines.size() < 2) {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: only {} bound machine(s)"), machines.size());
-        } else if (step.executions() <= 1) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: executions={}"), step.executions());
-        } else if (stepRemaining > configuredOperationsPerDispatch()) {
-            // A ParallelCraftGroup reserves one material/token slice per queued
-            // operation. Keep large orders on the bounded single-worker path;
-            // otherwise one tick materializes every operation before any machine
-            // begins processing it.
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "[LB] skipped: {} remaining operations exceed dispatch limit {}"),
-                    stepRemaining, configuredOperationsPerDispatch());
+        } else if (flatDispatchWindow(stepRemaining, configuredOperationsPerDispatch()) <= 1) {
+            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: dispatchWindow<=1 remaining={}"), stepRemaining);
         } else {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] attempting parallel: {} machines, {} executions"),
                     machines.size(), step.executions());
@@ -3639,10 +3645,34 @@ public final class AsyncCraftChain {
     private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
+        int window = flatDispatchWindow(stepRemaining, configuredOperationsPerDispatch());
+        while (window > 1) {
+            materialReservationFailureDetail = null;
+            IBatchDelegate group = tryStartParallelWindow(machines, step, online, window);
+            if (group != null || ledger.isCommitted() || materialReservationFailureDetail == null) {
+                return group;
+            }
+            restoreVirtualFromCommitted();
+            if (ledger.state() != ExtractionLedger.State.IDLE) ledger.reset();
+            window /= 2;
+        }
+        return null;
+    }
+
+    private IBatchDelegate tryStartParallelWindow(List<BoundMachine> machines,
+                                                  CraftingResolver.ResolutionStep step,
+                                                  ServerPlayer online, int operationCount) {
         if (server == null) return null;
 
-        // Filter: chunk loaded, BE present, not busy (resolves per-machine dimension)
-        List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server);
+        IBatchDelegate capabilityProbe = createStepDelegate(step);
+        List<BoundMachine> available;
+        GraphConcurrencyPolicy.Decision capabilityDecision;
+        try {
+            available = LoadBalancer.filterAvailable(machines, server, capabilityProbe);
+            capabilityDecision = concurrencyDecision(step, capabilityProbe);
+        } finally {
+            if (capabilityProbe != null) releasePreparationQuietly(capabilityProbe);
+        }
         if (available.size() < 2) {
             RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines ->{} available (<2, abort)"),
                     machines.size(), available.size());
@@ -3671,44 +3701,48 @@ public final class AsyncCraftChain {
         if (available.size() < 2) return null;
 
         // Do not start more workers than remaining operations.
-        int cap = Math.min(step.executions(), stepRemaining);
-        if (available.size() > cap) {
-            available = new ArrayList<>(available.subList(0, cap));
-        }
+        int cap = Math.min(operationCount, Math.min(craftOperationBudget.availableCapacity(),
+                globalOperationBudget.availableCapacity()));
+        if (cap < 2) return null;
 
         // Build a parallel group -constructor internally creates and validates
         // one delegate per machine. Pass the same recipe-aware capability contract
         // used by graph execution; otherwise the operation kernel accepts the group
         // but rejects every child as capability-exclusive after materials are committed.
-        IBatchDelegate capabilityProbe = createStepDelegate(step);
-        var capabilityDecision = concurrencyDecision(step, capabilityProbe);
         if (capabilityDecision.exclusive()) {
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "[LB] parallel disabled by capability policy: {}"), capabilityDecision.reason());
             return null;
         }
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
-                step.recipeId(), online, stepRemaining, step.inferMode(),
-                capabilityDecision.capabilities());
+                step.recipeId(), online, operationCount, step.inferMode(),
+                capabilityDecision.capabilities(), storageEndpoint, cap);
         if (!validatePreparedDelegate(
                 group, online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty -all children failed validateAndInit"));
+            releasePreparationQuietly(group);
+            return null;
+        }
+        if (group.getChildCount() < 2) {
+            releasePreparationQuietly(group);
             return null;
         }
 
-        this.machineCount = group.getChildCount();
+        this.machineCount = operationCount;
         group.setMachineServer(server);
         if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
             group.setTargetOutput(step.syntheticOutput());
         } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
             group.setTargetOutput(targetOutput);
         }
-        RSIntegrationMod.LOGGER.info(ctx.format("Load-balanced: {} machines for recipe {}"),
-                group.getChildCount(), step.recipeId());
-
-        // Parallel groups use the tryStartSingleCraft path (each child extracts
-        // its own materials independently)
-        return startParallelStep(group, step, online);
+        IBatchDelegate started = startParallelStep(group, step, online);
+        if (started != null) {
+            RSIntegrationMod.LOGGER.info(ctx.format(
+                    "Load-balanced window: recipe={} machines={} operations={} remainingBefore={} dispatchLimit={}"),
+                    step.recipeId(), group.getChildCount(), operationCount, stepRemaining,
+                    configuredOperationsPerDispatch());
+        }
+        return started;
     }
 
     private IBatchDelegate startParallelStep(IBatchDelegate group,
@@ -3726,7 +3760,7 @@ public final class AsyncCraftChain {
                         && group instanceof ParallelCraftGroup parallel) {
                     ParallelReservation reserved = preReserveParallelOperations(
                             operationSpecs, parallel.getMaterialReservationScopes(),
-                            parallel.getChildCount(), stepRemaining, online);
+                            parallel.getChildCount(), parallel.getTotalOperations(), online);
                     if (reserved == null) {
                         materials = null;
                     } else {
@@ -3748,10 +3782,8 @@ public final class AsyncCraftChain {
                     materials = preReserveStepMaterials(specs, online);
                 }
                 if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve for parallel step {}"),
+                    RSIntegrationMod.LOGGER.debug(ctx.format("Reducing or falling back after parallel reservation failure for {}"),
                             step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
                     try { group.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
                     }
@@ -3829,7 +3861,7 @@ public final class AsyncCraftChain {
                 List<IngredientSpec> one = List.of(new IngredientSpec(
                         spec.ingredient(), spec.count(), spec.role()));
                 int reusableMark = ledger.reservationMark();
-                List<ItemStack> material = preReserveStepMaterials(one, online);
+                List<ItemStack> material = preReserveStepMaterials(one, online, null, false);
                 if (material == null) {
                     ledger.reset();
                     restoreVirtualSnapshot(virtualSnapshot);
@@ -3848,7 +3880,7 @@ public final class AsyncCraftChain {
                     perOperation.add(specs.get(i));
                 }
             }
-            List<ItemStack> materials = preReserveStepMaterials(perOperation, online, virtualDebits);
+            List<ItemStack> materials = preReserveStepMaterials(perOperation, online, virtualDebits, false);
             if (materials == null) {
                 ledger.reset();
                 restoreVirtualSnapshot(virtualSnapshot);

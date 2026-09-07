@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -84,7 +85,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
 
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return Math.max(1, Math.min(MAX_MATERIAL_COUNT, totalOperations));
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, MAX_MATERIAL_COUNT);
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {

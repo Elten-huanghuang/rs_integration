@@ -11,6 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ApprenticeCodexRecipeHandlerTest {
 
     @Test
+    void smokerSharesSmallOrdersInsteadOfFirstWorkerClaimingEverything() {
+        var delegate = new ApprenticeCodexEssenceSmokerBatchDelegate();
+        assertEquals(1, delegate.preferredParallelBatchSize(2, 2));
+        assertEquals(3, delegate.preferredParallelBatchSize(8, 3));
+        assertEquals(8, delegate.preferredParallelBatchSize(100, 2));
+        assertEquals(1, delegate.preferredParallelBatchSize(1, 4));
+    }
+
+    @Test
     void catalystDemandRoundsUpAtEightMaterialSlots() {
         assertEquals(0, ApprenticeCodexRecipeHandler.requiredCatalystCount(0));
         assertEquals(1, ApprenticeCodexRecipeHandler.requiredCatalystCount(1));

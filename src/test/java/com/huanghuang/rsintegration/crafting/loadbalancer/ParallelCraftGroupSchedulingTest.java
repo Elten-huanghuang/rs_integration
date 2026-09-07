@@ -23,6 +23,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ParallelCraftGroupSchedulingTest extends BootstrapTest {
 
     @Test
+    void rejectedEarlierCandidatesDoNotConsumeTheSmallOrderWorkerLimit() {
+        int ready = 0;
+        int inspected = 0;
+        for (boolean valid : List.of(false, false, true, true, true)) {
+            if (!ParallelCraftGroup.needsMoreWorkers(ready, 2, 2)) break;
+            inspected++;
+            if (valid) ready++;
+        }
+        assertEquals(2, ready);
+        assertEquals(4, inspected);
+        assertFalse(ParallelCraftGroup.needsMoreWorkers(1, 8, 1));
+        assertFalse(ParallelCraftGroup.needsMoreWorkers(0, 0, 100));
+    }
+
+    @Test
     void supplementalContainerIsRepeatedAndMergedIntoEveryOperation() {
         IngredientSpec bowl = new IngredientSpec(Ingredient.of(Items.BOWL), 1);
         assertEquals(6, ParallelCraftGroup.repeatSpecs(List.of(bowl), 6).size());

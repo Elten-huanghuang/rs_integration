@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -56,6 +57,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private final ResourceLocation recipeId;
     private final BatchConcurrencyCapabilities concurrencyCapabilities;
     private final boolean inferMode;
+    @Nullable
+    private final CraftStorageEndpoint storageEndpoint;
     private final OperationQueue operations;
     private final boolean[] safelyRecoverableVirtual;
     private BlockPos representativePos = BlockPos.ZERO;
@@ -148,16 +151,36 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                               ResourceLocation recipeId, ServerPlayer player,
                               int totalOperations, boolean inferMode,
                               @Nullable BatchConcurrencyCapabilities concurrencyCapabilities) {
+        this(machines, modType, recipeId, player, totalOperations, inferMode,
+                concurrencyCapabilities, null);
+    }
+
+    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
+                              ResourceLocation recipeId, ServerPlayer player,
+                              int totalOperations, boolean inferMode,
+                              @Nullable BatchConcurrencyCapabilities concurrencyCapabilities,
+                              @Nullable CraftStorageEndpoint storageEndpoint) {
+        this(machines, modType, recipeId, player, totalOperations, inferMode,
+                concurrencyCapabilities, storageEndpoint, machines.size());
+    }
+
+    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
+                              ResourceLocation recipeId, ServerPlayer player,
+                              int totalOperations, boolean inferMode,
+                              @Nullable BatchConcurrencyCapabilities concurrencyCapabilities,
+                              @Nullable CraftStorageEndpoint storageEndpoint, int maxWorkers) {
         this.modType = modType;
         this.recipeId = recipeId;
         this.inferMode = inferMode;
         this.concurrencyCapabilities = concurrencyCapabilities;
+        this.storageEndpoint = storageEndpoint;
         this.player = player;
         this.operations = new OperationQueue(totalOperations);
         this.safelyRecoverableVirtual = new boolean[totalOperations];
         java.util.Arrays.fill(this.safelyRecoverableVirtual, true);
         int workerId = 0;
         for (BoundMachine machine : machines) {
+            if (!needsMoreWorkers(workers.size(), maxWorkers, totalOperations)) break;
             ChildPreparation preparation = prepareChildDelegate(machine, player);
             if (preparation.state() != ChildPreparationState.READY || preparation.delegate() == null) {
                 if (preparation.state() == ChildPreparationState.FATAL) {
@@ -177,6 +200,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
         RSIntegrationMod.LOGGER.debug("[RSI-ParallelGroup] Created {}/{} workers for {} operations of {}",
                 workers.size(), machines.size(), totalOperations, recipeId);
+    }
+
+    static boolean needsMoreWorkers(int readyWorkers, int maxWorkers, int totalOperations) {
+        return readyWorkers < Math.min(Math.max(0, maxWorkers), Math.max(0, totalOperations));
     }
 
     @Override
@@ -944,6 +971,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return ChildPreparation.fatal("delegate factory returned null for " + modType.id());
         }
         try {
+            configureDelegate(delegate, machine);
             IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
                     delegate, player, recipeId, machine.dim(), machine.pos());
             if (result.state() == IBatchDelegate.PreparationState.RETRY) {
@@ -975,6 +1003,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private void configureDelegate(IBatchDelegate delegate, BoundMachine machine) {
         if (!(delegate instanceof AbstractBatchDelegate abstractDelegate)) return;
+        abstractDelegate.setStorageEndpoint(storageEndpoint);
         abstractDelegate.setMachineDim(machine.dim());
         if (machineServer != null) abstractDelegate.setMachineServer(machineServer);
         if (targetOutput != null) abstractDelegate.setTargetOutput(targetOutput);
