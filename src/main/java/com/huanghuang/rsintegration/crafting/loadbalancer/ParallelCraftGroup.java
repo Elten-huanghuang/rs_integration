@@ -86,6 +86,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean draining;
     private boolean queuedMaterialsRecovered;
     private String failureDetail = "";
+    private long lastProgressTick = -1;
+    private long lastWaitReportTick = -1;
+    private int lastObservedCompleted;
+    private long lastObservedCaptured;
+    private long nextWaitCheckTick;
     /** Whether every worker requiring physical cleanup was successfully cleaned. */
     private boolean physicalFailureCleanupCompleted;
     @Nullable
@@ -121,6 +126,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         boolean pristineDelegate = true;
         boolean hasStartedOperation;
         boolean needsFailureCleanup;
+        CraftObservation lastObservation = new CraftObservation(CraftPhase.WAITING_FOR_START);
 
         WorkerSlot(int id, BoundMachine machine, IBatchDelegate delegate) {
             this.id = id;
@@ -578,6 +584,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 beginDraining("worker observation failed at " + worker.machine.pos());
                 continue;
             }
+            worker.lastObservation = observation;
             if (observation.phase() == CraftPhase.FAILED) {
                 operations.abandonBatch(worker.id);
                 worker.clearOperations();
@@ -599,7 +606,56 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return new CraftObservation(CraftPhase.FAILED, failureDetail);
         }
         if (operations.isComplete()) return new CraftObservation(CraftPhase.DONE);
+        reportWaitingWorkers(level.getGameTime());
         return new CraftObservation(CraftPhase.WORKING);
+    }
+
+    private void reportWaitingWorkers(long tick) {
+        if (tick < nextWaitCheckTick) return;
+        nextWaitCheckTick = tick + 20;
+        long captured = 0;
+        for (WorkerSlot worker : workers) {
+            if (worker.running()) captured += capturedSnapshot(worker).stream()
+                    .mapToLong(ItemStack::getCount).sum();
+        }
+        int completed = operations.completedOperations();
+        if (lastProgressTick < 0 || completed != lastObservedCompleted || captured != lastObservedCaptured) {
+            lastProgressTick = tick;
+            lastObservedCompleted = completed;
+            lastObservedCaptured = captured;
+        }
+        if (!shouldReportWait(tick, lastProgressTick, lastWaitReportTick)) return;
+        lastWaitReportTick = tick;
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-ParallelWait] craft={} node={} recipe={} completed={}/{} running={} queued={} draining={}",
+                craftId, nodeId, recipeId, completed, operations.totalOperations(),
+                operations.runningOperations(), operations.queuedOperations(), draining);
+        for (WorkerSlot worker : workers) {
+            if (!worker.running()) continue;
+            ItemStack expected = worker.delegate.getExpectedOutput();
+            if (expected == null || expected.isEmpty()) {
+                ExpectedProduction production = worker.delegate.getExpectedProduction();
+                if (production != null) expected = production.item().copyWithCount(production.count());
+            }
+            String machineState;
+            try {
+                machineState = worker.delegate.describeExecutionState();
+            } catch (RuntimeException exception) {
+                machineState = "machine_state=unavailable error=" + exception.getClass().getSimpleName();
+            }
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-ParallelWait] craft={} worker={} dimension={} machine={} operations={} phase={} "
+                            + "expected={} captured={} detail={} {}",
+                    craftId, worker.id, worker.machine.dim(),
+                    worker.delegate.getOperationMachinePos(worker.machine.pos()), worker.operationIds,
+                    worker.lastObservation.phase(), expected, capturedSnapshot(worker),
+                    worker.lastObservation.detail(), machineState);
+        }
+    }
+
+    static boolean shouldReportWait(long tick, long lastProgressTick, long lastReportTick) {
+        return lastProgressTick >= 0 && tick - lastProgressTick >= 100
+                && (lastReportTick < 0 || tick - lastReportTick >= 600);
     }
 
     private void dispatchQueuedOperations() {
@@ -1096,11 +1152,15 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean hasCapturedExpectedOutput(WorkerSlot worker) {
         ItemStack expected = worker.delegate.getExpectedOutput();
         if (expected == null || expected.isEmpty()) return false;
+        return containsExpectedWorldOutput(capturedSnapshot(worker), expected);
+    }
+
+    private List<ItemStack> capturedSnapshot(WorkerSlot worker) {
         List<ItemStack> captured = new ArrayList<>();
         if (worker.operationSession != null) captured.addAll(worker.operationSession.capturedSnapshot());
         CraftOutputInterceptor.CaptureHandle handle = legacyCaptureHandles.get(worker.id);
         if (handle != null) captured.addAll(handle.snapshot());
-        return containsExpectedWorldOutput(captured, expected);
+        return captured;
     }
 
     static boolean containsExpectedWorldOutput(List<ItemStack> captured, ItemStack expected) {

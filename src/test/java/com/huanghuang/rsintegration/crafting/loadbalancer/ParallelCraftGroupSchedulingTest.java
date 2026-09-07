@@ -23,6 +23,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ParallelCraftGroupSchedulingTest extends BootstrapTest {
 
     @Test
+    void waitingDiagnosticsRequireNoProgressAndAreRateLimited() {
+        assertFalse(ParallelCraftGroup.shouldReportWait(99, 0, -1));
+        assertTrue(ParallelCraftGroup.shouldReportWait(100, 0, -1));
+        assertFalse(ParallelCraftGroup.shouldReportWait(699, 0, 100));
+        assertTrue(ParallelCraftGroup.shouldReportWait(700, 0, 100));
+        assertFalse(ParallelCraftGroup.shouldReportWait(700, 650, 100));
+        assertFalse(ParallelCraftGroup.shouldReportWait(700, -1, -1));
+    }
+
+    @Test
     void rejectedEarlierCandidatesDoNotConsumeTheSmallOrderWorkerLimit() {
         int ready = 0;
         int inspected = 0;

@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.ManaInfusionRecipe;
 import vazkii.botania.common.block.block_entity.mana.ManaPoolBlockEntity;
+import vazkii.botania.xplat.XplatAbstractions;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -135,7 +136,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return parallelWorkerBatchSize(totalOperations, workerCount);
+        int share = parallelWorkerBatchSize(totalOperations, workerCount);
+        int mana = level != null && poolPos != null
+                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
+                ? pool.getCurrentMana() : 0;
+        return physicalBatchSize(share, mana, recipe == null ? 0 : recipe.getManaToConsume());
     }
 
     static int parallelWorkerBatchSize(int totalOperations, int workerCount) {
@@ -240,7 +245,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
         if (!started) return false;
-        AABB box = new AABB(poolPos).inflate(1.5);
+        AABB box = getOutputCaptureRegion();
         int outputCount = level.getEntitiesOfClass(ItemEntity.class, box, this::isCraftOutput)
                 .stream().mapToInt(entity -> entity.getItem().getCount()).sum();
         return outputCount >= expectedOutputCount();
@@ -248,7 +253,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
         if (level == null) return ItemStack.EMPTY;
-        AABB box = new AABB(poolPos).inflate(1.5);
+        AABB box = getOutputCaptureRegion();
         int collected = 0;
         for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box, this::isCraftOutput)) {
             collected += e.getItem().getCount();
@@ -261,10 +266,38 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return entity.isAlive()
                 && !inputEntityIds.contains(entity.getUUID())
                 && BotaniaDelegateSupport.isNew(entity, entitiesBefore)
-                && !entity.getItem().isEmpty()
-                && ItemStack.isSameItemSameTags(entity.getItem(), expected)
-                && entity.getItem().getCount() >= expected.getCount()
+                && acceptsPhysicalOutput(poolPos, entity.position(), entity.getItem(), expected,
+                        XplatAbstractions.INSTANCE.itemFlagsComponent(entity).manaInfusionSpawned)
                 && level.getGameTime() >= startTick;
+    }
+
+    static boolean acceptsPhysicalOutput(BlockPos poolPos, net.minecraft.world.phys.Vec3 position,
+                                         ItemStack candidate, ItemStack expected, boolean infusionSpawned) {
+        return infusionSpawned && captureRegion(poolPos).contains(position)
+                && candidate != null && !candidate.isEmpty()
+                && expected != null && !expected.isEmpty()
+                && ItemStack.isSameItemSameTags(candidate, expected);
+    }
+
+    @Override
+    public String describeExecutionState() {
+        if (level == null || poolPos == null) return "mana_pool_state=unavailable";
+        int remainingInputs = 0;
+        for (java.util.UUID id : inputEntityIds) {
+            var entity = level.getEntity(id);
+            if (entity instanceof ItemEntity item && item.isAlive()) {
+                remainingInputs += item.getItem().getCount();
+            }
+        }
+        int mana = level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
+                ? pool.getCurrentMana() : -1;
+        return "mana=" + mana + " manaPerOperation=" + (recipe == null ? -1 : recipe.getManaToConsume())
+                + " ownedInputItems=" + remainingInputs + " batch=" + requestedBatch;
+    }
+
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        return expected.isEmpty() ? null : new ExpectedProduction(expected.copy(), expectedOutputCount());
     }
 
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {

@@ -330,3 +330,72 @@ Verification for the parallel-dispatch follow-up:
   `build/test-results/test/`. No game session or TPS measurement was performed.
 - Existing compile/deprecation warnings remain. No automatic commit, push or
   installation into the modpack was performed for this follow-up.
+
+## Adjacent Mana Pool Output Ownership (2026-09-07)
+
+Evidence is from the corrected instance, `PCL/.minecraft/versions/神秘启旅/logs`,
+not the previously supplied Chapter of Yuusha instance. Two separate orders used
+`botania:kjs/65yk66gm62mbg9o9c86lt9552` (one earthen spirit to two):
+
+- `50ef2fb1`: at 18:16:11, prepared six workers for a 32-operation window of a
+  1024-operation order; no later window or completion was logged. The player
+  cancelled it at 18:17:25 in `WAITING_MOD`.
+- `342ae399`: at 18:16:29, prepared four workers for another 1024-operation order;
+  all windows progressed and the order completed at 18:17:15. This delivery is
+  not evidence that the first order completed. Cancellation may also deliver
+  already settled partial results from the first order.
+
+Confirmed implementation defect: Mana Pool spawn interception used a local box,
+but observation and result collection scanned `new AABB(poolPos).inflate(1.5)`.
+Collection excluded only this worker's input UUIDs and the pre-start snapshot.
+Later-started adjacent workers' inputs pass that predicate for input-equals-output
+recipes. Finishing a worker could therefore collect a neighbor's remaining input
+as output, leaving that neighbor waiting for production that can never occur.
+Six workers divide 32 into 6/6/6/6/6/2. A reported completion count of 20 is
+consistent with two six-operation workers not settling, but the old log did not
+record per-worker captures or residual inputs, so this exact history is not proven.
+
+Changes:
+
+- Physical observation and collection share the local capture region and check
+  the entity position, including the entity-bounding-box edge case.
+- Candidates must have Botania's real `manaInfusionSpawned` flag, as set by
+  `ManaPoolBlockEntity.collideEntityItem`; item identity alone is insufficient.
+  Split output stacks remain collectible even below the per-recipe stack size.
+- ExpectedProduction now exposes the aggregate batch count to existing final
+  settlement checks. Nothing is force-completed or synthetically refunded.
+- Parallel batch preference respects current mana, like flat batch admission.
+  A mana-starved pool retains the existing one-operation wait behavior.
+- Shared parallel scheduling reports `[RSI-ParallelWait]` after five seconds of
+  sampled no progress, at most once per thirty seconds per group. It includes
+  craft/node IDs, queued/running/completed counts, dimension and actual machine
+  position, operation IDs, observation, expected and captured output. Mana Pools
+  additionally report current mana, cost and surviving owned input item count.
+  Other adapters explicitly report unavailable machine-specific state unless
+  they implement the diagnostic hook. Sampling is once per second and does not
+  introduce execution deadlines or cancel work.
+
+The existing bounded-window tail remains: faster machines may idle while the
+current window's slower machines finish. This patch fixes output ownership, not
+the separate architectural change to a persistent sliding dispatch pipeline.
+
+New tests cover the old neighbor-input predicate, native output flags, adjacent
+output exclusion, split/NBT output boundaries, 1024 operations over six adjacent
+simulated workers, mana-aware batch sizing and wait-log rate limiting. These
+are unit/simulation and bytecode wiring tests, not a running Botania world.
+Live acceptance must repeat the six-pool order with adjacent pools, verify exact
+inventory counts, cancellation recovery, final task removal and mixed mana levels.
+
+Verification for this output-ownership fix:
+
+- Directed suite: 58 passed, zero failures/errors/skips.
+- `gradlew.bat test build reobfJar verifyReleaseJar --no-daemon` succeeded:
+  1526 tests discovered, 1525 passed, one existing optional Iron Spellbooks
+  runtime contract skipped, zero failures/errors. Eight new tests were added.
+- Release: `D:/sd/rs-integration/build/libs/rs_integration-1.4.2.jar`,
+  4,416,540 bytes. SHA-256:
+  `6a6959a8cf5220428357b687ffdbf3b24b103e4c5332338599a522fe09754270`.
+  The adjacent `.jar.sha256` file contains the same hash.
+- HTML report: `build/reports/tests/test/index.html`; XML:
+  `build/test-results/test/`. Existing compile/Mixin/deprecation warnings remain.
+- No automatic commit, push, deployment, save modification or in-game testing.

@@ -88,6 +88,10 @@ public interface IBatchDelegate {
         }
     }
 
+    default String describeExecutionState() {
+        return "machine_state=unavailable";
+    }
+
     /** Number of repeated flat-plan operations this delegate can execute as one physical batch. */
     default int prepareFlatBatch(int remainingOperations) {
         return remainingOperations > 0 ? 1 : 0;
