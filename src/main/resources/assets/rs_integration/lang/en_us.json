@@ -1,4 +1,8 @@
 {
+  "rsi.recipe.materials.unknown": "Item materials: not checked or unavailable",
+  "rsi.recipe.materials.missing": "Item materials: insufficient for one execution",
+  "rsi.recipe.materials.ready": "Item materials: enough for one execution",
+  "rsi.recipe.materials.scope": "Fluids, energy and machine conditions are checked separately when crafting",
   "rsi.goety.cursed_infuser.spawner_required": "The Cursed Infuser requires a spawner directly below it",
   "rsi.goety.infuser.spawner_required": "The Cursed or Grim Infuser requires a spawner directly below it",
   "rsi.goety.dark_mender.cage_required": "The Dark Mender requires a Cursed Cage containing an item directly below it",

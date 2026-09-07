@@ -1383,7 +1383,7 @@ public final class GenericCraftPacket {
      * Look up a recipe from RecipeManager first, then fall back to
      * FARegistries.RITUAL (wrapping the FA Ritual in a FaRitualWrapper).
      */
-    private static Recipe<?> resolveRecipe(ServerLevel level, ResourceLocation recipeId) {
+    static Recipe<?> resolveRecipe(ServerLevel level, ResourceLocation recipeId) {
         // Strip JEI pagination prefix if present (e.g. mod:jei.real_path -> mod:real_path)
         recipeId = unwrapJeiId(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
@@ -3083,7 +3083,7 @@ public final class GenericCraftPacket {
         }
     }
 
-    private static INetwork resolveNetworkForRecipe(ServerPlayer player,
+    static INetwork resolveNetworkForRecipe(ServerPlayer player,
             @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
             @Nullable ModType modType) {
         // 1. Try primary machine (from packet/JEI).
@@ -5697,7 +5697,7 @@ public final class GenericCraftPacket {
         return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
     }
 
-    private static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
+    static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                                     @Nullable ResourceLocation dim,
                                                     @Nullable net.minecraft.core.BlockPos pos) {
         if (MinersDelightCopperPotSupport.isRequestedCopperPot(player, recipe, dim, pos)) {

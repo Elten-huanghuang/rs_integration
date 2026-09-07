@@ -25,9 +25,10 @@ import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.mods.goety.GoetyRSNetworkHandler;
+import com.huanghuang.rsintegration.client.CraftButtonTextures;
+import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
-import com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -38,7 +39,6 @@ import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.gui.recipes.RecipeGuiLayouts;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.core.BlockPos;
@@ -95,6 +95,8 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private final List<ResourceLocation> rsi$recipeIds = new ArrayList<>();
     @Unique
+    private final java.util.Map<Integer, RecipeAvailabilityKey> rsi$availabilityKeys = new java.util.HashMap<>();
+    @Unique
     private final List<Boolean> rsi$hasMachineGui = new ArrayList<>();
 
     @Inject(method = "setRecipeLayoutsWithButtons", at = @At("HEAD"))
@@ -124,6 +126,7 @@ public class RecipeGuiLayoutsMixin {
         rsi$layoutIndices.clear();
         rsi$positions.clear();
         rsi$recipeIds.clear();
+        rsi$availabilityKeys.clear();
         rsi$hasMachineGui.clear();
 
         if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
@@ -403,6 +406,9 @@ public class RecipeGuiLayoutsMixin {
             rsi$positions.add(new int[]{0, 0, 10, 10});
 
             rsi$recipeIds.add(recipeId);
+            rsi$availabilityKeys.put(rsi$positions.size() - 1,
+                    RecipeAvailabilityKey.of(recipeId, bindingDim, machinePos,
+                            faSmithingBase, concreteTargetOutput));
             AltarCraftButtons.add(0, 0, 10, 10, handler, tooltipKey, recipeId,
                     bindingDim, machinePos, modType);
 
@@ -435,9 +441,6 @@ public class RecipeGuiLayoutsMixin {
 
             buttonsAdded++;
 
-            if (rsi$isGoetyRitual(recipe) || rsi$isGoetyBrazierRecipe(recipe)) {
-                GoetyRSNetworkHandler.sendCheckRS(recipeId, bindingDim, machinePos);
-            }
         }
 
         RSIntegrationMod.debug("[RSI-JEI-DIAG] Layouts processed: layouts={} totalRecipes={} buttonsAdded={} positions={} "
@@ -701,50 +704,24 @@ public class RecipeGuiLayoutsMixin {
     private void rsi$drawButtons(GuiGraphics guiGraphics, int mouseX, int mouseY,
                                   CallbackInfoReturnable<Optional<IRecipeLayoutDrawable<?>>> cir) {
         if (rsi$positions.isEmpty()) return;
-
-        Font font = Minecraft.getInstance().font;
+        List<net.minecraft.network.chat.Component> tooltip = null;
         for (int i = 0; i < rsi$positions.size(); i++) {
             if (!AltarCraftButtons.isVisible(i)) continue;
             int[] pos = rsi$positions.get(i);
             int bx = pos[0], by = pos[1], bw = pos[2], bh = pos[3];
             boolean hovered = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh;
 
-            ResourceLocation recipeId = rsi$recipeIds.get(i);
-            boolean[] rsResults = recipeId != null ? RSClientAvailabilityCache.get(recipeId) : null;
-            boolean hasData = rsResults != null && rsResults.length > 0;
-            boolean rsAvailable = hasData;
-            if (rsAvailable) {
-                for (boolean b : rsResults) {
-                    if (!b) { rsAvailable = false; break; }
+            var state = RecipeAvailabilityClient.get(rsi$availabilityKeys.get(i));
+            CraftButtonTextures.craft(guiGraphics, bx, by, bw, bh, state, hovered);
+            if (hovered) {
+                var data = AltarCraftButtons.getButtonData(i);
+                tooltip = new ArrayList<>();
+                if (data != null) tooltip.add(net.minecraft.network.chat.Component.translatable(data.tooltip()));
+                if (rsi$availabilityKeys.containsKey(i)) {
+                    tooltip.add(net.minecraft.network.chat.Component.translatable(state.translationKey()));
+                    tooltip.add(net.minecraft.network.chat.Component.translatable("rsi.recipe.materials.scope"));
                 }
             }
-
-            int bgColor, borderColor, textColor;
-            if (hasData) {
-                if (rsAvailable) {
-                    bgColor = hovered ? 0xFF33AA33 : 0xFF226622;
-                    borderColor = hovered ? 0xFF66FF66 : 0xFF33AA33;
-                    textColor = hovered ? 0xFFFFFF : 0xCCFFCC;
-                } else {
-                    bgColor = hovered ? 0xFFAA3333 : 0xFF662222;
-                    borderColor = hovered ? 0xFFFF6666 : 0xFFAA3333;
-                    textColor = hovered ? 0xFFFFFF : 0xFFCCCC;
-                }
-            } else {
-                bgColor = hovered ? 0xFF555555 : 0xFF333333;
-                borderColor = hovered ? 0xFFFFFFFF : 0xFF888888;
-                textColor = hovered ? 0xFFFFFF : 0xAAAAAA;
-            }
-
-            guiGraphics.fill(bx, by, bx + bw, by + bh, borderColor);
-            guiGraphics.fill(bx + 1, by + 1, bx + bw - 1, by + bh - 1, bgColor);
-
-            String symbol = hasData && rsAvailable ? "✓" : "+";
-            int textW = font.width(symbol);
-            guiGraphics.drawString(font, symbol,
-                    bx + (bw - textW) / 2,
-                    by + (bh - font.lineHeight) / 2,
-                    textColor);
         }
 
         // Draw machine GUI buttons (gear icon to the right of "+" buttons)
@@ -754,23 +731,10 @@ public class RecipeGuiLayoutsMixin {
             int mx = pos[0], my = pos[1], mw = pos[2], mh = pos[3];
             boolean hovered = mouseX >= mx && mouseX < mx + mw && mouseY >= my && mouseY < my + mh;
 
-            int bgColor = hovered ? 0xFF556688 : 0xFF334455;
-            int borderColor = hovered ? 0xFF88AACC : 0xFF556677;
-            guiGraphics.fill(mx, my, mx + mw, my + mh, borderColor);
-            guiGraphics.fill(mx + 1, my + 1, mx + mw - 1, my + mh - 1, bgColor);
-
-            // Monitor/display icon for "open machine GUI"
-            int iconColor = hovered ? 0xFFCCDDEE : 0xFF8899AA;
-            int screenColor = hovered ? 0xFFEEF4FF : 0xFFAABBCC;
-            int standColor = hovered ? 0xFF99AACC : 0xFF667788;
-            // Bezel
-            guiGraphics.fill(mx + 1, my + 1, mx + mw - 1, my + mh - 3, iconColor);
-            // Screen
-            guiGraphics.fill(mx + 2, my + 2, mx + mw - 2, my + mh - 4, screenColor);
-            // Stand
-            guiGraphics.fill(mx + mw / 2 - 1, my + mh - 2, mx + mw / 2 + 1, my + mh - 1, standColor);
-            guiGraphics.fill(mx + mw / 2 - 2, my + mh - 1, mx + mw / 2 + 2, my + mh, standColor);
+            CraftButtonTextures.machine(guiGraphics, mx, my, mw, mh, hovered);
+            if (hovered) tooltip = List.of(net.minecraft.network.chat.Component.translatable("rsi.jei.open_machine"));
         }
+        if (tooltip != null) guiGraphics.renderComponentTooltip(Minecraft.getInstance().font, tooltip, mouseX, mouseY);
     }
 
     @Unique

@@ -81,6 +81,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeUnavailable() {
+        com.huanghuang.rsintegration.client.RecipeAvailabilityClient.clear();
         JeiMarqueeSelector.unregister();
         JeiCheatShortcuts.unregister();
         cachedRuntime = null;

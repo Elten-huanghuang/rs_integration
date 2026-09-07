@@ -40,8 +40,7 @@ public final class NetworkPacketIds {
     // 24: formerly ARS_NOUVEAU_CRAFT (now uses GenericCraftPacket via IBatchDelegate)
 
     // ── Goety ritual GUI (30-39) ───────────────────────────────────
-    public static final int GOETY_CHECK_RS = 30;
-    public static final int GOETY_RS_RESULT = 31;
+    // 30-31: retired Goety-only ingredient check packets; do not reuse.
     // 32 formerly GOETY_SELECT_RITUAL (companion-mod ritual GUI, removed) — do not reuse.
 
     // ── Side panel (40-69) ─────────────────────────────────────────
@@ -117,4 +116,6 @@ public final class NetworkPacketIds {
     public static final int BD_UNBIND_MACHINE = 134;
     public static final int BD_BINDING_SYNC = 135;
     public static final int JEI_CHEAT_DROP = 136;
+    public static final int RECIPE_AVAILABILITY_REQUEST = 137;
+    public static final int RECIPE_AVAILABILITY_RESULT = 138;
 }

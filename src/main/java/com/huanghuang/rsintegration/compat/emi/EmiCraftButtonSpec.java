@@ -10,5 +10,6 @@ record EmiCraftButtonSpec(
         @Nullable ModType modType,
         String tooltipKey,
         Runnable craftAction,
-        @Nullable Runnable machineAction
+        @Nullable Runnable machineAction,
+        @Nullable com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey availabilityKey
 ) {}
