@@ -74,6 +74,8 @@ public final class RecipeIndex {
     private static volatile long sourceRevision;
     private static volatile boolean generationBuildFailed;
     private static final AtomicBoolean BUILD_IN_FLIGHT = new AtomicBoolean();
+    private static final AtomicBoolean DRIFT_CHECK_IN_FLIGHT = new AtomicBoolean();
+    private static volatile long lastDriftCheckTick = Long.MIN_VALUE;
     private static final ExecutorService WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "RSI-RecipeCatalog");
         thread.setDaemon(true);
@@ -104,12 +106,35 @@ public final class RecipeIndex {
             if (!generationBuildFailed()) warmUp(level);
             return;
         }
-        if (!IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
-        RSIntegrationMod.LOGGER.info(
-                "[RecipeCatalog] Iron spell configuration changed; rebuilding dynamic recipes");
-        CraftPlanningRevision.bump();
-        invalidate();
-        warmUp(level);
+        long tick = level.getGameTime();
+        if (!driftCheckDue(tick, lastDriftCheckTick)
+                || !DRIFT_CHECK_IN_FLIGHT.compareAndSet(false, true)) return;
+        lastDriftCheckTick = tick;
+        RecipeManager manager = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
+        WARMUP_EXECUTOR.execute(() -> {
+            try {
+                if (!IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
+                synchronized (RecipeIndex.class) {
+                    if (source != manager || sourceRevision != revision
+                            || CraftPlanningRevision.current() != revision) return;
+                    RSIntegrationMod.LOGGER.info(
+                            "[RecipeCatalog] Iron spell configuration changed; rebuilding dynamic recipes");
+                    CraftPlanningRevision.bump();
+                    invalidate();
+                }
+                warmUp(level);
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeCatalog] Iron spell drift check failed; retaining current recipe generation", failure);
+            } finally {
+                DRIFT_CHECK_IN_FLIGHT.set(false);
+            }
+        });
+    }
+
+    static boolean driftCheckDue(long tick, long previousTick) {
+        return previousTick == Long.MIN_VALUE || tick < previousTick || tick - previousTick >= 100;
     }
 
     /**
@@ -562,8 +587,16 @@ public final class RecipeIndex {
                                            Set<ResourceLocation> seen) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
                 || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
+        java.util.Collection<com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe> recipes;
+        try {
+            recipes = IronSpellBooksRecipeCatalog.allRecipes();
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] Iron spell dynamic source unavailable; retaining other recipe sources", failure);
+            return 0;
+        }
         int count = 0;
-        for (var recipe : IronSpellBooksRecipeCatalog.allRecipes()) {
+        for (var recipe : recipes) {
             if (!seen.add(recipe.getId())) continue;
             ItemStack output = recipe.getResultItem(level.registryAccess());
             if (output.isEmpty()) continue;
@@ -915,6 +948,7 @@ public final class RecipeIndex {
             pureIncompatibleOutputIds = Set.of();
             source = null;
             sourceRevision = 0L;
+            lastDriftCheckTick = Long.MIN_VALUE;
             generationBuildFailed = false;
         }
         if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {

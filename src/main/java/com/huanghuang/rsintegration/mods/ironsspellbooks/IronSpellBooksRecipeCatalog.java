@@ -165,113 +165,120 @@ public final class IronSpellBooksRecipeCatalog {
     }
 
     private static Catalog build() {
+        IronSpellCatalogDiagnostics diagnostics = new IronSpellCatalogDiagnostics();
         Map<ResourceLocation, IronSpellBooksRecipe> result = new LinkedHashMap<>();
-        addScrollForgeRecipes(result, findFocuses());
-        addArcaneAnvilRecipes(result);
+        List<AbstractSpell> spells = enabledSpells(diagnostics);
+        List<InkItem> inks = diagnostics.read("inks", "registry", 0,
+                IronSpellBooksRecipeCatalog::findInks).orElse(List.of());
+        addScrollForgeRecipes(result, findFocuses(spells, diagnostics), spells, inks, diagnostics);
+        addArcaneAnvilRecipes(result, spells, diagnostics);
         Map<OutputKey, IronSpellBooksRecipe> byOutput = new HashMap<>();
         for (IronSpellBooksRecipe recipe : result.values()) {
             ItemStack output = recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY);
             if (!output.isEmpty()) byOutput.putIfAbsent(OutputKey.of(recipe.machine(), output), recipe);
         }
-        return new Catalog(Collections.unmodifiableMap(result), Map.copyOf(byOutput),
-                runtimeFingerprint());
+        long fingerprint = runtimeFingerprint(diagnostics);
+        if (diagnostics.hasFailures()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-IronSpells] Published partial dynamic catalog: retained={} {}; "
+                            + "unreadable spell variants were skipped, no rarity or material was guessed",
+                    result.size(), diagnostics.summary());
+        }
+        return new Catalog(Collections.unmodifiableMap(result), Map.copyOf(byOutput), fingerprint);
     }
 
     private static void addScrollForgeRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
-                                               Map<ResourceLocation, List<ItemStack>> focuses) {
+                                               Map<ResourceLocation, List<ItemStack>> focuses,
+                                               List<AbstractSpell> spells, List<InkItem> inks,
+                                               IronSpellCatalogDiagnostics diagnostics) {
         // Mirror Iron's own JEI maker: every registered InkItem is a valid
         // input, and its rarity determines the first scroll level. Do not
         // reverse-map a level through spell.getRarity(level); custom spells
         // and older ISB versions can have non-identical rarity curves.
-        List<InkItem> inks = findInks();
-        for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
-            if (spell == SpellRegistry.none() || !spell.allowCrafting()) continue;
-            List<ItemStack> focusOptions = focuses.getOrDefault(
-                    spell.getSchoolType().getId(), List.of());
-            if (focusOptions.isEmpty()) continue;
-            Map<Integer, List<InkItem>> inksByLevel = new LinkedHashMap<>();
-            for (InkItem ink : inks) {
-                int level = spell.getMinLevelForRarity(ink.getRarity());
-                if (level <= 0 || level > spell.getMaxLevel()) continue;
-                inksByLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(ink);
-            }
-            for (Map.Entry<Integer, List<InkItem>> entry : inksByLevel.entrySet()) {
-                int level = entry.getKey();
-                List<InkItem> levelInks = entry.getValue();
-                ItemStack displayInk = new ItemStack(levelInks.get(0));
-                Ingredient inkIngredient = Ingredient.of(levelInks.stream()
-                        .map(ItemStack::new));
-                ItemStack output = scroll(spell, level);
-                ResourceLocation id = id("scroll_forge", spell.getSpellResource(), level, null);
-                result.put(id, new IronSpellBooksRecipe(id,
-                        IronSpellBooksRecipe.Machine.SCROLL_FORGE,
-                        List.of(displayInk, new ItemStack(Items.PAPER), focusOptions.get(0)),
-                        List.of(inkIngredient, Ingredient.of(Items.PAPER),
-                                ingredientOf(focusOptions)), output,
-                        spell.getSpellId(), level));
+        for (AbstractSpell spell : spells) {
+            diagnostics.read("scroll_forge_spell", spellLabel(spell), 0, () -> {
+                if (spell == SpellRegistry.none() || !spell.allowCrafting()) return null;
+                List<ItemStack> focusOptions = focuses.getOrDefault(
+                        spell.getSchoolType().getId(), List.of());
+                if (focusOptions.isEmpty()) return null;
+                Map<Integer, List<InkItem>> inksByLevel = new LinkedHashMap<>();
+                for (InkItem ink : inks) {
+                    int level = diagnostics.read("scroll_forge_ink", spellLabel(spell), 0,
+                            () -> spell.getMinLevelForRarity(ink.getRarity())).orElse(-1);
+                    if (level <= 0 || level > spell.getMaxLevel()) continue;
+                    inksByLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(ink);
+                }
+                for (Map.Entry<Integer, List<InkItem>> entry : inksByLevel.entrySet()) {
+                    int level = entry.getKey();
+                    diagnostics.read("scroll_forge_output", spellLabel(spell), level, () -> {
+                        List<InkItem> levelInks = entry.getValue();
+                        ItemStack displayInk = new ItemStack(levelInks.get(0));
+                        Ingredient inkIngredient = Ingredient.of(levelInks.stream().map(ItemStack::new));
+                        ItemStack output = scroll(spell, level);
+                        ResourceLocation id = id("scroll_forge", spell.getSpellResource(), level, null);
+                        result.put(id, new IronSpellBooksRecipe(id,
+                                IronSpellBooksRecipe.Machine.SCROLL_FORGE,
+                                List.of(displayInk, new ItemStack(Items.PAPER), focusOptions.get(0)),
+                                List.of(inkIngredient, Ingredient.of(Items.PAPER),
+                                        ingredientOf(focusOptions)), output, spell.getSpellId(), level));
+                        return null;
+                    });
+                }
+                return null;
+            });
+        }
+    }
+
+    private static void addArcaneAnvilRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result,
+                                             List<AbstractSpell> spells,
+                                             IronSpellCatalogDiagnostics diagnostics) {
+        JeiAnvilAccess access = diagnostics.read("arcane_anvil_api", "jei", 0, () -> {
+            Class<?> recipeClass = findClass(
+                    "io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe",
+                    "io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe");
+            return new JeiAnvilAccess(recipeClass.getConstructor(AbstractSpell.class, int.class),
+                    recipeClass.getMethod("getRecipeItems"));
+        }).orElse(null);
+        for (AbstractSpell spell : spells) {
+            int[] range = spellRange(spell, diagnostics);
+            if (range == null) continue;
+            for (int level = range[0]; level < range[1]; level++) {
+                int inputLevel = level;
+                IronSpellBooksRecipe recipe = diagnostics.withFallback(spellLabel(spell), level + 1,
+                        access == null ? null : () -> reflectedUpgrade(access, spell, inputLevel),
+                        () -> nativeUpgrade(spell, inputLevel));
+                if (recipe != null) result.put(recipe.getId(), recipe);
             }
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private static void addArcaneAnvilRecipes(Map<ResourceLocation, IronSpellBooksRecipe> result) {
-        Map<ResourceLocation, IronSpellBooksRecipe> reflected = new LinkedHashMap<>();
-        boolean reflectionCompleted = false;
-        try {
-            Class<?> recipeClass = findClass(
-                    "io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe",
-                    "io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe");
-            Constructor<?> constructor = recipeClass.getConstructor(AbstractSpell.class, int.class);
-            Method getRecipeItems = recipeClass.getMethod("getRecipeItems");
-            for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
-                for (int level = spell.getMinLevel(); level < spell.getMaxLevel(); level++) {
-                    Object tuple = getRecipeItems.invoke(constructor.newInstance(spell, level));
-                    List<ItemStack> leftItems = tupleItems(tuple, "a");
-                    List<ItemStack> rightItems = tupleItems(tuple, "b");
-                    List<ItemStack> outputs = tupleItems(tuple, "c");
-                    if (leftItems.isEmpty() || rightItems.isEmpty() || outputs.isEmpty()) continue;
-                    ResourceLocation id = id("arcane_anvil/scroll_upgrade",
-                            spell.getSpellResource(), level + 1, null);
-                    reflected.put(id, new IronSpellBooksRecipe(id,
-                            IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
-                            List.of(leftItems.get(0), rightItems.get(0)),
-                            List.of(exactIngredientOf(leftItems), exactIngredientOf(rightItems)),
-                            outputs.get(0),
-                            spell.getSpellId(), level + 1));
-                }
-            }
-            reflectionCompleted = true;
-        } catch (ReflectiveOperationException | LinkageError e) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-IronSpells] Arcane Anvil JEI recipe reflection unavailable; using native fallback", e);
-        }
-        if (reflectionCompleted) {
-            result.putAll(reflected);
-            return;
-        }
+    private record JeiAnvilAccess(Constructor<?> constructor, Method getRecipeItems) {}
 
-        // Dedicated servers may not load the JEI-only recipe class at all. The
-        // native rule is intentionally only a fallback: supported JEI versions
-        // remain authoritative, while servers still get the same level -> rarity
-        // -> ink mapping instead of an empty or partial catalog.
-        RSIntegrationMod.LOGGER.warn(
-                "[RSI-IronSpells] Arcane Anvil JEI recipes unavailable; generating native scroll upgrades");
-        for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
-            for (int level = spell.getMinLevel(); level < spell.getMaxLevel(); level++) {
-                InkItem ink = InkItem.getInkForRarity(spell.getRarity(level + 1));
-                if (ink == null) continue;
-                ItemStack left = scroll(spell, level);
-                ItemStack right = new ItemStack(ink);
-                ItemStack output = scroll(spell, level + 1);
-                ResourceLocation id = id("arcane_anvil/scroll_upgrade",
-                        spell.getSpellResource(), level + 1, null);
-                result.put(id, new IronSpellBooksRecipe(id,
-                        IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
-                        List.of(left, right),
-                        List.of(exactIngredientOf(List.of(left)), exactIngredientOf(List.of(right))),
-                        output, spell.getSpellId(), level + 1));
-            }
-        }
+    private static IronSpellBooksRecipe reflectedUpgrade(JeiAnvilAccess access, AbstractSpell spell,
+                                                         int level) throws ReflectiveOperationException {
+        Object tuple = access.getRecipeItems().invoke(access.constructor().newInstance(spell, level));
+        List<ItemStack> leftItems = tupleItems(tuple, "a");
+        List<ItemStack> rightItems = tupleItems(tuple, "b");
+        List<ItemStack> outputs = tupleItems(tuple, "c");
+        if (leftItems.isEmpty() || rightItems.isEmpty() || outputs.isEmpty()) return null;
+        ResourceLocation id = id("arcane_anvil/scroll_upgrade", spell.getSpellResource(), level + 1, null);
+        return new IronSpellBooksRecipe(id, IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
+                List.of(leftItems.get(0), rightItems.get(0)),
+                List.of(exactIngredientOf(leftItems), exactIngredientOf(rightItems)),
+                outputs.get(0), spell.getSpellId(), level + 1);
+    }
+
+    private static IronSpellBooksRecipe nativeUpgrade(AbstractSpell spell, int level) {
+        InkItem ink = InkItem.getInkForRarity(spell.getRarity(level + 1));
+        if (ink == null) return null;
+        ItemStack left = scroll(spell, level);
+        ItemStack right = new ItemStack(ink);
+        ItemStack output = scroll(spell, level + 1);
+        ResourceLocation id = id("arcane_anvil/scroll_upgrade", spell.getSpellResource(), level + 1, null);
+        return new IronSpellBooksRecipe(id, IronSpellBooksRecipe.Machine.ARCANE_ANVIL,
+                List.of(left, right),
+                List.of(exactIngredientOf(List.of(left)), exactIngredientOf(List.of(right))),
+                output, spell.getSpellId(), level + 1);
     }
 
     private static Class<?> findClass(String... names) throws ClassNotFoundException {
@@ -308,19 +315,21 @@ public final class IronSpellBooksRecipeCatalog {
         return level <= 0 ? ItemStack.EMPTY : scroll(spell, level);
     }
 
-    private static Map<ResourceLocation, List<ItemStack>> findFocuses() {
+    private static Map<ResourceLocation, List<ItemStack>> findFocuses(List<AbstractSpell> spells,
+                                                                   IronSpellCatalogDiagnostics diagnostics) {
         Map<ResourceLocation, List<ItemStack>> focuses = new LinkedHashMap<>();
-        for (AbstractSpell spell : SpellRegistry.getEnabledSpells()) {
-            ResourceLocation schoolId = spell.getSchoolType().getId();
-            if (focuses.containsKey(schoolId)) continue;
-            List<ItemStack> matches = new ArrayList<>();
-            for (var item : ForgeRegistries.ITEMS.getValues()) {
-                ItemStack stack = new ItemStack(item);
-                if (spell.getSchoolType().isFocus(stack)) {
-                    matches.add(stack);
+        for (AbstractSpell spell : spells) {
+            diagnostics.read("focus", spellLabel(spell), 0, () -> {
+                ResourceLocation schoolId = spell.getSchoolType().getId();
+                if (focuses.containsKey(schoolId)) return null;
+                List<ItemStack> matches = new ArrayList<>();
+                for (var item : ForgeRegistries.ITEMS.getValues()) {
+                    ItemStack stack = new ItemStack(item);
+                    if (spell.getSchoolType().isFocus(stack)) matches.add(stack);
                 }
-            }
-            if (!matches.isEmpty()) focuses.put(schoolId, List.copyOf(matches));
+                if (!matches.isEmpty()) focuses.put(schoolId, List.copyOf(matches));
+                return null;
+            });
         }
         return focuses;
     }
@@ -348,29 +357,75 @@ public final class IronSpellBooksRecipeCatalog {
     }
 
     private static long runtimeFingerprint() {
-        List<AbstractSpell> spells = new ArrayList<>(SpellRegistry.getEnabledSpells());
-        spells.sort(java.util.Comparator.comparing(spell -> spell.getSpellResource().toString()));
-        List<InkItem> inks = findInks();
+        return runtimeFingerprint(new IronSpellCatalogDiagnostics());
+    }
+
+    private static List<AbstractSpell> enabledSpells(IronSpellCatalogDiagnostics diagnostics) {
+        return diagnostics.read("spell_registry", "registry", 0,
+                () -> List.copyOf(SpellRegistry.getEnabledSpells())).orElse(List.of());
+    }
+
+    private static String spellLabel(AbstractSpell spell) {
+        try {
+            return spell.getSpellId();
+        } catch (RuntimeException | LinkageError failure) {
+            return spell.getClass().getName();
+        }
+    }
+
+    @Nullable
+    private static int[] spellRange(AbstractSpell spell, IronSpellCatalogDiagnostics diagnostics) {
+        return diagnostics.read("spell_range", spellLabel(spell), 0, () -> {
+            int minimum = spell.getMinLevel();
+            int maximum = spell.getMaxLevel();
+            if (minimum <= 0 || maximum < minimum) {
+                throw new IllegalArgumentException("invalid spell range " + minimum + ".." + maximum);
+            }
+            return new int[]{minimum, maximum};
+        }).orElse(null);
+    }
+
+    private static long runtimeFingerprint(IronSpellCatalogDiagnostics diagnostics) {
+        List<AbstractSpell> spells = new ArrayList<>(enabledSpells(diagnostics));
+        spells.sort(java.util.Comparator.comparing(IronSpellBooksRecipeCatalog::spellLabel));
+        List<InkItem> inks = new ArrayList<>(diagnostics.read("inks", "registry", 0,
+                IronSpellBooksRecipeCatalog::findInks).orElse(List.of()));
         inks.sort(java.util.Comparator.comparing(ink -> {
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(ink);
             return id == null ? "" : id.toString();
         }));
         long hash = 0xcbf29ce484222325L;
         for (AbstractSpell spell : spells) {
-            hash = fingerprint(hash, spell.getSpellId());
-            hash = fingerprint(hash, spell.allowCrafting() ? 1 : 0);
-            hash = fingerprint(hash, spell.getMinLevel());
-            hash = fingerprint(hash, spell.getMaxLevel());
-            for (int level = spell.getMinLevel(); level <= spell.getMaxLevel(); level++) {
-                hash = fingerprint(hash, spell.getRarity(level).getValue());
+            String label = spellLabel(spell);
+            hash = fingerprint(hash, label);
+            hash = fingerprintProbe(hash, diagnostics, "fingerprint_crafting", label, 0,
+                    () -> spell.allowCrafting() ? 1 : 0);
+            int[] range = spellRange(spell, diagnostics);
+            hash = fingerprint(hash, range == null ? "invalid_range" : "valid_range");
+            if (range == null) continue;
+            hash = fingerprint(hash, range[0]);
+            hash = fingerprint(hash, range[1]);
+            for (long index = range[0]; index <= range[1]; index++) {
+                int level = (int) index;
+                hash = fingerprintProbe(hash, diagnostics, "fingerprint_rarity", label, level,
+                        () -> spell.getRarity(level).getValue());
             }
             for (InkItem ink : inks) {
                 ResourceLocation inkId = ForgeRegistries.ITEMS.getKey(ink);
                 hash = fingerprint(hash, inkId == null ? "" : inkId.toString());
-                hash = fingerprint(hash, spell.getMinLevelForRarity(ink.getRarity()));
+                hash = fingerprintProbe(hash, diagnostics, "fingerprint_ink", label, 0,
+                        () -> spell.getMinLevelForRarity(ink.getRarity()));
             }
         }
         return hash;
+    }
+
+    static long fingerprintProbe(long hash, IronSpellCatalogDiagnostics diagnostics,
+                                 String stage, String spell, int level,
+                                 IronSpellCatalogDiagnostics.Probe<Integer> probe) {
+        IronSpellCatalogDiagnostics.Result<Integer> result = diagnostics.read(stage, spell, level, probe);
+        hash = fingerprint(hash, result.failed() ? "unavailable" : "value");
+        return result.failed() ? hash : fingerprint(hash, result.value());
     }
 
     private static long fingerprint(long hash, String value) {

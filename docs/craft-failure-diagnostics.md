@@ -399,3 +399,84 @@ Verification for this output-ownership fix:
 - HTML report: `build/reports/tests/test/index.html`; XML:
   `build/test-results/test/`. Existing compile/Mixin/deprecation warnings remain.
 - No automatic commit, push, deployment, save modification or in-game testing.
+
+## Iron Spell Catalog Isolation: mclo.gs/bBdhOH8
+
+The user-provided log was downloaded from `https://api.mclo.gs/1/raw/bBdhOH8`
+to `D:/sd/rs-integration/build/mclogs-bBdhOH8.log` (2,809,655 bytes). It is
+from Lite Apotheosis Pack with Forge 47.4.23, Java 25.0.1, Iron's Spells 3.16.3
+and RSI 1.4.1fix (reported mod version 1.4.1), not the previous Mana Pool session.
+The same unguarded code paths were present in the current 1.4.2 source.
+
+Evidence:
+
+- Line 13301: an initial catalog generation succeeded with 26,913 entries.
+- Lines 13468-13480: JEI Arcane Anvil reflection failed, then native fallback
+  called `AbstractSpell.getRarity()`, whose injected `onGetRarity` threw
+  `ArrayIndexOutOfBoundsException: Index -2 out of bounds for length 8`.
+  This escaped `IronSpellBooksRecipeCatalog` and invalidated the whole RecipeIndex.
+- There are 219 `onGetRarity` stack occurrences: one RSI catalog failure and
+  repeated independent JEI failures. A catalog guard alone cannot fix JEI's call.
+- Runtime drift fingerprinting also called `getRarity()` unguarded, and was
+  invoked from the server tick. It could repeat the exception or cause expensive
+  full spell/level scans on the main thread even after a build-only guard.
+
+Implementation:
+
+- Reflection fallback is per spell/level. One broken level no longer discards
+  all successful JEI-derived entries. Native fallback failures skip only the
+  unreadable variant; a successful empty JEI result does not invent a recipe.
+- Scroll Forge, focus lookup and spell metadata probes also isolate failures.
+  No replacement rarity, material requirement or NBT is guessed or rewritten.
+- Fingerprints distinguish successful values from unavailable data. Persistent
+  failures have a stable marker, while recovery and valid mapping changes remain
+  detectable. Drift scans run on the existing catalog executor, at most once per
+  100 server ticks with one check in flight; stale generations are ignored.
+  Config publication still invalidates immediately. No crafting deadline is added.
+- A final optional-source guard lets ordinary and other-machine recipe sources
+  publish if the Iron dynamic source itself fails unexpectedly.
+- One bounded build summary records failing stage, spell identity, level and
+  underlying exception, with at most eight samples and truncated single-line
+  fields. Repeated fingerprint checks do not dump identical per-level exceptions.
+- User-supplied diagnostic jars remain untouched. Their duplicate/new Iron and
+  unrelated addon classes are excluded from `libs/*.jar` compilation. The legacy
+  3.4.0.9 compile baseline and 1.4.2 release version remain unchanged.
+
+External-mod investigation:
+
+- `apothic_staff_rarities-1.0.1.jar` has no Mixin config or `onGetRarity` injector.
+  Its affix JSON errors elsewhere in the log are separate.
+- The supplied `fantasy_ending-1.20.1-2.7.20g-all.jar` modifies `maxRarity` at
+  constructor tail and redirects the LEGENDARY field in `getRarity`. A full class
+  scan found no `onGetRarity` method. This does not exclude an interaction, but
+  does not establish it as the throwing injector. Do not clamp the index or
+  remove its ORIGIN rarity based only on suspicion.
+- The exact `improve_the_expectations-1.0.2-forge-1.20.1.jar` was requested to
+  continue tracing expanded rarities; it was not yet available during this check.
+- The log also contains 26 TravelOptics/Cataclysm coremod transform errors,
+  LWJGL Java/native version mismatch, affix parse failures and resource errors.
+  These are not RSI parallel-crafting failures and are not changed by this patch.
+
+Verification scope: unit tests exercise failing reflection/native suppliers,
+preservation of good variants, dedicated-server fallback, fingerprint recovery,
+bounded diagnostics and fatal-error propagation. Bytecode contracts check the
+optional-source catch boundary and background drift dispatch. The actual uploaded
+Iron 3.16.3 jar is checked via `RSI_IRON_COMPAT_JAR`; this is not a running modpack
+or a test of the transformed `onGetRarity` injector. No instance installation or
+in-game test is performed.
+
+Validation for this log-driven fix:
+
+- Directed suite: 40 passed, including the uploaded Iron 3.16.3 API contract.
+- Full `test build reobfJar verifyReleaseJar --no-daemon`: 1537 passed, no
+  failures/errors/skips with `RSI_IRON_COMPAT_JAR` set to the uploaded 3.16.3 jar.
+- Eleven regression tests were added. Reports are under
+  `build/reports/tests/test/index.html` and `build/test-results/test/`.
+- Release: `D:/sd/rs-integration/build/libs/rs_integration-1.4.2.jar`,
+  4,425,206 bytes. SHA-256:
+  `0778dc8aa6d1e2c3fa1bbf4e3c08f2a9ee500acbaf72832ce5949aae9d0b0351`.
+- Raw log SHA-256:
+  `6e07700424f6817f031ade6a0a5803c8f4dd648b896a816fcea57a530a940669`.
+- The earlier Mana Pool fix was committed separately as `79c9fc9` per the
+  user's pending local-commit request. This Iron catalog fix is uncommitted;
+  neither release was automatically deployed. Existing build warnings remain.
