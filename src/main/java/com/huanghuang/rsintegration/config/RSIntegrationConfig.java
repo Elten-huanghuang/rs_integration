@@ -365,6 +365,8 @@ public final class RSIntegrationConfig {
                                 "crafttweaker:avaritia.diamond_lattice.10",
                                 "crafttweaker:avaritia.diamond_lattice.11",
                                 "crafttweaker:avaritia.diamond_lattice.12",
+                                "crafttweaker:too_many_bows.power_crystal.ex",
+                                "crafttweaker:irons_spellbooks.lurker_ring",
                                 "crafttweaker:eidolon.lead_ingot.1",
                                 "crafttweaker:eidolon.lead_ingot.2",
                                 "crafttweaker:eidolon.lead_ingot.3",

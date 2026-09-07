@@ -50,7 +50,7 @@ cross-mod automation for Minecraft 1.20.1.
 [[dependencies.${mod_id}]]
     modId = "ftbquests"
     mandatory = false
-    versionRange = "[2001.4.13,)"
+    versionRange = "[2001.4.10,)"
     ordering = "AFTER"
     side = "BOTH"
 

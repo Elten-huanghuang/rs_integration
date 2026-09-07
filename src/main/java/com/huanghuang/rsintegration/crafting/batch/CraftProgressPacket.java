@@ -17,7 +17,7 @@ import java.util.function.Supplier;
 public final class CraftProgressPacket {
 
     static final int MAX_NODES = 4096;
-    static final int MAX_TECHNICAL_DETAIL_LENGTH = 1024;
+    static final int MAX_TECHNICAL_DETAIL_LENGTH = CraftProgressSnapshot.MAX_TECHNICAL_DETAIL_LENGTH;
     static final int MAX_RECIPE_ID_LENGTH = 256;
     static final int MAX_MOD_TYPE_ID_LENGTH = 128;
     static final int MAX_MACHINE_LABEL_LENGTH = 256;

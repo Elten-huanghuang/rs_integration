@@ -29,6 +29,9 @@ public final class CraftProgressTracker {
     private static final Map<UUID, Long> TERMINAL_SINCE = new LinkedHashMap<>();
     private static final Map<UUID, Long> LAST_UPDATED = new LinkedHashMap<>();
     private static final Map<UUID, Long> LAST_STATUS_REQUEST = new LinkedHashMap<>();
+    private static final CraftFailureHistory FAILURES = new CraftFailureHistory();
+    private static final Map<UUID, Boolean> GRAPH_MODES = new LinkedHashMap<>();
+    private static long sessionGeneration;
     private static final long TERMINAL_TIMEOUT_MS = 5_000;
     private static final long STALE_STATUS_MS = 5_000;
     private static boolean visible = true;
@@ -36,6 +39,8 @@ public final class CraftProgressTracker {
     private CraftProgressTracker() {}
 
     public static void onStarted(CraftStartedPacket packet) {
+        if (FAILURES.seen(packet.craftId())) return;
+        GRAPH_MODES.putIfAbsent(packet.craftId(), packet.graphMode());
         ACTIVE.putIfAbsent(packet.craftId(),
                 new CraftProgressSnapshot(packet.craftId(), 0,
                         CraftProgressSnapshot.Result.RUNNING, CraftProgressSnapshot.Reason.NONE,
@@ -44,28 +49,37 @@ public final class CraftProgressTracker {
         LAST_UPDATED.putIfAbsent(packet.craftId(), System.currentTimeMillis());
     }
 
-    public static void onProgress(CraftProgressSnapshot snapshot) {
+    public static boolean onProgress(CraftProgressSnapshot snapshot) {
+        if (FAILURES.seen(snapshot.craftId())) return false;
         CraftProgressSnapshot existing = ACTIVE.get(snapshot.craftId());
-        if (existing != null && snapshot.sequence() <= existing.sequence() && !snapshot.isTerminal()) return;
+        if (existing != null && (existing.isTerminal()
+                || snapshot.sequence() <= existing.sequence() && !snapshot.isTerminal())) return false;
         ACTIVE.put(snapshot.craftId(), snapshot);
         LAST_UPDATED.put(snapshot.craftId(), System.currentTimeMillis());
         LAST_STATUS_REQUEST.remove(snapshot.craftId());
         if (snapshot.isTerminal()) {
             TERMINAL_SINCE.putIfAbsent(snapshot.craftId(), System.currentTimeMillis());
+            if (snapshot.result() == CraftProgressSnapshot.Result.FAILED) {
+                ItemStack target = target(snapshot.craftId());
+                return FAILURES.record(snapshot, target,
+                        CraftFailureContext.capture(snapshot, target, GRAPH_MODES.get(snapshot.craftId())));
+            }
         }
+        return false;
     }
 
     /** Apply a delta only when it is based on the latest local full state. */
-    public static void onDelta(CraftProgressDeltaPacket delta) {
+    public static boolean onDelta(CraftProgressDeltaPacket delta) {
+        if (FAILURES.seen(delta.craftId())) return false;
         CraftProgressSnapshot existing = ACTIVE.get(delta.craftId());
         if (existing == null || existing.sequence() != delta.baseSequence()) {
             requestFullStatus(delta.craftId());
-            return;
+            return false;
         }
         Map<Integer, CraftProgressSnapshot.NodeProgress> nodes = new LinkedHashMap<>();
         for (CraftProgressSnapshot.NodeProgress node : existing.nodes()) nodes.put(node.nodeId(), node);
         for (CraftProgressSnapshot.NodeProgress node : delta.changedNodes()) nodes.put(node.nodeId(), node);
-        onProgress(new CraftProgressSnapshot(delta.craftId(), delta.sequence(), delta.result(),
+        return onProgress(new CraftProgressSnapshot(delta.craftId(), delta.sequence(), delta.result(),
                 delta.reason(), delta.completedNodes(), delta.totalNodes(), delta.runningNodes(),
                 delta.technicalDetail(), List.copyOf(nodes.values())));
     }
@@ -84,6 +98,7 @@ public final class CraftProgressTracker {
             if (now - entry.getValue() > TERMINAL_TIMEOUT_MS) {
                 ACTIVE.remove(entry.getKey());
                 TARGETS.remove(entry.getKey());
+                GRAPH_MODES.remove(entry.getKey());
                 LAST_UPDATED.remove(entry.getKey());
                 LAST_STATUS_REQUEST.remove(entry.getKey());
                 return true;
@@ -118,7 +133,21 @@ public final class CraftProgressTracker {
 
     public static ItemStack target(UUID craftId) {
         ItemStack target = TARGETS.get(craftId);
-        return target == null ? ItemStack.EMPTY : target.copy();
+        return target == null ? FAILURES.target(craftId) : target.copy();
+    }
+
+    public static Collection<CraftProgressSnapshot> taskSnapshots() {
+        expireTerminal();
+        Map<UUID, CraftProgressSnapshot> tasks = new LinkedHashMap<>(ACTIVE);
+        for (var failure : FAILURES.snapshots()) tasks.putIfAbsent(failure.craftId(), failure);
+        return List.copyOf(tasks.values());
+    }
+
+    public static void dismissFailure(UUID craftId) {
+        CraftProgressSnapshot active = ACTIVE.get(craftId);
+        if (active != null && !active.isTerminal()) return;
+        FAILURES.remove(craftId);
+        remove(craftId);
     }
 
     public static Collection<CraftProgressSnapshot> snapshots() {
@@ -127,6 +156,7 @@ public final class CraftProgressTracker {
     }
 
     public static void remove(UUID craftId) {
+        GRAPH_MODES.remove(craftId);
         ACTIVE.remove(craftId);
         TARGETS.remove(craftId);
         TERMINAL_SINCE.remove(craftId);
@@ -139,6 +169,7 @@ public final class CraftProgressTracker {
         HashSet<UUID> active = new HashSet<>(craftIds);
         ACTIVE.keySet().removeIf(craftId -> !active.contains(craftId));
         TARGETS.keySet().removeIf(craftId -> !active.contains(craftId));
+        GRAPH_MODES.keySet().removeIf(craftId -> !active.contains(craftId));
         TERMINAL_SINCE.keySet().removeIf(craftId -> !active.contains(craftId));
         LAST_UPDATED.keySet().removeIf(craftId -> !active.contains(craftId));
         LAST_STATUS_REQUEST.keySet().removeIf(craftId -> !active.contains(craftId));
@@ -151,6 +182,9 @@ public final class CraftProgressTracker {
         TERMINAL_SINCE.clear();
         LAST_UPDATED.clear();
         LAST_STATUS_REQUEST.clear();
+        FAILURES.clear();
+        GRAPH_MODES.clear();
+        sessionGeneration++;
         visible = true;
     }
 
@@ -160,6 +194,10 @@ public final class CraftProgressTracker {
     }
 
     public static boolean isVisible() { return visible; }
+
+    static CraftFailureHistory.Entry failure(UUID id) { return FAILURES.get(id); }
+
+    static long sessionGeneration() { return sessionGeneration; }
 
     public static void toggleVisible() { visible = !visible; }
 }

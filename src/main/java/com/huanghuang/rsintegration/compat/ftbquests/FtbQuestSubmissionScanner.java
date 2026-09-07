@@ -82,7 +82,7 @@ public final class FtbQuestSubmissionScanner {
                 List<ItemStack> valid = itemTask.getValidDisplayItems();
                 ItemStack display = itemTask.getItemStack();
                 if (display.isEmpty() && !valid.isEmpty()) display = valid.get(0);
-                requirements.add(new QuestItemRequirement(itemTask.getId(), display, valid,
+                requirements.add(new QuestItemRequirement(FtbQuestObjectId.getId(itemTask), display, valid,
                         required, progress, true, false, false,
                         isOptionalForProgression(itemTask, data)));
             }
@@ -97,11 +97,11 @@ public final class FtbQuestSubmissionScanner {
                 .filter(ItemReward.class::isInstance)
                 .map(ItemReward.class::cast)
                 .filter(reward -> !reward.getItem().isEmpty())
-                .map(reward -> new QuestItemRewardPreview(reward.getId(),
+                .map(reward -> new QuestItemRewardPreview(FtbQuestObjectId.getId(reward),
                         reward.getItem().copyWithCount(Math.max(1, reward.getCount()))))
                 .toList();
         boolean hasChoice = quest.getRewards().stream().anyMatch(ChoiceReward.class::isInstance);
-        return new QuestSubmissionSnapshot(quest.getId(), quest.getTitle().getString(), icon,
+        return new QuestSubmissionSnapshot(FtbQuestObjectId.getId(quest), quest.getTitle().getString(), icon,
                 quest.canBeRepeated(), quest.getRequireSequentialTasks(), eligibility,
                 requirements, itemRewards, quest.getRewards().size(), hasChoice);
     }
@@ -119,7 +119,7 @@ public final class FtbQuestSubmissionScanner {
             }
         } catch (ReflectiveOperationException | ClassCastException e) {
             RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Failed to inspect optional task state for {}",
-                    task.getId(), e);
+                    FtbQuestObjectId.getId(task), e);
             return false;
         }
     }

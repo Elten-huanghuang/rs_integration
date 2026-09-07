@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestObjectId;
 import com.huanghuang.rsintegration.compat.ftbquests.NativeItemTaskSubmissionService;
 import dev.ftb.mods.ftbquests.net.SubmitTaskMessage;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
@@ -44,7 +45,7 @@ public abstract class SubmitTaskMessageMixin {
         } catch (RuntimeException | LinkageError exception) {
             RSIntegrationMod.LOGGER.error(
                     "[RSI-FTBQuests] Submission hook failed for task {}; continuing native packet",
-                    task.getId(), exception);
+                    FtbQuestObjectId.getId(task), exception);
         }
 
         // Leave the packet untouched unless RSI actually reserved or settled

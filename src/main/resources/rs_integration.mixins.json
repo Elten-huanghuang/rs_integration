@@ -82,6 +82,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "minecraft.CraftFailureReportClickMixin",
     "beyonddimensions.BDBaseGuiOverlayMixin",
     "beyonddimensions.DimensionsNetGuiAutoEatMixin",
     "beyonddimensions.DimensionsNetGuiSidebarMixin",

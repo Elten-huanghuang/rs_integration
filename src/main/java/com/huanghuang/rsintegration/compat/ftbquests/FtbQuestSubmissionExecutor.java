@@ -72,7 +72,7 @@ public final class FtbQuestSubmissionExecutor {
 
         Map<Long, ItemTask> tasks = new HashMap<>();
         for (var task : quest.getTasksAsList()) {
-            if (task instanceof ItemTask itemTask) tasks.put(itemTask.getId(), itemTask);
+            if (task instanceof ItemTask itemTask) tasks.put(FtbQuestObjectId.getId(itemTask), itemTask);
         }
 
         try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint, network)) {
@@ -85,17 +85,17 @@ public final class FtbQuestSubmissionExecutor {
                 // Reserve with the task's authoritative matcher, just like the
                 // native single-task submit path does.
                 Ingredient ingredient = new TaskIngredient(task, requirement.displayStack());
-                if (!escrow.reserve(task.getId(), ingredient, remaining)) {
+                if (!escrow.reserve(FtbQuestObjectId.getId(task), ingredient, remaining)) {
                     RSIntegrationMod.LOGGER.warn(
                             "[RSI-FTBQuests] Escrow reservation failed task={} remaining={} display={}",
-                            task.getId(), remaining, requirement.displayStack());
+                            FtbQuestObjectId.getId(task), remaining, requirement.displayStack());
                     player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
                     return;
                 }
             }
             if (!escrow.commit()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Escrow commit failed quest={} requirements={}",
-                        quest.getId(), snapshot.requirements().size());
+                        FtbQuestObjectId.getId(quest), snapshot.requirements().size());
                 player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
                 return;
             }
@@ -105,14 +105,15 @@ public final class FtbQuestSubmissionExecutor {
                          QuestSubmissionAutoCompletionContext.open()) {
                 for (QuestItemRequirement requirement : snapshot.requirements()) {
                     ItemTask task = tasks.get(requirement.taskId());
-                    QuestSubmissionEscrow.Entry entry = escrow.entry(task.getId());
+                    QuestSubmissionEscrow.Entry entry = escrow.entry(FtbQuestObjectId.getId(task));
                     long before = data.getProgress(task);
                     ItemStack remainder = task.insert(data, entry.stack(), false);
                     long consumed = entry.stack().getCount() - remainder.getCount();
                     long expected = QuestProgressSettlement.expectedAccepted(
                             before, task.getMaxProgress(), entry.stack().getCount());
                     if (expected <= 0L || consumed != expected) {
-                        throw new IllegalStateException("FTB Quest task rejected escrowed items: " + task.getId());
+                        throw new IllegalStateException("FTB Quest task rejected escrowed items: "
+                                + FtbQuestObjectId.getId(task));
                     }
                     escrow.settle(entry, remainder);
                 }

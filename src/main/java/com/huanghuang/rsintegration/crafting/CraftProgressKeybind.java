@@ -49,7 +49,7 @@ public final class CraftProgressKeybind {
     public static void onKeyInput(InputEvent.Key event) {
         if (TOGGLE_PROGRESS == null) return;
         if (event.getAction() != GLFW.GLFW_PRESS) return;
-        if (!CraftProgressTracker.hasActive()) return;
+        if (CraftProgressTracker.taskSnapshots().isEmpty()) return;
         while (TOGGLE_PROGRESS.consumeClick()) {
             Minecraft.getInstance().setScreen(new CraftProgressScreen());
         }
