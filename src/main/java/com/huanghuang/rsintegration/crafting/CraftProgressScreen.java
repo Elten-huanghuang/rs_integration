@@ -29,6 +29,8 @@ public final class CraftProgressScreen extends Screen {
     private UUID selectedCraft;
     private Button hudButton;
     private Button cancelButton;
+    private Button diagnosticButton;
+    private int footerHeight;
     private int nodeScroll;
     private ItemStack hoveredNodeStack = ItemStack.EMPTY;
 
@@ -76,12 +78,13 @@ public final class CraftProgressScreen extends Screen {
         contentX = panelX + sidebarWidth + 1;
         contentY = panelY + 43;
         contentWidth = panelWidth - sidebarWidth - 1;
-        contentHeight = panelHeight - 43 - 39;
+        footerHeight = contentWidth < 420 ? 64 : 39;
+        contentHeight = panelHeight - 43 - footerHeight;
     }
 
     private void refreshCrafts() {
         crafts.clear();
-        crafts.addAll(CraftProgressTracker.snapshots());
+        crafts.addAll(CraftProgressTracker.taskSnapshots());
         if (selectedCraft == null && !crafts.isEmpty()) selectedCraft = crafts.get(0).craftId();
         if (selectedCraft != null && crafts.stream().noneMatch(s -> s.craftId().equals(selectedCraft))) {
             selectedCraft = crafts.isEmpty() ? null : crafts.get(0).craftId();
@@ -95,26 +98,40 @@ public final class CraftProgressScreen extends Screen {
 
     private void buildButtons() {
         clearWidgets();
-        int footerY = panelY + panelHeight - 30;
+        int footerY = panelY + panelHeight - footerHeight + 9;
+        int columns = footerHeight == 64 ? 2 : 4;
+        int buttonWidth = (contentWidth - 24 - (columns - 1) * 4) / columns;
         hudButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
                     CraftProgressTracker.toggleVisible();
                     updateButtonState();
                 })
-                .bounds(contentX + 12, footerY, Math.min(164, contentWidth / 2), 20).build());
+                .bounds(contentX + 12, footerY, buttonWidth, 20).build());
+        diagnosticButton = addRenderableWidget(Button.builder(
+                Component.translatable("rsi.diagnostic.open"), button -> {
+                    CraftProgressSnapshot snapshot = selectedSnapshot();
+                    if (snapshot != null && snapshot.result() == CraftProgressSnapshot.Result.FAILED) {
+                        var entry = CraftProgressTracker.failure(snapshot.craftId());
+                        if (entry != null) minecraft.setScreen(new CraftFailureScreen(this, entry));
+                        else minecraft.gui.getChat().addMessage(Component.translatable("rsi.diagnostic.link_expired"));
+                    }
+                }).bounds(contentX + 16 + buttonWidth, footerY, buttonWidth, 20).build());
         cancelButton = addRenderableWidget(Button.builder(
                         Component.translatable("rsi.progress.cancel"), button -> confirmCancel())
-                .bounds(contentX + contentWidth - 182, footerY, 104, 20).build());
+                .bounds(contentX + 12 + (2 % columns) * (buttonWidth + 4),
+                        footerY + (2 / columns) * 24, buttonWidth, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
-                .bounds(contentX + contentWidth - 70, footerY, 58, 20).build());
+                .bounds(contentX + 12 + (3 % columns) * (buttonWidth + 4),
+                        footerY + (3 / columns) * 24, buttonWidth, 20).build());
         updateButtonState();
     }
 
     private void updateButtonState() {
         if (hudButton == null || cancelButton == null) return;
         hudButton.setMessage(Component.translatable(CraftProgressTracker.isVisible()
-                ? "rsi.progress.hud.hide" : "rsi.progress.hud.show"));
+                ? "rsi.diagnostic.hud.hide" : "rsi.diagnostic.hud.show"));
         CraftProgressSnapshot snapshot = selectedSnapshot();
         cancelButton.active = snapshot != null && CraftProgressOverlay.cancellable(snapshot.result());
+        diagnosticButton.active = snapshot != null && snapshot.result() == CraftProgressSnapshot.Result.FAILED;
     }
 
     private void confirmCancel() {
@@ -140,8 +157,8 @@ public final class CraftProgressScreen extends Screen {
         graphics.fill(panelX + sidebarWidth, panelY + 43,
                 panelX + sidebarWidth + 1, panelY + panelHeight, DIVIDER);
         graphics.fill(panelX, panelY + 42, panelX + panelWidth, panelY + 43, DIVIDER);
-        graphics.fill(contentX, panelY + panelHeight - 38,
-                panelX + panelWidth, panelY + panelHeight - 37, DIVIDER);
+        graphics.fill(contentX, panelY + panelHeight - footerHeight,
+                panelX + panelWidth, panelY + panelHeight - footerHeight + 1, DIVIDER);
 
         renderHeader(graphics);
         renderSidebar(graphics, mouseX, mouseY);
@@ -227,7 +244,8 @@ public final class CraftProgressScreen extends Screen {
         int statusWidth = font.width(status) + 14;
         UIRenderer.pillBadge(graphics, font, right - statusWidth, y - 2, statusWidth, 17,
                 UIRenderer.alpha(accent, 0.22f), accent, status.getString());
-        graphics.drawString(font, CraftProgressOverlay.detail(snapshot), titleX, y + 13, MUTED, false);
+        graphics.drawString(font, font.plainSubstrByWidth(CraftProgressOverlay.detail(snapshot).getString(),
+                right - titleX), titleX, y + 13, MUTED, false);
         y += 35;
 
         int percent = CraftProgressOverlay.progressPercent(snapshot);
@@ -236,21 +254,24 @@ public final class CraftProgressScreen extends Screen {
         if (fill > 0) UIRenderer.rounded(graphics, x, y, fill, 8, 4f, accent);
         String percentText = percent + "%";
         graphics.drawString(font, percentText, right - font.width(percentText), y + 12, accent, true);
-        graphics.drawString(font, Component.translatable("rsi.progress.summary",
-                snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes()),
+        String summary = Component.translatable("rsi.progress.summary", snapshot.completedNodes(),
+                snapshot.totalNodes(), snapshot.runningNodes()).getString();
+        graphics.drawString(font, font.plainSubstrByWidth(summary, right - x - font.width(percentText) - 8),
                 x, y + 12, MUTED, false);
         y += 30;
 
-        int gap = 6;
-        int statWidth = Math.max(42, (right - x - gap * 2) / 3);
-        renderStat(graphics, x, y, statWidth, Component.translatable("rsi.progress.stat.completed"),
-                snapshot.completedNodes(), 0xFF67BE7B);
-        renderStat(graphics, x + statWidth + gap, y, statWidth,
-                Component.translatable("rsi.progress.stat.running"), snapshot.runningNodes(), 0xFF68A9E8);
-        int waiting = Math.max(0, snapshot.totalNodes() - snapshot.completedNodes() - snapshot.runningNodes());
-        renderStat(graphics, x + (statWidth + gap) * 2, y, right - x - (statWidth + gap) * 2,
-                Component.translatable("rsi.progress.stat.waiting"), waiting, 0xFFE0B35A);
-        y += 37;
+        if (contentHeight >= 230) {
+            int gap = 6;
+            int statWidth = Math.max(42, (right - x - gap * 2) / 3);
+            renderStat(graphics, x, y, statWidth, Component.translatable("rsi.progress.stat.completed"),
+                    snapshot.completedNodes(), 0xFF67BE7B);
+            renderStat(graphics, x + statWidth + gap, y, statWidth,
+                    Component.translatable("rsi.progress.stat.running"), snapshot.runningNodes(), 0xFF68A9E8);
+            int waiting = Math.max(0, snapshot.totalNodes() - snapshot.completedNodes() - snapshot.runningNodes());
+            renderStat(graphics, x + (statWidth + gap) * 2, y, right - x - (statWidth + gap) * 2,
+                    Component.translatable("rsi.progress.stat.waiting"), waiting, 0xFFE0B35A);
+            y += 37;
+        }
 
         graphics.drawString(font, Component.translatable("rsi.progress.screen.steps"), x, y, TEXT, true);
         List<CraftProgressSnapshot.NodeProgress> nodes = orderedNodes(snapshot);

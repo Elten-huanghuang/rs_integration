@@ -211,6 +211,17 @@ public final class CraftProgressOverlay {
 
     static Component detail(CraftProgressSnapshot snapshot) {
         CraftProgressSnapshot.Reason reason = snapshot.reason();
+        if (snapshot.result() == CraftProgressSnapshot.Result.FAILED
+                && (reason == CraftProgressSnapshot.Reason.NONE || reason == CraftProgressSnapshot.Reason.UNKNOWN)) {
+            for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
+                if (node.state() == CraftProgressSnapshot.NodeState.FAILED
+                        && node.reason() != CraftProgressSnapshot.Reason.NONE
+                        && node.reason() != CraftProgressSnapshot.Reason.UNKNOWN) {
+                    return Component.translatable(node.reason().translationKey());
+                }
+            }
+            return Component.translatable("rsi.progress.reason.failed_unspecified");
+        }
         if (reason == CraftProgressSnapshot.Reason.NONE) {
             for (CraftProgressSnapshot.NodeProgress node : snapshot.nodes()) {
                 if (node.reason() != CraftProgressSnapshot.Reason.NONE) {

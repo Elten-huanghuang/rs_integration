@@ -17,11 +17,15 @@ final class CraftProgressClientPacketHandler {
     }
 
     static void onProgress(CraftProgressSnapshot snapshot) {
-        CraftProgressTracker.onProgress(snapshot);
+        if (CraftProgressTracker.onProgress(snapshot)) {
+            com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.notifyFailure(snapshot.craftId());
+        }
     }
 
     static void onDelta(CraftProgressDeltaPacket packet) {
-        CraftProgressTracker.onDelta(packet);
+        if (CraftProgressTracker.onDelta(packet)) {
+            com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.notifyFailure(packet.craftId());
+        }
     }
 
     static void onStatusSync(boolean full, List<UUID> craftIds) {

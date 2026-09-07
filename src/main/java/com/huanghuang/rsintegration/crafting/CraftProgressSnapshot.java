@@ -19,10 +19,12 @@ public record CraftProgressSnapshot(
         List<NodeProgress> nodes
 ) {
     public static final int TERMINAL_SEQUENCE = Integer.MAX_VALUE;
+    public static final int MAX_TECHNICAL_DETAIL_LENGTH = 1024;
 
     public CraftProgressSnapshot {
         result = result == null ? Result.RUNNING : result;
         reason = reason == null ? Reason.NONE : reason;
+        technicalDetail = limitTechnicalDetail(technicalDetail);
         nodes = nodes == null ? List.of() : List.copyOf(nodes);
     }
 
@@ -124,7 +126,7 @@ public record CraftProgressSnapshot(
                     totalOperations - completedOperations);
             machineLabel = machineLabel == null ? "" : machineLabel;
             reason = reason == null ? Reason.NONE : reason;
-            technicalDetail = technicalDetail == null ? "" : technicalDetail;
+            technicalDetail = technicalDetail == null ? "" : limitTechnicalDetail(technicalDetail);
         }
 
         @Override
@@ -135,5 +137,14 @@ public record CraftProgressSnapshot(
 
     public boolean isTerminal() {
         return sequence == TERMINAL_SEQUENCE || result.terminal();
+    }
+
+    @Nullable
+    private static String limitTechnicalDetail(@Nullable String detail) {
+        if (detail == null || detail.length() <= MAX_TECHNICAL_DETAIL_LENGTH) return detail;
+        String suffix = " [truncated]";
+        int end = MAX_TECHNICAL_DETAIL_LENGTH - suffix.length();
+        if (Character.isHighSurrogate(detail.charAt(end - 1))) end--;
+        return detail.substring(0, end) + suffix;
     }
 }

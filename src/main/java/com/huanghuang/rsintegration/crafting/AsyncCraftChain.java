@@ -146,6 +146,8 @@ public final class AsyncCraftChain {
     private int machineLeaseWaitTicks;
     @Nullable
     private Component machineStartFailureMessage;
+    @Nullable
+    private String materialReservationFailureDetail;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
@@ -818,7 +820,9 @@ public final class AsyncCraftChain {
                     maybeSendProgress(online, false);
                     return false;
                 }
-                abort("Failed to start multi-block craft: " + step.recipeId(),
+                abort(materialReservationFailureDetail != null
+                                ? materialReservationFailureDetail
+                                : "Failed to start multi-block craft: " + step.recipeId(),
                         machineStartFailureMessage != null
                                 ? machineStartFailureMessage
                                 : Component.translatable("rsi.async.abort.machine_start_failed",
@@ -2475,19 +2479,9 @@ public final class AsyncCraftChain {
         if (terminalCause == TerminationCoordinator.Cause.INTERNAL_ERROR) {
             return CraftProgressSnapshot.Reason.INTERNAL_ERROR;
         }
-        String normalized = abortReason.toLowerCase(java.util.Locale.ROOT);
-        if (normalized.contains("timeout") || normalized.contains("exceeded global")) {
-            return CraftProgressSnapshot.Reason.TIMEOUT;
-        }
-        if (normalized.contains("missing") || normalized.contains("material")) {
-            return CraftProgressSnapshot.Reason.MATERIAL_EXTRACTION_FAILED;
-        }
-        if (normalized.contains("start") || normalized.contains("rejected")) {
-            return CraftProgressSnapshot.Reason.START_REJECTED;
-        }
-        if (normalized.contains("output")) {
-            return CraftProgressSnapshot.Reason.OUTPUT_MISSING;
-        }
+        CraftProgressSnapshot.Reason detailReason = progressReasonForDetail(abortReason);
+        if (detailReason != CraftProgressSnapshot.Reason.NONE
+                && detailReason != CraftProgressSnapshot.Reason.UNKNOWN) return detailReason;
         if (result == CraftProgressSnapshot.Result.FAILED) {
             return CraftProgressSnapshot.Reason.UNKNOWN;
         }
@@ -2603,9 +2597,17 @@ public final class AsyncCraftChain {
         return machine.dimension() + "@" + machine.position().toShortString();
     }
 
-    private static CraftProgressSnapshot.Reason progressReasonForDetail(String detail) {
+    static CraftProgressSnapshot.Reason progressReasonForDetail(String detail) {
         if (detail == null || detail.isEmpty()) return CraftProgressSnapshot.Reason.NONE;
         String normalized = detail.toLowerCase(java.util.Locale.ROOT);
+        // Classify the observed failure, not a guessed cause of a timeout.
+        if (normalized.contains("timeout") || normalized.contains("exceeded global")) {
+            return CraftProgressSnapshot.Reason.TIMEOUT;
+        }
+        if (normalized.contains("output") && (normalized.contains("missing")
+                || normalized.contains("shortage") || normalized.contains("incomplete"))) {
+            return CraftProgressSnapshot.Reason.OUTPUT_MISSING;
+        }
         if (normalized.contains("busy")) return CraftProgressSnapshot.Reason.MACHINE_BUSY;
         if (normalized.contains("network is null")
                 || normalized.contains("network unavailable")
@@ -3119,6 +3121,7 @@ public final class AsyncCraftChain {
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         machineStartFailureMessage = null;
+        materialReservationFailureDetail = null;
         if (step.modType().isVirtual()) {
             IBatchDelegate virtualDelegate = createStepDelegate(step);
             if (virtualDelegate == null || !validatePreparedDelegate(
@@ -3368,9 +3371,13 @@ public final class AsyncCraftChain {
                     abstractDelegate.setStorageEndpoint(storageEndpoint);
                 }
                 startedDelegate.configureMaterialReservation(ledger, online);
-                List<IngredientSpec> batchSpecs = scaleGraphSpecsForExecutions(
-                        specs, startedDelegate.getMaterialReservationScopes(), flatBatch);
-                List<ItemStack> materials = preReserveStepMaterials(batchSpecs, online);
+                FlatMaterialBatch reservation = reserveFlatMaterialBatch(flatBatch,
+                        startedDelegate::prepareFlatBatch,
+                        executions -> preReserveStepMaterials(scaleGraphSpecsForExecutions(
+                                startedDelegate.getRequiredMaterials(),
+                                startedDelegate.getMaterialReservationScopes(), executions),
+                                online, null, executions == 1));
+                List<ItemStack> materials = reservation.materials();
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
                             step.recipeId());
@@ -3381,6 +3388,12 @@ public final class AsyncCraftChain {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
 }
                     return null;
+                }
+                machineCount = reservation.executions();
+                if (machineCount != flatBatch) {
+                    RSIntegrationMod.LOGGER.info(ctx.format(
+                            "Flat material batch reduced: recipe={} remainingOperations={} requestedBatch={} admittedBatch={} reason=material_reservation; later batches may reuse settled outputs"),
+                            step.recipeId(), stepRemaining, flatBatch, machineCount);
                 }
                 if (!acquireFlatOperationScope(delegate, matchedMachine, step)) {
                     RSIntegrationMod.LOGGER.debug(ctx.format("Physical operation resources busy for {}"),
@@ -3886,17 +3899,62 @@ public final class AsyncCraftChain {
         virtualInventory.addAll(copyStacks(snapshot));
     }
 
+    record FlatMaterialBatch(int executions, List<ItemStack> materials) {}
+
+    static FlatMaterialBatch reserveFlatMaterialBatch(
+            int preparedBatch, java.util.function.IntUnaryOperator prepare,
+            java.util.function.IntFunction<List<ItemStack>> reserve) {
+        if (preparedBatch <= 0) throw new IllegalArgumentException("prepared batch must be positive");
+        int batch = preparedBatch;
+        while (true) {
+            List<ItemStack> materials = reserve.apply(batch);
+            if (materials != null) return new FlatMaterialBatch(batch, materials);
+            if (batch == 1) return new FlatMaterialBatch(0, null);
+            int limit = Math.max(1, batch / 2);
+            batch = prepare.applyAsInt(limit);
+            if (batch <= 0 || batch > limit) {
+                throw new IllegalStateException("Invalid reduced flat batch " + batch + " for limit " + limit);
+            }
+        }
+    }
+
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online) {
         return preReserveStepMaterials(specs, online, null);
     }
 
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
                                                     @Nullable List<ItemStack> virtualDebits) {
-        List<ItemStack> materials = new ArrayList<>();
-        List<ItemStack> virtualSnapshot = new ArrayList<>();
-        for (ItemStack vi : virtualInventory) {
-            virtualSnapshot.add(vi.copy());
+        return preReserveStepMaterials(specs, online, virtualDebits, true);
+    }
+
+    private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
+                                                    @Nullable List<ItemStack> virtualDebits,
+                                                    boolean logFailure) {
+        int mark = ledger.reservationMark();
+        int debitMark = virtualDebits == null ? 0 : virtualDebits.size();
+        List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
+        boolean reserved = false;
+        try {
+            List<ItemStack> materials = reserveStepMaterials(specs, online, virtualDebits, logFailure);
+            reserved = materials != null;
+            if (reserved && materialReservationFailureDetail != null) {
+                materialReservationFailureDetail = null;
+                machineStartFailureMessage = null;
+            }
+            return materials;
+        } finally {
+            if (!reserved) {
+                ledger.cancelReservationsSince(mark);
+                restoreVirtualSnapshot(virtualSnapshot);
+                if (virtualDebits != null) virtualDebits.subList(debitMark, virtualDebits.size()).clear();
+            }
         }
+    }
+
+    private List<ItemStack> reserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
+                                                @Nullable List<ItemStack> virtualDebits,
+                                                boolean logFailure) {
+        List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) {
                 materials.add(ItemStack.EMPTY);
@@ -3946,15 +4004,20 @@ public final class AsyncCraftChain {
             }
 
             if (needed > 0) {
-                if (!material.isEmpty()) {
-                    ledger.releaseReservations(List.of(material));
-                }
-                ledger.releaseReservations(materials);
-                virtualInventory.clear();
-                virtualInventory.addAll(virtualSnapshot);
-                RSIntegrationMod.LOGGER.warn(ctx.format("preReserveStepMaterials failed: need {} more of '{}' (spec {}/{}) for step {}"),
-                        needed, CraftPacketUtils.describeIngredient(spec.ingredient()).getString(),
-                        materials.size() + 1, specs.size(), steps.get(currentStepIdx).recipeId());
+                String ingredient = java.util.Arrays.stream(spec.ingredient().getItems())
+                        .filter(stack -> !stack.isEmpty()).limit(8)
+                        .map(stack -> String.valueOf(ForgeRegistries.ITEMS.getKey(stack.getItem())))
+                        .collect(java.util.stream.Collectors.joining(","));
+                materialReservationFailureDetail = "Material reservation failed before machine start: recipe="
+                        + steps.get(currentStepIdx).recipeId() + " inputCandidates(first8)=" + ingredient
+                        + " spec=" + (materials.size() + 1) + "/" + specs.size()
+                        + " required=" + spec.count() + " reserved=" + (spec.count() - needed)
+                        + " unreserved=" + needed
+                        + "; source reservations are all-or-nothing, unreserved is not a measured inventory shortage";
+                machineStartFailureMessage = Component.translatable(
+                        "rsi.generic.error.missing_materials",
+                        CraftPacketUtils.describeIngredient(spec.ingredient()));
+                if (logFailure) RSIntegrationMod.LOGGER.warn(ctx.format(materialReservationFailureDetail));
                 return null;
             }
             materials.add(material);

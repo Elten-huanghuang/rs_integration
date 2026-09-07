@@ -24,6 +24,7 @@ public final class ClientEventBootstrap {
         CraftProgressKeybind.register();
 
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
+        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.class);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class);
         // The auto-eat UI supports both RS Grid and the BD terminal. The
