@@ -97,13 +97,13 @@ public final class GoetyRSModule implements IModIntegration {
     }
 
     @Override
-    public void registerNetworkPackets() {
-        GoetyRSNetworkHandler.register();
+    public void initCommon() {
+        RSIntegrationMod.LOGGER.debug("Goety RS module common init done.");
     }
 
     @Override
-    public void initCommon() {
-        RSIntegrationMod.LOGGER.debug("Goety RS module common init done.");
+    public void registerNetworkPackets() {
+        // Material status packets are registered by the common crafting channel.
     }
 
     @Override
@@ -116,7 +116,7 @@ public final class GoetyRSModule implements IModIntegration {
     }
 
     public void onJeiRuntimeUnavailable() {
-        RSClientAvailabilityCache.clear();
+        // Common recipe availability is cleared by the client lifecycle.
     }
 
     public void registerRecipeTransferHandlers(IRecipeTransferRegistration registration) {

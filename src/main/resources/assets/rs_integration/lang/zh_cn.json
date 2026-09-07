@@ -1,4 +1,8 @@
 {
+  "rsi.recipe.materials.unknown": "物品材料：尚未检查或暂时无法判断",
+  "rsi.recipe.materials.missing": "物品材料：不足以执行一次配方",
+  "rsi.recipe.materials.ready": "物品材料：足够执行一次配方",
+  "rsi.recipe.materials.scope": "流体、能量和机器条件以实际合成检查为准",
   "rsi.goety.cursed_infuser.spawner_required": "诅咒注入器正下方必须放置刷怪笼",
   "rsi.goety.infuser.spawner_required": "诅咒注入器或狰狞注入器正下方必须放置刷怪笼",
   "rsi.goety.dark_mender.cage_required": "魂咒融注器正下方必须放置已装入物品的诅咒之笼",

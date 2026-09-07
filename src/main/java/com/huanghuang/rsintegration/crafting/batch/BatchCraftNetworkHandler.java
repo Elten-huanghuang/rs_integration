@@ -20,6 +20,14 @@ public final class BatchCraftNetworkHandler {
     public static void register() {
         if (registered) return;
         var ch = NetworkHandler.CHANNEL;
+        ch.registerMessage(NetworkPacketIds.RECIPE_AVAILABILITY_REQUEST, RecipeAvailabilityRequestPacket.class,
+                RecipeAvailabilityRequestPacket::encode, RecipeAvailabilityRequestPacket::decode,
+                RecipeAvailabilityRequestPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.RECIPE_AVAILABILITY_RESULT, RecipeAvailabilityResultPacket.class,
+                RecipeAvailabilityResultPacket::encode, RecipeAvailabilityResultPacket::decode,
+                RecipeAvailabilityResultPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.GENERIC_CRAFT, GenericCraftPacket.class,
                 GenericCraftPacket::encode, GenericCraftPacket::decode, GenericCraftPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));

@@ -51,7 +51,7 @@ public final class ClientEventBootstrap {
     }
 
     private static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
-        com.huanghuang.rsintegration.mods.goety.RSClientAvailabilityCache.clear();
+        RecipeAvailabilityClient.clear();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout();
         }

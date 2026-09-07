@@ -70,7 +70,7 @@ final class EmiCraftButtonResolver {
             Runnable action = () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(quest.questId()));
             return Optional.of(new EmiCraftButtonSpec(recipeId, null,
-                    "gui.rs_integration.jei.ftb_quest_submit", action, null));
+                    "gui.rs_integration.jei.ftb_quest_submit", action, null, null));
         }
         if (sourceRecipe == null) return Optional.empty();
 
@@ -122,7 +122,9 @@ final class EmiCraftButtonResolver {
         }
 
         return Optional.of(new EmiCraftButtonSpec(recipeId, modType,
-                tooltipKey(sourceRecipe, filter, modType), craftAction, machineAction));
+                tooltipKey(sourceRecipe, filter, modType), craftAction, machineAction,
+                com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey.of(
+                        recipeId, dimension, machinePos, baseItem, targetOutput)));
     }
 
     @Nullable
