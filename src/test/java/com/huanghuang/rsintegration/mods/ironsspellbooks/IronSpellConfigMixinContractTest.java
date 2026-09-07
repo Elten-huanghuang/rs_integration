@@ -69,7 +69,8 @@ class IronSpellConfigMixinContractTest {
         assertTrue(hook.indexOf("IronSpellRarityCache.resetAll") < hook.indexOf("catalog = null;"));
         assertTrue(hook.contains("CraftPlanningRevision.bump()"));
         assertFalse(hook.contains("RecipeIndex.invalidate("), "avoid index -> catalog lock inversion");
-        assertTrue(source.contains("fingerprint(hash, spell.getRarity(level).getValue())"));
+        assertTrue(source.contains("\"fingerprint_rarity\", label, level,"));
+        assertTrue(source.contains("() -> spell.getRarity(level).getValue()"));
     }
 
     @Test

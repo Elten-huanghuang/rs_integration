@@ -59,7 +59,9 @@ dependencies {
 
     // All mod jars in libs — must go through fg.deobf() so ForgeGradle
     // remaps the classes to match the dev-environment mappings.
-    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar'], exclude: ['emi-*.jar']))
+    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar'],
+            exclude: ['emi-*.jar', '*irons_spellbooks-1.20.1-3.16.3.jar', 'apothic_staff_rarities-*.jar',
+                      'fantasy_ending-1.20.1-2.7.20g-all.jar', 'improve_the_expectations-1.0.2-forge-1.20.1.jar']))
 
     // A production RS jar in run/mods is not remapped for the userdev namespace.
     // Keep the release artifact compile-only, but provide a deobfuscated runtime copy for dev runs.
