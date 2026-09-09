@@ -2141,8 +2141,12 @@ public final class RSGridSearchCache {
     private static List<String> captureTooltipLines(IGridStack stack) {
         List<String> lines = new ArrayList<>();
         boolean advanced = Minecraft.getInstance().options.advancedItemTooltips;
-        for (Component line : stack.getTooltip(advanced)) {
-            if (!SolCarrotSearchStatus.isDynamicTooltip(line)) lines.add(line.getString());
+        try {
+            for (Component line : stack.getTooltip(advanced)) {
+                if (!SolCarrotSearchStatus.isDynamicTooltip(line)) lines.add(line.getString());
+            }
+        } catch (RuntimeException | LinkageError exception) {
+            lines.add(stack.getName());
         }
         var runtime = RSJeiPlugin.getRuntime();
         if (runtime != null) {
@@ -2162,7 +2166,7 @@ public final class RSGridSearchCache {
             for (Component line : stack.getTooltipLines(minecraft.player, flag)) {
                 if (!SolCarrotSearchStatus.isDynamicTooltip(line)) lines.add(line.getString());
             }
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             lines.add(stack.getHoverName().getString());
         }
         var runtime = RSJeiPlugin.getRuntime();
