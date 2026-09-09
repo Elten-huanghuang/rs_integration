@@ -1,0 +1,24 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "priority": 500,
+  "plugin": "com.huanghuang.rsintegration.mixin.plugin.RSIntegrationMixinPlugin",
+  "package": "com.huanghuang.rsintegration.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "rs_integration.refmap.json",
+  "mixins": [
+    "craftflow.CraftFlowConfigMixin",
+    "craftflow.CraftFlowFoodEatingIntegrationMixin",
+    "craftflow.CraftFlowServerHandlerMixin",
+    "craftflow.CraftFlowWirelessBindingMixin"
+  ],
+  "client": [
+    "craftflow.CraftFlowBlueButtonPositionsMixin",
+    "craftflow.CraftFlowFoodEatingButtonsMixin",
+    "craftflow.CraftFlowJeiRecipeGuiLayoutsMixin",
+    "craftflow.CraftFlowEmiRecipeScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

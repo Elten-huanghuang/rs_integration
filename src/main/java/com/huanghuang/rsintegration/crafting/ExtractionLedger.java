@@ -498,21 +498,55 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
-        var matches = snapshot.match(ingredient).items();
+        EndpointReservation reservation = reserveEndpointMatches(
+                snapshot.match(ingredient).items(), count, pendingNet);
+        if (reservation.template().isEmpty()) return ItemStack.EMPTY;
+        // Keep the original Ingredient so commit-time extraction may consume
+        // several concrete variants that together satisfy a tag or predicate.
+        ItemStack reserved = reservation.template();
+        Entry entry = new Entry(Source.NETWORK, ingredient, reserved.copy(), null, null,
+                null, null, GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient));
+        entry.pendingNetworkAllocation.putAll(reservation.allocations());
+        recordEntry(entry);
+        return reserved;
+    }
+
+    static EndpointReservation reserveEndpointMatches(
+            List<com.huanghuang.rsintegration.storage.StoredItem> matches, int count,
+            Map<CraftingResolver.StackKey, Integer> pending) {
+        if (count <= 0) return EndpointReservation.EMPTY;
         long available = 0;
         ItemStack template = ItemStack.EMPTY;
         for (var stored : matches) {
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stored.stack(), true);
+            long unreserved = Math.max(0L,
+                    stored.amount() - pending.getOrDefault(key, 0));
+            if (unreserved <= 0) continue;
             if (template.isEmpty()) template = stored.stack().copyWithCount(1);
-            available = Math.min(Integer.MAX_VALUE, available + Math.max(0L, stored.amount()));
-            if (available >= count) break;
+            available = Math.min(Integer.MAX_VALUE, available + unreserved);
         }
-        if (template.isEmpty() || available < count) return ItemStack.EMPTY;
-        // Keep the original Ingredient so commit-time extraction may consume
-        // several concrete variants that together satisfy a tag or predicate.
-        ItemStack reserved = template.copyWithCount(count);
-        recordEntry(new Entry(Source.NETWORK, ingredient, reserved.copy(), null, null,
-                null, null, GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)));
-        return reserved;
+        if (template.isEmpty() || available < count) return EndpointReservation.EMPTY;
+
+        Map<CraftingResolver.StackKey, Integer> allocations = new LinkedHashMap<>();
+        int remaining = count;
+        for (var stored : matches) {
+            if (remaining <= 0) break;
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stored.stack(), true);
+            long unreserved = Math.max(0L,
+                    stored.amount() - pending.getOrDefault(key, 0));
+            int contribution = (int) Math.min(remaining, unreserved);
+            if (contribution <= 0) continue;
+            allocations.merge(key, contribution, Integer::sum);
+            remaining -= contribution;
+        }
+        allocations.forEach((key, amount) -> pending.merge(key, amount, Integer::sum));
+        return new EndpointReservation(template.copyWithCount(count), Map.copyOf(allocations));
+    }
+
+    record EndpointReservation(ItemStack template,
+                               Map<CraftingResolver.StackKey, Integer> allocations) {
+        private static final EndpointReservation EMPTY =
+                new EndpointReservation(ItemStack.EMPTY, Map.of());
     }
 
     private ItemStack reserveFromPreferredResonance(
@@ -1098,6 +1132,7 @@ public final class ExtractionLedger implements AutoCloseable {
         @Nullable final ResonanceStorageView resonanceView;
         final int resonanceSlot;
         @Nullable final ResonanceReservationKey resonanceKey;
+        final Map<CraftingResolver.StackKey, Integer> pendingNetworkAllocation = new HashMap<>();
         ItemStack extracted = ItemStack.EMPTY;
         int refundableCount;
 
@@ -2040,6 +2075,15 @@ public final class ExtractionLedger implements AutoCloseable {
                 int remaining = reserved - entry.count;
                 return remaining <= 0 ? null : remaining;
             });
+            return;
+        }
+        if (entry.source == Source.NETWORK && !entry.pendingNetworkAllocation.isEmpty()) {
+            for (var allocation : entry.pendingNetworkAllocation.entrySet()) {
+                pendingNet.computeIfPresent(allocation.getKey(), (ignored, reserved) -> {
+                    int remaining = reserved - allocation.getValue();
+                    return remaining <= 0 ? null : remaining;
+                });
+            }
             return;
         }
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(entry.template, true);

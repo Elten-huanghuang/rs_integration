@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelInputHandler;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -130,6 +131,24 @@ final class SidePanelMouseHandler {
         int col = ((int) mx - itemLeft) / RSSidePanelClient.SLOT_SIZE;
         int row = ((int) my - itemTop) / RSSidePanelClient.SLOT_SIZE;
         if (col < 0 || col >= RSSidePanelClient.COLUMNS || row < 0 || row >= RSSidePanelClient.visibleRows) return;
+
+        // Ctrl+drag selects multiple grid entries.  This state was never
+        // armed on mouse press, so the existing release handler could never
+        // send the selected entries as one batch.
+        if (Screen.hasControlDown()
+                && (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT || btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
+            int dIdx = (RSSidePanelClient.scrollRow + row) * RSSidePanelClient.COLUMNS + col;
+            if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList.size()) {
+                PanelStack ps = RSSidePanelClient.displayList.get(dIdx);
+                if (ps != null && !ps.zeroed && !ps.getStack().isEmpty()) {
+                    RSSidePanelClient.gridDragging = true;
+                    RSSidePanelClient.gridDragKeys.clear();
+                    RSSidePanelClient.gridDragCrossedSlots = false;
+                    RSSidePanelClient.gridDragKeys.add(ps.getId());
+                    return;
+                }
+            }
+        }
 
         // GUI icon click — open bound machine
         if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {

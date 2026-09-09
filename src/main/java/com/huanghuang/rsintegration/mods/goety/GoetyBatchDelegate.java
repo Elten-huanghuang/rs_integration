@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -77,6 +78,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private ItemStack pendingManualActivation = ItemStack.EMPTY;
     /** Result claimed atomically when completion is first observed. */
     private ItemStack pendingRitualResult = ItemStack.EMPTY;
+    /** Activation stack whose item type becomes the GoeticLegacy substitute result. */
+    private ItemStack substituteActivationTemplate = ItemStack.EMPTY;
     private boolean ritualPreparedForManualStart;
 
     // Brazier-mode state
@@ -351,6 +354,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
         this.pendingRitualResult = ItemStack.EMPTY;
+        this.substituteActivationTemplate = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;
 
         ServerLevel machineLevel = resolveMachineLevel(player);
@@ -417,6 +421,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         ItemStack activationItemStack = extractActivation(activationIng);
         if (activationItemStack == null) return false;
+        rememberSubstituteActivation(activationItemStack);
 
         if (specList.isEmpty()) {
             return startRitualDirectly(ritual, activationItemStack);
@@ -471,7 +476,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (availablePedestals != null) {
             for (int i = 0; i < reservedStacks.size(); i++) {
                 Object ped = availablePedestals.get(i);
-                writePedestalItem(ped, reservedStacks.get(i));
+                if (!writePedestalItem(ped, reservedStacks.get(i))) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-Batch-Goety] Failed to verify material placement on pedestal {}", ped);
+                    refundActivationToPlayer();
+                    ledger.refundCommitted(network, player);
+                    recoverFromPedestals();
+                    return false;
+                }
                 filledPedestals.add(ped);
             }
         }
@@ -571,7 +583,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 ItemStack stack = templates.get(i);
                 if (stack.isEmpty()) continue;
                 Object ped = availablePedestals.get(i);
-                writePedestalItem(ped, stack);
+                if (!writePedestalItem(ped, stack)) {
+                    throw new IllegalStateException("Goety pedestal rejected ritual material");
+                }
                 filledPedestals.add(ped);
             }
 
@@ -740,6 +754,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
+        this.pendingRitualResult = ItemStack.EMPTY;
+        this.substituteActivationTemplate = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;
 
         // Verify the cached BlockEntity is still valid
@@ -791,6 +807,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 this.activationExtractedFromPlayer = activationItem.copy();
             }
         }
+        rememberSubstituteActivation(activationItem);
 
         if (remainingMaterials.isEmpty()) {
             try {
@@ -833,7 +850,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 ItemStack stack = remainingMaterials.get(i);
                 if (stack.isEmpty()) continue;
                 Object ped = availablePedestals.get(i);
-                writePedestalItem(ped, stack);
+                if (!writePedestalItem(ped, stack)) {
+                    throw new IllegalStateException("Goety pedestal rejected ritual material");
+                }
                 filledPedestals.add(ped);
             }
 
@@ -983,12 +1002,22 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return doneObservation();
         }
         if (isMachineCraftFinished(level, be)) return doneObservation();
+        // Give event-driven substitute result handlers a wider completion
+        // window after Goety clears its current-ritual field.
+        long stabilityTicks = isDeferredSubstituteRitual()
+                ? Math.max(RITUAL_IDLE_STABILITY_TICKS, 100L)
+                : RITUAL_IDLE_STABILITY_TICKS;
         if (ritualStartRequested && ritualStoppedSinceGameTime >= 0L
-                && level.getGameTime() - ritualStoppedSinceGameTime >= RITUAL_IDLE_STABILITY_TICKS) {
+                && level.getGameTime() - ritualStoppedSinceGameTime >= stabilityTicks) {
             return failObservation("Goety ritual stopped without producing its expected output; "
                     + "ritual prerequisites may have changed");
         }
         return workingObservation();
+    }
+
+    private boolean isDeferredSubstituteRitual() {
+        return ritualRecipe instanceof Recipe<?> recipe
+                && GoetyRecipeHandler.isRuntimeTransformedSubstituteRecipe(recipe);
     }
 
     private boolean hasExpectedRitualOutput(ServerLevel level, BlockEntity be) {
@@ -1006,7 +1035,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (handlerOpt.isPresent() && handlerOpt.get() instanceof LazyOptional<?> lazy) {
             var resolved = lazy.resolve();
             if (resolved.isPresent() && resolved.get() instanceof IItemHandler handler) {
-                ItemStack claimed = claimMatchingOutput(handler, 0, expected);
+                ItemStack claimed = isDeferredSubstituteRitual()
+                        ? claimGoeticLegacySubstituteOutput(handler, 0, substituteActivationTemplate)
+                        : claimMatchingOutput(handler, 0, expected);
                 if (!claimed.isEmpty()) {
                     pendingRitualResult = claimed;
                     RSIntegrationMod.LOGGER.debug(
@@ -1022,16 +1053,16 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             var entities = level.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(pos).inflate(3),
-                    e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
+                    e -> matchesExpectedRitualResult(e.getItem(), expected));
             if (!entities.isEmpty()) return true;
         }
         if (player == null) return false;
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
-            if (IBatchDelegate.matchesProducedItem(stack, expected)) return true;
+            if (matchesExpectedRitualResult(stack, expected)) return true;
         }
         for (ItemStack stack : inv.offhand) {
-            if (IBatchDelegate.matchesProducedItem(stack, expected)) return true;
+            if (matchesExpectedRitualResult(stack, expected)) return true;
         }
         return false;
     }
@@ -1057,6 +1088,40 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return ItemStack.EMPTY;
         }
         return claimed;
+    }
+
+    static ItemStack claimGoeticLegacySubstituteOutput(
+            IItemHandler handler, int slot, ItemStack activationTemplate) {
+        if (handler == null || activationTemplate.isEmpty()
+                || slot < 0 || slot >= handler.getSlots()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack available = handler.getStackInSlot(slot);
+        if (!matchesGoeticLegacySubstituteResult(available, activationTemplate)) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack simulated = handler.extractItem(slot, 1, true);
+        if (!matchesGoeticLegacySubstituteResult(simulated, activationTemplate)) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack claimed = handler.extractItem(slot, 1, false);
+        return matchesGoeticLegacySubstituteResult(claimed, activationTemplate)
+                ? claimed : ItemStack.EMPTY;
+    }
+
+    static boolean matchesGoeticLegacySubstituteResult(
+            ItemStack actual, ItemStack activationTemplate) {
+        return actual != null && activationTemplate != null
+                && !actual.isEmpty() && !activationTemplate.isEmpty()
+                && ItemStack.isSameItem(actual, activationTemplate)
+                && actual.getTag() != null
+                && !actual.getTag().getString("GoeticLegacySub").isEmpty();
+    }
+
+    private boolean matchesExpectedRitualResult(ItemStack actual, ItemStack expected) {
+        return isDeferredSubstituteRitual()
+                ? matchesGoeticLegacySubstituteResult(actual, substituteActivationTemplate)
+                : IBatchDelegate.matchesProducedItem(actual, expected);
     }
 
     private boolean isBrazierCraftComplete(ServerLevel level) {
@@ -1099,7 +1164,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     var handler = (IItemHandler) resolved.get();
                     ItemStack inAltar = handler.getStackInSlot(0);
                     if (!inAltar.isEmpty()) {
-                        if (IBatchDelegate.matchesProducedItem(inAltar, expected)) {
+                        if (matchesExpectedRitualResult(inAltar, expected)) {
                             ItemStack collected = inAltar.copy();
                             if (collected.getCount() > expected.getCount()) {
                                 collected.setCount(expected.getCount());
@@ -1120,7 +1185,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             var entities = machineLevel.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(myPos).inflate(3),
-                    e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
+                    e -> matchesExpectedRitualResult(e.getItem(), expected));
             for (var entity : entities) {
                 ItemStack collected = entity.getItem().copy();
                 if (collected.getCount() > expected.getCount()) {
@@ -1142,7 +1207,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         all.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
 
         for (ItemStack stack : all) {
-            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
+            if (matchesExpectedRitualResult(stack, expected)) {
                 ItemStack collected = stack.split(expected.getCount());
                 return collected;
             }
@@ -1214,6 +1279,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         pendingManualActivation = ItemStack.EMPTY;
         pendingRitualResult = ItemStack.EMPTY;
+        substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
@@ -1224,6 +1290,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         recoverPendingRitualResult(player);
         pendingManualActivation = ItemStack.EMPTY;
         pendingRitualResult = ItemStack.EMPTY;
+        substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
@@ -1248,6 +1315,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         pendingManualActivation = ItemStack.EMPTY;
         pendingRitualResult = ItemStack.EMPTY;
+        substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         resetState();
         activationExtractedFromPlayer = null;
@@ -1321,11 +1389,23 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private ItemStack expectedRitualOutput(ServerLevel level) {
         if (!(ritualRecipe instanceof Recipe<?> recipe)) return ItemStack.EMPTY;
+        if (GoetyRecipeHandler.isRuntimeTransformedSubstituteRecipe(recipe)) {
+            return substituteActivationTemplate.isEmpty()
+                    ? ItemStack.EMPTY : substituteActivationTemplate.copyWithCount(1);
+        }
         if (GoetyDynamicRitualRecipe.isSupported(recipe)) {
             ItemStack dynamic = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
             return dynamic;
         }
         return RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+    }
+
+    private void rememberSubstituteActivation(ItemStack activation) {
+        if (ritualRecipe instanceof Recipe<?> recipe
+                && GoetyRecipeHandler.isRuntimeTransformedSubstituteRecipe(recipe)
+                && activation != null && !activation.isEmpty()) {
+            substituteActivationTemplate = activation.copyWithCount(1);
+        }
     }
 
     private static boolean requiresManualStart(Object recipe, Object ritual) {
@@ -1464,17 +1544,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @SuppressWarnings("unchecked")
-    private static void writePedestalItem(Object pedestal, ItemStack stack) {
+    private static boolean writePedestalItem(Object pedestal, ItemStack stack) {
         try {
             var opt = Reflect.<Object>getField(pedestal, "itemStackHandler");
-            if (opt.isEmpty()) return;
+            if (opt.isEmpty()) return false;
             var lazy = (LazyOptional<IItemHandler>) opt.get();
-            lazy.ifPresent(handler -> {
-                handler.extractItem(0, 64, false);
-                if (!stack.isEmpty()) {
-                    handler.insertItem(0, stack.copy(), false);
-                }
-            });
+            var resolved = lazy.resolve();
+            if (resolved.isEmpty()) return false;
+            boolean written = insertPedestalStack(resolved.get(), stack);
             BlockEntity be = (BlockEntity) pedestal;
             be.setChanged();
             Level lvl = be.getLevel();
@@ -1483,9 +1560,30 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 BlockState state = be.getBlockState();
                 lvl.sendBlockUpdated(pos, state, state, 3);
             }
+            return written;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] writePedestalItem failed", e);
+            return false;
         }
+    }
+
+    static boolean insertPedestalStack(IItemHandler handler, ItemStack stack) {
+        if (handler == null || handler.getSlots() <= 0) return false;
+        if (stack == null || stack.isEmpty()) {
+            handler.extractItem(0, Integer.MAX_VALUE, false);
+            return handler.getStackInSlot(0).isEmpty();
+        }
+        if (!handler.getStackInSlot(0).isEmpty()) return false;
+
+        ItemStack remainder = handler.insertItem(0, stack.copy(), false);
+        ItemStack placed = handler.getStackInSlot(0);
+        boolean complete = remainder.isEmpty()
+                && ItemStack.isSameItemSameTags(placed, stack)
+                && placed.getCount() == stack.getCount();
+        if (!complete && !placed.isEmpty()) {
+            handler.extractItem(0, placed.getCount(), false);
+        }
+        return complete;
     }
 
     @SuppressWarnings("unchecked")

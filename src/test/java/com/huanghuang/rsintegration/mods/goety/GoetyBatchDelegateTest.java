@@ -69,6 +69,55 @@ class GoetyBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
+    void recognizesOnlyTaggedActivationScrollAsSubstituteResult() {
+        ItemStack activation = new ItemStack(Items.PAPER);
+        ItemStack result = activation.copy();
+        result.getOrCreateTag().putString("GoeticLegacySub", "example:research");
+        result.getOrCreateTag().putInt("GoeticLegacySubRerolls", 0);
+
+        assertTrue(GoetyBatchDelegate.matchesGoeticLegacySubstituteResult(result, activation));
+        assertFalse(GoetyBatchDelegate.matchesGoeticLegacySubstituteResult(activation, activation));
+        assertFalse(GoetyBatchDelegate.matchesGoeticLegacySubstituteResult(
+                new ItemStack(Items.BOOK), activation));
+
+        ItemStack pendingPlaceholder = new ItemStack(Items.BOOK);
+        pendingPlaceholder.getOrCreateTag().putBoolean("GoeticLegacySubPending", true);
+        assertFalse(GoetyBatchDelegate.matchesGoeticLegacySubstituteResult(
+                pendingPlaceholder, activation));
+    }
+
+    @Test
+    void claimsTaggedSubstituteOutputExactlyOnce() {
+        ItemStack activation = new ItemStack(Items.PAPER);
+        ItemStack result = activation.copy();
+        result.getOrCreateTag().putString("GoeticLegacySub", "example:research");
+        ItemStackHandler altar = new ItemStackHandler(1);
+        altar.setStackInSlot(0, result);
+
+        ItemStack claimed = GoetyBatchDelegate.claimGoeticLegacySubstituteOutput(
+                altar, 0, activation);
+
+        assertTrue(GoetyBatchDelegate.matchesGoeticLegacySubstituteResult(claimed, activation));
+        assertTrue(altar.getStackInSlot(0).isEmpty());
+        assertTrue(GoetyBatchDelegate.claimGoeticLegacySubstituteOutput(
+                altar, 0, activation).isEmpty());
+    }
+
+    @Test
+    void pedestalInsertionMustBeCompleteAndObservable() {
+        ItemStackHandler pedestal = new ItemStackHandler(1);
+        ItemStack material = new ItemStack(Items.IRON_INGOT, 4);
+
+        assertTrue(GoetyBatchDelegate.insertPedestalStack(pedestal, material));
+        assertEquals(4, pedestal.getStackInSlot(0).getCount());
+        assertFalse(GoetyBatchDelegate.insertPedestalStack(
+                pedestal, new ItemStack(Items.GOLD_INGOT)));
+        assertEquals(Items.IRON_INGOT, pedestal.getStackInSlot(0).getItem());
+        assertTrue(GoetyBatchDelegate.insertPedestalStack(pedestal, ItemStack.EMPTY));
+        assertTrue(pedestal.getStackInSlot(0).isEmpty());
+    }
+
+    @Test
     void researchLookupAcceptsApiParameterSuperclass() throws Exception {
         Object player = new Object();
         AddonResearch research = new AddonResearch();

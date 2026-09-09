@@ -4363,7 +4363,13 @@ public final class AsyncCraftChain {
             if (!vi.isEmpty()) {
                 if (storageEndpoint != null) {
                     boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
-                            && matchesFinalTarget(vi);
+                            && (matchesFinalTarget(vi)
+                            // Recursive graphs may mark the terminal root as a
+                            // compatibility/intermediate node and therefore do
+                            // not expose graphDeclaresFinalOutput. The explicit
+                            // target item is still authoritative for delivery.
+                            || (targetOutput != null && !targetOutput.isEmpty()
+                            && vi.is(targetOutput.getItem())));
                     ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
                     ItemStack rsCandidate = leftover.copy();
                     if (!leftover.isEmpty()) {
@@ -4399,6 +4405,11 @@ public final class AsyncCraftChain {
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "->OMPLETED steps=" + steps.size());
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
+        if (online != null) {
+            online.sendSystemMessage(Component.translatable(
+                    "rsi.generic.craft_completed", steps.isEmpty() ? "" : steps.get(steps.size() - 1).recipeId().toString(),
+                    Math.max(1, steps.size())));
+        }
         sendTerminalProgress(online);
         fireOnDone();
         return true;
@@ -4500,6 +4511,15 @@ public final class AsyncCraftChain {
     /** How many machines produced output this chain run (1 for single machine, N for parallel). */
     public int getMachineCount() {
         return machineCount;
+    }
+
+    private int totalExecutionsForNotification() {
+        long total = 0;
+        for (var step : steps) {
+            total += Math.max(1, step.executions());
+            if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        }
+        return (int) total;
     }
 
     /** Abort after a physical machine consumed inputs but its output escaped.

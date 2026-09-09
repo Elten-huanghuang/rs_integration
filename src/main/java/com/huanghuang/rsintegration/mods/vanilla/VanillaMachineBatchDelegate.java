@@ -860,6 +860,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             if (!output.isEmpty()) {
                 return matchesFurnaceOutput(output)
                         ? doneObservation()
+                        // The operation cannot have consumed RSI inputs when the
+                        // output lane was occupied before dispatch. Mark this as
+                        // a pre-start failure so the shared ledger is refunded.
                         : failObservation("furnace output slot contains another item");
             }
         }
@@ -976,6 +979,17 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected boolean isFailureRefundSafe() {
         return kind == MachineKind.VIRTUAL;
+    }
+
+    @Override
+    public boolean failureConsumesInputs(CraftObservation observation) {
+        // An occupied furnace output is rejected before dispatch and therefore
+        // must follow the normal refund path, even if the lease was classified
+        // as in-flight by the asynchronous coordinator.
+        return observation != null
+                && observation.phase() == CraftPhase.FAILED
+                && observation.detail() != null
+                && !observation.detail().contains("output slot contains another item");
     }
 
     @Override

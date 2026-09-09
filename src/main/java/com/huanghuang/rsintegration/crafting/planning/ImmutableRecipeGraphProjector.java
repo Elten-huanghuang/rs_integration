@@ -336,6 +336,7 @@ public final class ImmutableRecipeGraphProjector {
             for (MaterialRef actual : availableByItem.getOrDefault(
                     expected.itemId(), List.of())) {
                 if (ingredient.nbtMatchMode() == NbtMatchMode.ANY
+                        || isTaintedEarthHeart(actual, expected)
                         || (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                         ? exactNbtMatches(expected.nbt(), actual.nbt())
                         : partialNbtMatches(expected.nbt(), actual.nbt()))) {
@@ -361,11 +362,24 @@ public final class ImmutableRecipeGraphProjector {
         for (MaterialRef expected : ingredient.alternatives()) {
             if (!actual.itemId().equals(expected.itemId())) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
+            if (isTaintedEarthHeart(actual, expected)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                     ? exactNbtMatches(expected.nbt(), actual.nbt())
                     : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
         }
         return false;
+    }
+
+    private static boolean isTaintedEarthHeart(MaterialRef actual, MaterialRef expected) {
+        if (!"enigmaticlegacy".equals(actual.itemId().getNamespace())
+                || !"earth_heart".equals(actual.itemId().getPath())) return false;
+        try {
+            var expectedTag = net.minecraft.nbt.TagParser.parseTag(expected.nbt());
+            var actualTag = net.minecraft.nbt.TagParser.parseTag(actual.nbt());
+            return expectedTag.getBoolean("isTainted") && actualTag.getBoolean("isTainted");
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     static RecipeNode withDemandedOutput(RecipeNode recipe, MaterialRef wanted,

@@ -10,6 +10,9 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
@@ -308,7 +311,27 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 drainingTicks = 0;
             }
 
-            IBatchDelegate.CraftObservation observation = delegate.observeCraft(null);
+            // Graph workers previously passed null here. Delegates that resolve
+            // machine state through the supplied level (notably Goety rituals)
+            // then dereferenced a null ServerLevel during recursive crafts.
+            net.minecraft.server.level.ServerLevel observeLevel = resolveObservationLevel();
+            if (observeLevel == null) {
+                failureReason = "graph observation level unavailable";
+                return ConcurrentNodeExecutor.Observation.FAILED;
+            }
+            IBatchDelegate.CraftObservation observation;
+            try {
+                observation = delegate.observeCraft(observeLevel);
+            } catch (Throwable error) {
+                // A broken optional-mod delegate must fail its node cleanly.  In
+                // particular, never let a null ServerLevel from a cross-dimension
+                // machine abort the whole graph worker thread.
+                failureReason = "machine observation crashed: "
+                        + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
+                        "[RSI] Graph node {} observation failed", nodeId, error);
+                return ConcurrentNodeExecutor.Observation.FAILED;
+            }
             if (delegate instanceof ParallelCraftGroup group) {
                 int completed = group.getCompletedOperations();
                 if (completed > observedCompletedOperations) {
@@ -369,6 +392,24 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         }
 
         return ConcurrentNodeExecutor.Observation.WORKING;
+    }
+
+    @Nullable
+    private net.minecraft.server.level.ServerLevel resolveObservationLevel() {
+        if (player == null || player.getServer() == null) return null;
+        ResourceLocation dimension = null;
+        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate base) {
+            dimension = base.getMachineDim();
+        }
+        if (dimension == null && machineLease != null) {
+            dimension = machineLease.machine().dimension();
+        }
+        if (dimension != null) {
+            net.minecraft.server.level.ServerLevel resolved = player.getServer().getLevel(
+                    ResourceKey.create(Registries.DIMENSION, dimension));
+            if (resolved != null) return resolved;
+        }
+        return player.serverLevel();
     }
 
     static boolean containsExpectedOutput(List<ItemStack> captured, @Nullable ItemStack expected) {

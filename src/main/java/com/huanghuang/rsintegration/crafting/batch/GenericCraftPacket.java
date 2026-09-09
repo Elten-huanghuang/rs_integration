@@ -942,7 +942,8 @@ public final class GenericCraftPacket {
                         recipeId);
                 return false;
             }
-            if (execution == CachedPurePlanExecution.ASYNCHRONOUS) {
+            if (execution == CachedPurePlanExecution.ASYNCHRONOUS
+                    || outputDestination == OutputDestination.PLAYER_INVENTORY) {
                 LegacyExecutionMetrics.Reason reason = canExecuteSynchronously(steps)
                         ? LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD
                         : LegacyExecutionMetrics.rejectedGraphReason(steps);
@@ -977,6 +978,7 @@ public final class GenericCraftPacket {
                     "[RSI-Generic] Executing revalidated typed preview graph for {} nodes={}",
                     recipeId, completeGraph.nodes().size());
             if (!canExecuteSynchronously(steps)
+                    || outputDestination == OutputDestination.PLAYER_INVENTORY
                     || storageEndpoint != null && shouldExecuteGenericChainAsync(steps)) {
                 launchGraphAsyncChain(player, completeGraph, terminalStep, network, storageEndpoint,
                         repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem,
