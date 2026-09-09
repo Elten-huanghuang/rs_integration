@@ -26,7 +26,7 @@ public abstract class DimensionsNetGuiSidebarMixin {
                 button -> addRenderableWidget(leftButtonSidebar.addButton(button)));
     }
 
-    @Shadow
+    @Shadow(remap = true)
     protected abstract <T extends GuiEventListener & net.minecraft.client.gui.components.Renderable>
             T addRenderableWidget(T widget);
 }

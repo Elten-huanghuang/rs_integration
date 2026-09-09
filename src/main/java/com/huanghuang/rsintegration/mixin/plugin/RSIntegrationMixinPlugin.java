@@ -30,6 +30,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".craftflow.")) {
+            return isClassPresent("com.ybm.craftflow.CraftFlow")
+                    && isClassPresent(targetClassName);
+        }
         if (mixinClassName.endsWith(".ironsspellbooks.SpellConfigManagerMixin")) {
             return readClass(targetClassName, node -> node.methods.stream().anyMatch(method ->
                     "buildConfigManager".equals(method.name)
@@ -317,6 +321,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiSidebarMixin")) {
             return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
                     && hasField(targetClassName, "leftButtonSidebar")
+                    // The sidebar mixin shadows the vanilla screen widget
+                    // registration method. Disable it when BD changes or
+                    // hides that method; an invalid shadow crashes at startup.
+                    && (hasMethod(targetClassName, "addRenderableWidget")
+                    || hasMethod(targetClassName, "m_142416_"))
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("beyonddimensions.BDBaseGuiOverlayMixin")) {

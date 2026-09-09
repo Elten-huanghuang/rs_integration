@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -119,11 +120,25 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
                 && ritual.getClass().getName().endsWith("CraftItemRitual");
     }
 
+    public static boolean isRuntimeTransformedSubstituteRecipe(Recipe<?> recipe) {
+        return recipe != null && isRuntimeTransformedSubstituteRecipeId(recipe.getId());
+    }
+
+    static boolean isRuntimeTransformedSubstituteRecipeId(ResourceLocation id) {
+        return id != null
+                && "goeticlegacy".equals(id.getNamespace())
+                && id.getPath().startsWith("substitute_ritual_");
+    }
+
     @Override
     public boolean indexPrimaryOutput(Recipe<?> recipe) {
         // Manual rituals remain directly previewable by ID, but cannot serve as
-        // recursive producers for another automated plan.
-        return !isManualRitual(recipe);
+        // recursive producers for another automated plan. GoeticLegacy's
+        // substitute rituals also cannot be indexed by their declared
+        // minecraft:empty_focus placeholder: the real result is derived from
+        // the activation scroll at runtime.
+        return !isManualRitual(recipe)
+                && !isRuntimeTransformedSubstituteRecipe(recipe);
     }
 
     @Override

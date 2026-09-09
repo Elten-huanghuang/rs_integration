@@ -9,12 +9,31 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftStorageReservationViewTest extends com.huanghuang.rsintegration.testutil.BootstrapTest {
+    @Test
+    void endpointSnapshotCannotBeOverbookedByRepeatedIngredientReservations() {
+        StorageBackendId backend = new StorageBackendId("test");
+        ItemStack slabs = new ItemStack(Items.OAK_SLAB, 2);
+        List<StoredItem> matches = List.of(new StoredItem(
+                StorageItemKey.fromItemStack(backend, slabs), slabs.getCount()));
+        Map<CraftingResolver.StackKey, Integer> pending = new HashMap<>();
+
+        assertEquals(1, ExtractionLedger.reserveEndpointMatches(matches, 1, pending)
+                .template().getCount());
+        assertEquals(1, ExtractionLedger.reserveEndpointMatches(matches, 1, pending)
+                .template().getCount());
+        assertTrue(ExtractionLedger.reserveEndpointMatches(matches, 1, pending)
+                .template().isEmpty());
+        assertEquals(2, pending.values().stream().mapToInt(Integer::intValue).sum());
+    }
+
     @Test
     void reservationsReduceExactAvailabilityAndCanBeReleased() {
         StorageBackendId backend = new StorageBackendId("test");

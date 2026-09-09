@@ -513,9 +513,25 @@ public final class PureRecipePlanner {
                                                            boolean pruneUnseeded,
                                                            NbtMatchMode mode) {
             List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, wanted, mode);
+            // Reachability is only a heuristic: it is based on the initial stock
+            // snapshot and cannot see dynamic/NBT-sensitive outputs produced while
+            // solving this plan. Keep the fast filter in the common case, but fall
+            // back to all producers when it would remove every candidate. This
+            // prevents false "missing material" results without making every broad
+            // recipe search traverse the entire graph.
             List<RecipeNode> ordered = candidates.stream()
-                    .filter(candidate -> !pruneUnseeded || hasAllInputsInStock(candidate) || reachability().canReach(candidate))
+                    .filter(candidate -> !pruneUnseeded || hasAllInputsInStock(candidate)
+                            || reachability().canReach(candidate))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+            if (ordered.isEmpty() && pruneUnseeded && !candidates.isEmpty()) {
+                // A conservative escape hatch for stale reachability results:
+                // require at least one concrete stock seed before reopening a
+                // candidate.  A recipe whose inputs are all absent would only
+                // create an unproductive empty-material search.
+                candidates.stream()
+                        .filter(this::hasAnyInputInStock)
+                        .forEach(ordered::add);
+            }
             if (ordered.size() < 2) return ordered;
             Comparator<RecipeNode> coverage = Comparator
                     .comparingDouble(this::inputStockCoverage).reversed();
@@ -529,6 +545,11 @@ public final class PureRecipePlanner {
 
         private boolean hasAllInputsInStock(RecipeNode candidate) {
             return candidate.inputs().stream().allMatch(input -> stockAcross(input) >= input.count());
+        }
+
+        private boolean hasAnyInputInStock(RecipeNode candidate) {
+            return candidate.inputs().stream().anyMatch(input ->
+                    input.alternatives().stream().anyMatch(material -> stock.getOrDefault(material, 0) > 0));
         }
 
         private SeededReachability reachability() {

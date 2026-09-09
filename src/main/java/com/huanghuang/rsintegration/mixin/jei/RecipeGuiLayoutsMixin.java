@@ -706,6 +706,10 @@ public class RecipeGuiLayoutsMixin {
         if (rsi$positions.isEmpty()) return;
         List<net.minecraft.network.chat.Component> tooltip = null;
         for (int i = 0; i < rsi$positions.size(); i++) {
+            // JEI can invoke draw during a layout swap.  The layout list and
+            // the button metadata are rebuilt in separate callbacks; skip a
+            // transient entry instead of drawing a stale/misaligned button.
+            if (i >= rsi$availabilityKeys.size() && i >= AltarCraftButtons.getPositions().size()) continue;
             if (!AltarCraftButtons.isVisible(i)) continue;
             int[] pos = rsi$positions.get(i);
             int bx = pos[0], by = pos[1], bw = pos[2], bh = pos[3];

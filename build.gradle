@@ -11,6 +11,7 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 mixin {
     add sourceSets.main, "rs_integration.refmap.json"
     config "rs_integration.mixins.json"
+    config "rs_integration.craftflow_compat.mixins.json"
 }
 
 minecraft {
@@ -22,6 +23,7 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             arg "-mixin.config=rs_integration.mixins.json"
+            arg "-mixin.config=rs_integration.craftflow_compat.mixins.json"
             mods {
                 rs_integration {
                     source sourceSets.main
@@ -33,6 +35,7 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             arg "-mixin.config=rs_integration.mixins.json"
+            arg "-mixin.config=rs_integration.craftflow_compat.mixins.json"
             mods {
                 rs_integration {
                     source sourceSets.main
@@ -184,7 +187,7 @@ jar {
                 "Implementation-Title"    : project.name,
                 "Implementation-Version"  : project.jar.archiveVersion,
                 "Implementation-Vendor"   : "Huanghuang",
-                "MixinConfigs"            : "rs_integration.mixins.json"
+                "MixinConfigs"            : "rs_integration.mixins.json,rs_integration.craftflow_compat.mixins.json"
         ])
     }
 }
@@ -204,7 +207,7 @@ tasks.named('jarJar', Jar) {
                 "Implementation-Title"    : project.name,
                 "Implementation-Version"  : project.jar.archiveVersion,
                 "Implementation-Vendor"   : "Huanghuang",
-                "MixinConfigs"            : "rs_integration.mixins.json"
+                "MixinConfigs"            : "rs_integration.mixins.json,rs_integration.craftflow_compat.mixins.json"
         ])
     }
 }
@@ -230,6 +233,7 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
                     'com/huanghuang/rsintegration/compat/emi/RSEmiPlugin.class',
                     'rs_integration.mixins.json',
+                    'rs_integration.craftflow_compat.mixins.json',
                     'rs_integration.refmap.json'
             ]
             requiredEntries.each { entryName ->
@@ -254,13 +258,15 @@ tasks.register('verifyReleaseJar') {
                 }
             }
 
-            def mixinConfigEntry = zip.getEntry('rs_integration.mixins.json')
-            def mixinConfig = new groovy.json.JsonSlurper().parse(zip.getInputStream(mixinConfigEntry))
-            ['mixins', 'client', 'server'].each { side ->
-                (mixinConfig[side] ?: []).each { mixinName ->
-                    def className = "${mixinConfig.package}.${mixinName}".replace('.', '/') + '.class'
-                    if (zip.getEntry(className) == null) {
-                        throw new GradleException("Mixin config references missing class ${className}: ${archive}")
+            ['rs_integration.mixins.json', 'rs_integration.craftflow_compat.mixins.json'].each { configName ->
+                def mixinConfigEntry = zip.getEntry(configName)
+                def mixinConfig = new groovy.json.JsonSlurper().parse(zip.getInputStream(mixinConfigEntry))
+                ['mixins', 'client', 'server'].each { side ->
+                    (mixinConfig[side] ?: []).each { mixinName ->
+                        def className = "${mixinConfig.package}.${mixinName}".replace('.', '/') + '.class'
+                        if (zip.getEntry(className) == null) {
+                            throw new GradleException("Mixin config references missing class ${className}: ${archive}")
+                        }
                     }
                 }
             }
@@ -276,7 +282,7 @@ tasks.register('verifyReleaseJar') {
             def manifest = new java.util.jar.Manifest(zip.getInputStream(manifestEntry))
             def attributes = manifest.mainAttributes
             if (attributes.getValue('Implementation-Version') != project.version.toString()
-                    || attributes.getValue('MixinConfigs') != 'rs_integration.mixins.json') {
+                    || attributes.getValue('MixinConfigs') != 'rs_integration.mixins.json,rs_integration.craftflow_compat.mixins.json') {
                 throw new GradleException("Release manifest has incorrect version or MixinConfigs: ${archive}")
             }
 
