@@ -40,6 +40,14 @@ class FlatParallelWindowTest extends BootstrapTest {
                 .anyMatch(call -> call.contains("#setStorageEndpoint")));
     }
 
+    @Test
+    void flatDispatchConsultsPreparedMachineBatchCapacity() throws IOException {
+        assertTrue(calls(AsyncCraftChain.class, "startModStep").stream()
+                .anyMatch(call -> call.contains("IBatchDelegate#flatBatchOperationLimit")));
+        assertTrue(calls(AsyncCraftChain.class, "flatDispatchOperationLimit").stream()
+                .anyMatch(call -> call.contains("IBatchDelegate#flatBatchOperationLimit")));
+    }
+
     private static int indexOfCall(List<String> calls, String fragment) {
         for (int index = 0; index < calls.size(); index++) {
             if (calls.get(index).contains(fragment)) return index;

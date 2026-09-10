@@ -382,10 +382,17 @@ public final class RecipeIndex {
         } else if (isTypedPureProjectionCandidate(handler, type, recipe)) {
             long graphStarted = System.nanoTime();
             List<IngredientSpec> typedSpecs = handler.getIngredients(recipe);
+            boolean runtimeNbt = handler.hasRuntimeDependentPrimaryNbt(recipe);
             ImmutableRecipeGraph.RecipeNode node = typedSpecs == null ? null
                     : ImmutableRecipeGraphProjector.projectRecipe(
                     recipe.getId(), result, typedSpecs, type.id(), typeId,
-                    !handler.hasRuntimeDependentPrimaryNbt(recipe));
+                    !runtimeNbt);
+            if (runtimeNbt && "malum".equals(type.id())) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RecipeCatalog] runtime NBT recipe={} output={} count={} projected={} outputNbt=UNKNOWN",
+                        recipe.getId(), ForgeRegistries.ITEMS.getKey(result.getItem()),
+                        result.getCount(), node != null);
+            }
             if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
                     && typedSpecs != null && typedSpecs.size() == 3) {
                 RSIntegrationMod.LOGGER.debug(

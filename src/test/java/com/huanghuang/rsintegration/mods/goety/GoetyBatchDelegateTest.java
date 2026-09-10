@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +16,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GoetyBatchDelegateTest extends BootstrapTest {
 
@@ -179,5 +181,54 @@ class GoetyBatchDelegateTest extends BootstrapTest {
                 GoetyBatchDelegate.prerequisiteFailureState(false));
         assertEquals(IBatchDelegate.PreparationState.FATAL,
                 GoetyBatchDelegate.prerequisiteFailureState(true));
+    }
+
+    @Test
+    void soulProbeAcceptsEnoughEnergy() {
+        assertEquals(IBatchDelegate.PreparationState.READY,
+                GoetyBatchDelegate.soulPreparationResult(100, 100).state());
+    }
+
+    @Test
+    void removedSoulTotemProducesRetryableSpecificFailure() {
+        IBatchDelegate.PreparationResult result =
+                GoetyBatchDelegate.soulPreparationResult(100, 0);
+
+        assertEquals(IBatchDelegate.PreparationState.RETRY, result.state());
+        assertTrue(result.detail().contains("required=100"));
+        assertEquals("rsi.goety.error.insufficient_souls",
+                ((net.minecraft.network.chat.contents.TranslatableContents)
+                        result.userMessage().getContents()).getKey());
+    }
+
+    @Test
+    void readyAltarWinsWhenAnotherAltarHasNoTotem() {
+        MachineCandidateView missingTotem = candidate(
+                MachineCandidateView.State.TEMPORARY,
+                GoetyBatchDelegate.soulPreparationResult(100, 0).userMessage());
+        MachineCandidateView ready = candidate(
+                MachineCandidateView.State.READY,
+                Component.translatable("rsi.machine_candidate.ready"));
+
+        assertEquals(ready, GoetyBatchDelegate.firstReadyMachine(
+                List.of(missingTotem, ready)));
+        assertTrue(GoetyBatchDelegate.hasReadyMachine(List.of(missingTotem, ready)));
+    }
+
+    @Test
+    void allAltarsWithoutSoulTotemsHaveNoReadyCandidate() {
+        MachineCandidateView first = candidate(MachineCandidateView.State.TEMPORARY,
+                GoetyBatchDelegate.soulPreparationResult(100, 0).userMessage());
+        MachineCandidateView second = candidate(MachineCandidateView.State.TEMPORARY,
+                GoetyBatchDelegate.soulPreparationResult(100, 0).userMessage());
+
+        assertNull(GoetyBatchDelegate.firstReadyMachine(List.of(first, second)));
+        assertFalse(GoetyBatchDelegate.hasReadyMachine(List.of(first, second)));
+    }
+
+    private static MachineCandidateView candidate(
+            MachineCandidateView.State state, Component status) {
+        return new MachineCandidateView("minecraft:overworld", 0, 64, 0,
+                ItemStack.EMPTY, state, status);
     }
 }

@@ -522,7 +522,11 @@ public final class AutoEatEngine {
                 new AutoEatSyncPacket(AutoEatMode.STACK, eaten,
                         Component.translatable("rsi.autoeat.result.stack", eaten,
                                 targetItem.getDescription())));
-        return eaten >= toExtract && count >= toExtract && runningTasks.contains(player.getUUID());
+        // Stack mode is a one-shot action: the button requests one bounded
+        // batch, not a continuously running feed loop. Returning true here
+        // would leave the request in pendingTasks and make the server consume
+        // another batch on every tick while storage still contains this food.
+        return false;
     }
 
     // ── Mode 3: Diet ────────────────────────────────────────────

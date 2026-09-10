@@ -2223,8 +2223,15 @@ public final class GenericCraftPacket {
         if (requiresBoundMachine(recipe, modType)
                 && !hasBindingForExecutionType(player, recipe, modType)) {
             logBindingRejection("execute-entry", player, recipe, modType, dim, pos);
+            // A wrapped smithing recipe can still reach this guard if a
+            // third-party classifier misses it. Keep the binding failure
+            // user-facing instead of dereferencing a nullable type while
+            // constructing the error message.
+            String bindingTypeId = modType != null
+                    ? modType.id()
+                    : isSmithingRecipe(recipe) ? "smithing" : "unknown";
             player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.error.no_bound_machine", modType.id()));
+                    "rsi.generic.error.no_bound_machine", bindingTypeId));
             return;
         }
         if (modType != null && modType.isVirtual()) {
@@ -2311,8 +2318,19 @@ public final class GenericCraftPacket {
         } else if ((effectiveDim == null || effectivePos == null)
                 && isPhysicalMachineRecipe(recipe, modType)) {
             String reqKeyword = getMachineKeywordForRecipe(recipe);
-            for (var m : AltarBindingRegistry
-                    .getBoundMachinesForRecipe(player, modType, recipeId)) {
+            List<AltarBindingRegistry.BoundMachine> boundMachines = new ArrayList<>(
+                    AltarBindingRegistry.getBoundMachinesForRecipe(player, modType, recipeId));
+            if (ModIds.GOETY.equals(modType.id())) {
+                MachineCandidateView ready = GoetyBatchDelegate.firstReadyPlanMachine(player, recipe);
+                if (ready != null) {
+                    boundMachines.sort(Comparator.comparingInt(machine ->
+                            machine.dim().toString().equals(ready.dimension())
+                                    && machine.pos().getX() == ready.x()
+                                    && machine.pos().getY() == ready.y()
+                                    && machine.pos().getZ() == ready.z() ? 0 : 1));
+                }
+            }
+            for (var m : boundMachines) {
                 if (reqKeyword != null && m.blockKey() != null && !m.blockKey().contains(reqKeyword))
                     continue;
                 effectiveDim = m.dim();
@@ -5167,6 +5185,19 @@ public final class GenericCraftPacket {
                 ? com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate
                 .getPlanMachineCandidates(player, recipe)
                 : List.of();
+        if (!machineCandidates.isEmpty()
+                && machineCandidates.stream().noneMatch(candidate ->
+                candidate.state() == MachineCandidateView.State.READY)) {
+            feasible = false;
+            blockingPrerequisiteFailure = true;
+            modWarnings.add(Component.translatable("rsi.goety.warn.no_ready_altar"));
+            for (MachineCandidateView candidate : machineCandidates) {
+                modWarnings.add(Component.translatable(
+                        "rsi.goety.warn.altar_candidate_unavailable",
+                        candidate.dimension(), candidate.x(), candidate.y(), candidate.z(),
+                        candidate.status()));
+            }
+        }
 
         PlanResponseDraft responseDraft = new PlanResponseDraft(
                 feasible,

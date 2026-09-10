@@ -632,6 +632,8 @@
   "rsi.goety.warn.no_bound_altar": "§6⚠ No altar bound, cannot verify structure (%s)",
   "rsi.goety.warn.altar_unloaded": "§6⚠ The bound altar chunk is not loaded, so the structure check is deferred (%s). Load the altar chunk before execution",
   "rsi.goety.warn.bound_altar_invalid": "§cThe binding is stale: the target is not a Dark Altar. Crafting is blocked",
+  "rsi.goety.warn.no_ready_altar": "§cNo Goety altar is currently ready; check the altar list below for each altar's specific reason",
+  "rsi.goety.warn.altar_candidate_unavailable": "§cAltar %s [%s, %s, %s]: %s",
   "rsi.goety.error.brazier_wrong_biome": "§cNecroBrazier must be placed in a Deep Dark biome to function",
   "rsi.goety.error.brazier_no_candlesticks": "§cNo Soul Candlesticks nearby — brazier needs candlestick souls to operate",
   "rsi.goety.summon_prepared": "§aPedestal materials filled from the storage network. §e%s§a has been placed in your inventory. RSI did not start the ritual; confirm the area is safe, then use the activation item on the Dark Altar.",

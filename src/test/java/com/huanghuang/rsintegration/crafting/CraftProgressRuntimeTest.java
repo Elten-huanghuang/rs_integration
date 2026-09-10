@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -24,6 +25,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -31,9 +33,24 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CraftProgressRuntimeTest extends BootstrapTest {
+    private ServerPlayer player;
+    private ServerLevel level;
+
+    @BeforeEach
+    void createWorldContext() {
+        MinecraftServer server = mock(MinecraftServer.class);
+        level = mock(ServerLevel.class);
+        player = mock(ServerPlayer.class);
+        when(player.getServer()).thenReturn(server);
+        when(player.serverLevel()).thenReturn(level);
+    }
 
     @BeforeAll
     static void loadDefaultServerConfig() {
@@ -47,12 +64,14 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(4), "test:ordinary", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
 
         assertEquals(0, runtime.completedOperations());
         assertEquals(1, runtime.totalOperations());
         assertEquals(1, runtime.runningOperations());
 
         assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertSame(level, delegate.observedLevel);
         assertEquals(1, runtime.completedOperations());
         assertEquals(0, runtime.runningOperations());
     }
@@ -62,6 +81,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.FAILED, "machine jammed");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(5), "test:failing", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
 
         assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
         assertEquals("machine jammed", runtime.failureReason());
@@ -72,6 +92,18 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertEquals(0, runtime.completedOperations());
         assertEquals(0, runtime.runningOperations());
         assertEquals(1, delegate.failureCleanups);
+    }
+
+    @Test
+    void missingWorldContextFailsBeforeCallingDelegate() {
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                new NodeId(10), "test:missing-world", delegate, null, null);
+
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        assertEquals("graph observation level unavailable", runtime.failureReason());
+        assertEquals(0, delegate.observationCalls);
+        assertEquals(0, runtime.completedOperations());
     }
 
     @Test
@@ -118,6 +150,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
         NodeId node = new NodeId(6);
         CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:shortage", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
         runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
                 new OutputPortId(node, 0), MaterialKey.of(new ItemStack(net.minecraft.world.item.Items.DIAMOND)),
                 1, OutputKind.PRIMARY))));
@@ -142,6 +175,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         NodeId node = new NodeId(9);
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 node, "test:world-state-mutation", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
         runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
                 new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 1, OutputKind.PRIMARY))));
@@ -157,20 +191,23 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         OperationExecutionKernel kernel = new OperationExecutionKernel(
                 new OperationResourceCoordinator(new MachineLeaseRegistry(),
                         new CaptureLeaseRegistry(), new OperationBudget(1, 2)));
-        OperationExecutionKernel.Session session = kernel.tryPrepare(
+        try (OperationExecutionKernel.Session session = kernel.tryPrepare(
                 UUID.randomUUID(), node, 0, new OperationBudget(1, 2),
                 new MachineLeaseRegistry.MachineKey(new ResourceLocation("minecraft", "overworld"),
                         BlockPos.ZERO, "test"),
                 new OperationResourceCoordinator.CaptureRequest(
                         new ResourceLocation("minecraft", "overworld"),
-                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)));
-        assertTrue(session.commit(() -> true));
-        assertTrue(session.tryStart(() -> true));
-        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:capture", delegate,
-                null, null, session);
+                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)))) {
+            assertNotNull(session);
+            assertTrue(session.commit(() -> true));
+            assertTrue(session.tryStart(() -> true));
+            CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:capture", delegate,
+                    null, null, session);
+            runtime.setChainContext(new ArrayList<>(), player);
 
-        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
-        session.close();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertSame(level, delegate.observedLevel);
+        }
     }
 
     @Test
@@ -185,20 +222,23 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         OperationExecutionKernel kernel = new OperationExecutionKernel(
                 new OperationResourceCoordinator(new MachineLeaseRegistry(),
                         new CaptureLeaseRegistry(), new OperationBudget(1, 2)));
-        OperationExecutionKernel.Session session = kernel.tryPrepare(
+        try (OperationExecutionKernel.Session session = kernel.tryPrepare(
                 UUID.randomUUID(), node, 0, new OperationBudget(1, 2),
                 new MachineLeaseRegistry.MachineKey(new ResourceLocation("minecraft", "overworld"),
                         BlockPos.ZERO, "test"),
                 new OperationResourceCoordinator.CaptureRequest(
                         new ResourceLocation("minecraft", "overworld"),
-                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)));
-        assertTrue(session.commit(() -> true));
-        assertTrue(session.tryStart(() -> true));
-        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:slot-output", delegate,
-                null, null, session);
+                        new AABB(0, 0, 0, 1, 1, 1), new ItemStack(Items.DIAMOND)))) {
+            assertNotNull(session);
+            assertTrue(session.commit(() -> true));
+            assertTrue(session.tryStart(() -> true));
+            CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:slot-output", delegate,
+                    null, null, session);
+            runtime.setChainContext(new ArrayList<>(), player);
 
-        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
-        session.close();
+            assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+            assertSame(level, delegate.observedLevel);
+        }
     }
 
     @Test
@@ -255,6 +295,8 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         private final CraftPhase phase;
         private final String detail;
         private int failureCleanups;
+        private ServerLevel observedLevel;
+        private int observationCalls;
 
         private StubDelegate(CraftPhase phase, String detail) {
             this.phase = phase;
@@ -279,6 +321,8 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
         @Override
         public CraftObservation observeCraft(ServerLevel level) {
+            observedLevel = level;
+            observationCalls++;
             return new CraftObservation(phase, detail);
         }
 

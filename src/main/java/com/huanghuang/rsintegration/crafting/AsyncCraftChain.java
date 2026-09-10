@@ -1376,7 +1376,7 @@ public final class AsyncCraftChain {
                     protectionRejection = true;
                     continue;
                 }
-                candidate = createStepDelegate(step);
+                candidate = createStepDelegate(step, machine.type());
                 if (candidate == null) {
                     fatalDetail = "delegate factory returned null for " + step.modType().id();
                     continue;
@@ -3302,7 +3302,7 @@ public final class AsyncCraftChain {
             IBatchDelegate candidate = null;
             boolean retained = false;
             try {
-                candidate = createStepDelegate(step);
+                candidate = createStepDelegate(step, m.type());
                 if (candidate == null) continue;
                 if (candidate instanceof AbstractBatchDelegate abd) {
                     // Preparation can inspect storage-backed availability. The
@@ -3359,9 +3359,18 @@ public final class AsyncCraftChain {
             return null;
         }
 
+        if (matchedMachine.type() != step.modType()) {
+            RSIntegrationMod.LOGGER.info(ctx.format(
+                    "[RSI-Craft] compatible binding route recipe={} recipeType={} machineType={} delegate={} machine={}"),
+                    step.recipeId(), step.modType().id(), matchedMachine.type().id(),
+                    delegate.getClass().getSimpleName(), matchedMachine.pos());
+        }
+
         final IBatchDelegate startedDelegate = delegate;
         try {
-            int allowedBatch = Math.min(stepRemaining, configuredOperationsPerDispatch());
+            int configuredLimit = configuredOperationsPerDispatch();
+            int delegateLimit = startedDelegate.flatBatchOperationLimit(configuredLimit);
+            int allowedBatch = Math.min(stepRemaining, Math.max(1, delegateLimit));
             int flatBatch = startedDelegate.prepareFlatBatch(allowedBatch);
             if (flatBatch <= 0 || flatBatch > allowedBatch) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
@@ -3645,7 +3654,8 @@ public final class AsyncCraftChain {
     private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
-        int window = flatDispatchWindow(stepRemaining, configuredOperationsPerDispatch());
+        int dispatchLimit = flatDispatchOperationLimit(machines, step, online);
+        int window = flatDispatchWindow(stepRemaining, dispatchLimit);
         while (window > 1) {
             materialReservationFailureDetail = null;
             IBatchDelegate group = tryStartParallelWindow(machines, step, online, window);
@@ -3659,12 +3669,50 @@ public final class AsyncCraftChain {
         return null;
     }
 
+    private int flatDispatchOperationLimit(List<BoundMachine> machines,
+                                           CraftingResolver.ResolutionStep step,
+                                           ServerPlayer online) {
+        int configuredLimit = configuredOperationsPerDispatch();
+        if (stepRemaining <= configuredLimit) return configuredLimit;
+        IBatchDelegate capabilityProbe = createStepDelegate(step, machines.get(0).type());
+        try {
+            if (capabilityProbe == null || !capabilityProbe.expandsFlatBatchOperationLimit()) {
+                return configuredLimit;
+            }
+        } finally {
+            if (capabilityProbe != null) releasePreparationQuietly(capabilityProbe);
+        }
+        int effectiveLimit = configuredLimit;
+        for (BoundMachine machine : machines) {
+            IBatchDelegate candidate = null;
+            try {
+                candidate = createStepDelegate(step, machine.type());
+                if (candidate == null) continue;
+                if (candidate instanceof AbstractBatchDelegate abstractDelegate) {
+                    abstractDelegate.setStorageEndpoint(storageEndpoint);
+                }
+                IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
+                        candidate, online, step.recipeId(), machine.dim(), machine.pos());
+                if (preparation.state() == IBatchDelegate.PreparationState.READY) {
+                    effectiveLimit = Math.max(effectiveLimit,
+                            candidate.flatBatchOperationLimit(configuredLimit));
+                }
+            } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "Flat dispatch capacity probe failed at {}"), machine.pos(), exception);
+            } finally {
+                if (candidate != null) releasePreparationQuietly(candidate);
+            }
+        }
+        return Math.max(1, effectiveLimit);
+    }
+
     private IBatchDelegate tryStartParallelWindow(List<BoundMachine> machines,
                                                   CraftingResolver.ResolutionStep step,
                                                   ServerPlayer online, int operationCount) {
         if (server == null) return null;
 
-        IBatchDelegate capabilityProbe = createStepDelegate(step);
+        IBatchDelegate capabilityProbe = createStepDelegate(step, machines.get(0).type());
         List<BoundMachine> available;
         GraphConcurrencyPolicy.Decision capabilityDecision;
         try {
@@ -4971,6 +5019,17 @@ public final class AsyncCraftChain {
         boolean useInference = EreAlchemyDelegateMode.shouldUseInference(
                 step.modType().id(), step.inferMode(), codeKnown);
         return useInference ? step.modType().createInferDelegate() : createDelegate(step.modType());
+    }
+
+    private IBatchDelegate createStepDelegate(CraftingResolver.ResolutionStep step,
+                                               ModType machineType) {
+        if (machineType == null || machineType == step.modType()) {
+            return createStepDelegate(step);
+        }
+        // Compatible binding aliases describe the recipe using one type and the
+        // physical worker using another. Inference is a recipe-type feature and
+        // no current alias supports it, so the concrete machine delegate wins.
+        return createDelegate(machineType);
     }
 
     private static IBatchDelegate createDelegate(ModType type) {

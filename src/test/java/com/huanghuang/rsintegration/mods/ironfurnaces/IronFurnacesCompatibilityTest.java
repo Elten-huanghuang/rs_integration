@@ -18,6 +18,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class IronFurnacesCompatibilityTest extends BootstrapTest {
 
     @Test
+    void nativePhysicalBatchCanExceedTheGenericDispatchWindow() {
+        assertTrue(new IronFurnacesBatchDelegate().expandsFlatBatchOperationLimit());
+        assertEquals(32, IronFurnacesBatchDelegate.expandedFlatBatchOperationLimit(32, 1));
+        assertEquals(32, IronFurnacesBatchDelegate.expandedFlatBatchOperationLimit(32, 6));
+        assertEquals(64, IronFurnacesBatchDelegate.expandedFlatBatchOperationLimit(32, 64));
+        assertEquals(384, IronFurnacesBatchDelegate.expandedFlatBatchOperationLimit(32, 384));
+        assertEquals(512, IronFurnacesBatchDelegate.expandedFlatBatchOperationLimit(512, 384));
+    }
+
+    @Test
     void smallAndWindowedOrdersUseBothFactoryWorkersWithinLaneCapacity() {
         assertEquals(1, IronFurnacesBatchDelegate.parallelWorkerBatchSize(2, 2, 6));
         assertEquals(2, IronFurnacesBatchDelegate.parallelWorkerBatchSize(3, 2, 6));
@@ -162,6 +172,18 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
         assertTrue(AltarBindingRegistry.isCompatibleMachineType(vanillaBlast, blast));
         assertTrue(AltarBindingRegistry.isCompatibleMachineType(vanillaSmoker, smoker));
         assertFalse(AltarBindingRegistry.isCompatibleMachineType(register("goety"), furnace));
+    }
+
+    @Test
+    void compatibleBindingPreservesConcreteDelegateType() {
+        ModType requested = register("vanilla_furnace");
+        ModType concrete = register("ironfurnaces_furnace");
+        ModType unrelated = register("pmmo_salvage_owner");
+
+        assertSame(concrete,
+                AltarBindingRegistry.executionTypeForBinding(requested, concrete));
+        assertSame(requested,
+                AltarBindingRegistry.executionTypeForBinding(requested, unrelated));
     }
 
     @Test

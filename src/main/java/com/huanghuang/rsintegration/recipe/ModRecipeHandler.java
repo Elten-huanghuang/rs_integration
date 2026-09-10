@@ -82,12 +82,11 @@ public interface ModRecipeHandler {
      * Whether this recipe exposes a complete value-only input/output contract.
      * Such recipes may be projected once during catalog construction and
      * planned off-thread; machine interaction still remains on the server thread.
-     * The default is intentionally conservative for handlers that implement
-     * this interface directly. Prefix-based handlers inherit the stricter
-     * default from {@link AbstractRecipeHandler}.
+     * Runtime-derived NBT is represented explicitly in the graph and can only
+     * satisfy item-only demands. It does not make the item or its count random.
      */
     default boolean supportsBackgroundPlanning(@Nonnull Recipe<?> recipe) {
-        if (!hasDeterministicPrimaryOutput(recipe) || hasRuntimeDependentPrimaryNbt(recipe)) {
+        if (!hasDeterministicPrimaryOutput(recipe)) {
             return false;
         }
         List<IngredientSpec> specs = getIngredients(recipe);

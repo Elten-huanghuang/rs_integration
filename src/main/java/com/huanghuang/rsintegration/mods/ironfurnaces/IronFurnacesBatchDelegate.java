@@ -110,6 +110,20 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return expandedFlatBatchOperationLimit(configuredLimit, physicalBatchCapacity());
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return true;
+    }
+
+    static int expandedFlatBatchOperationLimit(int configuredLimit, int physicalCapacity) {
+        return Math.max(Math.max(1, configuredLimit), Math.max(1, physicalCapacity));
+    }
+
+    @Override
     public void prepareGraphBatch(int executions) {
         plannedOperations = Math.max(1, executions);
     }

@@ -1022,9 +1022,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {
-        IBatchDelegate delegate = createChildDelegate(modType);
+        ModType executionType = machine.type() == null ? modType : machine.type();
+        IBatchDelegate delegate = createChildDelegate(executionType);
         if (delegate == null) {
-            return ChildPreparation.fatal("delegate factory returned null for " + modType.id());
+            return ChildPreparation.fatal("delegate factory returned null for " + executionType.id());
         }
         try {
             configureDelegate(delegate, machine);

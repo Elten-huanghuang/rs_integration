@@ -69,6 +69,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean ritualStartRequested;
     private boolean prerequisiteBlocked;
     private boolean prerequisiteFailurePermanent;
+    private PreparationResult soulPreparationFailure;
     private long ritualIdleSinceGameTime = -1L;
     /** Tracks a ritual that stopped before yielding an output. */
     private long ritualStoppedSinceGameTime = -1L;
@@ -96,6 +97,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                                      @Nullable ResourceLocation dim, BlockPos pos) {
         if (validateAndInit(player, recipeId, dim, pos)) {
             return PreparationResult.ready();
+        }
+        if (soulPreparationFailure != null) {
+            return soulPreparationFailure;
         }
         if (prerequisiteBlocked) {
             String detail = "Goety ritual prerequisites not met for " + recipeId;
@@ -131,6 +135,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.prerequisiteBlocked = false;
         this.prerequisiteFailurePermanent = false;
+        this.soulPreparationFailure = null;
         // Set machineDim NOW so resolveMachineLevel() resolves the machine's own
         // dimension during validation (e.g. checkStructureRequirements). The chain
         // otherwise calls setMachineDim only AFTER validateAndInit returns true, so
@@ -1485,10 +1490,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Soul probe: altar={} cage={} required={} available={}",
                     myPos, cagePos, cost, available);
-            if (available < cost) {
+            PreparationResult soulResult = soulPreparationResult(cost, available);
+            if (soulResult.state() != PreparationState.READY) {
+                soulPreparationFailure = soulResult;
                 if (notifyPlayer) {
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.goety.error.insufficient_souls", cost, available));
+                    player.sendSystemMessage(soulResult.userMessage());
                 }
                 return false;
             }
@@ -1497,6 +1503,19 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Soul validation failed, skipping", e);
             return true;
         }
+    }
+
+    static PreparationResult soulPreparationResult(int required, int available) {
+        int safeRequired = Math.max(0, required);
+        int safeAvailable = Math.max(0, available);
+        if (safeRequired == 0 || safeAvailable >= safeRequired) {
+            return PreparationResult.ready();
+        }
+        return PreparationResult.retry(
+                "Goety altar has insufficient souls (required=" + safeRequired
+                        + ", available=" + safeAvailable + ")",
+                Component.translatable(
+                        "rsi.goety.error.insufficient_souls", safeRequired, safeAvailable));
     }
 
     // ── Recipe ingredient collection ─────────────────────────────
@@ -2089,7 +2108,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                         status = Component.translatable("rsi.machine_candidate.ready");
                     } else if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
                         state = MachineCandidateView.State.TEMPORARY;
-                        status = Component.translatable("rsi.machine_candidate.temporary");
+                        status = preparation.userMessage() != null
+                                ? preparation.userMessage()
+                                : Component.translatable("rsi.machine_candidate.temporary");
                     } else {
                         state = MachineCandidateView.State.INCOMPATIBLE;
                         status = Component.translatable("rsi.machine_candidate.incompatible");
@@ -2114,6 +2135,24 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                         candidate.state() == MachineCandidateView.State.READY ? 0 : 1)
                 .thenComparingInt(candidate -> candidate.dimension().equals(playerDim.toString()) ? 0 : 1));
         return List.copyOf(result);
+    }
+
+    public static @Nullable MachineCandidateView firstReadyPlanMachine(
+            ServerPlayer player, Recipe<?> recipe) {
+        return firstReadyMachine(getPlanMachineCandidates(player, recipe));
+    }
+
+    static @Nullable MachineCandidateView firstReadyMachine(
+            List<MachineCandidateView> candidates) {
+        if (candidates == null) return null;
+        return candidates.stream()
+                .filter(candidate -> candidate.state() == MachineCandidateView.State.READY)
+                .findFirst()
+                .orElse(null);
+    }
+
+    static boolean hasReadyMachine(List<MachineCandidateView> candidates) {
+        return firstReadyMachine(candidates) != null;
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
