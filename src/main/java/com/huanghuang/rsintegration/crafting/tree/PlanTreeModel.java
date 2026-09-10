@@ -86,7 +86,62 @@ public final class PlanTreeModel {
         // without misflagging DAG reuse (iron ingot shared by two sibling components).
         Set<IngredientKey> pathStack = new LinkedHashSet<>();
         buildChildren(root, producerByOutput, pathStack, plan);
+        retainUnlinkedLegacySteps(root, plan, producerByOutput);
         return new PlanTreeModel(root);
+    }
+
+    /**
+     * A legacy response is a flat execution manifest. Item/NBT display
+     * representatives can occasionally prevent an otherwise valid step from
+     * linking through {@link IngredientKey}; card view still shows that step,
+     * while tree view used to discard it. Preserve the manifest invariant by
+     * attaching any unrendered execution step to the root, matching the graph
+     * response fallback below.
+     */
+    private static void retainUnlinkedLegacySteps(
+            PlanTreeNode root, PlanResponse plan,
+            Map<IngredientKey, PlanStep> producers) {
+        Set<ResourceLocation> rendered = new HashSet<>();
+        collectRenderedRecipeIds(root, rendered);
+        ResourceLocation targetRecipe = plan.recipeId() == null
+                ? null : ResourceLocation.tryParse(plan.recipeId());
+        Set<Item> reachableOutputs = legacyReachableOutputs(root.step, plan.steps());
+        for (PlanStep step : plan.steps()) {
+            if (step.recipeId().equals(targetRecipe) || rendered.contains(step.recipeId())
+                    || !reachableOutputs.contains(step.output().getItem())) continue;
+            ItemStack output = step.output().copyWithCount(1);
+            if (output.isEmpty()) continue;
+            int amount = Math.max(1, step.totalOutputCount());
+            PlanTreeNode unlinked = new PlanTreeNode(IngredientKey.of(output), output,
+                    amount, 1, step);
+            unlinked.limited = step.alternatives().size() > maxTreeCandidates();
+            applyAvailability(unlinked, plan, output);
+            Set<IngredientKey> path = new LinkedHashSet<>();
+            path.add(unlinked.key);
+            buildChildren(unlinked, producers, path, plan);
+            root.children.add(unlinked);
+            collectRenderedRecipeIds(unlinked, rendered);
+        }
+    }
+
+    private static Set<Item> legacyReachableOutputs(
+            @Nullable PlanStep target, List<PlanStep> steps) {
+        if (target == null) return Set.of();
+        Set<Item> reachable = new HashSet<>();
+        for (ItemStack input : target.inputs()) {
+            if (!input.isEmpty()) reachable.add(input.getItem());
+        }
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (PlanStep step : steps) {
+                if (!reachable.contains(step.output().getItem())) continue;
+                for (ItemStack input : step.inputs()) {
+                    if (!input.isEmpty() && reachable.add(input.getItem())) changed = true;
+                }
+            }
+        }
+        return reachable;
     }
 
     private static PlanTreeModel fromGraph(PlanResponse plan) {

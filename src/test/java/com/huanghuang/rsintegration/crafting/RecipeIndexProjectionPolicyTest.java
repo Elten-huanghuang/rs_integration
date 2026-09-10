@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.NonNullList;
@@ -20,6 +21,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeIndexProjectionPolicyTest extends BootstrapTest {
+    @Test
+    void prefixHandlersUseTheirDeclaredValueOnlyContractForProjection() {
+        Recipe<?> recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "prefix_projection"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
+
+        assertTrue(new PrefixHandler(true, false, true)
+                .supportsBackgroundPlanning(recipe));
+        assertFalse(new PrefixHandler(false, false, true)
+                .supportsBackgroundPlanning(recipe));
+        assertTrue(new PrefixHandler(true, true, true)
+                .supportsBackgroundPlanning(recipe));
+        assertFalse(new PrefixHandler(true, false, false)
+                .supportsBackgroundPlanning(recipe));
+    }
+
     @Test
     void soulBladeTransformPassesCatalogPolicyAndKeepsPositionalBaseInProjection() {
         var recipe = new net.minecraft.world.item.crafting.SmithingTransformRecipe(
@@ -78,5 +96,44 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
                 return deterministic;
             }
         };
+    }
+
+    private static final class PrefixHandler extends AbstractRecipeHandler {
+        private final boolean deterministic;
+        private final boolean runtimeNbt;
+        private final boolean ingredientsAvailable;
+
+        private PrefixHandler(boolean deterministic, boolean runtimeNbt,
+                              boolean ingredientsAvailable) {
+            this.deterministic = deterministic;
+            this.runtimeNbt = runtimeNbt;
+            this.ingredientsAvailable = ingredientsAvailable;
+        }
+
+        @Override public ModType modType() {
+            return ModType.FARMINGFORBLOCKHEADS_MARKET;
+        }
+
+        @Override public boolean canHandle(Recipe<?> recipe) {
+            return true;
+        }
+
+        @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+            return new ItemStack(Items.DIAMOND);
+        }
+
+        @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+            return ingredientsAvailable
+                    ? List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1))
+                    : null;
+        }
+
+        @Override public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+            return deterministic;
+        }
+
+        @Override public boolean hasRuntimeDependentPrimaryNbt(Recipe<?> recipe) {
+            return runtimeNbt;
+        }
     }
 }

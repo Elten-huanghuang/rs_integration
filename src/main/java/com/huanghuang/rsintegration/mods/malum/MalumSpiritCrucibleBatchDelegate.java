@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -11,8 +14,9 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -25,7 +29,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -73,6 +76,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private ItemStack expectedOutput;
     private boolean craftStarted;
     private boolean craftWasSeenActive;
+    @Nullable
+    private CraftStorageEndpoint catalystReturnEndpoint;
+    @Nullable
+    private INetwork catalystReturnNetwork;
 
     // ── IBatchDelegate ────────────────────────────────────────────
 
@@ -169,6 +176,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             this.network = CraftPacketUtils
                     .resolveNetworkForCraft(player, level.dimension(), pos);
         }
+        // onBatchFinished resets AbstractBatchDelegate before the surrounding
+        // parallel group releases its worker-reusable catalyst. Preserve the
+        // exact backend route until releaseReusableMaterials runs, otherwise a
+        // later order can leave the catalyst outside its originating storage.
+        this.catalystReturnEndpoint = storageEndpoint();
+        this.catalystReturnNetwork = this.network;
 
         // Check crucible is idle (no active recipe)
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
@@ -322,6 +335,27 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return materialReservationScopes(specs);
     }
 
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of());
+    }
+
+    @Override
+    public boolean supportsConcurrentNodeExecution() {
+        return true;
+    }
+
+    @Override
+    public boolean allowsOverlappingOutputCaptureOrigins() {
+        return true;
+    }
+
     static List<IBatchDelegate.MaterialReservationScope> materialReservationScopes(
             @Nullable List<IngredientSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
@@ -377,7 +411,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             this.usingSharedLedger = true;
         }
 
-        // ── 1. Place catalyst (MUST succeed before spirits are placed) ──
+        // Reserve the catalyst now, but place it only after every spirit. Malum
+        // resolves the recipe when the center slot changes, so writing it first
+        // can lock in a recipe that matches only the first spirit stack.
+        ItemStack catalystToPlace = ItemStack.EMPTY;
         if (invCatalyst.getStackInSlot(0).isEmpty()) {
             Field inputField = Reflect.findField(recipe.getClass(), "input").orElse(null);
             if (inputField != null) {
@@ -393,7 +430,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                                 ItemStack extracted = extractFromRS(player, ri, count,
                                         localLedger, usingSharedLedger);
                                 if (!extracted.isEmpty()) {
-                                    setSlot(invCatalyst, 0, extracted);
+                                    catalystToPlace = extracted;
                                 }
                             }
                         } else if (val instanceof net.minecraft.world.item.crafting.Ingredient ri) {
@@ -401,7 +438,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                             ItemStack extracted = extractFromRS(player, ri, 1,
                                     localLedger, usingSharedLedger);
                             if (!extracted.isEmpty()) {
-                                setSlot(invCatalyst, 0, extracted);
+                                catalystToPlace = extracted;
                             }
                         }
                     }
@@ -411,20 +448,20 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             }
         }
 
-        // Verify catalyst was placed before touching spirits
-        if (invCatalyst.getStackInSlot(0).isEmpty()) {
+        if (invCatalyst.getStackInSlot(0).isEmpty() && catalystToPlace.isEmpty()) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.malum_crucible.error.no_catalyst"));
             return false;
         }
 
-        // ── 2. Place spirits ──
-        if (!placeSpiritStacks(player, localLedger, usingSharedLedger)) {
+        List<ItemStack> spiritStacks = reserveSpiritStacks(player, localLedger, usingSharedLedger);
+        if (spiritStacks == null) {
             clearUncommittedPlacements();
             player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
                     "rsi.generic.error.missing_materials", recipe.getId().toString()));
             return false;
         }
+        placePreparedInputs(invSpirits, spiritStacks, invCatalyst, catalystToPlace);
 
         if (!activateExpectedRecipe(be, player)) {
             clearUncommittedPlacements();
@@ -452,34 +489,33 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
-    private boolean placeSpiritStacks(ServerPlayer player, ExtractionLedger ledger,
-                                      boolean useShared) {
+    @Nullable
+    private List<ItemStack> reserveSpiritStacks(ServerPlayer player, ExtractionLedger ledger,
+                                                boolean useShared) {
         Field field = Reflect.findField(recipe.getClass(), "spirits").orElse(null);
-        if (field == null) return true;
+        if (field == null) return List.of();
         try {
             field.setAccessible(true);
             List<?> spirits = (List<?>) field.get(recipe);
-            if (spirits == null || spirits.isEmpty()) return true;
-            if (spirits.size() > invSpirits.getSlots()) return false;
-            int slot = 0;
+            if (spirits == null || spirits.isEmpty()) return List.of();
+            if (spirits.size() > invSpirits.getSlots()) return null;
+            List<ItemStack> reserved = new ArrayList<>(spirits.size());
             for (Object swc : spirits) {
                 int count = Reflect.getIntField(swc, "count").orElse(1);
                 Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
                 if (!(itemObj instanceof net.minecraft.world.item.Item item) || count <= 0) {
-                    return false;
+                    return null;
                 }
                 ItemStack extracted = extractFromRS(player,
                         net.minecraft.world.item.crafting.Ingredient.of(item), count,
                         ledger, useShared);
-                if (extracted.isEmpty() || extracted.getCount() < count) return false;
-                // Malum stores one spirit type per slot. The requirement count
-                // is that slot's stack size, not repeated writes to one slot.
-                setSlot(invSpirits, slot++, extracted);
+                if (extracted.isEmpty() || extracted.getCount() < count) return null;
+                reserved.add(extracted);
             }
-            return true;
+            return reserved;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirits extract failed", e);
-            return false;
+            return null;
         }
     }
 
@@ -494,8 +530,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (invCatalyst == null || invSpirits == null) return false;
         if (Reflect.getField(be, "recipe").orElse(null) != null) return false;
 
-        // Place materials in order: [catalyst, spirit1, spirit2, ...]
-        int matIdx = 0;
+        // Material lists remain [catalyst, spirit1, spirit2, ...], while the
+        // physical placement order is spirits first and catalyst last.
+        int matIdx = materials.isEmpty() ? 0 : 1;
+        ItemStack catalystToPlace = ItemStack.EMPTY;
 
         if (!materials.isEmpty()) {
             boolean reusable = hasReusableCatalystInput();
@@ -506,21 +544,17 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 existing = ItemStack.EMPTY;
             }
             if (!existing.isEmpty()) {
-                matIdx++;
+                // A reusable catalyst can remain in place between operations.
             } else {
-                ItemStack mat = materials.get(matIdx++);
-                if (!mat.isEmpty()) setSlot(invCatalyst, 0, mat.copy());
+                catalystToPlace = materials.get(0).copy();
             }
         }
-        // Spirits — one per slot, each spirit count may need splitting
-        int spiritSlot = 0;
-        while (matIdx < materials.size() && spiritSlot < invSpirits.getSlots()) {
-            ItemStack mat = materials.get(matIdx++);
-            if (!mat.isEmpty()) {
-                setSlot(invSpirits, spiritSlot, mat.copy());
-            }
-            spiritSlot++;
+
+        List<ItemStack> spiritStacks = new ArrayList<>();
+        while (matIdx < materials.size() && spiritStacks.size() < invSpirits.getSlots()) {
+            spiritStacks.add(materials.get(matIdx++).copy());
         }
+        placePreparedInputs(invSpirits, spiritStacks, invCatalyst, catalystToPlace);
 
         if (!activateExpectedRecipe(be, player)) return false;
 
@@ -555,28 +589,96 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             init.setAccessible(true);
             init.invoke(crucible);
 
-            Field recipeField = null;
-            for (Class<?> current = crucible.getClass();
-                 current != null && current != Object.class;
-                 current = current.getSuperclass()) {
-                try {
-                    recipeField = current.getDeclaredField("recipe");
-                    break;
-                } catch (NoSuchFieldException ignored) {
-                    // Continue through compatibility subclasses.
-                }
-            }
+            Field recipeField = findField(crucible.getClass(), "recipe");
             if (recipeField == null) return false;
             recipeField.setAccessible(true);
-            Object active = recipeField.get(crucible);
-            if (active instanceof java.util.Optional<?> optional) {
-                active = optional.orElse(null);
-            }
-            if (!(active instanceof Recipe<?> activeRecipe)) return false;
-            return activeRecipe == expected || activeRecipe.getId().equals(expected.getId());
+            Object active = unwrapOptional(recipeField.get(crucible));
+            if (sameRecipe(active, expected)) return true;
+
+            // Malum selects the first recipe whose spirit counts are <= the
+            // inserted stacks. Modpacks can therefore have a low-cost recipe
+            // shadow a higher-cost recipe with the same catalyst and spirit
+            // types. Only override that ambiguous choice after Malum's own
+            // target-recipe predicates confirm the placed inputs.
+            if (!matchesPlacedInputs(crucible, expected)) return false;
+            Object selected = java.util.Optional.class.isAssignableFrom(recipeField.getType())
+                    ? java.util.Optional.of(expected) : expected;
+            recipeField.set(crucible, selected);
+            return sameRecipe(unwrapOptional(recipeField.get(crucible)), expected);
         } catch (ReflectiveOperationException | RuntimeException e) {
             return false;
         }
+    }
+
+    private static boolean matchesPlacedInputs(Object crucible, Recipe<?> expected)
+            throws ReflectiveOperationException {
+        IItemHandler catalyst = readHandlerDirect(crucible, "inventory");
+        IItemHandler spirits = readHandlerDirect(crucible, "spiritInventory");
+        if (catalyst == null || spirits == null || catalyst.getSlots() == 0) return false;
+
+        java.lang.reflect.Method inputMatch = findCompatibleMethod(
+                expected.getClass(), "doesInputMatch", ItemStack.class);
+        java.lang.reflect.Method spiritMatch = findCompatibleMethod(
+                expected.getClass(), "doSpiritsMatch", List.class);
+        if (inputMatch == null || spiritMatch == null) return false;
+
+        List<ItemStack> placedSpirits = new ArrayList<>();
+        for (int slot = 0; slot < spirits.getSlots(); slot++) {
+            ItemStack stack = spirits.getStackInSlot(slot);
+            if (!stack.isEmpty()) placedSpirits.add(stack);
+        }
+        inputMatch.setAccessible(true);
+        spiritMatch.setAccessible(true);
+        return Boolean.TRUE.equals(inputMatch.invoke(expected, catalyst.getStackInSlot(0)))
+                && Boolean.TRUE.equals(spiritMatch.invoke(expected, placedSpirits));
+    }
+
+    @Nullable
+    private static IItemHandler readHandlerDirect(Object owner, String name)
+            throws IllegalAccessException {
+        Field field = findField(owner.getClass(), name);
+        if (field == null) return null;
+        field.setAccessible(true);
+        Object value = field.get(owner);
+        return value instanceof IItemHandler handler ? handler : null;
+    }
+
+    private static boolean sameRecipe(@Nullable Object active, Recipe<?> expected) {
+        return active instanceof Recipe<?> activeRecipe
+                && (activeRecipe == expected || activeRecipe.getId().equals(expected.getId()));
+    }
+
+    @Nullable
+    private static Object unwrapOptional(@Nullable Object value) {
+        return value instanceof java.util.Optional<?> optional ? optional.orElse(null) : value;
+    }
+
+    @Nullable
+    private static Field findField(Class<?> type, String name) {
+        for (Class<?> current = type; current != null && current != Object.class;
+             current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                // Continue through compatibility subclasses.
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static java.lang.reflect.Method findCompatibleMethod(
+            Class<?> type, String name, Class<?> argumentType) {
+        for (Class<?> current = type; current != null && current != Object.class;
+             current = current.getSuperclass()) {
+            for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+                if (method.getName().equals(name) && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0].isAssignableFrom(argumentType)) {
+                    return method;
+                }
+            }
+        }
+        return null;
     }
 
     private static java.lang.reflect.Method findNoArgMethod(Class<?> type, String name) {
@@ -618,6 +720,18 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (crucible == null || level == null || pos == null) return false;
         try {
             java.lang.reflect.Method recalibrate = null;
+            // getMethods() includes public default methods declared by Malum's
+            // ICatalyzerAccelerationTarget interface.
+            for (java.lang.reflect.Method method : crucible.getClass().getMethods()) {
+                Class<?>[] parameters = method.getParameterTypes();
+                if (method.getName().equals("recalibrateAccelerators")
+                        && parameters.length == 2
+                        && parameters[0].isInstance(level)
+                        && parameters[1].isInstance(pos)) {
+                    recalibrate = method;
+                    break;
+                }
+            }
             for (Class<?> current = crucible.getClass();
                  current != null && current != Object.class && recalibrate == null;
                  current = current.getSuperclass()) {
@@ -740,25 +854,33 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public void onBatchFinished(@NotNull ServerPlayer player) {
         clearSpiritSlots();
         if (!hasReusableCatalystInput()) {
-            releaseCatalystSlot();
+            releaseCatalystSlot(player);
         }
         resetState();
     }
 
     @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
-        releaseCatalystSlot();
+        releaseCatalystSlot(player);
     }
 
-    private void releaseCatalystSlot() {
+    private void releaseCatalystSlot(@Nullable ServerPlayer returnPlayer) {
         if (invCatalyst == null) return;
+        boolean allReturned = true;
         for (int i = 0; i < invCatalyst.getSlots(); i++) {
             ItemStack catalyst = invCatalyst.getStackInSlot(i);
             if (catalyst.isEmpty()) continue;
-            returnCrucibleItem(catalyst.copy());
-            setSlot(invCatalyst, i, ItemStack.EMPTY);
+            if (tryReturnCrucibleItem(catalyst.copy(), returnPlayer)) {
+                setSlot(invCatalyst, i, ItemStack.EMPTY);
+            } else {
+                allReturned = false;
+            }
         }
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
+        if (allReturned) {
+            catalystReturnEndpoint = null;
+            catalystReturnNetwork = null;
+        }
     }
 
     private boolean hasReusableCatalystInput() {
@@ -795,6 +917,17 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Crucible] setSlot failed", e);
         }
+    }
+
+    static void placePreparedInputs(IItemHandler spiritHandler,
+                                    List<ItemStack> spiritStacks,
+                                    IItemHandler catalystHandler,
+                                    ItemStack catalystStack) {
+        for (int slot = 0; slot < spiritStacks.size() && slot < spiritHandler.getSlots(); slot++) {
+            ItemStack spirit = spiritStacks.get(slot);
+            if (!spirit.isEmpty()) setSlot(spiritHandler, slot, spirit);
+        }
+        if (!catalystStack.isEmpty()) setSlot(catalystHandler, 0, catalystStack);
     }
 
     private void clearSpiritSlots() {
@@ -862,19 +995,38 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private void returnCrucibleItem(ItemStack stack) {
-        if (stack.isEmpty()) return;
-        if (storageEndpoint() == null && network == null) {
-            network = CraftPacketUtils
-                    .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
+        tryReturnCrucibleItem(stack, player);
+    }
+
+    private boolean tryReturnCrucibleItem(ItemStack stack,
+                                          @Nullable ServerPlayer returnPlayer) {
+        if (stack.isEmpty()) return true;
+        CraftStorageEndpoint endpoint = storageEndpoint();
+        if (endpoint == null) endpoint = catalystReturnEndpoint;
+        INetwork returnNetwork = network != null ? network : catalystReturnNetwork;
+        if (endpoint == null && returnNetwork == null && returnPlayer != null) {
+            returnNetwork = CraftPacketUtils
+                    .resolveNetworkForCraft(returnPlayer, myLevel.dimension(), myPos);
         }
-        if (storageEndpoint() != null || network != null) {
-            ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
-            if (!leftover.isEmpty() && player != null) {
-                net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+        if (endpoint != null && returnPlayer != null) {
+            ItemStack leftover = endpoint.insert(returnPlayer, stack.copy(), false)
+                    .remainder().orElseGet(stack::copy);
+            if (!leftover.isEmpty()) {
+                PlayerUtils.safeGiveToPlayer(returnPlayer, leftover, returnNetwork);
             }
-        } else if (player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+            return true;
+        } else if (returnNetwork != null && returnPlayer != null) {
+            ItemStack leftover = CraftStorageEndpoints.insertLegacy(
+                    returnNetwork, returnPlayer, stack.copy(), false);
+            if (!leftover.isEmpty()) {
+                PlayerUtils.safeGiveToPlayer(returnPlayer, leftover, returnNetwork);
+            }
+            return true;
+        } else if (returnPlayer != null) {
+            PlayerUtils.safeGiveToPlayer(returnPlayer, stack.copy(), null);
+            return true;
         }
+        return false;
     }
 
     private ItemStack extractFromRS(ServerPlayer player, net.minecraft.world.item.crafting.Ingredient ingredient,

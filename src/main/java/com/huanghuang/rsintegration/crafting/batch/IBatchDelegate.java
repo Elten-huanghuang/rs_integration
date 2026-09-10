@@ -79,6 +79,10 @@ public interface IBatchDelegate {
             return new PreparationResult(PreparationState.RETRY, detail);
         }
 
+        public static PreparationResult retry(String detail, Component userMessage) {
+            return new PreparationResult(PreparationState.RETRY, detail, userMessage);
+        }
+
         public static PreparationResult fatal(String detail) {
             return new PreparationResult(PreparationState.FATAL, detail);
         }
@@ -95,6 +99,22 @@ public interface IBatchDelegate {
     /** Number of repeated flat-plan operations this delegate can execute as one physical batch. */
     default int prepareFlatBatch(int remainingOperations) {
         return remainingOperations > 0 ? 1 : 0;
+    }
+
+    /**
+     * Maximum logical operations admitted to one flat dispatch after this
+     * delegate has inspected its physical machine. Most machines retain the
+     * configured server-work bound. A delegate may raise it only to expose one
+     * bounded native machine batch that it processes under a single operation
+     * lease, such as a multi-lane furnace factory.
+     */
+    default int flatBatchOperationLimit(int configuredLimit) {
+        return Math.max(1, configuredLimit);
+    }
+
+    /** Whether flat multi-machine dispatch should probe prepared delegates for a larger native batch. */
+    default boolean expandsFlatBatchOperationLimit() {
+        return false;
     }
 
     /** Announces the aggregate execution count before graph output capture is armed. */

@@ -247,11 +247,8 @@ public final class PureDemandTreeInspector {
             Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
-                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
-                if (coverage == Coverage.COVERED) {
-                    ledger.add(alternative, remaining);
-                    return Coverage.COVERED;
-                }
+                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode(), true);
+                if (coverage == Coverage.COVERED) return Coverage.COVERED;
                 if (coverage == Coverage.NODE_LIMIT) {
                     best = Coverage.NODE_LIMIT;
                     break;
@@ -305,6 +302,11 @@ public final class PureDemandTreeInspector {
 
         private Coverage coverMaterial(MaterialRef material, int count,
                                        ImmutableRecipeGraph.NbtMatchMode mode) {
+            return coverMaterial(material, count, mode, false);
+        }
+
+        private Coverage coverMaterial(MaterialRef material, int count,
+                                       ImmutableRecipeGraph.NbtMatchMode mode, boolean catalyst) {
             if (count <= 0) return Coverage.COVERED;
             if (budgetExpired()) return Coverage.NODE_LIMIT;
             if (nodeLimitReached) return Coverage.NODE_LIMIT;
@@ -357,7 +359,12 @@ public final class PureDemandTreeInspector {
                             candidateCoverage = Coverage.MISSING_MATERIALS;
                         }
                     }
-                    if (candidateCoverage == Coverage.COVERED) return Coverage.COVERED;
+                    if (candidateCoverage == Coverage.COVERED) {
+                        long remainingOutput = batches * candidate.outputCount() - (catalyst ? 0L : count);
+                        if (remainingOutput > 0L) ledger.add(candidate.output(),
+                                (int) Math.min(Integer.MAX_VALUE, remainingOutput));
+                        return Coverage.COVERED;
+                    }
                     if (candidateCoverage == Coverage.NODE_LIMIT) return Coverage.NODE_LIMIT;
                     // Candidate recipes are OR branches, so any fully projected shortage path
                     // makes this material safe for the background planner.

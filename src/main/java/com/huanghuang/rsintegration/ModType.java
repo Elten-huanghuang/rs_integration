@@ -315,6 +315,14 @@ public final class ModType {
         }
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
         if (cn.endsWith("ApplyModifierRecipe")) return null;
+        // Several mods wrap vanilla smithing recipes in subclasses whose class
+        // names no longer start with the registered vanilla recipe prefixes.
+        // Classify by the recipe contract so binding and execution agree with
+        // SmithingRecipeHandler (for example Sophisticated Backpacks upgrades).
+        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
+                || recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+            return byId("smithing");
+        }
 
         // Cooking pot recipes: distinguish by result's crafting remainder (the bowl/pot type)
         if (cn.startsWith("dev.xkmc.youkaishomecoming.content.pot.cooking.")) {

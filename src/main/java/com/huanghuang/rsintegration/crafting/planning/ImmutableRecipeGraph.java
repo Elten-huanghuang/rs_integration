@@ -29,10 +29,16 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
         return indexed;
     }
 
-    public record MaterialRef(ResourceLocation itemId, String nbt) {
+    /** Runtime NBT is unknown, not a promise that the produced stack is tagless. */
+    public record MaterialRef(ResourceLocation itemId, String nbt, boolean runtimeNbt) {
+        public MaterialRef(ResourceLocation itemId, String nbt) {
+            this(itemId, nbt, false);
+        }
+
         public MaterialRef {
             if (itemId == null) throw new IllegalArgumentException("itemId");
             nbt = nbt == null ? "" : nbt;
+            if (runtimeNbt && !nbt.isEmpty()) throw new IllegalArgumentException("unknown output NBT");
         }
     }
 

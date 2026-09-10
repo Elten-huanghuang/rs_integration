@@ -176,7 +176,8 @@ public final class PureRecipePlanner {
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
     private record DemandTask(IngredientRef ingredient) implements Task {}
     private record CompleteRecipeTask(MaterialRef output, int outputCount, int consumeCount,
-                                      ResourceLocation recipeId, int batches) implements Task {}
+                                      ResourceLocation recipeId, int batches,
+                                      MaterialRef resolvingMaterial) implements Task {}
     private record FailureKey(List<Task> pending, Map<MaterialRef, Integer> stock,
                               Set<MaterialRef> resolving, int stepCount) {}
 
@@ -335,8 +336,16 @@ public final class PureRecipePlanner {
                         continuation.add(new DemandTask(ingredient));
                         continuation.addAll(rest);
                     }
+                    // Production may have a different NBT identity than the demand.
+                    // Consume the combined existing and new variants through the matcher.
+                    if (selfConsumed == 0 && !catalyst && !candidate.output().equals(wanted)) {
+                        consumeCount = 0;
+                        continuation = new ArrayList<>(rest.size() + 1);
+                        continuation.add(new DemandTask(ingredient));
+                        continuation.addAll(rest);
+                    }
                     List<Task> branch = recipeBranch(candidate, scheduledBatches,
-                            consumeCount, continuation);
+                            consumeCount, continuation, wanted);
                     if (branch == null) continue;
                     resolving.add(wanted);
                     if (solve(branch)) return true;
@@ -461,7 +470,7 @@ public final class PureRecipePlanner {
             if (afterProduction < completed.consumeCount() || afterProduction > Integer.MAX_VALUE) {
                 return false;
             }
-            resolving.remove(completed.output());
+            resolving.remove(completed.resolvingMaterial());
             setStock(completed.output(), (int) afterProduction - completed.consumeCount());
             RecipeNode source = graph.recipesById().get(completed.recipeId());
             MaterialRef demanded = source != null && "smithing".equals(source.modTypeId())
@@ -470,13 +479,13 @@ public final class PureRecipePlanner {
             if (solve(rest)) return true;
             steps.remove(steps.size() - 1);
             setStock(completed.output(), before);
-            resolving.add(completed.output());
+            resolving.add(completed.resolvingMaterial());
             backtracks++;
             return false;
         }
 
         private List<Task> recipeBranch(RecipeNode candidate, int batches, int consumeCount,
-                                        List<Task> rest) {
+                                        List<Task> rest, MaterialRef resolvingMaterial) {
             List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(candidate.inputs());
             List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
             for (IngredientRef input : inputs) {
@@ -485,7 +494,7 @@ public final class PureRecipePlanner {
                 branch.add(new DemandTask(input.withCount((int) scaled)));
             }
             branch.add(new CompleteRecipeTask(candidate.output(), candidate.outputCount(),
-                    consumeCount, candidate.recipeId(), batches));
+                    consumeCount, candidate.recipeId(), batches, resolvingMaterial));
             branch.addAll(rest);
             return List.copyOf(branch);
         }
@@ -840,7 +849,7 @@ public final class PureRecipePlanner {
                 long surplus = (long) recipe.outputCount() * batches
                         - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
                 if (surplus > 0L) {
-                    stock.merge(choice.output(), (int) Math.min(Integer.MAX_VALUE, surplus),
+                    stock.merge(recipe.output(), (int) Math.min(Integer.MAX_VALUE, surplus),
                             (left, right) -> (int) Math.min(
                                     Integer.MAX_VALUE, (long) left + right));
                 }

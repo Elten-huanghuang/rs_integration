@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
@@ -10,6 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -20,6 +22,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SmithingRecipeHandlerTest extends BootstrapTest {
+
+    @BeforeAll
+    static void registerSmithingTypeForClassificationTest() {
+        if (ModType.findById("smithing") == null) {
+            ModType.register("smithing", new String[]{
+                    "net.minecraft.world.item.crafting.SmithingTransformRecipe",
+                    "net.minecraft.world.item.crafting.SmithingTrimRecipe"
+            }, new String[]{"smithing_table"}, new String[]{"smithing"}, () -> null);
+        }
+    }
 
     @Test
     void actualAssemblyPreservesRepairCostAndModifierInsteadOfRebuildingABareTool() throws Exception {
@@ -110,6 +122,18 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
     @Test
     void transformOutputNbtIsDeclaredAsRuntimeDependent() {
         assertTrue(new SmithingRecipeHandler().hasRuntimeDependentPrimaryNbt(recipe()));
+    }
+
+    @Test
+    void smithingSubclassUsesTheSmithingExecutionType() {
+        SmithingTransformRecipe wrapped = new SmithingTransformRecipe(
+                new ResourceLocation("test", "wrapped_smithing"),
+                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                Ingredient.of(Items.DIAMOND_CHESTPLATE),
+                Ingredient.of(Items.NETHERITE_INGOT),
+                new ItemStack(Items.NETHERITE_CHESTPLATE)) {};
+
+        assertEquals(ModType.byId("smithing"), ModType.classifyRecipe(wrapped));
     }
 
     @Test

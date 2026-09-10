@@ -331,8 +331,8 @@ public final class RSIntegrationConfig {
                 .comment("Enable RS integration with Farmer's Respite (Kettle fluid brewing).")
                 .define("enableFarmersRespite", true);
         ENABLE_IRON_FURNACES = c
-                .comment("Enable RS integration with Iron Furnaces ordinary furnace mode.",
-                        "Supports smelting, blasting, and smoking recipes; Factory and Generator modes are not supported.")
+                .comment("Enable RS integration with Iron Furnaces furnace and factory modes.",
+                        "Supports smelting, blasting, and smoking recipes; Generator mode is not supported.")
                 .define("enableIronFurnaces", true);
         ENABLE_DISTANT_WORLDS = c
                 .comment("Enable RS integration with Distant Worlds Lithum Altar Firon recipes.")
@@ -874,6 +874,7 @@ public final class RSIntegrationConfig {
         CRAFTING_OPERATIONS_PER_DISPATCH = s
                 .comment("Maximum recipe operations RSI may reserve and commit in one non-vanilla dispatch.",
                         "Larger graph nodes automatically use the flat, tick-sliced executor.",
+                        "A machine delegate may raise this to one bounded native physical batch.",
                         "This bounds ledger entries, storage calls, and batch output work per dispatch. Range: 1-256.")
                 .defineInRange("craftingOperationsPerDispatch",
                         DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH, 1, 256);

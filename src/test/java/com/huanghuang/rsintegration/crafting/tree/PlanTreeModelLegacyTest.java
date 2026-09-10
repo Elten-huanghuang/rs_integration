@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -60,5 +61,44 @@ class PlanTreeModelLegacyTest extends BootstrapTest {
         assertEquals(altarId, altarNode.step.recipeId());
         assertTrue(altarNode.prerequisiteBlocked);
         assertEquals("Missing altar structure", altarNode.warnings.get(0).getString());
+    }
+
+    @Test
+    void treeRetainsAnExecutionStepThatCardViewCanShowButCannotBeLinked() {
+        ResourceLocation rootId = new ResourceLocation("test", "root");
+        ResourceLocation intermediateId = new ResourceLocation("minecraft", "kjs/malum_wicked_spirit");
+        ItemStack taggedIntermediate = new ItemStack(Items.PAPER);
+        CompoundTag tag = new CompoundTag();
+        tag.putString("variant", "wicked");
+        taggedIntermediate.setTag(tag);
+        PlanStep intermediate = new PlanStep(intermediateId, taggedIntermediate, 1,
+                List.of(new ItemStack(Items.BLAZE_POWDER, 2)), List.of(),
+                ModType.byId("generic"));
+        PlanStep root = new PlanStep(rootId, new ItemStack(Items.DIAMOND), 1,
+                List.of(new ItemStack(Items.PAPER)), List.of(), ModType.byId("generic"));
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(intermediate, root), Map.of(), List.of(), rootId.toString());
+
+        PlanTreeNode treeRoot = PlanTreeModel.from(plan).root;
+
+        assertTrue(treeRoot.children.stream().anyMatch(node -> node.step != null
+                && node.step.recipeId().equals(intermediateId)));
+    }
+
+    @Test
+    void treeDoesNotAttachAnUnreachableLegacyManifestStep() {
+        ResourceLocation rootId = new ResourceLocation("test", "root");
+        ResourceLocation unrelatedId = new ResourceLocation("test", "unrelated");
+        PlanStep unrelated = new PlanStep(unrelatedId, new ItemStack(Items.EMERALD), 1,
+                List.of(new ItemStack(Items.COAL)), List.of(), ModType.byId("generic"));
+        PlanStep root = new PlanStep(rootId, new ItemStack(Items.DIAMOND), 1,
+                List.of(new ItemStack(Items.PAPER)), List.of(), ModType.byId("generic"));
+        PlanResponse plan = new PlanResponse(true, "Diamond", new ItemStack(Items.DIAMOND),
+                List.of(unrelated, root), Map.of(), List.of(), rootId.toString());
+
+        PlanTreeNode treeRoot = PlanTreeModel.from(plan).root;
+
+        assertTrue(treeRoot.children.stream().noneMatch(node -> node.step != null
+                && node.step.recipeId().equals(unrelatedId)));
     }
 }

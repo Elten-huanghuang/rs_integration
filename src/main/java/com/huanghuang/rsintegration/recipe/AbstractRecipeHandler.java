@@ -23,14 +23,15 @@ public abstract class AbstractRecipeHandler implements ModRecipeHandler {
     }
 
     /**
-     * A class-prefix handler is not enough evidence that a machine recipe is
-     * safe to project off-thread.  Subclasses must opt in after verifying that
-     * the recipe's inputs and output do not depend on a live block entity,
-     * world state, capability, or random result.
+     * Prefix handlers still have to expose a deterministic, value-only recipe
+     * contract before they can enter the immutable planning graph. The shared
+     * interface check rejects random outputs and recipes whose ingredient list
+     * cannot be extracted. Runtime NBT remains unknown in the graph. RecipeIndex applies
+     * the separate machine-type execution audit before projecting the recipe.
      */
     @Override
     public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
-        return false;
+        return ModRecipeHandler.super.supportsBackgroundPlanning(recipe);
     }
 
     @Override

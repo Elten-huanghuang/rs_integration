@@ -126,7 +126,8 @@ public final class ImmutableRecipeGraphProjector {
             if (input == null) return null;
             inputs.add(input);
         }
-        MaterialRef outputRef = material(output, includeOutputNbt && output.hasTag());
+        MaterialRef outputRef = includeOutputNbt ? material(output, output.hasTag())
+                : new MaterialRef(BuiltInRegistries.ITEM.getKey(output.getItem()), "", true);
         return new RecipeNode(recipeId, outputRef, Math.max(1, output.getCount()),
                 inputs, modTypeId, recipeTypeId);
     }
@@ -335,11 +336,7 @@ public final class ImmutableRecipeGraphProjector {
         for (MaterialRef expected : ingredient.alternatives()) {
             for (MaterialRef actual : availableByItem.getOrDefault(
                     expected.itemId(), List.of())) {
-                if (ingredient.nbtMatchMode() == NbtMatchMode.ANY
-                        || isTaintedEarthHeart(actual, expected)
-                        || (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
-                        ? exactNbtMatches(expected.nbt(), actual.nbt())
-                        : partialNbtMatches(expected.nbt(), actual.nbt()))) {
+                if (matchesIngredient(actual, ingredient)) {
                     alternatives.add(actual);
                 }
             }
@@ -362,6 +359,7 @@ public final class ImmutableRecipeGraphProjector {
         for (MaterialRef expected : ingredient.alternatives()) {
             if (!actual.itemId().equals(expected.itemId())) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
+            if (actual.runtimeNbt()) continue;
             if (isTaintedEarthHeart(actual, expected)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                     ? exactNbtMatches(expected.nbt(), actual.nbt())
@@ -384,7 +382,8 @@ public final class ImmutableRecipeGraphProjector {
 
     static RecipeNode withDemandedOutput(RecipeNode recipe, MaterialRef wanted,
                                          NbtMatchMode mode) {
-        if (wanted.nbt().isEmpty() || !"smithing".equals(recipe.modTypeId())
+        if (wanted.runtimeNbt() || (wanted.nbt().isEmpty() && mode != NbtMatchMode.EXACT)
+                || !"smithing".equals(recipe.modTypeId())
                 || !recipe.output().itemId().equals(wanted.itemId())
                 || recipe.inputs().size() != 3) return recipe;
         List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
@@ -401,7 +400,20 @@ public final class ImmutableRecipeGraphProjector {
     static List<RecipeNode> candidates(ImmutableRecipeGraph graph, MaterialRef wanted,
                                        NbtMatchMode mode) {
         if (mode == NbtMatchMode.EXACT && wanted.nbt().isEmpty()) {
-            return graph.recipesByOutput().getOrDefault(wanted, List.of());
+            if (wanted.runtimeNbt()) return List.of();
+            List<RecipeNode> direct = graph.recipesByOutput().getOrDefault(wanted, List.of());
+            List<RecipeNode> combined = null;
+            // Preserve the constant-time tagless lookup. Only smithing can prove
+            // a tagless result from an unknown output by constraining its base.
+            for (RecipeNode recipe : graph.recipesByOutput().getOrDefault(
+                    new MaterialRef(wanted.itemId(), "", true), List.of())) {
+                if (!"smithing".equals(recipe.modTypeId())) continue;
+                RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
+                if (specialized == null || specialized.output().runtimeNbt()) continue;
+                if (combined == null) combined = new ArrayList<>(direct);
+                combined.add(specialized);
+            }
+            return combined == null ? direct : combined;
         }
         IngredientRef demand = new IngredientRef(List.of(wanted), 1, mode);
         List<RecipeNode> candidates = new ArrayList<>();
@@ -409,7 +421,7 @@ public final class ImmutableRecipeGraphProjector {
             for (RecipeNode recipe : graph.recipesByOutput().get(output)) {
                 if (matchesIngredient(output, demand)) {
                     candidates.add(recipe);
-                } else if (!wanted.nbt().isEmpty() && "smithing".equals(recipe.modTypeId())) {
+                } else if ("smithing".equals(recipe.modTypeId())) {
                     RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
                     if (specialized != null && matchesIngredient(specialized.output(), demand)) {
                         candidates.add(specialized);

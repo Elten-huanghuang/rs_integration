@@ -466,6 +466,11 @@ public final class AltarBindingRegistry {
         };
     }
 
+    /** Resolve the delegate type for a binding accepted by a recipe type. */
+    public static ModType executionTypeForBinding(ModType requested, ModType bound) {
+        return isCompatibleMachineType(requested, bound) ? bound : requested;
+    }
+
     // ── event handlers ──────────────────────────────────────────
 
     @SubscribeEvent
@@ -654,7 +659,13 @@ public final class AltarBindingRegistry {
                     continue;
                 }
                 if (!hasUsableStorageBinding(player, altarDim, entry.pos())) continue;
-                out.add(new BoundMachine(entry.dim(), entry.pos(), type, entry.blockKey()));
+                // Keep the concrete binding type. A recipe can deliberately use a
+                // compatible alias (notably vanilla_furnace -> ironfurnaces_furnace),
+                // but execution must still instantiate the bound machine's delegate.
+                // Falling back to the requested type is required for compatibility
+                // routes such as PMMO salvage that do not represent a delegate alias.
+                ModType executionType = executionTypeForBinding(type, entryType);
+                out.add(new BoundMachine(entry.dim(), entry.pos(), executionType, entry.blockKey()));
             }
         }
     }
