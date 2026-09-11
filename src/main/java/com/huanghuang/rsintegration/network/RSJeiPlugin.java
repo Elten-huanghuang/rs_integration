@@ -203,6 +203,14 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            registration.addGuiScreenHandler(
+                    com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen.class,
+                    new com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeJeiScreenHandler());
+            registration.addGhostIngredientHandler(
+                    com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen.class,
+                    new com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeGhostIngredientHandler());
+        }
         registerOptionalRefinedStorageGuiHandler(registration);
         registerOptionalBeyondDimensionsGuiHandlers(registration);
         if (!ModList.get().isLoaded(ModIds.APOTHEOSIS)) return;

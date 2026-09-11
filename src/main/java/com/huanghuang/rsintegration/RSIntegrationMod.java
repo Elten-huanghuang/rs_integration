@@ -568,6 +568,16 @@ public final class RSIntegrationMod {
                     ));
         }
 
+        // Enchanting is player/seed driven rather than recipe driven. Register
+        // only its GUI so it can be bound and opened remotely without exposing
+        // a batch-crafting or recursive-crafting action.
+        BindingEventHandler.registerTarget(
+                new BindingEventHandler.MachineBindingTarget(
+                        "minecraft", ModType.CUSTOM_GUI,
+                        RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                        List.of(), List.of("minecraft:enchanting_table"),
+                        "custom_gui", true));
+
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()
                 && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)

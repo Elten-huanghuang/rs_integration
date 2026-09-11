@@ -27,6 +27,8 @@ public final class RSOptionalBootstrap {
     public static void registerItems(IEventBus modBus) {
         ModItems.registerOptionalResonance(modBus,
                 () -> com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem.INSTANCE);
+        ModItems.registerOptionalVoidUpgrade(modBus,
+                com.huanghuang.rsintegration.voidupgrade.RSVoidUpgradeItem::new);
     }
 
     public static void registerBindings() {
@@ -34,6 +36,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerCommon() {
+        com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler.register();
         ResonanceStorageResolvers.register(RSInventoryBridge::resolveResonanceView);
         API.instance().getStorageDiskRegistry().add(
                 ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
@@ -72,6 +75,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void clearServerState() {
+        com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler.clearServerState();
         RSSidePanelNetworkHandler.clearServerState();
     }
 

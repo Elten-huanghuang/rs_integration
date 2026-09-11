@@ -118,4 +118,5 @@ public final class NetworkPacketIds {
     public static final int JEI_CHEAT_DROP = 136;
     public static final int RECIPE_AVAILABILITY_REQUEST = 137;
     public static final int RECIPE_AVAILABILITY_RESULT = 138;
+    public static final int VOID_UPGRADE_CONFIG = 139;
 }

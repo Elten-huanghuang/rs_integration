@@ -31,6 +31,7 @@ public final class ModItems {
     /** Optional RS-owned entries are registered only by RSOptionalBootstrap. */
     public static RegistryObject<Item> RESONANCE_STORAGE_DISK;
     public static RegistryObject<Item> DIMENSIONAL_RESONANCE_DISK;
+    public static RegistryObject<Item> RS_VOID_UPGRADE;
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
@@ -55,6 +56,7 @@ public final class ModItems {
                         acceptIfPresent(output, "rs_magnet_upgrade");
                         acceptIfPresent(output, "rs_refill_upgrade");
                         acceptIfPresent(output, "rs_feeding_upgrade");
+                        acceptIfPresent(output, "rs_void_upgrade");
                     })
                     .build());
 
@@ -77,6 +79,11 @@ public final class ModItems {
     public static void registerOptionalResonance(IEventBus modBus,
                                                   Supplier<? extends Item> diskSupplier) {
         RESONANCE_STORAGE_DISK = ITEMS.register("resonance_storage_disk", diskSupplier);
+    }
+
+    public static void registerOptionalVoidUpgrade(IEventBus modBus,
+                                                    Supplier<? extends Item> supplier) {
+        RS_VOID_UPGRADE = ITEMS.register("rs_void_upgrade", supplier);
     }
 
     public static void registerOptionalBeyondDimensions(IEventBus modBus,
