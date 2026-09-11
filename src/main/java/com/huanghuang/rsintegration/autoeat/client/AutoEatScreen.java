@@ -134,12 +134,10 @@ public final class AutoEatScreen extends Screen {
         addRenderableWidget(searchBox);
 
         int btnY = panelTop + PANEL_H - 27;
-        if (mode != AutoEatMode.STACK) {
-            addRenderableWidget(new FlatButton(panelLeft + 12, btnY, 48, 20,
-                    Component.translatable("rsi.autoeat.btn.select_all"), this::selectAllVisible, false));
-            addRenderableWidget(new FlatButton(panelLeft + 64, btnY, 48, 20,
-                    Component.translatable("rsi.autoeat.btn.deselect"), this::clearVisible, false));
-        }
+        addRenderableWidget(new FlatButton(panelLeft + 12, btnY, 48, 20,
+                Component.translatable("rsi.autoeat.btn.select_all"), this::selectAllVisible, false));
+        addRenderableWidget(new FlatButton(panelLeft + 64, btnY, 48, 20,
+                Component.translatable("rsi.autoeat.btn.deselect"), this::clearVisible, false));
         addRenderableWidget(new FlatButton(panelLeft + PANEL_W - 62, btnY, 50, 20,
                 Component.translatable("gui.done"), this::onClose, true));
 
@@ -219,13 +217,17 @@ public final class AutoEatScreen extends Screen {
     private void selectAllVisible() {
         int start = page * entriesPerPage();
         int end = Math.min(start + entriesPerPage(), filteredEntries.size());
-        activeBlacklist().addAll(filteredEntries.subList(start, end));
+        List<ResourceLocation> visible = filteredEntries.subList(start, end);
+        if (mode == AutoEatMode.STACK) ClientState.selectItems(visible);
+        else activeBlacklist().addAll(visible);
     }
 
     private void clearVisible() {
         int start = page * entriesPerPage();
         int end = Math.min(start + entriesPerPage(), filteredEntries.size());
-        activeBlacklist().removeAll(filteredEntries.subList(start, end));
+        List<ResourceLocation> visible = filteredEntries.subList(start, end);
+        if (mode == AutoEatMode.STACK) ClientState.deselectItems(visible);
+        else activeBlacklist().removeAll(visible);
     }
 
     @Override
@@ -242,7 +244,7 @@ public final class AutoEatScreen extends Screen {
             int sy = entryY(local);
             ResourceLocation key = filteredEntries.get(i);
             boolean blacklisted = activeBlacklist().contains(key);
-            boolean selected = mode == AutoEatMode.STACK && key.equals(ClientState.selectedItem);
+            boolean selected = mode == AutoEatMode.STACK && ClientState.selectedItems.contains(key);
             boolean hovered = isMouseOverSlot(mouseX, mouseY, sx, sy);
 
             int background = selected
@@ -327,11 +329,16 @@ public final class AutoEatScreen extends Screen {
     }
 
     private String titleText() {
-        if (mode == AutoEatMode.STACK && ClientState.selectedItem != null) {
-            Item selected = ForgeRegistries.ITEMS.getValue(ClientState.selectedItem);
-            String name = selected == null ? ClientState.selectedItem.toString()
+        if (mode == AutoEatMode.STACK && ClientState.selectedItems.size() == 1) {
+            ResourceLocation selectedId = ClientState.selectedItems.iterator().next();
+            Item selected = ForgeRegistries.ITEMS.getValue(selectedId);
+            String name = selected == null ? selectedId.toString()
                     : selected.getDescription().getString();
             return Component.translatable("rsi.autoeat.title.select", name).getString();
+        }
+        if (mode == AutoEatMode.STACK && !ClientState.selectedItems.isEmpty()) {
+            return Component.translatable("rsi.autoeat.title.select_count",
+                    ClientState.selectedItems.size()).getString();
         }
         if (mode == AutoEatMode.STACK) {
             return Component.translatable("rsi.autoeat.btn.select").getString();
@@ -353,7 +360,7 @@ public final class AutoEatScreen extends Screen {
             if (index >= 0) {
                 ResourceLocation key = filteredEntries.get(index);
                 if (mode == AutoEatMode.STACK) {
-                    ClientState.selectItem(key);
+                    ClientState.toggleSelectedItem(key);
                 } else {
                     Set<ResourceLocation> blacklist = activeBlacklist();
                     boolean wasBlacklisted = blacklist.contains(key);

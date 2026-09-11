@@ -1,16 +1,20 @@
 package com.huanghuang.rsintegration.autoeat.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatPacket;
 import com.huanghuang.rsintegration.autoeat.network.RequestBlacklistPacket;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -18,12 +22,25 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.function.Consumer;
 
 @OnlyIn(Dist.CLIENT)
 public final class AutoEatClientEvents {
 
     private AutoEatClientEvents() {}
+
+    private static final int BUTTON_WIDTH = 64;
+    private static final int BUTTON_HEIGHT = 20;
+    private static final int BUTTON_GAP = 4;
+    private static final int SIDEBAR_GAP = 2;
+    private static final ResourceLocation HUD_ICONS = new ResourceLocation("textures/gui/icons.png");
+    private static final ResourceLocation RS_ICONS =
+            new ResourceLocation("refinedstorage", "textures/icons.png");
+    private static final ResourceLocation BD_SLOT =
+            new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button.png");
+    private static final ResourceLocation BD_SLOT_HOVER =
+            new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button_hovered.png");
 
     private static boolean blacklistRequested;
 
@@ -87,9 +104,11 @@ public final class AutoEatClientEvents {
         AutoEatButton existingEat = null;
         AutoEatButton existingSelect = null;
         AutoEatButton existingMode = null;
+        AutoEatButton existingMenu = null;
         for (Object listener : screen.children()) {
             if (listener instanceof AutoEatButton) {
                 switch (((AutoEatButton) listener).role) {
+                    case MENU -> existingMenu = (AutoEatButton) listener;
                     case EAT -> existingEat = (AutoEatButton) listener;
                     case SELECT -> existingSelect = (AutoEatButton) listener;
                     case MODE -> existingMode = (AutoEatButton) listener;
@@ -97,16 +116,16 @@ public final class AutoEatClientEvents {
             }
         }
 
-        int btnW = 64;
-        int btnH = 20;
-        int btnGap = 4;
         boolean beyondDimensions = isBeyondDimensionsScreen(screen);
         // RS Grid keeps its established left-side placement. BD's main panel
         // is a centered 176px surface; anchor the buttons beside that panel
         // instead of reusing the RS offset, which puts them roughly 150px
         // away on the BD terminal screen.
-        int x;
-        int yBase;
+        int menuX;
+        int menuY;
+        int menuSize;
+        int secondaryX;
+        int secondaryY;
         if (beyondDimensions) {
             // Keep the controls in the left gutter of BD's item grid. Resolve
             // the real container edge when available so GUI scaling does not
@@ -122,49 +141,98 @@ public final class AutoEatClientEvents {
             // BD owns a vertical strip of 16px buttons at leftPos - 18.
             // Keep our controls further left so none of BD's native controls
             // are covered, and anchor to the actual dynamic panel bottom.
-            x = Math.max(4, guiLeft - btnW - 26);
-            yBase = Math.max(4, guiTop + imageHeight - (btnH * 4 + btnGap * 3) - 4);
-            // BD's native side-button slot is 18px tall. Move the custom
-            // three-button stack down by exactly one of its own slots.
-            x += 25;
-            yBase += btnH + btnGap;
+            menuSize = 16;
+            menuX = Math.max(0, guiLeft - 18);
+            // Machine Center and Resonance occupy slots 9 and 10. Auto Eat
+            // continues the same native 18px-pitch strip in slot 11.
+            menuY = guiTop + 6 + 18 * 10;
+            secondaryX = Math.max(4, guiLeft - BUTTON_WIDTH - 26) + 25;
+            secondaryY = Math.max(4, guiTop + imageHeight
+                    - (BUTTON_HEIGHT * 4 + BUTTON_GAP * 3) - 4)
+                    + BUTTON_HEIGHT + BUTTON_GAP;
         } else {
             // Preserve the original RS Grid-relative placement. Reflection is
             // used here so BD-only clients never link an RS screen class.
             int guiLeft = resolveScreenInt(screen, "getGuiLeft", "leftPos", screen.width / 2 - 88);
             int guiTop = resolveScreenInt(screen, "getGuiTop", "topPos", screen.height / 2 - 80);
+            menuSize = 18;
+            int resonanceRelX = resolveScreenInt(screen,
+                    "rsi$getResonanceBackpackButtonX", "rsi$resonanceBackpackRelX", -20);
+            int resonanceRelY = resolveScreenInt(screen,
+                    "rsi$getResonanceBackpackButtonY", "rsi$resonanceBackpackRelY", Integer.MIN_VALUE);
+            menuX = guiLeft + (resonanceRelX < 0 ? resonanceRelX : -20);
+            if (resonanceRelY == Integer.MIN_VALUE || resonanceRelY <= 0) {
+                int ySize = resolveScreenInt(screen, "getYSize", "imageHeight", 166);
+                menuY = Math.max(4, guiTop + ySize - menuSize);
+            } else {
+                menuY = guiTop + resonanceRelY + menuSize + SIDEBAR_GAP;
+            }
             int ySize = resolveScreenInt(screen, "getYSize", "imageHeight", 166);
-            x = Math.max(4, guiLeft - btnW - 4);
-            yBase = Math.max(4, guiTop + ySize - (btnH * 3 + btnGap * 2) - 2);
+            secondaryX = Math.max(4, guiLeft - BUTTON_WIDTH - 4);
+            secondaryY = Math.max(4, guiTop + ySize
+                    - (BUTTON_HEIGHT * 3 + BUTTON_GAP * 2) - 2);
         }
 
-        // Button 1 — Eat (one-shot)
-        AutoEatButton eatBtn = new AutoEatButton(Role.EAT, x, yBase, btnW, btnH,
+        boolean expanded = isMenuExpanded(screen);
+
+        AutoEatButton menuBtn = new AutoEatButton(Role.MENU, menuX, menuY,
+                menuSize, menuSize, getMenuLabel(), getMenuTooltip(expanded),
+                btn -> {
+                    boolean nextExpanded = !isMenuExpanded(screen);
+                    rememberMenuExpanded(nextExpanded);
+                    btn.setTooltip(getMenuTooltip(nextExpanded));
+                    setSecondaryControlsVisible(screen, nextExpanded);
+                });
+        menuBtn.setMenuStyle(beyondDimensions);
+        if (existingMenu == null) adder.add(menuBtn);
+        else {
+            existingMenu.setX(menuX);
+            existingMenu.setY(menuY);
+            existingMenu.setWidth(menuSize);
+            existingMenu.setHeight(menuSize);
+            existingMenu.setMessage(getMenuLabel());
+            existingMenu.setTooltip(getMenuTooltip(expanded));
+            existingMenu.setMenuStyle(beyondDimensions);
+        }
+
+        // Keep the three established controls at their original screen anchors.
+        AutoEatButton eatBtn = new AutoEatButton(Role.EAT, secondaryX, secondaryY,
+                BUTTON_WIDTH, BUTTON_HEIGHT,
                 Component.translatable("rsi.autoeat.btn.eat"),
                 Tooltip.create(Component.translatable("rsi.autoeat.btn.eat.tooltip")
                         .append("\n")
                         .append(Component.translatable("rsi.autoeat.btn.eat.hint"))),
                 btn -> NetworkHandler.CHANNEL.sendToServer(
-                        new AutoEatPacket(ClientState.currentMode, ClientState.selectedItem))
+                        new AutoEatPacket(ClientState.currentMode, ClientState.selectedItems))
         );
+        setButtonVisible(eatBtn, expanded);
         if (existingEat == null) adder.add(eatBtn);
-        else { existingEat.setX(x); existingEat.setY(yBase); }
+        else {
+            existingEat.setX(secondaryX);
+            existingEat.setY(secondaryY);
+            setButtonVisible(existingEat, expanded);
+        }
 
-        // Button 2 — Select / Blacklist
-        AutoEatButton selectBtn = new AutoEatButton(Role.SELECT, x, yBase + btnH + btnGap, btnW, btnH,
+        // Level 2, button 2: Select / Blacklist
+        AutoEatButton selectBtn = new AutoEatButton(Role.SELECT, secondaryX,
+                secondaryY + BUTTON_HEIGHT + BUTTON_GAP, BUTTON_WIDTH, BUTTON_HEIGHT,
                 getSelectLabel(),
                 Tooltip.create(getSelectTooltip()),
                 btn -> openSelectScreen()
         );
+        setButtonVisible(selectBtn, expanded);
         if (existingSelect == null) adder.add(selectBtn);
         else {
-            existingSelect.setX(x); existingSelect.setY(yBase + btnH + btnGap);
+            existingSelect.setX(secondaryX);
+            existingSelect.setY(secondaryY + BUTTON_HEIGHT + BUTTON_GAP);
             existingSelect.setMessage(getSelectLabel());
             existingSelect.setTooltip(Tooltip.create(getSelectTooltip()));
+            setButtonVisible(existingSelect, expanded);
         }
 
-        // Button 3 — Mode switch
-        AutoEatButton modeBtn = new AutoEatButton(Role.MODE, x, yBase + (btnH + btnGap) * 2, btnW, btnH,
+        // Level 2, button 3: Mode switch
+        AutoEatButton modeBtn = new AutoEatButton(Role.MODE, secondaryX,
+                secondaryY + (BUTTON_HEIGHT + BUTTON_GAP) * 2, BUTTON_WIDTH, BUTTON_HEIGHT,
                 ClientState.currentMode.displayName(),
                 Tooltip.create(Component.translatable("rsi.autoeat.btn.mode.tooltip")),
                 btn -> {
@@ -174,8 +242,14 @@ public final class AutoEatClientEvents {
                     selectBtn.setTooltip(Tooltip.create(getSelectTooltip()));
                 }
         );
+        setButtonVisible(modeBtn, expanded);
         if (existingMode == null) adder.add(modeBtn);
-        else { existingMode.setX(x); existingMode.setY(yBase + (btnH + btnGap) * 2); }
+        else {
+            existingMode.setX(secondaryX);
+            existingMode.setY(secondaryY + (BUTTON_HEIGHT + BUTTON_GAP) * 2);
+            existingMode.setMessage(ClientState.currentMode.displayName());
+            setButtonVisible(existingMode, expanded);
+        }
 
         // Sync blacklist from server (once per session)
         if (!blacklistRequested) {
@@ -188,6 +262,57 @@ public final class AutoEatClientEvents {
         return ClientSyncedConfig.isSynced()
                 ? ClientSyncedConfig.ENABLE_AUTO_EAT
                 : RSIntegrationConfig.ENABLE_AUTO_EAT.get();
+    }
+
+    /** Returns the bounds of the currently visible auto-eat controls for JEI avoidance. */
+    public static List<Rect2i> getGuiExtraAreas(Screen screen) {
+        if (screen == null || !isAutoEatEnabled() || !isStorageScreen(screen)) return List.of();
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (Object listener : screen.children()) {
+            if (!(listener instanceof AutoEatButton button) || !button.visible) continue;
+            minX = Math.min(minX, button.getX());
+            minY = Math.min(minY, button.getY());
+            maxX = Math.max(maxX, button.getX() + button.getWidth());
+            maxY = Math.max(maxY, button.getY() + button.getHeight());
+        }
+        return minX == Integer.MAX_VALUE
+                ? List.of()
+                : List.of(new Rect2i(minX, minY, maxX - minX, maxY - minY));
+    }
+
+    private static boolean isMenuExpanded(Screen screen) {
+        return RSIntegrationConfig.AUTO_EAT_MENU_EXPANDED.get();
+    }
+
+    private static void rememberMenuExpanded(boolean expanded) {
+        RSIntegrationConfig.AUTO_EAT_MENU_EXPANDED.set(expanded);
+        RSIntegrationConfig.saveClientConfig();
+    }
+
+    private static Component getMenuLabel() {
+        return Component.translatable("rsi.autoeat.btn.menu");
+    }
+
+    private static Tooltip getMenuTooltip(boolean expanded) {
+        return Tooltip.create(Component.translatable(expanded
+                ? "rsi.autoeat.btn.menu.collapse.tooltip"
+                : "rsi.autoeat.btn.menu.expand.tooltip"));
+    }
+
+    private static void setSecondaryControlsVisible(Screen screen, boolean visible) {
+        for (Object listener : screen.children()) {
+            if (listener instanceof AutoEatButton button && button.role != Role.MENU) {
+                setButtonVisible(button, visible);
+            }
+        }
+    }
+
+    private static void setButtonVisible(AutoEatButton button, boolean visible) {
+        button.visible = visible;
+        button.active = visible;
     }
 
     private static boolean isStorageScreen(Screen screen) {
@@ -334,14 +459,52 @@ public final class AutoEatClientEvents {
      * for the re-entry guard: ScreenEvent.Init.Post can fire more than once,
      * and checking for this type prevents stacking duplicate buttons.
      */
-    private enum Role { EAT, SELECT, MODE }
+    private enum Role { MENU, EAT, SELECT, MODE }
 
     private static class AutoEatButton extends Button {
         private final Role role;
+        private boolean beyondDimensionsStyle;
+
         AutoEatButton(Role role, int x, int y, int w, int h, Component text, Tooltip tooltip, OnPress onPress) {
             super(x, y, w, h, text, onPress, DEFAULT_NARRATION);
             this.role = role;
             setTooltip(tooltip);
+        }
+
+        void setMenuStyle(boolean beyondDimensions) {
+            this.beyondDimensionsStyle = beyondDimensions;
+        }
+
+        @Override
+        protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            if (role != Role.MENU) {
+                super.renderWidget(graphics, mouseX, mouseY, partialTick);
+                return;
+            }
+
+            boolean hovered = isHoveredOrFocused();
+            if (beyondDimensionsStyle) {
+                ResourceLocation texture = hovered ? BD_SLOT_HOVER : BD_SLOT;
+                graphics.blit(texture, getX(), getY(), 0, 0,
+                        width, height, width, height);
+            } else {
+                int textureY = hovered ? 35 : 16;
+                graphics.blit(RS_ICONS, getX(), getY(), 238, textureY, 18, 18);
+                if (hovered) {
+                    RenderSystem.enableBlend();
+                    RenderSystem.defaultBlendFunc();
+                    graphics.setColor(1.0F, 1.0F, 1.0F, 0.5F);
+                    graphics.blit(RS_ICONS, getX(), getY(), 238, 54, 18, 18);
+                    graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+                    RenderSystem.disableBlend();
+                }
+            }
+            // Vanilla draws the empty hunger outline first and the full-food
+            // fill second; the fill sprite alone has no dark outer contour.
+            graphics.blit(HUD_ICONS, getX() + (width - 9) / 2, getY() + (height - 9) / 2,
+                    16, 27, 9, 9);
+            graphics.blit(HUD_ICONS, getX() + (width - 9) / 2, getY() + (height - 9) / 2,
+                    52, 27, 9, 9);
         }
     }
 }

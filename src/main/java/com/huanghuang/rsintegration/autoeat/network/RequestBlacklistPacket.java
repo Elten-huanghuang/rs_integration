@@ -27,7 +27,7 @@ public class RequestBlacklistPacket {
                 AutoEatPreferences preferences = AutoEatPreferences.load(sender);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
                         new BlacklistSyncPacket(blacklist, AutoEatEngine.getEffectBlacklist(sender),
-                                preferences.mode(), preferences.selectedItem()));
+                                preferences.mode(), preferences.selectedItems()));
             }
         });
         ctx.get().setPacketHandled(true);

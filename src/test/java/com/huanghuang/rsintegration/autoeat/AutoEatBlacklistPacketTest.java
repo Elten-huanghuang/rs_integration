@@ -4,13 +4,16 @@ import com.huanghuang.rsintegration.autoeat.network.BlacklistSyncPacket;
 import com.huanghuang.rsintegration.autoeat.network.UpdateAutoEatPreferencesPacket;
 import com.huanghuang.rsintegration.autoeat.network.UpdateBlacklistPacket;
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AutoEatBlacklistPacketTest {
 
@@ -20,15 +23,16 @@ class AutoEatBlacklistPacketTest {
     @Test
     void syncPacketRoundTripsBothBlacklists() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        ResourceLocation bread = new ResourceLocation("minecraft", "bread");
         BlacklistSyncPacket.encode(new BlacklistSyncPacket(
-                Set.of(FOOD), Set.of(EFFECT), AutoEatMode.STACK, FOOD), buffer);
+                Set.of(FOOD), Set.of(EFFECT), AutoEatMode.STACK, List.of(FOOD, bread)), buffer);
 
         BlacklistSyncPacket decoded = BlacklistSyncPacket.decode(buffer);
 
         assertEquals(Set.of(FOOD), decoded.blacklist);
         assertEquals(Set.of(EFFECT), decoded.effectBlacklist);
         assertEquals(AutoEatMode.STACK, decoded.mode);
-        assertEquals(FOOD, decoded.selectedItem);
+        assertEquals(List.of(FOOD, bread), decoded.selectedItems);
     }
 
     @Test
@@ -51,11 +55,21 @@ class AutoEatBlacklistPacketTest {
     void preferenceUpdateRoundTripsModeAndSelection() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         UpdateAutoEatPreferencesPacket.encode(
-                new UpdateAutoEatPreferencesPacket(AutoEatMode.STACK, FOOD), buffer);
+                new UpdateAutoEatPreferencesPacket(AutoEatMode.STACK, List.of(FOOD)), buffer);
 
         UpdateAutoEatPreferencesPacket decoded = UpdateAutoEatPreferencesPacket.decode(buffer);
 
         assertEquals(AutoEatMode.STACK, decoded.mode());
-        assertEquals(FOOD, decoded.selectedItem());
+        assertEquals(List.of(FOOD), decoded.selectedItems());
+    }
+
+    @Test
+    void rejectsOversizedPreferenceSelection() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        buffer.writeEnum(AutoEatMode.STACK);
+        buffer.writeVarInt(AutoEatPreferences.MAX_SELECTED_ITEMS + 1);
+
+        assertThrows(DecoderException.class,
+                () -> UpdateAutoEatPreferencesPacket.decode(buffer));
     }
 }
