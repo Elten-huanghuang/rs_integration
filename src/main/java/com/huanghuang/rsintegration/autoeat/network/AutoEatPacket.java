@@ -9,30 +9,26 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 
-import javax.annotation.Nullable;
+import java.util.Collection;
+import java.util.List;
 
 public class AutoEatPacket {
     public final AutoEatMode mode;
-    @Nullable
-    public final ResourceLocation selectedItem;
+    public final List<ResourceLocation> selectedItems;
 
-    public AutoEatPacket(AutoEatMode mode, @Nullable ResourceLocation selectedItem) {
+    public AutoEatPacket(AutoEatMode mode, Collection<ResourceLocation> selectedItems) {
         this.mode = mode;
-        this.selectedItem = selectedItem;
+        this.selectedItems = AutoEatSelectionCodec.copy(selectedItems);
     }
 
     public static void encode(AutoEatPacket packet, FriendlyByteBuf buf) {
         buf.writeEnum(packet.mode);
-        buf.writeBoolean(packet.selectedItem != null);
-        if (packet.selectedItem != null) {
-            buf.writeResourceLocation(packet.selectedItem);
-        }
+        AutoEatSelectionCodec.write(buf, packet.selectedItems);
     }
 
     public static AutoEatPacket decode(FriendlyByteBuf buf) {
         AutoEatMode mode = buf.readEnum(AutoEatMode.class);
-        ResourceLocation item = buf.readBoolean() ? buf.readResourceLocation() : null;
-        return new AutoEatPacket(mode, item);
+        return new AutoEatPacket(mode, AutoEatSelectionCodec.read(buf));
     }
 
     public static void handle(AutoEatPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
@@ -50,7 +46,7 @@ public class AutoEatPacket {
                 if (AutoEatRateLimiter.isRateLimited(sender.getUUID())) {
                     return;
                 }
-                AutoEatEngine.execute(sender, packet.mode, packet.selectedItem);
+                AutoEatEngine.execute(sender, packet.mode, packet.selectedItems);
             }
         });
         ctx.get().setPacketHandled(true);

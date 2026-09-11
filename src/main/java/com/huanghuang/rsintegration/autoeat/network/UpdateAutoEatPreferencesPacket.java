@@ -7,28 +7,33 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.network.NetworkEvent;
 
-import javax.annotation.Nullable;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
 /** Persists the client's current auto-eat mode and stack-food selection. */
 public record UpdateAutoEatPreferencesPacket(
-        AutoEatMode mode, @Nullable ResourceLocation selectedItem) {
+        AutoEatMode mode, List<ResourceLocation> selectedItems) {
 
     public UpdateAutoEatPreferencesPacket {
         Objects.requireNonNull(mode, "mode");
+        selectedItems = AutoEatSelectionCodec.copy(selectedItems);
+    }
+
+    public UpdateAutoEatPreferencesPacket(AutoEatMode mode,
+                                          Collection<ResourceLocation> selectedItems) {
+        this(mode, AutoEatSelectionCodec.copy(selectedItems));
     }
 
     public static void encode(UpdateAutoEatPreferencesPacket packet, FriendlyByteBuf buffer) {
         buffer.writeEnum(packet.mode);
-        buffer.writeBoolean(packet.selectedItem != null);
-        if (packet.selectedItem != null) buffer.writeResourceLocation(packet.selectedItem);
+        AutoEatSelectionCodec.write(buffer, packet.selectedItems);
     }
 
     public static UpdateAutoEatPreferencesPacket decode(FriendlyByteBuf buffer) {
         AutoEatMode mode = buffer.readEnum(AutoEatMode.class);
-        ResourceLocation selected = buffer.readBoolean() ? buffer.readResourceLocation() : null;
-        return new UpdateAutoEatPreferencesPacket(mode, selected);
+        return new UpdateAutoEatPreferencesPacket(mode, AutoEatSelectionCodec.read(buffer));
     }
 
     public static void handle(UpdateAutoEatPreferencesPacket packet,
@@ -37,7 +42,7 @@ public record UpdateAutoEatPreferencesPacket(
         context.enqueueWork(() -> {
             var sender = context.getSender();
             if (sender != null && !(sender instanceof FakePlayer)) {
-                AutoEatPreferences.save(sender, packet.mode, packet.selectedItem);
+                AutoEatPreferences.save(sender, packet.mode, packet.selectedItems);
             }
         });
         context.setPacketHandled(true);

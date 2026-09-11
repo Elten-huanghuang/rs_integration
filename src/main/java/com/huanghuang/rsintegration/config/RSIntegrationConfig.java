@@ -245,6 +245,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_HEIGHT;
     public static ForgeConfigSpec.BooleanValue RS_SIDE_PANEL_HIDDEN;
+    public static ForgeConfigSpec.BooleanValue AUTO_EAT_MENU_EXPANDED;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_NAVIGATION_TIMEOUT_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS_HUD;
 
@@ -1068,6 +1069,11 @@ public final class RSIntegrationConfig {
                         DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MIN_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MAX_NAVIGATION_TIMEOUT_MS);
+        cl.pop();
+        cl.push("autoEat");
+        AUTO_EAT_MENU_EXPANDED = cl
+                .comment("Remember whether the compact Auto Eat flyout is expanded.")
+                .define("menuExpanded", false);
         cl.pop();
         cl.push("gridSearch");
         GRID_SEARCH_IDLE_BUDGET_MICROS = cl

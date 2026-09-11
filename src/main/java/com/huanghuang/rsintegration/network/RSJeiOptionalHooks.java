@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
+import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
@@ -15,7 +16,10 @@ public final class RSJeiOptionalHooks {
                 new IGuiContainerHandler<GridScreen>() {
                     @Override
                     public java.util.List<Rect2i> getGuiExtraAreas(GridScreen screen) {
-                        return MachineFavoritesClient.getJeiExtraAreas(screen);
+                        java.util.List<Rect2i> areas = new java.util.ArrayList<>();
+                        areas.addAll(MachineFavoritesClient.getJeiExtraAreas(screen));
+                        areas.addAll(AutoEatClientEvents.getGuiExtraAreas(screen));
+                        return java.util.List.copyOf(areas);
                     }
                 });
     }

@@ -19,6 +19,6 @@ final class AutoEatClientPacketHandler {
         ClientState.blacklistedItems.addAll(packet.blacklist);
         ClientState.blacklistedEffects.clear();
         ClientState.blacklistedEffects.addAll(packet.effectBlacklist);
-        ClientState.applyPreferences(packet.mode, packet.selectedItem);
+        ClientState.applyPreferences(packet.mode, packet.selectedItems);
     }
 }

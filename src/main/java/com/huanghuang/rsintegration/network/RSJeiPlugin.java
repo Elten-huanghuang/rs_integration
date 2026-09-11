@@ -257,8 +257,13 @@ public final class RSJeiPlugin implements IModPlugin {
                     @Override
                     public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
                             AbstractContainerScreen<?> screen) {
-                        return com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient
-                                .getFavoriteExtraAreas(screen);
+                        java.util.List<net.minecraft.client.renderer.Rect2i> areas =
+                                new java.util.ArrayList<>();
+                        areas.addAll(com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient
+                                .getFavoriteExtraAreas(screen));
+                        areas.addAll(com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents
+                                .getGuiExtraAreas(screen));
+                        return java.util.List.copyOf(areas);
                     }
                 };
         for (String className : java.util.List.of(

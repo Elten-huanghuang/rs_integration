@@ -7,40 +7,41 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 
 import java.util.HashSet;
+import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 public class BlacklistSyncPacket {
     public final Set<ResourceLocation> blacklist;
     public final Set<ResourceLocation> effectBlacklist;
     public final AutoEatMode mode;
-    public final ResourceLocation selectedItem;
+    public final List<ResourceLocation> selectedItems;
 
     public BlacklistSyncPacket(Set<ResourceLocation> blacklist, Set<ResourceLocation> effectBlacklist) {
         this(blacklist, effectBlacklist, AutoEatMode.DIVERSITY, null);
     }
 
     public BlacklistSyncPacket(Set<ResourceLocation> blacklist, Set<ResourceLocation> effectBlacklist,
-                               AutoEatMode mode, ResourceLocation selectedItem) {
+                               AutoEatMode mode, Collection<ResourceLocation> selectedItems) {
         this.blacklist = blacklist;
         this.effectBlacklist = effectBlacklist;
         this.mode = mode;
-        this.selectedItem = selectedItem;
+        this.selectedItems = AutoEatSelectionCodec.copy(selectedItems);
     }
 
     public static void encode(BlacklistSyncPacket packet, FriendlyByteBuf buf) {
         writeSet(buf, packet.blacklist);
         writeSet(buf, packet.effectBlacklist);
         buf.writeEnum(packet.mode);
-        buf.writeBoolean(packet.selectedItem != null);
-        if (packet.selectedItem != null) buf.writeResourceLocation(packet.selectedItem);
+        AutoEatSelectionCodec.write(buf, packet.selectedItems);
     }
 
     public static BlacklistSyncPacket decode(FriendlyByteBuf buf) {
         Set<ResourceLocation> blacklist = readSet(buf);
         Set<ResourceLocation> effectBlacklist = readSet(buf);
         AutoEatMode mode = buf.readEnum(AutoEatMode.class);
-        ResourceLocation selectedItem = buf.readBoolean() ? buf.readResourceLocation() : null;
-        return new BlacklistSyncPacket(blacklist, effectBlacklist, mode, selectedItem);
+        return new BlacklistSyncPacket(blacklist, effectBlacklist, mode,
+                AutoEatSelectionCodec.read(buf));
     }
 
     public static void handle(BlacklistSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
