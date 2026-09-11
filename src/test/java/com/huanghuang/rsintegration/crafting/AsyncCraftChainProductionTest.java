@@ -209,6 +209,40 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void onlyPrimaryGraphPublicationsAdvanceCraftedItemProgress() {
+        NodeId nodeId = new NodeId(7);
+        OutputDeclaration primary = new OutputDeclaration(new OutputPortId(nodeId, 0),
+                MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 2, OutputKind.PRIMARY);
+        OutputDeclaration remainder = new OutputDeclaration(new OutputPortId(nodeId, 1),
+                MaterialKey.of(new ItemStack(Items.BUCKET)), 1, OutputKind.REMAINDER);
+        CraftNode node = new CraftNode(nodeId, new ResourceLocation("test", "smelting"),
+                "generic", null, 1, List.of(), List.of(), false, null, null,
+                List.of(), List.of(primary, remainder));
+
+        assertTrue(AsyncCraftChain.isPrimaryGraphPublication(node,
+                new com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator.Publication(
+                        primary.id(), primary.material(), new ItemStack(Items.IRON_INGOT, 2))));
+        assertFalse(AsyncCraftChain.isPrimaryGraphPublication(node,
+                new com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator.Publication(
+                        remainder.id(), remainder.material(), new ItemStack(Items.BUCKET))));
+    }
+
+    @Test
+    void flatCraftedProgressSelectsOnlyDeclaredPrimaryQuantity() {
+        List<ItemStack> selected = AsyncCraftChain.selectCraftedPrimaryOutputs(List.of(
+                        new ItemStack(Items.IRON_INGOT, 2),
+                        new ItemStack(Items.GOLD_INGOT, 8),
+                        new ItemStack(Items.IRON_INGOT, 2)),
+                new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), 3),
+                ItemStack.EMPTY);
+
+        assertEquals(2, selected.size());
+        assertEquals(2, selected.get(0).getCount());
+        assertEquals(1, selected.get(1).getCount());
+        assertTrue(selected.stream().allMatch(stack -> stack.is(Items.IRON_INGOT)));
+    }
+
+    @Test
     void graphFinalOutputUsesRootDeclarationInsteadOfClickedStackNbt() {
         MaterialKey declared = new MaterialKey(Items.DIAMOND_SWORD, null);
         MaterialSource source = new MaterialSource.ProducerOutput(
