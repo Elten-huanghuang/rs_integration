@@ -190,6 +190,7 @@ The Resonance Disk is an RS storage disk whose contents can act as if carried by
 
 - Tracks real RS insertions caused by crafting, container transfer, magnet/pickup flows, and other external movement.
 - Simulated insertion, voiding, refunds, and recovery do not advance quest progress.
+- Confirmed primary outputs from recursive crafting also advance quest progress, including intermediates consumed by downstream recipes; container returns and refunds do not count.
 - Uses FTB Quests item filters and NBT matching rules.
 - Explicit quest submission can consume missing items directly from RS; missing requirements are bookmarked in JEI.
 - Crafted and externally acquired items are accounted for separately to prevent duplicate progress.

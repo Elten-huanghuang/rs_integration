@@ -5,8 +5,6 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
-import com.huanghuang.rsintegration.util.InsertedStackDelta;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.huanghuang.rsintegration.util.LogSampler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -600,6 +598,9 @@ public final class AsyncCraftChain {
                     }
                     List<ItemStack> settled = group.drainSettledResults();
                     if (!settled.isEmpty()) {
+                        reportCraftedPrimaryOutputs(online, settled,
+                                currentDelegate.getExpectedProduction(),
+                                currentStepOutputPrototype());
                         for (ItemStack result : settled) addToVirtualInventory(result);
                         snapshotCommittedVirtual();
                         waitTicks = 0;
@@ -616,6 +617,9 @@ public final class AsyncCraftChain {
                         closeFlatOperationScope();
                         actualResults.addAll(currentDelegate.collectAllResults(online));
                         actualResults.removeIf(stack -> stack == null || stack.isEmpty());
+                        reportCraftedPrimaryOutputs(online, actualResults,
+                                currentDelegate.getExpectedProduction(),
+                                currentStepOutputPrototype());
                         for (ItemStack result : actualResults) addToVirtualInventory(result);
                         snapshotCommittedVirtual();
                         ledger.reset();
@@ -660,6 +664,8 @@ public final class AsyncCraftChain {
 
                     IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
                     int actualCount = countMatchingProduction(actualResults, expected);
+                    reportCraftedPrimaryOutputs(online, actualResults, expected,
+                            currentStepOutputPrototype());
                     if (expected != null && expected.count() > actualCount) {
                         RSIntegrationMod.LOGGER.warn(ctx.format(
                                 "Craft output partially extracted: recipe={} delegate={} expected={} actual={}"),
@@ -1833,6 +1839,9 @@ public final class AsyncCraftChain {
         for (NodeOutputAccumulator.Publication publication : publications) {
             graphMaterials.publishActual(new MaterialSource.ProducerOutput(publication.port()),
                     publication.material(), publication.stack());
+            if (isPrimaryGraphPublication(graphNodes.get(nodeId), publication)) {
+                ExternalItemProgressBridge.enqueueCrafted(resolvePlayer(), publication.stack());
+            }
         }
         if (graphScheduler != null && !graphScheduler.isStopping()) {
             graphScheduler.refreshBlocked(candidate -> graphMaterials.canReserve(
@@ -2982,8 +2991,10 @@ public final class AsyncCraftChain {
                             recipe, server.overworld().registryAccess());
                 }
                 if (!result.isEmpty()) {
-                    addToInventory(workingInventory,
-                            result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
+                    ItemStack produced = result.copyWithCount(
+                            StepExecutor.mulCount(result.getCount(), executions));
+                    addToInventory(workingInventory, produced);
+                    ExternalItemProgressBridge.enqueueCrafted(online, produced);
                 }
                 for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
                     addToInventory(workingInventory,
@@ -3084,7 +3095,10 @@ public final class AsyncCraftChain {
         if (result.isEmpty()) {
             result = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
         }
-        if (!result.isEmpty()) addToInventory(workingInventory, result);
+        if (!result.isEmpty()) {
+            addToInventory(workingInventory, result);
+            ExternalItemProgressBridge.enqueueCrafted(online, result);
+        }
 
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe, consumed)) {
             int remainderExecutions = CraftPacketUtils.remainderExecutions(remainder, specs, 1);
@@ -4252,6 +4266,71 @@ public final class AsyncCraftChain {
         return count;
     }
 
+    private static void reportCraftedPrimaryOutputs(
+            @Nullable ServerPlayer player, List<ItemStack> results,
+            @Nullable IBatchDelegate.ExpectedProduction expected,
+            @Nullable ItemStack expectedOutput) {
+        if (player == null) return;
+        for (ItemStack output : selectCraftedPrimaryOutputs(results, expected, expectedOutput)) {
+            ExternalItemProgressBridge.enqueueCrafted(player, output);
+        }
+    }
+
+    static List<ItemStack> selectCraftedPrimaryOutputs(
+            List<ItemStack> results,
+            @Nullable IBatchDelegate.ExpectedProduction expected,
+            @Nullable ItemStack expectedOutput) {
+        if (results == null || results.isEmpty()) return List.of();
+        ItemStack prototype = expected != null ? expected.item() : expectedOutput;
+        if (prototype == null || prototype.isEmpty()) return List.of();
+        int remaining = expected == null ? Integer.MAX_VALUE : expected.count();
+        if (remaining <= 0) return List.of();
+        List<ItemStack> selected = new ArrayList<>();
+        for (ItemStack result : results) {
+            if (result != null && !result.isEmpty()
+                    && IBatchDelegate.matchesProducedItem(result, prototype)) {
+                int accepted = Math.min(remaining, result.getCount());
+                if (accepted > 0) {
+                    selected.add(result.copyWithCount(accepted));
+                    remaining -= accepted;
+                }
+                if (remaining <= 0) break;
+            }
+        }
+        return List.copyOf(selected);
+    }
+
+    private ItemStack currentStepOutputPrototype() {
+        if (currentDelegate != null) {
+            IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
+            if (expected != null && expected.item() != null && !expected.item().isEmpty()) {
+                return expected.item();
+            }
+            ItemStack expectedOutput = currentDelegate.getExpectedOutput();
+            if (expectedOutput != null && !expectedOutput.isEmpty()) return expectedOutput;
+        }
+        if (targetOutput != null && !targetOutput.isEmpty()
+                && currentStepIdx == steps.size() - 1) {
+            return targetOutput;
+        }
+        if (currentStepIdx < 0 || currentStepIdx >= steps.size()) return ItemStack.EMPTY;
+        ItemStack plannedOutput = steps.get(currentStepIdx).syntheticOutput();
+        if (plannedOutput != null && !plannedOutput.isEmpty()) return plannedOutput;
+        ServerLevel level = server.overworld();
+        if (level == null) return ItemStack.EMPTY;
+        Recipe<?> recipe = level.getRecipeManager()
+                .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
+        return recipe == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+    }
+
+    static boolean isPrimaryGraphPublication(
+            @Nullable CraftNode node, NodeOutputAccumulator.Publication publication) {
+        if (node == null || publication == null) return false;
+        return node.outputs().stream().anyMatch(output -> output.id().equals(publication.port())
+                && output.kind() == OutputKind.PRIMARY);
+    }
+
     //  virtual inventory
 
     private void addToVirtualInventory(ItemStack stack) {
@@ -4422,11 +4501,6 @@ public final class AsyncCraftChain {
                     ItemStack rsCandidate = leftover.copy();
                     if (!leftover.isEmpty()) {
                         leftover = insertIntoStorage(online, rsCandidate);
-                    }
-                    ItemStack inserted = InsertedStackDelta.between(vi, leftover);
-                    if (targetOutput != null && vi.is(targetOutput.getItem())) {
-                        ExternalItemProgressBridge.enqueueCrafted(
-                                online, inserted);
                     }
                     if (!leftover.isEmpty()) {
                         safeGiveToPlayer(online, leftover);
