@@ -1,0 +1,17 @@
+{
+  "conditions": [
+    {
+      "type": "forge:mod_loaded",
+      "modid": "refinedstorage"
+    }
+  ],
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "refinedstorage:filter" },
+    { "item": "refinedstorage:advanced_processor" },
+    { "item": "minecraft:lava_bucket" }
+  ],
+  "result": {
+    "item": "rs_integration:rs_void_upgrade"
+  }
+}

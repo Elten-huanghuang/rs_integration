@@ -1,16 +1,19 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
+import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeClient;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.Slot;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -45,7 +48,19 @@ public abstract class GridScreenMouseMixin {
 
     @Unique
     private static void onMousePressedPre(ScreenEvent.MouseButtonPressed.Pre event) {
-        if (!(event.getScreen() instanceof GridScreen)) return;
+        if (!(event.getScreen() instanceof GridScreen screen)) return;
+        if (event.getButton() == 1 && Screen.hasShiftDown()
+                && ModItems.RS_VOID_UPGRADE != null) {
+            Slot slot = screen.getSlotUnderMouse();
+            if (slot != null && slot.getItem().is(ModItems.RS_VOID_UPGRADE.get())) {
+                int slotId = screen.getMenu().slots.indexOf(slot);
+                if (slotId >= 0) {
+                    VoidUpgradeClient.openMenuSlot(slotId, slot.getItem(), screen);
+                    event.setCanceled(true);
+                    return;
+                }
+            }
+        }
         if (!MachineHubInputHandler.isConsumingInput()) return;
         if (!MachineHub.isWithinBounds((int) event.getMouseX(), (int) event.getMouseY())) return;
 
