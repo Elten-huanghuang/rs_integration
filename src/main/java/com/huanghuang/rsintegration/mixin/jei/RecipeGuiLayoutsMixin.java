@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.WishingFountainRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
 import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
+import com.huanghuang.rsintegration.compat.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -462,9 +463,6 @@ public class RecipeGuiLayoutsMixin {
     private static final int MIN_BUTTON_H = 10;
     @Unique
     private static final int BUTTON_GAP = 2;
-    @Unique
-    private static final int SCREEN_MARGIN = 2;
-
     @Inject(method = "updateRecipeButtonPositions", at = @At("RETURN"), require = 0)
     private void rsi$updatePositions(CallbackInfo ci) {
         rsi$refreshButtonPositions();
@@ -480,7 +478,6 @@ public class RecipeGuiLayoutsMixin {
         AltarCraftButtons.clearTransferPositions();
         int mgIdx = 0;
         List<int[]> mgPos = AltarCraftButtons.getMachineGuiPositions();
-        List<int[]> occupied = rsi$collectJeiOccupiedAreas();
         int screenWidth = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int screenHeight = Minecraft.getInstance().getWindow().getGuiScaledHeight();
         for (int i = 0; i < rsi$layoutIndices.size(); i++) {
@@ -496,8 +493,8 @@ public class RecipeGuiLayoutsMixin {
             int bh = Math.max(area.getHeight(), MIN_BUTTON_H);
             boolean hasMachineGui = rsi$hasMachineGui.size() > i && rsi$hasMachineGui.get(i);
             int groupWidth = bw + (hasMachineGui ? BUTTON_GAP + bw : 0);
-            int[] placement = rsi$findButtonPlacement(recipeLayout.getRectWithBorder(), area,
-                    groupWidth, bh, screenWidth, screenHeight, occupied);
+            int[] placement = JeiRecipeButtonPlacement.place(
+                    area, groupWidth, bh, screenWidth, screenHeight);
             int bx = placement[0];
             int by = placement[1];
 
@@ -517,7 +514,6 @@ public class RecipeGuiLayoutsMixin {
             }
 
             AltarCraftButtons.addTransferPos(area.getX(), area.getY(), bw, bh);
-            occupied.add(new int[]{bx, by, groupWidth, bh});
 
             if (hasMachineGui && mgIdx < mgPos.size()) {
                 int[] mgp = mgPos.get(mgIdx);
@@ -590,20 +586,6 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private List<int[]> rsi$collectJeiOccupiedAreas() {
-        List<int[]> occupied = new ArrayList<>();
-        for (Object layout : recipeLayoutsWithButtons) {
-            IRecipeLayoutDrawable<?> drawable = rsi$getRecipeLayout(layout);
-            if (drawable == null) continue;
-            rsi$addOccupiedArea(occupied, drawable.getRectWithBorder());
-            rsi$addOccupiedArea(occupied, rsi$getTransferButtonArea(layout, drawable));
-            rsi$addOccupiedArea(occupied, rsi$absoluteRecipeArea(
-                    drawable, drawable.getRecipeBookmarkButtonArea()));
-        }
-        return occupied;
-    }
-
-    @Unique
     private static Rect2i rsi$absoluteRecipeArea(IRecipeLayoutDrawable<?> recipeLayout,
                                                   Rect2i relativeArea) {
         if (recipeLayout == null || relativeArea == null) return null;
@@ -613,91 +595,6 @@ public class RecipeGuiLayoutsMixin {
                 recipeArea.getX() + relativeArea.getX(),
                 recipeArea.getY() + relativeArea.getY(),
                 relativeArea.getWidth(), relativeArea.getHeight());
-    }
-
-    @Unique
-    private static void rsi$addOccupiedArea(List<int[]> occupied, Rect2i area) {
-        if (area != null && area.getWidth() > 0 && area.getHeight() > 0) {
-            occupied.add(new int[]{area.getX(), area.getY(), area.getWidth(), area.getHeight()});
-        }
-    }
-
-    @Unique
-    private static int[] rsi$findButtonPlacement(Rect2i recipeArea, Rect2i transferArea,
-                                                  int width, int height, int screenWidth, int screenHeight,
-                                                  List<int[]> occupied) {
-        int recipeLeft = recipeArea.getX();
-        int recipeTop = recipeArea.getY();
-        int recipeRight = recipeLeft + recipeArea.getWidth();
-        int recipeBottom = recipeTop + recipeArea.getHeight();
-        int anchorX = transferArea.getX();
-        int anchorY = transferArea.getY();
-        int[][] candidates = {
-                {anchorX, recipeBottom + BUTTON_GAP},
-                {recipeRight + BUTTON_GAP, anchorY},
-                {recipeLeft - width - BUTTON_GAP, anchorY},
-                {anchorX, recipeTop - height - BUTTON_GAP}
-        };
-
-        for (int[] candidate : candidates) {
-            if (rsi$isInsideScreen(candidate[0], candidate[1], width, height, screenWidth, screenHeight)
-                    && !rsi$overlapsAny(candidate[0], candidate[1], width, height, occupied)) {
-                return candidate;
-            }
-        }
-
-        int[] best = null;
-        long bestScore = Long.MAX_VALUE;
-        for (int i = 0; i < candidates.length; i++) {
-            int x = rsi$clamp(candidates[i][0], SCREEN_MARGIN,
-                    Math.max(SCREEN_MARGIN, screenWidth - SCREEN_MARGIN - width));
-            int y = rsi$clamp(candidates[i][1], SCREEN_MARGIN,
-                    Math.max(SCREEN_MARGIN, screenHeight - SCREEN_MARGIN - height));
-            long score = (long) rsi$overlapArea(x, y, width, height, occupied) * 1_000_000L
-                    + (long) Math.abs(x - candidates[0][0]) + Math.abs(y - candidates[0][1]) + i;
-            if (score < bestScore) {
-                bestScore = score;
-                best = new int[]{x, y};
-            }
-        }
-        return best;
-    }
-
-    @Unique
-    private static boolean rsi$isInsideScreen(int x, int y, int width, int height,
-                                               int screenWidth, int screenHeight) {
-        return x >= SCREEN_MARGIN && y >= SCREEN_MARGIN
-                && x + width <= screenWidth - SCREEN_MARGIN
-                && y + height <= screenHeight - SCREEN_MARGIN;
-    }
-
-    @Unique
-    private static boolean rsi$overlapsAny(int x, int y, int width, int height, List<int[]> areas) {
-        for (int[] area : areas) {
-            if (rsi$overlapArea(x, y, width, height, area) > 0) return true;
-        }
-        return false;
-    }
-
-    @Unique
-    private static int rsi$overlapArea(int x, int y, int width, int height, List<int[]> areas) {
-        int total = 0;
-        for (int[] area : areas) {
-            total += rsi$overlapArea(x, y, width, height, area);
-        }
-        return total;
-    }
-
-    @Unique
-    private static int rsi$overlapArea(int x, int y, int width, int height, int[] area) {
-        int overlapWidth = Math.max(0, Math.min(x + width, area[0] + area[2]) - Math.max(x, area[0]));
-        int overlapHeight = Math.max(0, Math.min(y + height, area[1] + area[3]) - Math.max(y, area[1]));
-        return overlapWidth * overlapHeight;
-    }
-
-    @Unique
-    private static int rsi$clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(value, max));
     }
 
     @Inject(method = "draw", at = @At("RETURN"))

@@ -25,12 +25,31 @@ class RecipeAvailabilityCacheTest {
         assertEquals(MaterialAvailability.UNKNOWN, cache.get(key, 0, (k, t) -> tickets.add(t)));
         cache.accept(key, tickets.get(0), MaterialAvailability.READY, 10);
         assertEquals(MaterialAvailability.READY, cache.get(key, 100, (k, t) -> tickets.add(t)));
-        assertEquals(MaterialAvailability.UNKNOWN, cache.get(key, 2000, (k, t) -> tickets.add(t)));
+        assertEquals(MaterialAvailability.READY, cache.get(key, 2000, (k, t) -> tickets.add(t)));
         cache.accept(key, tickets.get(0), MaterialAvailability.READY, 2010);
-        assertEquals(MaterialAvailability.UNKNOWN, cache.get(key, 2020, (k, t) -> tickets.add(t)));
+        assertEquals(MaterialAvailability.READY, cache.get(key, 2020, (k, t) -> tickets.add(t)));
         cache.accept(key, tickets.get(1), MaterialAvailability.MISSING, 2030);
         assertEquals(MaterialAvailability.MISSING, cache.get(key, 2040, (k, t) -> tickets.add(t)));
         assertEquals(2, tickets.size());
+    }
+
+    @Test void invalidationRefreshesWithoutFlashingBackToUnknown() {
+        var cache = new RecipeAvailabilityCache();
+        List<Long> tickets = new ArrayList<>();
+        var key = key(0);
+        cache.get(key, 0, (k, t) -> tickets.add(t));
+        cache.accept(key, tickets.get(0), MaterialAvailability.READY, 10);
+
+        cache.invalidate();
+        assertEquals(MaterialAvailability.READY,
+                cache.get(key, 20, (k, t) -> tickets.add(t)));
+        assertEquals(MaterialAvailability.READY,
+                cache.get(key, 21, (k, t) -> tickets.add(t)));
+        assertEquals(2, tickets.size());
+
+        cache.accept(key, tickets.get(1), MaterialAvailability.MISSING, 30);
+        assertEquals(MaterialAvailability.MISSING,
+                cache.get(key, 31, (k, t) -> tickets.add(t)));
     }
 
     @Test void invalidationDoesNotReuseTicketsOrMachineResults() {

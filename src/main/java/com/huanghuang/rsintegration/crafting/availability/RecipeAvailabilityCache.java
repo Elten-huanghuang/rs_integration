@@ -16,26 +16,36 @@ public final class RecipeAvailabilityCache {
     public MaterialAvailability get(RecipeAvailabilityKey key, long now,
                                       BiConsumer<RecipeAvailabilityKey, Long> send) {
         Entry entry = entries.get(key);
-        if (entry != null && now >= entry.time && now - entry.time < REFRESH_MS) return entry.state;
+        if (entry != null && entry.pending
+                && now >= entry.time && now - entry.time < REFRESH_MS) return entry.state;
+        if (entry != null && !entry.stale
+                && now >= entry.time && now - entry.time < REFRESH_MS) return entry.state;
         if (windowStart == Long.MIN_VALUE || now < windowStart || now - windowStart >= 1_000) {
             windowStart = now;
             requests = 0;
         }
-        if (requests >= 32) return MaterialAvailability.UNKNOWN;
+        MaterialAvailability state = entry == null ? MaterialAvailability.UNKNOWN : entry.state;
+        if (requests >= 32) return state;
         requests++;
         long ticket = ++nextTicket;
-        entries.put(key, new Entry(ticket, now, MaterialAvailability.UNKNOWN));
+        entries.put(key, new Entry(ticket, now, state, true, false));
         while (entries.size() > MAX_ENTRIES) entries.remove(entries.keySet().iterator().next());
         send.accept(key, ticket);
-        return MaterialAvailability.UNKNOWN;
+        return state;
     }
 
     public void accept(RecipeAvailabilityKey key, long ticket, MaterialAvailability state, long now) {
         Entry pending = entries.get(key);
-        if (pending != null && pending.ticket == ticket && now >= pending.time
+        if (pending != null && pending.pending && pending.ticket == ticket && now >= pending.time
                 && now - pending.time < REFRESH_MS) {
-            entries.put(key, new Entry(ticket, pending.time, state));
+            entries.put(key, new Entry(ticket, pending.time, state, false, false));
         }
+    }
+
+    /** Force a refresh while retaining the last rendered state until the reply arrives. */
+    public void invalidate() {
+        entries.replaceAll((key, entry) ->
+                new Entry(-1, entry.time, entry.state, false, true));
     }
 
     public void clear() {
@@ -43,5 +53,6 @@ public final class RecipeAvailabilityCache {
         // Retain ticket and rate window across screen changes and logout.
     }
 
-    private record Entry(long ticket, long time, MaterialAvailability state) {}
+    private record Entry(long ticket, long time, MaterialAvailability state,
+                         boolean pending, boolean stale) {}
 }

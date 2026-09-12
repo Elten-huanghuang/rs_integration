@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class JeiRecipeButtonCompatibilityTest {
     private static final String WRAPPER = "mezz/jei/gui/recipes/RecipeLayoutWithButtons.class";
@@ -52,6 +53,23 @@ class JeiRecipeButtonCompatibilityTest {
 
         assertTrue(calls.contains(owner(GuiIconToggleButtonAccessor.class) + ".getButton"));
         assertTrue(calls.contains(owner(RecipeGuiLayoutsMixin.class) + ".rsi$absoluteRecipeArea"));
+    }
+
+    @Test
+    void staticMixinHelpersRemainPrivate() throws IOException {
+        new ClassReader(classBytes(RecipeGuiLayoutsMixin.class)).accept(
+                new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        if (name.startsWith("rsi$")
+                                && (access & Opcodes.ACC_STATIC) != 0
+                                && (access & Opcodes.ACC_PRIVATE) == 0) {
+                            fail("Mixin static helper must be private: " + name + descriptor);
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
     }
 
     private static Set<String> methods(Path jar, String entryName) throws IOException {
