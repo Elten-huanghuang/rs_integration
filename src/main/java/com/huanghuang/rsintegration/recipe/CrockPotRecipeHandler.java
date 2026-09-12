@@ -42,6 +42,33 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
+        int requiredLevel = getMinimumPotTier(recipe);
+        if (requiredLevel <= 0) return true;
+        int machineLevel = machinePotLevelFromBindingKey(blockKey);
+        return machineLevel < 0 || machineLevel >= requiredLevel;
+    }
+
+    /** CrockPot registers the normal pot at level 0 and the portable pot at level 1. */
+    static int machinePotLevelFromBindingKey(@Nullable String blockKey) {
+        if (blockKey == null) return -1;
+        String lower = blockKey.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("portable_crock_pot")) return 1;
+        if (lower.contains("crock_pot")) return 0;
+        return -1;
+    }
+
+    static int getMinimumPotTier(Recipe<?> recipe) {
+        try {
+            Method method = recipe.getClass().getMethod("getPotLevel");
+            Object value = method.invoke(recipe);
+            return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return 0;
+        }
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // CrockPotCookingRecipe exposes its real output through getResult();
         try {

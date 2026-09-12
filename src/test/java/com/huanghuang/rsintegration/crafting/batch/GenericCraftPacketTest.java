@@ -851,6 +851,25 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void runtimeUnavailableRecipesAreRemovedWithoutBeingReportedAsUnboundMachines() {
+        var output = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "diamond"), "");
+        var input = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "coal"), "")), 1);
+        var unavailableVirtual = new ImmutableRecipeGraph.RecipeNode(
+                new ResourceLocation("test", "virtual"), output, 1, List.of(input),
+                "test_virtual", new ResourceLocation("test", "virtual"));
+
+        var filtered = GenericCraftPacket.filterRecipeGraph(
+                new ImmutableRecipeGraph(Map.of(output, List.of(unavailableVirtual))),
+                node -> false, node -> false);
+
+        assertFalse(filtered.graph().recipesByOutput().containsKey(output));
+        assertTrue(filtered.blockedOutputIds().isEmpty());
+    }
+
+    @Test
     void outputDestinationRoundTripsAndInvalidOrdinalsDefaultToRs() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         OutputDestination.PLAYER_INVENTORY.write(buffer);

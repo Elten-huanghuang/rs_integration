@@ -91,10 +91,23 @@ class AltarBindingRegistryTest {
     }
 
     @Test
-    void eidolonRitualFolderDoesNotRejectBoundBrazier() {
+    void eidolonMachineCategoriesDistinguishBrazierAndCrucible() {
         registerLeafType(ModIds.EIDOLON);
-        assertNull(AltarBindingRegistry.normalizeSubType(
+        assertEquals("brazier", AltarBindingRegistry.normalizeSubType(
                 "rituals", ModType.byId(ModIds.EIDOLON)));
+        assertEquals("brazier", AltarBindingRegistry.normalizeSubType(
+                "ritual", ModType.byId(ModIds.EIDOLON)));
+        assertEquals("crucible", AltarBindingRegistry.normalizeSubType(
+                "crucible", ModType.byId(ModIds.EIDOLON)));
+    }
+
+    @Test
+    void avaritiaRecipeFoldersDoNotPretendToBeMachineTiers() {
+        registerLeafType(ModIds.ID_AVARITIA_CRAFTING);
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "extreme", ModType.byId(ModIds.ID_AVARITIA_CRAFTING)));
+        assertNull(AltarBindingRegistry.normalizeSubType(
+                "kjs", ModType.byId(ModIds.ID_AVARITIA_CRAFTING)));
     }
 
     @Test

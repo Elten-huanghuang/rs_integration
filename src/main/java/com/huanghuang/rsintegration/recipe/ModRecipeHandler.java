@@ -43,6 +43,17 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /**
+     * Whether one concrete bound machine can execute this recipe. This is used
+     * by both recursive candidate pruning and final machine enumeration, so a
+     * recipe accepted during planning cannot later be routed to an incompatible
+     * machine family or tier.
+     */
+    default boolean isCompatibleBinding(@Nonnull Recipe<?> recipe,
+                                        @Nullable String blockKey) {
+        return true;
+    }
+
     /** Extract the primary result item for display/indexing purposes. */
     @Nonnull
     ItemStack getResultItem(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access);
