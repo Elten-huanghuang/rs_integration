@@ -407,7 +407,8 @@ final class CandidateEngine {
         if (MinersDelightCopperPotSupport.isCopperPotType(entry.modType())) {
             return AltarBindingRegistry.hasAnyBindingForType(ctx.player, entry.modType());
         }
-        return AltarBindingRegistry.hasBindingForRecipe(ctx.player, entry.recipe());
+        return AltarBindingRegistry.hasBindingForRecipe(
+                ctx.player, entry.recipe(), entry.modType());
     }
 
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {

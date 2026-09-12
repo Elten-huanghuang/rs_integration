@@ -845,13 +845,29 @@ public final class GenericCraftPacket {
                 Set.copyOf(blockedOutputs));
     }
 
+    /**
+     * Apply non-machine runtime requirements before binding filtering. Outputs
+     * rejected by a catalyst or other handler-specific prerequisite are not
+     * machine-blocked and must not trigger the no-bound-machine fallback.
+     */
+    static BindingAwareGraph filterRecipeGraph(
+            ImmutableRecipeGraph graph,
+            Predicate<ImmutableRecipeGraph.RecipeNode> runtimeAvailable,
+            Predicate<ImmutableRecipeGraph.RecipeNode> machineAvailable) {
+        ImmutableRecipeGraph runtimeGraph = filterRecipeGraph(graph, runtimeAvailable).graph();
+        return filterRecipeGraph(runtimeGraph, machineAvailable);
+    }
+
     private static BindingAwareGraph bindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
         return filterRecipeGraph(graph, node -> {
+            Recipe<?> recipe = resolveRecipe(player.serverLevel(), node.recipeId());
+            if (recipe == null) return true;
+            return isRecipeAvailableForPlanning(player, recipe);
+        }, node -> {
             ModType type = ModType.byId(node.modTypeId());
             if (!requiresBoundMachine(type)) return true;
-            Recipe<?> recipe = player.serverLevel().getRecipeManager()
-                    .byKey(node.recipeId()).orElse(null);
+            Recipe<?> recipe = resolveRecipe(player.serverLevel(), node.recipeId());
             if (recipe == null || !requiresBoundMachine(recipe, type)) return true;
             // Keep vanilla smithing nodes in the planning graph so recursive
             // previews can show the complete upgrade chain. Execution still
@@ -4583,9 +4599,12 @@ public final class GenericCraftPacket {
                     // wrongly hid those alternatives (e.g. the blast-furnace path for
                     // refined_beeswax_bar), leaving only the stonecutter step with no
                     // switch button even though the resolver could use either.
-                    boolean hasMachine = AltarBindingRegistry.hasBindingForRecipe(player, altRecipe);
-                    RSIntegrationMod.debug("[RSI-OR]   alt {}: hasMachine={}", altId, hasMachine);
-                    if (isSmithingRecipe(altRecipe) || hasMachine) {
+                    boolean hasMachine = AltarBindingRegistry.hasBindingForRecipe(
+                            player, altRecipe, ModType.byId(altMod));
+                    boolean runtimeAvailable = isRecipeAvailableForPlanning(player, altRecipe);
+                    RSIntegrationMod.debug("[RSI-OR]   alt {}: hasMachine={} runtimeAvailable={}",
+                            altId, hasMachine, runtimeAvailable);
+                    if (runtimeAvailable && (isSmithingRecipe(altRecipe) || hasMachine)) {
                         alternatives.add(altId);
                         alternativeModTypes.add(altMod);
                     }
@@ -4784,7 +4803,9 @@ public final class GenericCraftPacket {
                     // Selecting this branch performs a fresh recursive plan, so
                     // current inventory must not decide whether the button exists.
                     if (isSmithingRecipe(e.recipe())
-                            || AltarBindingRegistry.hasBindingForRecipe(player, e.recipe())) {
+                            || AltarBindingRegistry.hasBindingForRecipe(
+                                    player, e.recipe(), e.modType())) {
+                        if (!isRecipeAvailableForPlanning(player, e.recipe())) continue;
                         targetAlts.add(e.recipe().getId());
                         targetAltModTypes.add(e.modType().id());
                     }
@@ -5745,7 +5766,12 @@ public final class GenericCraftPacket {
         if (executionType != null && ModIds.ID_MD_COPPER_POT.equals(executionType.id())) {
             return AltarBindingRegistry.hasAnyBindingForType(player, executionType);
         }
-        return AltarBindingRegistry.hasBindingForRecipe(player, recipe);
+        return AltarBindingRegistry.hasBindingForRecipe(player, recipe, executionType);
+    }
+
+    private static boolean isRecipeAvailableForPlanning(ServerPlayer player, Recipe<?> recipe) {
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        return handler == null || handler.isAvailableForPlanning(recipe, player);
     }
 
     private static void logBindingRejection(String phase, ServerPlayer player, Recipe<?> recipe,

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.RegistryAccess;
@@ -32,6 +33,14 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
         // let the removed compressor path re-enter through the generic handler.
         return !recipe.getClass().getName().endsWith("CompressorRecipe")
                 && super.canHandle(recipe);
+    }
+
+    @Override
+    public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
+        int recipeTier = CraftingTableBatchDelegate.recipeTier(recipe);
+        if (recipeTier <= 0) return true;
+        int machineTier = CraftingTableBatchDelegate.machineTierFromBindingKey(blockKey);
+        return machineTier <= 0 || machineTier == recipeTier;
     }
 
     @Override

@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -343,7 +345,18 @@ public final class AltarBindingRegistry {
      * the block key of each bound machine.
      */
     public static boolean hasBindingForRecipe(ServerPlayer player, net.minecraft.world.item.crafting.Recipe<?> recipe) {
-        ModType type = ModType.classifyRecipe(recipe);
+        return hasBindingForRecipe(player, recipe, ModType.classifyRecipe(recipe));
+    }
+
+    /**
+     * Binding check for callers that already classified the recipe. The known
+     * type is authoritative for synthetic and handler-classified recipes that
+     * cannot be reconstructed from the recipe class alone.
+     */
+    public static boolean hasBindingForRecipe(ServerPlayer player,
+                                              net.minecraft.world.item.crafting.Recipe<?> recipe,
+                                              @Nullable ModType expectedType) {
+        ModType type = expectedType;
         if (type == null || type == ModType.GENERIC) {
             return !(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)
                     && !(recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe);
@@ -367,18 +380,30 @@ public final class AltarBindingRegistry {
             return !getBoundMachinesForRecipe(player, type, recipe.getId()).isEmpty();
         }
 
-        String subType = recipeSubTypeHint(recipe.getId());
-        subType = normalizeSubType(subType, type);
+        String subType = recipeMachineSubType(recipe, type);
 
         TickCache cache = getTickCache(player);
         if (!cache.modTypeIds.contains(type.id())) return false;
-        if (subType == null) return true;
         Set<String> keys = cache.blockKeysByType.get(type.id());
         if (keys == null) return false;
         for (String bk : keys) {
-            if (bk != null && bk.toLowerCase(java.util.Locale.ROOT).contains(subType)) return true;
+            if (subType != null && (bk == null
+                    || !bk.toLowerCase(java.util.Locale.ROOT).contains(subType))) {
+                continue;
+            }
+            if (isRecipeBindingCompatible(recipe, type, bk)) return true;
         }
         return false;
+    }
+
+    static boolean isRecipeBindingCompatible(
+            net.minecraft.world.item.crafting.Recipe<?> recipe,
+            ModType type, @Nullable String blockKey) {
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler == null || handler.modType() == ModType.GENERIC) {
+            handler = ModRecipeHandlers.handlerFor(type);
+        }
+        return handler == null || handler.isCompatibleBinding(recipe, blockKey);
     }
 
     private static TickCache getTickCache(ServerPlayer player) {
@@ -562,7 +587,12 @@ public final class AltarBindingRegistry {
     /** Enumerate machines that can execute this exact recipe. */
     public static List<BoundMachine> getBoundMachinesForRecipe(
             ServerPlayer player, ModType type, ResourceLocation recipeId) {
-        return getBoundMachinesForType(player, type, recipeSubTypeHint(recipeId), recipeId);
+        net.minecraft.world.item.crafting.Recipe<?> recipe = player.serverLevel()
+                .getRecipeManager().byKey(recipeId).orElse(null);
+        String subType = recipe != null
+                ? recipeMachineSubType(recipe, type)
+                : normalizeSubType(recipeSubTypeHint(recipeId), type);
+        return getBoundMachinesForType(player, type, subType, recipeId, recipe);
     }
 
     /**
@@ -579,15 +609,16 @@ public final class AltarBindingRegistry {
 
     public static List<BoundMachine> getBoundMachinesForType(ServerPlayer player, ModType type,
                                                               @Nullable String subTypeHint) {
-        return getBoundMachinesForType(player, type, subTypeHint, null);
+        return getBoundMachinesForType(player, type, subTypeHint, null, null);
     }
 
     private static List<BoundMachine> getBoundMachinesForType(
             ServerPlayer player, ModType type, @Nullable String subTypeHint,
-            @Nullable ResourceLocation recipeId) {
+            @Nullable ResourceLocation recipeId,
+            @Nullable net.minecraft.world.item.crafting.Recipe<?> recipe) {
         List<BoundMachine> result = new ArrayList<>();
         forEachInventoryGroup(player, stacks -> collectBindingsForType(
-                stacks, type, subTypeHint, recipeId, player, result));
+                stacks, type, subTypeHint, recipeId, recipe, player, result));
         // Aether fallback: the generic "aether" ModType acts as a recipe
         // classifier but machines are bound under concrete sub-types.
         if ("aether".equals(type.id()) && result.isEmpty()) {
@@ -595,7 +626,8 @@ public final class AltarBindingRegistry {
                 ModType subType = ModType.byId(subId);
                 if (subType != ModType.GENERIC) {
                     forEachInventoryGroup(player, stacks ->
-                            collectBindingsForType(stacks, subType, subTypeHint, recipeId, player, result));
+                            collectBindingsForType(stacks, subType, subTypeHint, recipeId,
+                                    recipe, player, result));
                 }
             }
         }
@@ -628,11 +660,11 @@ public final class AltarBindingRegistry {
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
                                                 String subTypeHint,
                                                 @Nullable ResourceLocation recipeId,
+                                                @Nullable net.minecraft.world.item.crafting.Recipe<?> recipe,
                                                 ServerPlayer player,
                                                 List<BoundMachine> out) {
-        // Normalize recipe sub-type hint to canonical machine prefix.
-        // Recipe IDs use a different naming scheme than blockKey prefixes
-        // (e.g. "crystal_infusion" recipe type vs "crystal_ritual" machine prefix).
+        // Callers normally pass a canonical hint. Keep this normalization for
+        // public callers that still provide a recipe-ID folder directly.
         String normalized = normalizeSubType(subTypeHint, type);
 
         for (ItemStack stack : stacks) {
@@ -647,6 +679,8 @@ public final class AltarBindingRegistry {
                         && !TaczWorkbenchCompatibility.accepts(entry.displayStack(), recipeId)) {
                     continue;
                 }
+                if (recipe != null
+                        && !isRecipeBindingCompatible(recipe, type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
                         && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
                     continue;
@@ -745,6 +779,22 @@ public final class AltarBindingRegistry {
         return "kjs".equals(hint) ? null : hint;
     }
 
+    /**
+     * Resolve the concrete machine family from recipe class metadata first.
+     * Recipe IDs are frequently flat or script-owned, while the registered JEI
+     * class mapping still identifies the physical workstation reliably.
+     */
+    @Nullable
+    static String recipeMachineSubType(net.minecraft.world.item.crafting.Recipe<?> recipe,
+                                       ModType type) {
+        if (recipe == null) return null;
+        String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
+        if (classHint != null && !classHint.equals(type.id())) {
+            return normalizeSubType(classHint, type);
+        }
+        return normalizeSubType(recipeSubTypeHint(recipe.getId()), type);
+    }
+
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
      *  Wizards Reborn names its recipe category "crystal_infusion"
      *  but the machine prefix used during binding is "crystal_ritual".
@@ -779,6 +829,11 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_ARS_APPARATUS.equals(type.id())
                 || ModIds.ID_ARS_IMBUEMENT.equals(type.id())
                 || ModIds.ID_ARS_SCRIBES_TABLE.equals(type.id())) {
+            return null;
+        }
+        // Avaritia recipe paths do not identify the four table tiers. The
+        // handler compares recipe.getTier() against the concrete bound block.
+        if (ModIds.ID_AVARITIA_CRAFTING.equals(type.id())) {
             return null;
         }
         // MythicBotany exposes one Mana Infuser recipe type and one physical
@@ -861,10 +916,12 @@ public final class AltarBindingRegistry {
         if (ModIds.CROCKPOT.equals(type.id())) {
             return null;
         }
-        // Eidolon ritual recipes are conventionally stored under rituals/,
-        // while their physical machine is a Brazier or Crucible. The folder is
-        // recipe grouping rather than a machine subtype.
+        // Eidolon's shared ModType covers two different physical machines.
+        // Class/category metadata distinguishes them even when recipe IDs such
+        // as eidolon:crimson_gem have no path prefix.
         if (ModIds.EIDOLON.equals(type.id())) {
+            if ("ritual".equals(hint) || "rituals".equals(hint)) return "brazier";
+            if ("crucible".equals(hint)) return "crucible";
             return null;
         }
         // TACZ gun smith table handles all recipe types (gun/ammo/attachments).

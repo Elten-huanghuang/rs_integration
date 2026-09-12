@@ -332,6 +332,19 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         };
     }
 
+    /** Resolve a tier from a persisted binding key or registry ID. */
+    public static int machineTierFromBindingKey(@Nullable String blockKey) {
+        if (blockKey == null || blockKey.isBlank()) return 0;
+        int direct = machineTier(ResourceLocation.tryParse(blockKey));
+        if (direct > 0) return direct;
+        String lower = blockKey.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("sculk_crafting_table")) return 1;
+        if (lower.contains("nether_crafting_table")) return 2;
+        if (lower.contains("end_crafting_table")) return 3;
+        if (lower.contains("extreme_crafting_table")) return 4;
+        return 0;
+    }
+
     /** Re-Avaritia exposes the required tier on both shaped and shapeless table recipes. */
     public static int recipeTier(@Nullable Recipe<?> recipe) {
         if (recipe == null) return 0;

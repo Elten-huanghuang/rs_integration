@@ -25,6 +25,27 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("eidolon"); }
 
     @Override
+    public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
+        if (blockKey == null) return false;
+        String required = requiredMachineKey(recipe);
+        return required == null
+                || blockKey.toLowerCase(java.util.Locale.ROOT).contains(required);
+    }
+
+    @Nullable
+    static String requiredMachineKey(Recipe<?> recipe) {
+        String className = recipe.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        if (className.contains("worktable")) return "worktable";
+        if (className.contains("ritual")) return "brazier";
+        if (className.contains("crucible")) return "crucible";
+
+        String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
+        if ("ritual".equals(classHint) || "rituals".equals(classHint)) return "brazier";
+        if ("crucible".equals(classHint)) return "crucible";
+        return null;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // RitualRecipe (ItemRitualRecipe) has getResultItem() returning the actual result
         return recipe.getResultItem(access);

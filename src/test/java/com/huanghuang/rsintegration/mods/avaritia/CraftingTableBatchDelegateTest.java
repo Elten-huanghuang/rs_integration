@@ -29,6 +29,20 @@ class CraftingTableBatchDelegateTest {
     }
 
     @Test
+    void recognizesTiersInsidePersistedBindingKeys() {
+        assertEquals(1, CraftingTableBatchDelegate.machineTierFromBindingKey(
+                "avaritia_crafting||block.avaritia.sculk_crafting_table"));
+        assertEquals(2, CraftingTableBatchDelegate.machineTierFromBindingKey(
+                "avaritia_crafting||block.avaritia.nether_crafting_table"));
+        assertEquals(3, CraftingTableBatchDelegate.machineTierFromBindingKey(
+                "avaritia_crafting||block.avaritia.end_crafting_table"));
+        assertEquals(4, CraftingTableBatchDelegate.machineTierFromBindingKey(
+                "avaritia_crafting||block.avaritia.extreme_crafting_table"));
+        assertEquals(0, CraftingTableBatchDelegate.machineTierFromBindingKey(
+                "avaritia_crafting||block.avaritia.compressed_crafting_table"));
+    }
+
+    @Test
     void recognizesReAvaritiaExtremeRecipesAndBlockEntity() {
         assertEquals(true, CraftingTableBatchDelegate.isReAvaritiaExtremeRecipeClass(
                 "committee.nova.mods.avaritia.common.crafting.recipe.ShapedExtremeCraftingRecipe"));
