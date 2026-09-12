@@ -25,11 +25,17 @@ public final class RecipeAvailabilityClient {
     public static MaterialAvailability get(@Nullable RecipeAvailabilityKey key) {
         Minecraft mc = Minecraft.getInstance();
         if (key == null || mc.player == null || mc.getConnection() == null) return MaterialAvailability.UNKNOWN;
-        if (level != mc.level || screen != mc.screen || menu != mc.player.containerMenu
-                || inventoryRevision != mc.player.getInventory().getTimesChanged()
+        boolean contextChanged = level != mc.level || screen != mc.screen
+                || menu != mc.player.containerMenu;
+        boolean inventoryChanged = inventoryRevision != mc.player.getInventory().getTimesChanged()
                 || !ItemStack.matches(mainHand, mc.player.getMainHandItem())
-                || !ItemStack.matches(offHand, mc.player.getOffhandItem())) {
+                || !ItemStack.matches(offHand, mc.player.getOffhandItem());
+        if (contextChanged) {
             CACHE.clear();
+        } else if (inventoryChanged) {
+            CACHE.invalidate();
+        }
+        if (contextChanged || inventoryChanged) {
             level = mc.level;
             screen = mc.screen;
             menu = mc.player.containerMenu;
