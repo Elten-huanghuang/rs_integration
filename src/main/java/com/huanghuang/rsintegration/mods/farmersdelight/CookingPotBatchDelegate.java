@@ -52,6 +52,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean craftDone;
+    private boolean arcaneCookingPot;
     private final List<ItemStack> placedInputs = new ArrayList<>();
     private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
     private ItemStack placedContainer = ItemStack.EMPTY;
@@ -84,10 +85,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.arcaneCookingPot = false;
         this.placedInputs.clear();
         this.detachedRecoveredInputs.clear();
         this.placedContainer = ItemStack.EMPTY;
         BlockEntity existing = level.getBlockEntity(pos);
+        this.arcaneCookingPot = ArcaneStoveSupport.isArcaneCookingPot(existing);
         IItemHandler existingInventory = existing != null
                 && isSupportedBlockEntity(existing)
                 ? getInventory(existing) : null;
@@ -227,7 +230,29 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         forceChunkLoad(true);
 
-        // Check heat source — Cooking Pot requires a heat source below
+        // The bound machine is the pot, but Arcane Stove fuel state lives one
+        // block below it. Invoke the stove's native interaction before checking heat.
+        BlockEntity heatSource = myLevel.getBlockEntity(myPos.below());
+        if (arcaneCookingPot && ArcaneStoveSupport.isArcaneStove(heatSource)
+                && !ArcaneStoveSupport.ensureBurning(player, heatSource,
+                FarmersDelightRecipeHandler.getCookTime(recipe),
+                new ArcaneStoveSupport.FuelAccess() {
+                    @Override public ItemStack extract(ItemStack template) {
+                        return extractExactFromStorage(player, template, 1, false);
+                    }
+
+                    @Override public void refund(ItemStack stack) {
+                        ItemStack remainder = insertIntoStorage(player, stack, false);
+                        if (!remainder.isEmpty()) {
+                            ItemHandlerHelper.giveItemToPlayer(player, remainder);
+                        }
+                    }
+                })) {
+            forceChunkLoad(false);
+            return false;
+        }
+
+        // Ordinary cooking pots still use their original heat-source behavior.
         if (!isHeated(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] No heat source under cooking pot at {}", myPos);
             player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
@@ -412,7 +437,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             warnings.add(Component.translatable("rsi.farmersdelight.container_needed",
                     container.getHoverName()));
         }
-        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning"));
+        boolean arcaneCombination = false;
+        if (pos != null) {
+            ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+            if (level != null && level.hasChunkAt(pos) && level.hasChunkAt(pos.below())) {
+                BlockEntity pot = level.getBlockEntity(pos);
+                BlockEntity stove = level.getBlockEntity(pos.below());
+                arcaneCombination = ArcaneStoveSupport.isArcaneCookingPot(pot)
+                        && ArcaneStoveSupport.isArcaneStove(stove);
+            }
+        }
+        warnings.add(Component.translatable(arcaneCombination
+                ? "rsi.farmersdelight.arcane_pot.plan_fuel"
+                : "rsi.farmersdelight.heat_warning"));
         return warnings;
     }
 
@@ -479,9 +516,23 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private boolean matchesRecipeOutput(ItemStack stack) {
         ItemStack expected = getExpectedRecipeResult(recipe,
                 myLevel != null ? myLevel.registryAccess() : null);
-        return !stack.isEmpty() && !expected.isEmpty()
-                && ItemStack.isSameItemSameTags(stack, expected)
-                && stack.getCount() >= expected.getCount();
+        return matchesRecipeOutputStack(stack, expected, arcaneCookingPot);
+    }
+
+    static boolean matchesRecipeOutputStack(ItemStack stack, ItemStack expected,
+                                            boolean arcaneCookingPot) {
+        if (stack.isEmpty() || expected.isEmpty()
+                || !ItemStack.isSameItem(stack, expected)
+                || stack.getCount() < expected.getCount()) return false;
+        if (ItemStack.isSameItemSameTags(stack, expected)) return true;
+        if (!arcaneCookingPot) return false;
+
+        ItemStack normalized = stack.copy();
+        if (normalized.hasTag()) {
+            normalized.getTag().remove("IronsSpellsDelightArcaneCooked");
+            if (normalized.getTag().isEmpty()) normalized.setTag(null);
+        }
+        return ItemStack.isSameItemSameTags(normalized, expected);
     }
 
     /** SRG-safe recipe result using the active level's registry access. */
