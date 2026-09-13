@@ -93,12 +93,9 @@ final class ContainerTransferLogic {
         boolean hasCrafting = hasCraftingContainer(menu);
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
-            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
-            if (isPlayerInventorySlot(player, menu, slotIndex, slot) || isUpgradeSlot(slot)) continue;
-            if (hasCrafting && isResultSlot(slot)) continue;
-            if (slot.container instanceof CraftingContainer) continue;
+            if (!isTransferableSourceSlot(player, menu, slotIndex, slot, hasCrafting)) continue;
             ItemStack stack = slot.getItem();
-            if (stack.isEmpty() || !slot.mayPickup(player)) continue;
+            if (stack.isEmpty()) continue;
             if (isBoundToBeyondDimensionsNetwork(stack, session)) continue;
             ItemStack input = stack.copy();
             StorageOperationResult result = session.insert(player, input, false);
@@ -161,16 +158,11 @@ final class ContainerTransferLogic {
 
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
-            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
-            if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
-            if (isUpgradeSlot(slot)) continue;
-            if (hasCrafting && isResultSlot(slot)) continue;
-            if (slot.container instanceof CraftingContainer) continue;
+            if (!isTransferableSourceSlot(player, menu, slotIndex, slot, hasCrafting)) continue;
 
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
             if (isBoundNetworkUpgrade(stack)) continue;
-            if (!slot.mayPickup(player)) continue;
 
             // Skip items the deposit upgrade says should stay in the backpack.
             if (depositUpgrades != null && !depositUpgrades.isEmpty()) {
@@ -235,14 +227,10 @@ final class ContainerTransferLogic {
 
         for (int slotIndex = 0; slotIndex < menu.slots.size(); slotIndex++) {
             Slot slot = menu.slots.get(slotIndex);
-            if (isBetterBeyondDimensionsNetworkSlot(slot)) continue;
-            if (isPlayerInventorySlot(player, menu, slotIndex, slot)) continue;
-            if (hasCrafting && isResultSlot(slot)) continue;
-            if (slot.container instanceof CraftingContainer) continue;
+            if (!isTransferableSourceSlot(player, menu, slotIndex, slot, hasCrafting)) continue;
 
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) continue;
-            if (!slot.mayPickup(player)) continue;
 
             int count = stack.getCount();
             ItemStack toMove = stack.copy();
@@ -449,6 +437,15 @@ final class ContainerTransferLogic {
                 && slotIndex >= slotCount - PLAYER_MAIN_INVENTORY_SLOTS;
     }
 
+    private static boolean isTransferableSourceSlot(ServerPlayer player, AbstractContainerMenu menu,
+                                                     int slotIndex, Slot slot, boolean hasCrafting) {
+        if (slot == null || !slot.isActive() || !slot.mayPickup(player)) return false;
+        if (isVirtualSlot(slot) || isUpgradeSlot(slot)) return false;
+        if (isPlayerInventorySlot(player, menu, slotIndex, slot)) return false;
+        if (hasCrafting && isResultSlot(slot)) return false;
+        return !(slot.container instanceof CraftingContainer);
+    }
+
     static boolean isSelfNetworkStorageMenu(String menuClassName) {
         return DISK_DRIVE_MENU.equals(menuClassName)
                 || RESONANCE_BACKPACK_MENU.equals(menuClassName);
@@ -486,6 +483,62 @@ final class ContainerTransferLogic {
 
     static boolean isBetterBeyondDimensionsNetworkSlotClass(String className) {
         return BBD_NETWORK_SLOT.equals(className);
+    }
+
+    /**
+     * Fake filter/display slots contain representative stacks rather than owned items.
+     * Treat unfamiliar slot implementations conservatively so pressing F cannot copy a
+     * displayed stack into a storage backend. Known marker interfaces are detected by
+     * name to avoid hard links to every optional menu mod.
+     */
+    private static boolean isVirtualSlot(Slot slot) {
+        if (isBetterBeyondDimensionsNetworkSlot(slot)) return true;
+        if (hasVirtualSlotType(slot.getClass())) return true;
+        return slot.container != null && hasVirtualBackingType(slot.container.getClass());
+    }
+
+    private static boolean hasVirtualSlotType(Class<?> type) {
+        while (type != null && type != Object.class) {
+            if (isVirtualSlotClass(type.getName())) return true;
+            for (Class<?> marker : type.getInterfaces()) {
+                if (isVirtualSlotClass(marker.getName())) return true;
+            }
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    private static boolean hasVirtualBackingType(Class<?> type) {
+        while (type != null && type != Object.class) {
+            if (isVirtualBackingClass(type.getName())) return true;
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
+    static boolean isVirtualSlotClass(String className) {
+        String name = simpleClassName(className);
+        return name.contains("fakeslot") || name.contains("slotfake")
+                || name.contains("ghostslot") || name.contains("slotghost")
+                || name.contains("phantomslot") || name.contains("slotphantom")
+                || name.contains("dummyslot") || name.contains("slotdummy")
+                || name.contains("filterslot") || name.contains("slotfilter")
+                || name.contains("templateslot") || name.contains("slottemplate")
+                || name.contains("previewslot") || name.contains("slotpreview");
+    }
+
+    static boolean isVirtualBackingClass(String className) {
+        String name = simpleClassName(className);
+        boolean backingType = name.contains("inventory") || name.contains("container")
+                || name.contains("handler");
+        return backingType && (name.contains("fake") || name.contains("ghost")
+                || name.contains("phantom") || name.contains("dummy"));
+    }
+
+    private static String simpleClassName(String className) {
+        if (className == null) return "";
+        int separator = Math.max(className.lastIndexOf('.'), className.lastIndexOf('$'));
+        return className.substring(separator + 1).toLowerCase(java.util.Locale.ROOT);
     }
 
     private static boolean isBoundToBeyondDimensionsNetwork(ItemStack stack,
