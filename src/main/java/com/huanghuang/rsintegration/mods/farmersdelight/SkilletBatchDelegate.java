@@ -27,6 +27,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -35,6 +36,8 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /** Batch delegate for Farmer's Delight Skillet (also handles campfire). */
 public final class SkilletBatchDelegate extends AbstractBatchDelegate {
@@ -51,12 +54,16 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     // Skillet-specific
     private boolean isSkillet;
+    private boolean isArcaneStove;
     private boolean skilletStarted;
     private int skilletPrevTime = -1;
     private ItemStack placedInput = ItemStack.EMPTY;
     // Campfire-specific
     private int campfireSlot = -1;
     private Object campfireBE;
+    private int arcaneSlot = -1;
+    private final Set<UUID> arcaneEntitiesBefore = new java.util.HashSet<>();
+    private long arcaneStartTick;
 
     private static volatile Class<?> campfireClass;
     private static final Field CAMPFIRE_ITEMS;
@@ -116,8 +123,16 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
         this.skilletStarted = false;
         this.placedInput = ItemStack.EMPTY;
+        this.isSkillet = false;
+        this.isArcaneStove = false;
+        this.arcaneSlot = -1;
+        this.arcaneEntitiesBefore.clear();
 
         BlockEntity be = level.getBlockEntity(pos);
+        if (be != null && ArcaneStoveSupport.isArcaneStove(be)) {
+            this.isArcaneStove = true;
+            return true;
+        }
         if (be != null && isSkilletBE(be)) {
             this.isSkillet = true;
         }
@@ -184,7 +199,9 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         if (materials.isEmpty()) return false;
         ItemStack input = materials.get(0).copyWithCount(1);
 
-        if (isSkilletBE(be)) {
+        if (isArcaneStove) {
+            return tryStartArcaneStove(be, input);
+        } else if (isSkilletBE(be)) {
             return tryStartSkillet(be, input);
         } else if (isCampfireBE(be)) {
             return tryStartCampfire(be, input);
@@ -192,6 +209,65 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
         RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Unknown BE type: {}", be.getClass().getName());
         return false;
+    }
+
+    private boolean tryStartArcaneStove(BlockEntity be, ItemStack input) {
+        ItemStackHandler stoveItems = ArcaneStoveSupport.items(be);
+        if (stoveItems == null || stoveItems.getSlots() <= 0) return false;
+        boolean[] emptyBefore = new boolean[stoveItems.getSlots()];
+        boolean hasEmptySlot = false;
+        for (int slot = 0; slot < stoveItems.getSlots(); slot++) {
+            if (stoveItems.getStackInSlot(slot).isEmpty()) {
+                emptyBefore[slot] = true;
+                hasEmptySlot = true;
+            }
+        }
+        if (!hasEmptySlot) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.farmersdelight.arcane_stove.full"));
+            return false;
+        }
+        if (!ArcaneStoveSupport.ensureBurning(player, be,
+                recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 200,
+                new ArcaneStoveSupport.FuelAccess() {
+                    @Override public ItemStack extract(ItemStack template) {
+                        return extractExactFromStorage(player, template, 1, false);
+                    }
+                    @Override public void refund(ItemStack stack) {
+                        ItemStack remainder = insertIntoStorage(player, stack, false);
+                        if (!remainder.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, remainder);
+                    }
+                })) return false;
+        arcaneEntitiesBefore.clear();
+        for (var entity : myLevel.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                new net.minecraft.world.phys.AABB(myPos).inflate(1.5))) {
+            arcaneEntitiesBefore.add(entity.getUUID());
+        }
+        if (!ArcaneStoveSupport.placeFood(be, player, input,
+                recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 200)) return false;
+        arcaneSlot = findPlacedArcaneSlot(stoveItems, emptyBefore, input);
+        if (arcaneSlot < 0) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-ArcaneStove] Native placeFood succeeded but its slot could not be identified at {}",
+                    myPos);
+        }
+        placedInput = input.copy();
+        arcaneStartTick = myLevel.getGameTime();
+        forceMachineChunk(myLevel, myPos, true);
+        be.setChanged();
+        return true;
+    }
+
+    private static int findPlacedArcaneSlot(ItemStackHandler handler, boolean[] emptyBefore,
+                                            ItemStack input) {
+        for (int slot = 0; slot < handler.getSlots() && slot < emptyBefore.length; slot++) {
+            ItemStack stored = handler.getStackInSlot(slot);
+            if (emptyBefore[slot] && !stored.isEmpty()
+                    && PhysicalInputRecovery.recoveredExpected(stored, input)) {
+                return slot;
+            }
+        }
+        return -1;
     }
 
     private boolean tryStartSkillet(BlockEntity be, ItemStack input) {
@@ -278,6 +354,16 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+        if (isArcaneStove) {
+            ItemStack expected = getExpectedOutput();
+            if (expected == null || expected.isEmpty()) return false;
+            return level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(myPos).inflate(1.5), entity ->
+                            entity.isAlive() && level.getGameTime() >= arcaneStartTick
+                                    && !arcaneEntitiesBefore.contains(entity.getUUID())
+                                    && ItemStack.isSameItemSameTags(entity.getItem(), expected)).stream()
+                    .findAny().isPresent();
+        }
         if (isSkilletBE(be)) {
             // Use CAMPFIRE_ITEMS (already resolved in static init) to peek at
             // the stored item. hasStoredStack() returns true even for raw
@@ -347,6 +433,10 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
+        if (isArcaneStove) {
+            forceMachineChunk(myLevel, myPos, false);
+            return ItemStack.EMPTY;
+        }
         if (isSkilletBE(be)) {
             try {
                 Method removeItem = be.getClass().getMethod("removeItem");
@@ -391,7 +481,13 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         List<ItemStack> recoveredInputs = new ArrayList<>();
-        if (isSkilletBE(be)) {
+        if (isArcaneStove) {
+            ItemStack recovered = clearArcaneInput(be);
+            if (!recovered.isEmpty()) {
+                recoveredInputs.add(recovered.copy());
+                if (!usingSharedLedger) refundToRSNetwork(recovered);
+            }
+        } else if (isSkilletBE(be)) {
             try {
                 Method isCooking = be.getClass().getMethod("isCooking");
                 if ((Boolean) isCooking.invoke(be)) {
@@ -413,11 +509,27 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         craftDone = false;
         skilletPrevTime = -1;
         placedInput = ItemStack.EMPTY;
+        arcaneSlot = -1;
+    }
+
+    private ItemStack clearArcaneInput(BlockEntity be) {
+        ItemStackHandler handler = ArcaneStoveSupport.items(be);
+        if (handler == null || placedInput.isEmpty()
+                || arcaneSlot < 0 || arcaneSlot >= handler.getSlots()) return ItemStack.EMPTY;
+        ItemStack visible = handler.getStackInSlot(arcaneSlot);
+        if (visible.isEmpty()
+                || !PhysicalInputRecovery.recoveredExpected(visible, placedInput)) return ItemStack.EMPTY;
+        ItemStack recovered = handler.extractItem(arcaneSlot,
+                Math.min(visible.getCount(), placedInput.getCount()), false);
+        be.setChanged();
+        return recovered;
     }
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         campfireForceLoad(false);
+        forceMachineChunk(myLevel, myPos, false);
         craftDone = false;
         skilletPrevTime = -1;
         network = null;
@@ -477,7 +589,18 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
-        warnings.add(Component.translatable("rsi.farmersdelight.heat_warning"));
+        boolean arcaneStove = false;
+        if (pos != null) {
+            ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+            if (level != null && level.hasChunkAt(pos)
+                    && ArcaneStoveSupport.isArcaneStove(level.getBlockEntity(pos))) {
+                arcaneStove = true;
+                warnings.add(Component.translatable("rsi.farmersdelight.arcane_stove.plan_fuel"));
+            }
+        }
+        if (!arcaneStove) {
+            warnings.add(Component.translatable("rsi.farmersdelight.heat_warning"));
+        }
         return warnings;
     }
 

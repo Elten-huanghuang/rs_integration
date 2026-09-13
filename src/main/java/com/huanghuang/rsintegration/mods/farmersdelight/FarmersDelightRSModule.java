@@ -118,6 +118,18 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 "farmersdelight_skillet", false
         ));
 
+        // Iron's Spell's Delight Arcane Stove uses the same CampfireCookingRecipe
+        // contract as a skillet, but needs a player mana/essence interaction to
+        // start burning. The delegate detects this BE and invokes that native
+        // interaction with a temporary empty hand.
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "irons_spells_delight", ModType.byId("farmersdelight_skillet"),
+                RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
+                List.of("com.inolia_zaicek.irons_spells_delight.blocks.ArcaneStoveBlock"),
+                List.of("irons_spells_delight:arcane_stove"),
+                "farmersdelight_skillet", false
+        ));
+
         if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {
             BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                     ModIds.MINERS_DELIGHT, ModType.byId(ModIds.ID_MD_COPPER_POT),
