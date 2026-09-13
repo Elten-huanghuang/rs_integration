@@ -81,6 +81,36 @@ class ContainerTransferLogicTest {
     }
 
     @Test
+    void rejectsCommonFakeAndFilterSlotImplementations() {
+        assertTrue(ContainerTransferLogic.isVirtualSlotClass(
+                "net.p3pp3rf1y.sophisticatedcore.common.gui.IFilterSlot"));
+        assertTrue(ContainerTransferLogic.isVirtualSlotClass(
+                "example.menu.GhostSlot"));
+        assertTrue(ContainerTransferLogic.isVirtualSlotClass(
+                "example.menu.SlotPhantom"));
+        assertTrue(ContainerTransferLogic.isVirtualSlotClass(
+                "example.menu.TemplateSlot"));
+        assertTrue(ContainerTransferLogic.isVirtualSlotClass(
+                "example.menu.PreviewSlot"));
+        assertFalse(ContainerTransferLogic.isVirtualSlotClass(
+                "net.minecraft.world.inventory.Slot"));
+        assertFalse(ContainerTransferLogic.isVirtualSlotClass(
+                "example.menu.FluidInputSlot"));
+    }
+
+    @Test
+    void rejectsVirtualBackingInventoriesWithoutBlockingRealContainers() {
+        assertTrue(ContainerTransferLogic.isVirtualBackingClass(
+                "example.menu.GhostInventory"));
+        assertTrue(ContainerTransferLogic.isVirtualBackingClass(
+                "example.menu.FakeItemHandler"));
+        assertFalse(ContainerTransferLogic.isVirtualBackingClass(
+                "net.minecraft.world.SimpleContainer"));
+        assertFalse(ContainerTransferLogic.isVirtualBackingClass(
+                "example.inventory.FilteredItemHandler"));
+    }
+
+    @Test
     void protectsOnlyFullyBoundRsNetworkUpgrades() {
         assertTrue(ContainerTransferLogic.isProtectedBoundNetworkUpgrade(
                 "rs_integration:rs_magnet_upgrade", true, true));
