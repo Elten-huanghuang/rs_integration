@@ -93,6 +93,38 @@ class StorageSnapshotTest extends BootstrapTest {
     }
 
     @Test
+    void indexedMultiItemMatchingPreservesSnapshotOrder() {
+        StorageItemKey firstGold = key(namedStack(Items.GOLD_INGOT, "first"));
+        StorageItemKey iron = key(namedStack(Items.IRON_INGOT, "middle"));
+        StorageItemKey secondGold = key(namedStack(Items.GOLD_INGOT, "last"));
+        StorageSnapshot snapshot = new StorageSnapshot(BACKEND, List.of(
+                new StoredItem(firstGold, 1),
+                new StoredItem(key(new ItemStack(Items.STICK)), 64),
+                new StoredItem(iron, 2),
+                new StoredItem(secondGold, 3)));
+
+        assertEquals(List.of(firstGold, iron, secondGold), snapshot.match(
+                Ingredient.of(Items.IRON_INGOT, Items.GOLD_INGOT)).items().stream()
+                .map(StoredItem::key).toList());
+    }
+
+    @Test
+    void customIngredientStillScansOutsideItsDisplayItems() {
+        StorageSnapshot snapshot = new StorageSnapshot(BACKEND, List.of(
+                new StoredItem(key(new ItemStack(Items.IRON_INGOT)), 1),
+                new StoredItem(key(new ItemStack(Items.GOLD_INGOT)), 2)));
+        Ingredient custom = new Ingredient(Stream.of(
+                new Ingredient.ItemValue(new ItemStack(Items.IRON_INGOT)))) {
+            @Override public boolean test(ItemStack stack) {
+                return stack.is(Items.GOLD_INGOT);
+            }
+        };
+
+        assertEquals(List.of(Items.GOLD_INGOT), snapshot.match(custom).items().stream()
+                .map(stored -> stored.stack().getItem()).toList());
+    }
+
+    @Test
     void backendIdentityKeepsEqualDisplayStacksSeparate() {
         ItemStack display = new ItemStack(Items.DIAMOND);
         CompoundTag firstIdentity = new CompoundTag();
@@ -110,7 +142,11 @@ class StorageSnapshotTest extends BootstrapTest {
     }
 
     private static ItemStack namedDiamond(String variant) {
-        ItemStack stack = new ItemStack(Items.DIAMOND);
+        return namedStack(Items.DIAMOND, variant);
+    }
+
+    private static ItemStack namedStack(net.minecraft.world.item.Item item, String variant) {
+        ItemStack stack = new ItemStack(item);
         CompoundTag tag = new CompoundTag();
         tag.putString("variant", variant);
         stack.setTag(tag);

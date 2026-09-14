@@ -49,12 +49,18 @@ public record VoidUpgradeRule(Type type, String value, CompoundTag itemNbt) {
     }
 
     public boolean matches(ItemStack stack, boolean matchNbt) {
+        return matches(stack, matchNbt, matchNbt, matchNbt);
+    }
+
+    public boolean matches(ItemStack stack, boolean matchNbt, boolean matchDamage,
+                           boolean matchEnchantments) {
         if (stack.isEmpty()) return false;
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (itemId == null) return false;
         return switch (type) {
             case ITEM -> value.equals(itemId.toString())
-                    && (!matchNbt || Objects.equals(itemNbt, stack.getTag()));
+                    && itemNbtMatches(itemNbt, stack.getTag(), matchNbt, matchDamage,
+                    matchEnchantments);
             case TAG -> {
                 ResourceLocation id = ResourceLocation.tryParse(value);
                 yield id != null && stack.is(net.minecraft.tags.TagKey.create(
@@ -65,6 +71,69 @@ public record VoidUpgradeRule(Type type, String value, CompoundTag itemNbt) {
             case EQUIPMENT -> stack.getItem() instanceof ArmorItem armor
                     && armor.getEquipmentSlot().getName().equals(value);
         };
+    }
+
+    static boolean itemNbtMatches(CompoundTag expected, CompoundTag actual, boolean matchNbt,
+                                  boolean matchDamage, boolean matchEnchantments) {
+        if (matchDamage && damage(expected) != damage(actual)) return false;
+        if (matchEnchantments
+                && (!enchantmentsEqual(expected, actual, "Enchantments")
+                || !enchantmentsEqual(expected, actual, "StoredEnchantments"))) return false;
+        if (!matchNbt) return true;
+        return ordinaryNbtEquals(expected, actual);
+    }
+
+    private static int damage(CompoundTag tag) {
+        return tag == null ? 0 : tag.getInt("Damage");
+    }
+
+    private static boolean enchantmentsEqual(CompoundTag expected, CompoundTag actual,
+                                             String key) {
+        net.minecraft.nbt.ListTag left = list(expected, key);
+        net.minecraft.nbt.ListTag right = list(actual, key);
+        if (left.size() != right.size()) return false;
+        boolean[] matched = new boolean[right.size()];
+        for (int i = 0; i < left.size(); i++) {
+            boolean found = false;
+            for (int j = 0; j < right.size(); j++) {
+                if (!matched[j] && left.get(i).equals(right.get(j))) {
+                    matched[j] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+        return true;
+    }
+
+    private static net.minecraft.nbt.ListTag list(CompoundTag tag, String key) {
+        if (tag != null && tag.get(key) instanceof net.minecraft.nbt.ListTag list) return list;
+        return new net.minecraft.nbt.ListTag();
+    }
+
+    private static boolean ordinaryNbtEquals(CompoundTag expected, CompoundTag actual) {
+        if (expected != null) {
+            for (String key : expected.getAllKeys()) {
+                if (!isSeparateOption(key)
+                        && (actual == null || !Objects.equals(expected.get(key), actual.get(key)))) {
+                    return false;
+                }
+            }
+        }
+        if (actual != null) {
+            for (String key : actual.getAllKeys()) {
+                if (!isSeparateOption(key) && (expected == null || !expected.contains(key))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean isSeparateOption(String key) {
+        return key.equals("Damage") || key.equals("Enchantments")
+                || key.equals("StoredEnchantments");
     }
 
     public CompoundTag toTag() {

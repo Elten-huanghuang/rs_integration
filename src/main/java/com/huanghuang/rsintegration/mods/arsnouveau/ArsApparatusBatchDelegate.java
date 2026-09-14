@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -109,10 +110,19 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.retry("Enchanting Apparatus is busy");
         }
 
-        // Check pedestals are available
+        // Data-pack recipes can legitimately use only the central reagent.
+        // Validate the native layout against this recipe's actual demand.
         List<BlockPos> pedestals = ArsTileAccess.pedestalPositions(be);
-        if (pedestals.isEmpty()) {
-            return PreparationResult.fatal("No pedestals found around Apparatus");
+        List<Ingredient> pedestalIngredients = getPedestalIngredients(candidate);
+        int requiredPedestals = ArsApparatusMaterials.pedestalItemCount(pedestalIngredients);
+        if (!ArsApparatusMaterials.hasPedestalCapacity(pedestalIngredients, pedestals.size())) {
+            String machineLabel = level.dimension().location() + "@" + pos.toShortString();
+            String detail = "Enchanting Apparatus preparation rejected at " + machineLabel
+                    + ": recipe=" + recipeId + " requires " + requiredPedestals
+                    + " Arcane Pedestal(s) within radius 3, found " + pedestals.size();
+            return PreparationResult.fatal(detail, Component.translatable(
+                    "rsi.ars_nouveau.error.pedestals_insufficient",
+                    requiredPedestals, pedestals.size(), machineLabel));
         }
 
         return validateAndInit(player, recipeId, dim, pos)
@@ -154,8 +164,8 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         this.expectedOutput = getRecipeOutput(foundRecipe);
         this.sourceCost = getSourceCost(foundRecipe);
 
-        // Capture pedestal layout (radius 3)
-        this.pedestalLayout = ArsPedestalLayout.capture(level, pos);
+        // An empty layout is valid when the recipe has no pedestal ingredients.
+        this.pedestalLayout = ArsPedestalLayout.captureAllowEmpty(level, pos);
         if (this.pedestalLayout == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsApparatus] Failed to capture pedestal layout");
             return false;
@@ -163,6 +173,11 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         // Build required materials list
         this.requiredMaterials = buildMaterialsList(foundRecipe);
+        List<Ingredient> pedestalIngredients = getPedestalIngredients(foundRecipe);
+        if (!ArsApparatusMaterials.hasPedestalCapacity(
+                pedestalIngredients, pedestalLayout.pedestalCount())) {
+            return false;
+        }
 
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Validated: recipe={}, output={}, source={}, pedestals={}",
                 recipeId, expectedOutput, sourceCost, pedestalLayout.pedestalCount());
@@ -496,9 +511,12 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return ArsDynamicApparatusRecipe.buildMaterials(recipe, target);
         }
         Ingredient reagent = Reflect.<Ingredient>getField(recipe, "reagent").orElse(Ingredient.EMPTY);
-        List<Ingredient> pedestalItems = Reflect.<List<Ingredient>>getField(recipe, "pedestalItems")
-                .orElse(List.of());
+        List<Ingredient> pedestalItems = getPedestalIngredients(recipe);
         return ArsApparatusMaterials.build(reagent, pedestalItems);
+    }
+
+    private List<Ingredient> getPedestalIngredients(Recipe<?> recipe) {
+        return Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").orElse(List.of());
     }
 
     private boolean matchesExpectedOutput(ItemStack result) {

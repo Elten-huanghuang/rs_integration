@@ -87,6 +87,12 @@ public final class ApotheosisRSModule implements IModIntegration {
     @Override
     public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "apotheosis", ModType.CUSTOM_GUI,
+                RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                List.of(), List.of("apotheosis:augmenting_table"),
+                "custom_gui", true));
+
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "apotheosis", ModType.byId(FLETCHING_TYPE),
                 RSIntegrationConfig.ENABLE_APOTHEOSIS,
                 List.of("dev.shadowsoffire.apotheosis.village.fletching.ApothFletchingBlock"),

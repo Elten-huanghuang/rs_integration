@@ -43,16 +43,21 @@ public final class ArsPedestalLayout {
      */
     @Nullable
     public static ArsPedestalLayout capture(Level level, BlockPos machinePos) {
+        ArsPedestalLayout layout = captureAllowEmpty(level, machinePos);
+        return layout == null || layout.pedestalPositions.isEmpty() ? null : layout;
+    }
+
+    /**
+     * Captures a layout while preserving a valid empty scan. Apparatus recipes
+     * created by data packs may require only the central reagent and therefore
+     * do not need an Arcane Pedestal.
+     */
+    @Nullable
+    public static ArsPedestalLayout captureAllowEmpty(Level level, BlockPos machinePos) {
         BlockEntity be = level.getBlockEntity(machinePos);
         if (be == null) return null;
 
-        // Query the machine's pedestal list via reflection
         List<BlockPos> positions = ArsTileAccess.pedestalPositions(be);
-        if (positions.isEmpty()) {
-            // Not an Ars machine with pedestals, or reflection failed
-            return null;
-        }
-
         return new ArsPedestalLayout(machinePos, positions);
     }
 

@@ -74,6 +74,9 @@ public final class GoetyRSModule implements IModIntegration {
     @Override
     public void registerBindingTargets() {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "goety", ModType.CUSTOM_GUI, RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                List.of(), List.of("goety:dark_anvil"), "custom_gui", true));
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "goety", ModType.byId("goety_cursed_infuser"), RSIntegrationConfig.ENABLE_GOETY,
                 CURSED_INFUSER_BLOCK_CLASSES, CURSED_INFUSER_BLOCK_IDS,
                 "goety_cursed_infuser", false));

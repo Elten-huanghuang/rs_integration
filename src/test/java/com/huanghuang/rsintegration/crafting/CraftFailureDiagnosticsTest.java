@@ -33,6 +33,8 @@ class CraftFailureDiagnosticsTest extends BootstrapTest {
                 AsyncCraftChain.progressReasonForDetail("missing material minecraft:iron_ingot"));
         assertEquals(Reason.NETWORK_UNAVAILABLE,
                 AsyncCraftChain.progressReasonForDetail("network unavailable"));
+        assertEquals(Reason.START_REJECTED, AsyncCraftChain.progressReasonForDetail(
+                "Enchanting Apparatus preparation rejected: requires 3 Arcane Pedestals, found 0"));
         assertEquals(Reason.UNKNOWN, AsyncCraftChain.progressReasonForDetail("unrecognized failure"));
     }
 
