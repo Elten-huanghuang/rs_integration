@@ -172,12 +172,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         setSlot(0, expectedOutput.copy());
         be.setChanged();
 
-        // Refund secondary input — extracted from RS but the runic workbench
-        // doesn't consume it via the workbench slot.
-        if (reserved.size() > 1 && !reserved.get(1).isEmpty()) {
-            refundItem(reserved.get(1).copy());
-        }
-
         this.craftDone = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] Craft started (instant): recipe={}", recipe.getId());
         return true;
@@ -226,12 +220,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         }
         setSlot(0, expectedOutput.copy());
         be.setChanged();
-
-        // Secondary input (materials[1]) was committed from RS by the caller but
-        // the runic workbench only consumes the primary — refund it so it is not lost.
-        if (materials.size() > 1 && !materials.get(1).isEmpty()) {
-            refundItem(materials.get(1).copy());
-        }
 
         this.craftDone = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Runic] Craft started with materials: recipe={}", recipe.getId());
@@ -284,8 +272,19 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         if (MalumReflection.runicWorkbenchBEClass.isInstance(be) && itemHandler != null) {
             ItemStack slot = itemHandler.getStackInSlot(0);
             if (!slot.isEmpty()) {
-                refundItem(slot);
+                // Shared-ledger callers must let the chain refund the committed
+                // reservation exactly once. Record what was physically recovered
+                // instead of inserting it immediately (which would duplicate the
+                // ledger refund). Private-ledger callers still need a direct refund.
+                if (usingSharedLedger) {
+                    recordFailureRecoveredInputs(List.of(slot.copy()));
+                } else {
+                    refundItem(slot);
+                }
                 setSlot(0, ItemStack.EMPTY);
+            }
+            if (usingSharedLedger && failureRecoveredInputs() == null) {
+                recordFailureRecoveredInputs(List.of());
             }
             be.setChanged();
         }
