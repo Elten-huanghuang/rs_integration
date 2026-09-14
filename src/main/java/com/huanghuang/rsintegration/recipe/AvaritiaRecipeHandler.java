@@ -18,6 +18,7 @@ import java.util.List;
 public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
 
     private static final String RECIPE_PKG = "committee.nova.mods.avaritia.common.crafting.recipe.";
+    private static final int EXTREME_SMITHING_ADDITION_SLOTS = 3;
 
     static {
         registerRecipePrefixes(AvaritiaRecipeHandler.class, RECIPE_PKG);
@@ -73,14 +74,40 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
             if (template != null && !template.isEmpty()) specs.add(new IngredientSpec(template, 1));
             if (base != null && !base.isEmpty()) specs.add(new IngredientSpec(base, 1));
             if (additions != null && !additions.isEmpty()) {
-                specs.add(new IngredientSpec(additions, 1));
-                specs.add(new IngredientSpec(additions, 1));
-                specs.add(new IngredientSpec(additions, 1));
+                specs.addAll(getSmithingAdditionSpecs(additions));
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Avaritia] Failed to reflect smithing ingredients", e);
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    /**
+     * Re-Avaritia serializes the three positional additions as one vanilla
+     * Ingredient. Its runtime matcher consequently treats all three values as
+     * alternatives in every slot, while its recipe display presents them as
+     * three ordered inputs. Restore that positional contract for planning and
+     * extraction when the Ingredient contains exactly three concrete entries.
+     */
+    static List<IngredientSpec> getSmithingAdditionSpecs(Ingredient additions) {
+        ItemStack[] entries = additions.getItems();
+        List<IngredientSpec> specs = new ArrayList<>(EXTREME_SMITHING_ADDITION_SLOTS);
+        if (entries.length == EXTREME_SMITHING_ADDITION_SLOTS) {
+            for (ItemStack entry : entries) {
+                if (entry.isEmpty()) return repeatedAdditionSpecs(additions);
+                specs.add(new IngredientSpec(Ingredient.of(entry.copyWithCount(1)), 1));
+            }
+            return specs;
+        }
+        return repeatedAdditionSpecs(additions);
+    }
+
+    private static List<IngredientSpec> repeatedAdditionSpecs(Ingredient additions) {
+        List<IngredientSpec> specs = new ArrayList<>(EXTREME_SMITHING_ADDITION_SLOTS);
+        for (int i = 0; i < EXTREME_SMITHING_ADDITION_SLOTS; i++) {
+            specs.add(new IngredientSpec(additions, 1));
+        }
+        return specs;
     }
 
     private static Object field(Object obj, String name) throws Exception {
