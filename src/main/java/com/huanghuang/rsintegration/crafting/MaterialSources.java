@@ -201,6 +201,25 @@ public final class MaterialSources {
         networkCache.clear();
     }
 
+    /**
+     * Invalidate a player's view and, when known, only the affected legacy RS
+     * network. The broad overload remains for callers that do not know which
+     * storage was mutated.
+     */
+    public static void invalidateFor(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        String prefix = player.getUUID() + ":";
+        cache.keySet().removeIf(key -> key.startsWith(prefix));
+        if (endpoint == null) {
+            // Legacy callers may still mutate an RS network without exposing
+            // the endpoint identity. Keep the old correctness guarantee.
+            networkCache.clear();
+            return;
+        }
+        if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
+            networkCache.remove(networkCacheKey(legacy));
+        }
+    }
+
     private static int currentTick(ServerPlayer player) {
         MinecraftServer server = player.getServer();
         return server != null ? server.getTickCount() : 0;
