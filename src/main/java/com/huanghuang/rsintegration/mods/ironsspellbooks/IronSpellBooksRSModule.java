@@ -51,6 +51,9 @@ public final class IronSpellBooksRSModule implements IModIntegration {
                 List.of("io.redspace.ironsspellbooks.block.scroll_forge.ScrollForgeBlock"),
                 List.of("irons_spellbooks:scroll_forge"), SCROLL_FORGE_TYPE, true));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "irons_spellbooks", ModType.CUSTOM_GUI, RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                List.of(), List.of("irons_spellbooks:inscription_table"), "custom_gui", true));
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "irons_spellbooks", ModType.byId(ARCANE_ANVIL_TYPE), RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS,
                 List.of("io.redspace.ironsspellbooks.block.arcane_anvil.ArcaneAnvilBlock"),
                 List.of("irons_spellbooks:arcane_anvil"), ARCANE_ANVIL_TYPE, true));

@@ -145,6 +145,9 @@ public final class AsyncCraftChain {
     @Nullable
     private Component machineStartFailureMessage;
     @Nullable
+    private String machineStartFailureDetail;
+    private String machineStartFailureLabel = "";
+    @Nullable
     private String materialReservationFailureDetail;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
@@ -822,7 +825,9 @@ public final class AsyncCraftChain {
                     maybeSendProgress(online, false);
                     return false;
                 }
-                abort(materialReservationFailureDetail != null
+                abort(machineStartFailureDetail != null
+                                ? machineStartFailureDetail
+                                : materialReservationFailureDetail != null
                                 ? materialReservationFailureDetail
                                 : "Failed to start multi-block craft: " + step.recipeId(),
                         machineStartFailureMessage != null
@@ -2597,7 +2602,7 @@ public final class AsyncCraftChain {
         if (currentDelegate instanceof ParallelCraftGroup group) return group.machineLabel();
         MachineLeaseRegistry.Lease lease = flatOperationSession == null
                 ? null : flatOperationSession.machineLease();
-        if (lease == null) return "";
+        if (lease == null) return machineStartFailureLabel;
         MachineLeaseRegistry.MachineKey machine = lease.machine();
         return machine.dimension() + "@" + machine.position().toShortString();
     }
@@ -3149,6 +3154,8 @@ public final class AsyncCraftChain {
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         machineStartFailureMessage = null;
+        machineStartFailureDetail = null;
+        machineStartFailureLabel = "";
         materialReservationFailureDetail = null;
         if (step.modType().isVirtual()) {
             IBatchDelegate virtualDelegate = createStepDelegate(step);
@@ -3311,6 +3318,7 @@ public final class AsyncCraftChain {
         boolean unloadedRejection = candidateSelection.unloadedRejected();
         boolean protectionRejection = candidateSelection.protectionRejected();
         String fatalDetail = "";
+        String fatalMachineLabel = "";
         Component fatalUserMessage = null;
         for (BoundMachine m : candidateSelection.usable()) {
             IBatchDelegate candidate = null;
@@ -3342,11 +3350,15 @@ public final class AsyncCraftChain {
                     retryableRejection = true;
                 } else if (fatalDetail.isEmpty()) {
                     fatalDetail = preparation.detail();
+                    fatalMachineLabel = m.dim() + "@" + m.pos().toShortString();
                     fatalUserMessage = preparation.userMessage();
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.debug(ctx.format("prepare failed for machine at {}"), m.pos(), e);
-                if (fatalDetail.isEmpty()) fatalDetail = e.getMessage();
+                if (fatalDetail.isEmpty()) {
+                    fatalDetail = e.getMessage();
+                    fatalMachineLabel = m.dim() + "@" + m.pos().toShortString();
+                }
             } finally {
                 if (candidate != null && !retained) releasePreparationQuietly(candidate);
             }
@@ -3363,6 +3375,8 @@ public final class AsyncCraftChain {
                     "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
                     machines.size(), step.modType(), step.recipeId(),
                     fatalDetail);
+            machineStartFailureDetail = fatalDetail.isEmpty() ? null : fatalDetail;
+            machineStartFailureLabel = fatalMachineLabel;
             machineStartFailureMessage = fatalUserMessage != null
                     ? fatalUserMessage
                     : protectionRejection

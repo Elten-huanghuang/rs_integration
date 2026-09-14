@@ -900,6 +900,27 @@ public final class BindingEventHandler {
         // Malum Spirit Crucible: the visible component occupies the block
         // above the core. Both halves must resolve to one binding position.
         ResourceLocation blockKey = ForgeRegistries.BLOCKS.getKey(block);
+        if (blockKey != null && blockKey.toString().equals("irons_spellbooks:inscription_table")) {
+            BlockState state = level.getBlockState(pos);
+            net.minecraft.core.Direction facing = null;
+            String part = null;
+            for (var property : state.getProperties()) {
+                Object value = state.getValue(property);
+                if ("facing".equals(property.getName())
+                        && value instanceof net.minecraft.core.Direction direction) {
+                    facing = direction;
+                } else if ("type".equals(property.getName())) {
+                    part = String.valueOf(value);
+                }
+            }
+            if ("left".equals(part) && facing != null) {
+                BlockPos rightPos = pos.relative(facing.getClockWise());
+                ResourceLocation rightKey = ForgeRegistries.BLOCKS.getKey(
+                        level.getBlockState(rightPos).getBlock());
+                if (blockKey.equals(rightKey)) return rightPos;
+            }
+            return pos;
+        }
         if (blockKey != null && blockKey.toString().equals("ars_nouveau:scribes_table")) {
             BlockEntity clickedTile = level.getBlockEntity(pos);
             if (clickedTile != null) {

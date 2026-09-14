@@ -32,7 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class VoidUpgradeScreen extends Screen {
-    private static final int PANEL_WIDTH = 360;
+    private static final int PANEL_WIDTH = 430;
     private static final int PANEL_HEIGHT = 246;
     private static final int ROW_HEIGHT = 20;
     private static final ExecutorService PINYIN_INDEXER = Executors.newSingleThreadExecutor(task -> {
@@ -49,8 +49,12 @@ public final class VoidUpgradeScreen extends Screen {
     private final List<Candidate> visible = new ArrayList<>();
     private VoidUpgradeRule.Type selectedType = VoidUpgradeRule.Type.ITEM;
     private boolean matchNbt;
+    private boolean matchDamage;
+    private boolean matchEnchantments;
     private EditBox search;
     private Button nbtButton;
+    private Button damageButton;
+    private Button enchantmentsButton;
     private Button nameAddButton;
     private int candidateScroll;
     private int ruleScroll;
@@ -58,6 +62,7 @@ public final class VoidUpgradeScreen extends Screen {
     private int top;
     private int panelWidth;
     private int panelHeight;
+    private boolean configSaved;
     private final AtomicInteger catalogGeneration = new AtomicInteger();
 
     public VoidUpgradeScreen(SaveVoidUpgradeConfigPacket.Target target, int targetSlot,
@@ -67,6 +72,8 @@ public final class VoidUpgradeScreen extends Screen {
         this.targetSlot = targetSlot;
         this.parent = parent;
         this.matchNbt = config.matchNbt();
+        this.matchDamage = config.matchDamage();
+        this.matchEnchantments = config.matchEnchantments();
         this.rules = new ArrayList<>(config.rules());
     }
 
@@ -96,10 +103,23 @@ public final class VoidUpgradeScreen extends Screen {
                 button -> addNameRule())
                 .bounds(left + panelWidth - 60, top + 25, 50, 20).build());
 
-        nbtButton = addRenderableWidget(Button.builder(nbtLabel(), button -> {
+        int optionWidth = Math.max(62, (panelWidth - 112) / 3);
+        int optionGap = 4;
+        nbtButton = addRenderableWidget(Button.builder(optionLabel("nbt", matchNbt), button -> {
             matchNbt = !matchNbt;
-            button.setMessage(nbtLabel());
-        }).bounds(left + 10, top + panelHeight - 28, 130, 20).build());
+            button.setMessage(optionLabel("nbt", matchNbt));
+        }).bounds(left + 10, top + panelHeight - 28, optionWidth, 20).build());
+        damageButton = addRenderableWidget(Button.builder(optionLabel("damage", matchDamage), button -> {
+            matchDamage = !matchDamage;
+            button.setMessage(optionLabel("damage", matchDamage));
+        }).bounds(left + 10 + optionWidth + optionGap, top + panelHeight - 28,
+                optionWidth, 20).build());
+        enchantmentsButton = addRenderableWidget(Button.builder(
+                optionLabel("enchantments", matchEnchantments), button -> {
+                    matchEnchantments = !matchEnchantments;
+                    button.setMessage(optionLabel("enchantments", matchEnchantments));
+                }).bounds(left + 10 + (optionWidth + optionGap) * 2,
+                        top + panelHeight - 28, optionWidth, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> save())
                 .bounds(left + panelWidth - 80, top + panelHeight - 28, 70, 20).build());
         updateTypeControls();
@@ -214,10 +234,27 @@ public final class VoidUpgradeScreen extends Screen {
     }
 
     public void acceptGhostIngredient(ItemStack stack) {
+        if (selectedType == VoidUpgradeRule.Type.TAG) {
+            buildTagCatalogFor(stack);
+            return;
+        }
         addRule(VoidUpgradeRule.item(stack));
         selectedType = VoidUpgradeRule.Type.ITEM;
         updateTypeControls();
         rebuildCatalog();
+    }
+
+    private void buildTagCatalogFor(ItemStack stack) {
+        catalog.clear();
+        search.setValue("");
+        ItemStack icon = stack.copyWithCount(1);
+        stack.getTags().map(tag -> tag.location())
+                .sorted(Comparator.comparing(ResourceLocation::toString))
+                .forEach(id -> catalog.add(new Candidate(Component.literal("#" + id),
+                        icon.getHoverName().getString(), VoidUpgradeRule.tag(id), icon)));
+        candidateScroll = 0;
+        filterCatalog();
+        indexPinyinAsync();
     }
 
     private void addRule(VoidUpgradeRule rule) {
@@ -228,12 +265,18 @@ public final class VoidUpgradeScreen extends Screen {
     }
 
     private void save() {
-        VoidUpgradeConfig config = new VoidUpgradeConfig(matchNbt, rules);
+        onClose();
+    }
+
+    private void saveConfigOnce() {
+        if (configSaved) return;
+        configSaved = true;
+        VoidUpgradeConfig config = new VoidUpgradeConfig(matchNbt, matchDamage,
+                matchEnchantments, rules);
         NetworkHandler.CHANNEL.sendToServer(target == SaveVoidUpgradeConfigPacket.Target.MENU_SLOT
                 ? SaveVoidUpgradeConfigPacket.menuSlot(targetSlot, config)
                 : SaveVoidUpgradeConfigPacket.hand(target == SaveVoidUpgradeConfigPacket.Target.MAIN_HAND
                         ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND, config));
-        onClose();
     }
 
     @Override
@@ -270,8 +313,11 @@ public final class VoidUpgradeScreen extends Screen {
         }
         super.render(graphics, mouseX, mouseY, partialTick);
         if (ghostContains(mouseX, mouseY)) {
-            graphics.renderTooltip(font,
-                    Component.translatable("screen.rs_integration.void_upgrade.jei_drop"), mouseX, mouseY);
+            graphics.renderTooltip(font, List.of(
+                    Component.translatable("screen.rs_integration.void_upgrade.jei_drop"),
+                    Component.translatable("screen.rs_integration.void_upgrade.jei_container_warning")
+                            .withStyle(net.minecraft.ChatFormatting.GOLD)
+            ).stream().map(Component::getVisualOrderText).toList(), mouseX, mouseY);
         }
     }
 
@@ -358,6 +404,7 @@ public final class VoidUpgradeScreen extends Screen {
 
     @Override
     public void onClose() {
+        saveConfigOnce();
         Minecraft.getInstance().setScreen(parent);
     }
 
@@ -378,9 +425,10 @@ public final class VoidUpgradeScreen extends Screen {
         return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
     }
 
-    private Component nbtLabel() {
-        return Component.translatable("screen.rs_integration.void_upgrade.nbt." +
-                (matchNbt ? "match" : "ignore"));
+    private Component optionLabel(String option, boolean enabled) {
+        return Component.translatable("screen.rs_integration.void_upgrade.option." + option,
+                Component.translatable("screen.rs_integration.void_upgrade.option."
+                        + (enabled ? "match" : "ignore")));
     }
 
     private static Component typeLabel(VoidUpgradeRule.Type type) {

@@ -301,7 +301,7 @@ public final class JeiMarqueeSelector {
     //  Mouse handlers
     // ═══════════════════════════════════════════════════════════
 
-    @SubscribeEvent(priority = EventPriority.HIGH)
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
         Screen screen = event.getScreen();
         if (screen == null) return;
@@ -336,6 +336,15 @@ public final class JeiMarqueeSelector {
         }
 
         if (event.getButton() != 0) return;
+
+        // Match desktop multi-selection: Ctrl+click toggles one slot without
+        // discarding the rest of the completed marquee selection. Handle this
+        // before JEI's Ctrl+click cheat shortcut can consume the same gesture.
+        if (selecting && !dragging && Screen.hasControlDown()
+                && toggleSelectionAt(mx, my)) {
+            event.setCanceled(true);
+            return;
+        }
 
         if (selecting && !dragging) clearSelection();
 
@@ -579,6 +588,56 @@ public final class JeiMarqueeSelector {
 
         selectedSlotAreas = areas;
         cachedIngredients = ingredients;
+    }
+
+    /** Toggles the ingredient slot under the mouse in the completed selection. */
+    private static boolean toggleSelectionAt(int mx, int my) {
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null) return false;
+
+        probeReflection();
+
+        Object grid;
+        if (dragOnBookmarks) {
+            IBookmarkOverlay overlay = runtime.getBookmarkOverlay();
+            grid = getJeiGrid(bookmarkContentsField, overlay);
+        } else {
+            IIngredientListOverlay overlay = runtime.getIngredientListOverlay();
+            if (overlay == null || !overlay.isListDisplayed()) return false;
+            grid = getJeiGrid(overlayContentsField, overlay);
+        }
+        if (grid == null) return false;
+
+        for (JeiSlotView slot : getGridSlots(grid)) {
+            SlotArea area = slot.area();
+            ITypedIngredient<?> ingredient = slot.ingredient();
+            if (ingredient == null || !contains(area, mx, my)) continue;
+
+            List<SlotArea> areas = new ArrayList<>(selectedSlotAreas);
+            List<ITypedIngredient<?>> ingredients = new ArrayList<>(cachedIngredients);
+            int selectedIndex = areas.indexOf(area);
+            if (selectedIndex >= 0) {
+                areas.remove(selectedIndex);
+                ingredients.remove(selectedIndex);
+            } else {
+                areas.add(area);
+                ingredients.add(ingredient);
+            }
+
+            if (areas.isEmpty()) {
+                clearSelection();
+            } else {
+                selectedSlotAreas = areas;
+                cachedIngredients = ingredients;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean contains(SlotArea area, int x, int y) {
+        return x >= area.x() && x < area.x() + area.width()
+                && y >= area.y() && y < area.y() + area.height();
     }
 
     // ═══════════════════════════════════════════════════════════

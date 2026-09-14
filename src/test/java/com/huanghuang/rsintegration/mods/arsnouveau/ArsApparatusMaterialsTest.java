@@ -34,4 +34,15 @@ class ArsApparatusMaterialsTest extends BootstrapTest {
         assertEquals(List.of(DemandRole.CONSUMED, DemandRole.CONSUMED, DemandRole.CONSUMED),
                 specs.stream().map(spec -> spec.role()).toList());
     }
+
+    @Test
+    void pedestalCapacityUsesOnlyNonEmptyRecipeIngredients() {
+        List<Ingredient> pedestalItems = List.of(
+                Ingredient.of(Items.STRING), Ingredient.EMPTY, Ingredient.of(Items.SUGAR));
+
+        assertEquals(2, ArsApparatusMaterials.pedestalItemCount(pedestalItems));
+        assertFalse(ArsApparatusMaterials.hasPedestalCapacity(pedestalItems, 1));
+        assertTrue(ArsApparatusMaterials.hasPedestalCapacity(pedestalItems, 2));
+        assertTrue(ArsApparatusMaterials.hasPedestalCapacity(List.of(), 0));
+    }
 }

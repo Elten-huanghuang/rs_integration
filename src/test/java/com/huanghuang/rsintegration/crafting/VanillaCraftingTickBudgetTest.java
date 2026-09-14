@@ -44,4 +44,17 @@ class VanillaCraftingTickBudgetTest {
         assertEquals(List.of("c", "a", "b"),
                 AsyncCraftManager.roundRobinOrder(chains, 2));
     }
+
+    @Test
+    void partialRoundRobinPassResumesAtFirstDeferredChain() {
+        assertEquals(2, AsyncCraftManager.nextRoundRobinCursor(0, 2, 5));
+        assertEquals(0, AsyncCraftManager.nextRoundRobinCursor(3, 2, 5));
+        assertEquals(4, AsyncCraftManager.nextRoundRobinCursor(3, 0, 5));
+    }
+
+    @Test
+    void completeRoundRobinPassRotatesTheStartingChain() {
+        assertEquals(2, AsyncCraftManager.nextRoundRobinCursor(1, 5, 5));
+        assertEquals(0, AsyncCraftManager.nextRoundRobinCursor(7, 3, 0));
+    }
 }

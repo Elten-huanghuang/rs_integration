@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.storage.StorageReservationSource;
 import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -61,14 +62,45 @@ public final class ExtractionLedger implements AutoCloseable {
     /** Backend-neutral endpoint used by migrated callers. */
     @Nullable
     private CraftStorageEndpoint storageEndpoint;
+    @Nullable
+    private CraftStorageEndpoint reservationSnapshotEndpoint;
+    @Nullable
+    private StorageSnapshot reservationSnapshot;
+    private long reservationSnapshotTick = Long.MIN_VALUE;
 
     /** Backend-neutral settlement mirror; physical extraction remains here for compatibility. */
     private StorageSettlementLedger settlementLedger = new StorageSettlementLedger();
     private final Map<Integer, StorageSettlementLedger.EntryId> settlementEntries = new HashMap<>();
 
     public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
+        if (this.storageEndpoint == endpoint) return;
         this.storageEndpoint = endpoint;
         this.networkEntryCache.clear();
+        clearReservationSnapshot();
+    }
+
+    @Nullable
+    private StorageSnapshot reservationSnapshot(CraftStorageEndpoint endpoint, ServerPlayer player) {
+        long currentTick = player.server.getTickCount();
+        if (reservationSnapshot != null && reservationSnapshotEndpoint == endpoint
+                && reservationSnapshotTick == currentTick) {
+            return reservationSnapshot;
+        }
+        StorageSnapshot loaded = endpoint.snapshot(player).snapshot().orElse(null);
+        if (loaded == null) {
+            clearReservationSnapshot();
+            return null;
+        }
+        reservationSnapshotEndpoint = endpoint;
+        reservationSnapshot = loaded;
+        reservationSnapshotTick = currentTick;
+        return loaded;
+    }
+
+    private void clearReservationSnapshot() {
+        reservationSnapshotEndpoint = null;
+        reservationSnapshot = null;
+        reservationSnapshotTick = Long.MIN_VALUE;
     }
 
     /** Prefer a matching tool/catalyst from the selected backend's resonance disk. */
@@ -383,7 +415,7 @@ public final class ExtractionLedger implements AutoCloseable {
         ItemStack resonance = reserveFromPreferredResonance(
                 Ingredient.of(template.copyWithCount(1)), template, count, endpoint, player);
         if (!resonance.isEmpty()) return resonance;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = reservationSnapshot(endpoint, player);
         if (storageSupportsFluidContainers(endpoint)
                 && (template.is(net.minecraft.world.item.Items.WATER_BUCKET)
                 || template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
@@ -496,7 +528,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 return template.copyWithCount(count);
             }
         }
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = reservationSnapshot(endpoint, player);
         if (snapshot == null) return ItemStack.EMPTY;
         EndpointReservation reservation = reserveEndpointMatches(
                 snapshot.match(ingredient).items(), count, pendingNet);
@@ -793,6 +825,7 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingInv.clear();
         pendingResonance.clear();
         networkEntryCache.clear();
+        clearReservationSnapshot();
         transition(State.COMMITTED);
         return true;
     }
@@ -817,10 +850,12 @@ public final class ExtractionLedger implements AutoCloseable {
                     if (snapshot == null) return false;
                     for (var ingEntry : neededByIngredient.entrySet()) {
                         if (isContainerFluidIngredient(ingEntry.getKey())) continue;
-                        long available = snapshot.items().stream()
-                                .filter(item -> IngredientMatcher.test(ingEntry.getKey(), item.stack()))
-                                .mapToLong(com.huanghuang.rsintegration.storage.StoredItem::amount)
-                                .sum();
+                        StorageSnapshot.MatchResult match = snapshot.match(ingEntry.getKey());
+                        if (!match.successful()) return false;
+                        long available = 0L;
+                        for (var item : match.items()) {
+                            available = saturatedAdd(available, item.amount());
+                        }
                         if (available < ingEntry.getValue()) {
                             RSIntegrationMod.LOGGER.warn(
                                     "[RSI-Ledger] Pre-check endpoint: insufficient {} in storage (need {}, have {})",
@@ -945,6 +980,7 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingInv.clear();
         pendingResonance.clear();
         networkEntryCache.clear();
+        clearReservationSnapshot();
     }
 
     private static boolean storageSupportsFluidContainers(@Nullable CraftStorageEndpoint endpoint) {
@@ -969,6 +1005,7 @@ public final class ExtractionLedger implements AutoCloseable {
      */
     public void invalidateNetworkSnapshot() {
         networkEntryCache.clear();
+        clearReservationSnapshot();
     }
 
     public int size() { return entries.size(); }
@@ -1077,6 +1114,7 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingResonance.clear();
         preferredResonanceIngredients.clear();
         networkEntryCache.clear();
+        clearReservationSnapshot();
         // A chain reuses its master ledger across vanilla steps. The settlement
         // mirror is a per-commit scope and must be reset with the legacy ledger;
         // otherwise the next step calls beginCommit() on COMMITTED state.
@@ -1107,6 +1145,7 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingResonance.clear();
         preferredResonanceIngredients.clear();
         networkEntryCache.clear();
+        clearReservationSnapshot();
         resetSettlementMirror();
         state = State.ROLLED_BACK;
     }
@@ -1300,9 +1339,9 @@ public final class ExtractionLedger implements AutoCloseable {
                                              @Nullable ServerPlayer player) {
         try {
             if (storageEndpoint != null && player != null) {
-                long available = storageEndpoint.snapshot(player).snapshot()
-                        .map(snapshot -> snapshot.countExact(storageEndpoint.session().itemKey(template)))
-                        .orElse(0L);
+                StorageSnapshot snapshot = reservationSnapshot(storageEndpoint, player);
+                long available = snapshot == null ? 0L
+                        : snapshot.countExact(storageEndpoint.session().itemKey(template));
                 CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
                 available -= pending.getOrDefault(key, 0);
                 if (available < needed) return false;
@@ -1333,9 +1372,9 @@ public final class ExtractionLedger implements AutoCloseable {
                                              @Nullable ServerPlayer player) {
         try {
             if (storageEndpoint != null && player != null) {
-                long endpointAvailable = storageEndpoint.snapshot(player).snapshot()
-                        .map(snapshot -> snapshot.countExact(storageEndpoint.session().itemKey(template)))
-                        .orElse(0L);
+                StorageSnapshot snapshot = reservationSnapshot(storageEndpoint, player);
+                long endpointAvailable = snapshot == null ? 0L
+                        : snapshot.countExact(storageEndpoint.session().itemKey(template));
                 endpointAvailable = Math.max(0L, endpointAvailable
                         - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0));
                 long resonanceAvailable = countExactAvailableInPreferredResonance(
@@ -1809,6 +1848,10 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state != State.COMMITTED) return;
         for (Entry e : entries) refundEntry(e, network, player);
         transition(State.ROLLED_BACK);
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
     }
 
     private void refundEntry(Entry e, @Nullable INetwork network,

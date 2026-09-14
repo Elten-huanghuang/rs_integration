@@ -111,17 +111,16 @@ final class RefinedStorageSession implements StorageSession {
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return failedPermissionExtraction(
                 amount, permission, mode(simulate));
-        StorageSnapshotResult snapshot = snapshotItems(player);
-        if (!snapshot.successful()) return StorageOperationResult.failedExtraction(
-                mode(simulate), amount, toOperationStatus(snapshot.status()), List.of(), List.of(),
-                snapshot.diagnosticCode());
-        long target = Math.min(amount, snapshot.snapshot().orElseThrow().countExact(key));
         ItemStack template = ItemStack.of(key.backendPayload());
         if (template.isEmpty()) return StorageOperationResult.failedExtraction(
                 mode(simulate), amount,
                 StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
+        // The native extraction result is authoritative and is already checked
+        // for amount and exact identity by the executor. Pre-scanning the whole
+        // network here only creates a stale upper bound and forced one complete
+        // snapshot rebuild per committed exact ledger entry.
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(
-                driver, key, template, amount, target, simulate);
+                driver, key, template, amount, amount, simulate);
         if (!simulate) invalidateSnapshot();
         return result;
     }

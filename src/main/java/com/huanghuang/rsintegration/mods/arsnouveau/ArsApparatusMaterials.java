@@ -27,4 +27,18 @@ public final class ArsApparatusMaterials {
         }
         return List.copyOf(specs);
     }
+
+    static int pedestalItemCount(@Nullable List<Ingredient> pedestalItems) {
+        if (pedestalItems == null) return 0;
+        int count = 0;
+        for (Ingredient ingredient : pedestalItems) {
+            if (ingredient != null && !ingredient.isEmpty()) count++;
+        }
+        return count;
+    }
+
+    static boolean hasPedestalCapacity(@Nullable List<Ingredient> pedestalItems,
+                                       int availablePedestals) {
+        return Math.max(0, availablePedestals) >= pedestalItemCount(pedestalItems);
+    }
 }

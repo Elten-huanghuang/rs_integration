@@ -189,11 +189,13 @@ public final class AsyncCraftManager {
         VanillaCraftingTickBudget vanillaBudget = new VanillaCraftingTickBudget(globalLimit);
         int deferredChains = 0;
         int start = snapshot.isEmpty() ? 0 : Math.floorMod(roundRobinCursor, snapshot.size());
-        for (AsyncCraftChain chain : roundRobinOrder(snapshot, start)) {
+        int processed = 0;
+        for (int offset = 0; offset < snapshot.size(); offset++) {
             if (System.nanoTime() - tickStart >= tickBudgetNanos) {
-                deferredChains++;
-                continue;
+                deferredChains += snapshot.size() - offset;
+                break;
             }
+            AsyncCraftChain chain = snapshot.get((start + offset) % snapshot.size());
             VanillaCraftingTickBudget.ChainAllowance allowance =
                     vanillaBudget.allowance(perChainLimit);
             try {
@@ -216,8 +218,11 @@ public final class AsyncCraftManager {
             if (!chain.isDone() && chain.isWaitingForVanillaBudget() && allowance.remaining() == 0) {
                 deferredChains++;
             }
+            processed++;
         }
-        if (!snapshot.isEmpty()) roundRobinCursor = (start + 1) % snapshot.size();
+        if (!snapshot.isEmpty()) {
+            roundRobinCursor = nextRoundRobinCursor(start, processed, snapshot.size());
+        }
         int callbacksRemaining = configuredCompletionCallbacksPerTick();
         for (Runnable callback; callbacksRemaining > 0
                 && System.nanoTime() - tickStart < tickBudgetNanos
@@ -278,5 +283,15 @@ public final class AsyncCraftManager {
             ordered.add(source.get((normalized + offset) % source.size()));
         }
         return List.copyOf(ordered);
+    }
+
+    static int nextRoundRobinCursor(int start, int processed, int size) {
+        if (size <= 0) return 0;
+        int normalizedStart = Math.floorMod(start, size);
+        int boundedProcessed = Math.max(0, Math.min(processed, size));
+        // A complete pass rotates the first chain. A partial pass resumes at the
+        // first chain that did not receive a tick, including a zero-work pass.
+        int advance = boundedProcessed == size ? 1 : Math.max(1, boundedProcessed);
+        return (normalizedStart + advance) % size;
     }
 }

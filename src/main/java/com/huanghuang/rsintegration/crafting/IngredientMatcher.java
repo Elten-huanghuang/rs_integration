@@ -26,7 +26,7 @@ public final class IngredientMatcher {
 
     private IngredientMatcher() {}
 
-    static boolean hasCompleteItemList(Ingredient ingredient) {
+    public static boolean hasCompleteItemList(Ingredient ingredient) {
         Class<?> type = ingredient.getClass();
         return type == Ingredient.class || type == StrictNBTIngredient.class
                 || type == net.minecraftforge.common.crafting.PartialNBTIngredient.class;

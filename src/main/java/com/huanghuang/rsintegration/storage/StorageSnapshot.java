@@ -1,13 +1,18 @@
 package com.huanghuang.rsintegration.storage;
 
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Immutable point-in-time view of the item identities visible in a session. */
 public final class StorageSnapshot {
@@ -15,6 +20,9 @@ public final class StorageSnapshot {
 
     private final StorageBackendId backendId;
     private final List<StoredItem> items;
+    private final Map<StorageItemKey, StoredItem> exactItems;
+    private final Map<StorageItemKey, Integer> itemOrdinals;
+    private final Map<Item, List<StoredItem>> itemsByType;
     private final long revision;
 
     public enum MatchStatus { SUCCESS, EMPTY_INGREDIENT, FAILED }
@@ -61,6 +69,20 @@ public final class StorageSnapshot {
             normalized.add(new StoredItem(entry.getKey(), entry.getValue()));
         }
         this.items = List.copyOf(normalized);
+        Map<StorageItemKey, StoredItem> exact = new HashMap<>(normalized.size());
+        Map<StorageItemKey, Integer> ordinals = new HashMap<>(normalized.size());
+        Map<Item, List<StoredItem>> byType = new HashMap<>();
+        for (int ordinal = 0; ordinal < normalized.size(); ordinal++) {
+            StoredItem item = normalized.get(ordinal);
+            exact.put(item.key(), item);
+            ordinals.put(item.key(), ordinal);
+            byType.computeIfAbsent(item.stack().getItem(), ignored -> new ArrayList<>())
+                    .add(item);
+        }
+        this.exactItems = Map.copyOf(exact);
+        this.itemOrdinals = Map.copyOf(ordinals);
+        byType.replaceAll((ignored, stored) -> List.copyOf(stored));
+        this.itemsByType = Map.copyOf(byType);
         this.revision = revision;
     }
 
@@ -74,11 +96,8 @@ public final class StorageSnapshot {
 
     public long countExact(StorageItemKey key) {
         Objects.requireNonNull(key, "key");
-        long total = 0;
-        for (StoredItem item : items) {
-            if (item.key().equals(key)) total = saturatedAdd(total, item.amount());
-        }
-        return total;
+        StoredItem item = exactItems.get(key);
+        return item == null ? 0L : item.amount();
     }
 
     public MatchResult match(Ingredient ingredient) {
@@ -89,7 +108,7 @@ public final class StorageSnapshot {
                         StorageDiagnosticCode.NONE);
             }
             List<StoredItem> matches = new ArrayList<>();
-            for (StoredItem item : items) {
+            for (StoredItem item : candidates(ingredient)) {
                 if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, item.stack())) {
                     matches.add(item);
                 }
@@ -99,6 +118,26 @@ public final class StorageSnapshot {
             return new MatchResult(MatchStatus.FAILED, List.of(),
                     StorageDiagnosticCode.INGREDIENT_MATCH_FAILED);
         }
+    }
+
+    private Iterable<StoredItem> candidates(Ingredient ingredient) {
+        if (!com.huanghuang.rsintegration.crafting.IngredientMatcher.hasCompleteItemList(ingredient)) {
+            return items;
+        }
+        Set<Item> requestedTypes = new HashSet<>();
+        for (ItemStack template : ingredient.getItems()) {
+            if (!template.isEmpty()) requestedTypes.add(template.getItem());
+        }
+        if (requestedTypes.isEmpty()) return List.of();
+        if (requestedTypes.size() == 1) {
+            return itemsByType.getOrDefault(requestedTypes.iterator().next(), List.of());
+        }
+        List<StoredItem> selected = new ArrayList<>();
+        for (Item type : requestedTypes) {
+            selected.addAll(itemsByType.getOrDefault(type, List.of()));
+        }
+        selected.sort(Comparator.comparingInt(item -> itemOrdinals.get(item.key())));
+        return selected;
     }
 
     private static long saturatedAdd(long left, long right) {

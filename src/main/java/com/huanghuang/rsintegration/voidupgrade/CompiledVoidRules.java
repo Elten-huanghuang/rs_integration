@@ -17,12 +17,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 final class CompiledVoidRules {
     private final Set<ResourceLocation> itemsIgnoringNbt = new HashSet<>();
-    private final Map<ResourceLocation, List<CompoundTag>> itemsMatchingNbt = new HashMap<>();
+    private final Map<ResourceLocation, List<ItemMatcher>> itemMatchers = new HashMap<>();
     private final Set<String> mods = new HashSet<>();
     private final List<TagKey<Item>> tags = new ArrayList<>();
     private final Set<String> names = new HashSet<>();
@@ -31,13 +30,13 @@ final class CompiledVoidRules {
     static CompiledVoidRules compile(List<VoidUpgradeConfig> configs) {
         CompiledVoidRules result = new CompiledVoidRules();
         for (VoidUpgradeConfig config : configs) {
-            for (VoidUpgradeRule rule : config.rules()) result.add(rule, config.matchNbt());
+            for (VoidUpgradeRule rule : config.rules()) result.add(rule, config);
         }
         return result;
     }
 
     boolean isEmpty() {
-        return itemsIgnoringNbt.isEmpty() && itemsMatchingNbt.isEmpty() && mods.isEmpty()
+        return itemsIgnoringNbt.isEmpty() && itemMatchers.isEmpty() && mods.isEmpty()
                 && tags.isEmpty() && names.isEmpty() && equipment.isEmpty();
     }
 
@@ -45,10 +44,12 @@ final class CompiledVoidRules {
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) return false;
         if (itemsIgnoringNbt.contains(id) || mods.contains(id.getNamespace())) return true;
-        List<CompoundTag> variants = itemsMatchingNbt.get(id);
+        List<ItemMatcher> variants = itemMatchers.get(id);
         if (variants != null) {
-            for (CompoundTag variant : variants) {
-                if (Objects.equals(variant, stack.getTag())) return true;
+            for (ItemMatcher variant : variants) {
+                if (VoidUpgradeRule.itemNbtMatches(variant.nbt(), stack.getTag(),
+                        variant.matchNbt(), variant.matchDamage(),
+                        variant.matchEnchantments())) return true;
             }
         }
         for (TagKey<Item> tag : tags) {
@@ -65,14 +66,16 @@ final class CompiledVoidRules {
         return false;
     }
 
-    private void add(VoidUpgradeRule rule, boolean matchNbt) {
+    private void add(VoidUpgradeRule rule, VoidUpgradeConfig config) {
         switch (rule.type()) {
             case ITEM -> {
                 ResourceLocation id = ResourceLocation.tryParse(rule.value());
                 if (id == null) return;
-                if (matchNbt) {
-                    itemsMatchingNbt.computeIfAbsent(id, unused -> new ArrayList<>())
-                            .add(rule.itemNbt() == null ? null : rule.itemNbt().copy());
+                if (config.matchNbt() || config.matchDamage() || config.matchEnchantments()) {
+                    itemMatchers.computeIfAbsent(id, unused -> new ArrayList<>())
+                            .add(new ItemMatcher(rule.itemNbt() == null ? null : rule.itemNbt().copy(),
+                                    config.matchNbt(), config.matchDamage(),
+                                    config.matchEnchantments()));
                 } else {
                     itemsIgnoringNbt.add(id);
                 }
@@ -90,4 +93,7 @@ final class CompiledVoidRules {
             }
         }
     }
+
+    private record ItemMatcher(CompoundTag nbt, boolean matchNbt, boolean matchDamage,
+                               boolean matchEnchantments) {}
 }
