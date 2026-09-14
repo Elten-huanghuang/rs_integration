@@ -820,7 +820,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 resetSettlementMirror();
             }
         }
-        MaterialSources.invalidateFor(player);
+        MaterialSources.invalidateFor(player, storageEndpoint);
         pendingNet.clear();
         pendingInv.clear();
         pendingResonance.clear();

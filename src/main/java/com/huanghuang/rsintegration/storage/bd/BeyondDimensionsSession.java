@@ -17,12 +17,24 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 final class BeyondDimensionsSession implements StorageSession {
     private static final Cache<String, Boolean> SKIPPED_ITEM_WARNINGS = CacheBuilder.newBuilder()
             .maximumSize(256).expireAfterWrite(1, TimeUnit.MINUTES).build();
     private final Object network;
     private final StorageReference reference;
+    /** Snapshot is scoped to one synchronous extraction operation only. */
+    private ExtractionSnapshotScope extractionSnapshotScope;
+
+    private static final class ExtractionSnapshotScope {
+        private final ServerPlayer player;
+        private StorageSnapshotResult snapshot;
+
+        private ExtractionSnapshotScope(ServerPlayer player) {
+            this.player = player;
+        }
+    }
 
     BeyondDimensionsSession(Object network, StorageReference reference) {
         this.network = Objects.requireNonNull(network, "network");
@@ -193,9 +205,15 @@ final class BeyondDimensionsSession implements StorageSession {
     }
 
     @Override public StorageOperationResult extractMatching(ServerPlayer player, Ingredient ingredient, long amount, boolean simulate) {
+        return withExtractionSnapshotScope(player,
+                () -> extractMatchingInScope(player, ingredient, amount, simulate));
+    }
+
+    private StorageOperationResult extractMatchingInScope(ServerPlayer player, Ingredient ingredient,
+                                                          long amount, boolean simulate) {
         if (amount < 0) throw new IllegalArgumentException("amount must not be negative");
         if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
-        StorageSnapshotResult snapshot = snapshotItems(player);
+        StorageSnapshotResult snapshot = snapshotForExtraction(player);
         if (!snapshot.successful()) return StorageOperationResult.failedExtraction(mode(simulate), amount,
                 snapshot.status() == StorageSnapshotStatus.DENIED ? StorageOperationStatus.DENIED
                         : snapshot.status() == StorageSnapshotStatus.UNAVAILABLE ? StorageOperationStatus.UNAVAILABLE
@@ -230,6 +248,28 @@ final class BeyondDimensionsSession implements StorageSession {
             }
         }
         return StorageOperationResult.extracted(mode(simulate), amount, result);
+    }
+
+    private StorageSnapshotResult snapshotForExtraction(ServerPlayer player) {
+        ExtractionSnapshotScope scope = extractionSnapshotScope;
+        if (scope == null || scope.player != player) return snapshotItems(player);
+        if (scope.snapshot == null) scope.snapshot = snapshotItems(player);
+        return scope.snapshot;
+    }
+
+    private <T> T withExtractionSnapshotScope(ServerPlayer player, Supplier<T> action) {
+        ExtractionSnapshotScope previous = extractionSnapshotScope;
+        if (previous != null && previous.player == player) return action.get();
+        ExtractionSnapshotScope scope = new ExtractionSnapshotScope(player);
+        extractionSnapshotScope = scope;
+        try {
+            return action.get();
+        } finally {
+            // A perform extraction may have mutated native storage. Never let
+            // this snapshot escape the synchronous operation boundary.
+            scope.snapshot = null;
+            extractionSnapshotScope = previous;
+        }
     }
 
     @Override
@@ -334,7 +374,7 @@ final class BeyondDimensionsSession implements StorageSession {
         java.lang.reflect.Method extract;
         try {
             nativeStorage = storage();
-            StorageItemKey storedKey = snapshotItems(player).snapshot()
+            StorageItemKey storedKey = snapshotForExtraction(player).snapshot()
                     .map(snapshot -> storedPayloadKey(snapshot, key))
                     .orElse(key);
             nativeKey = BeyondDimensionsReflection.itemKey(ItemStack.of(storedKey.backendPayload()));

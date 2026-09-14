@@ -55,7 +55,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 var tracker = network.getItemStorageTracker();
                 if (tracker != null) tracker.changed(player, accepted);
                 if (player instanceof ServerPlayer serverPlayer) {
-                    com.huanghuang.rsintegration.crafting.MaterialSources.invalidateFor(serverPlayer);
+                    com.huanghuang.rsintegration.crafting.MaterialSources.invalidateFor(serverPlayer, this);
                     serverPlayer.containerMenu.broadcastChanges();
                 }
             }

@@ -65,7 +65,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private MinecraftServer machineServer;
     private ServerPlayer player;
     private ExtractionLedger sharedLedger;
-    private List<List<ItemStack>> operationMaterials = List.of();
+    /**
+     * Flat, immutable material layout: operation * materials-per-operation.
+     * Keeping one list avoids allocating one list object for every operation
+     * before the worker has even claimed it.
+     */
+    private List<ItemStack> operationMaterials = List.of();
     private List<List<ItemStack>> virtualDebits = List.of();
     private List<List<ItemStack>> producerDebits = List.of();
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
@@ -358,17 +363,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 && producerDebits.size() != operations.totalOperations())) {
             return false;
         }
-        List<List<ItemStack>> slices = new ArrayList<>(operations.totalOperations());
-        for (int operation = 0; operation < operations.totalOperations(); operation++) {
-            List<ItemStack> slice = new ArrayList<>(perOperation);
-            int offset = operation * perOperation;
-            for (int i = 0; i < perOperation; i++) {
-                ItemStack material = materials.get(offset + i);
-                slice.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
-            }
-            slices.add(List.copyOf(slice));
+        List<ItemStack> flat = new ArrayList<>(materials.size());
+        for (ItemStack material : materials) {
+            flat.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
         }
-        this.operationMaterials = List.copyOf(slices);
+        this.operationMaterials = List.copyOf(flat);
         this.sharedLedger = sharedLedger;
         this.sharedMaterialMode = true;
         this.player = player;
@@ -516,21 +515,19 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (!sharedMaterialMode || requested <= 1) return 1;
         int compatible = 1;
         for (int candidate = 2; candidate <= requested; candidate++) {
-            List<Integer> ids = java.util.stream.IntStream
-                    .range(firstOperation, firstOperation + candidate).boxed().toList();
-            if (canAggregateOperationMaterials(ids)) compatible = candidate;
+            if (canAggregateOperationMaterials(firstOperation, candidate)) compatible = candidate;
             else break;
         }
         return compatible;
     }
 
-    private boolean canAggregateOperationMaterials(List<Integer> operationIds) {
-        if (operationIds.isEmpty() || baseSpecs == null || baseSpecs.isEmpty()) return false;
+    private boolean canAggregateOperationMaterials(int firstOperation, int operationCount) {
+        if (operationCount <= 0 || baseSpecs == null || baseSpecs.isEmpty()) return false;
         int perOperation = baseSpecs.size();
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
             ItemStack first = ItemStack.EMPTY;
-            for (int operationId : operationIds) {
-                ItemStack stack = operationMaterials.get(operationId).get(materialIndex);
+            for (int offset = 0; offset < operationCount; offset++) {
+                ItemStack stack = operationMaterialAt(firstOperation + offset, materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (first.isEmpty()) first = stack;
                 else if (!MaterialMatcher.equivalentRuntimeFragment(first, stack)) return false;
@@ -541,14 +538,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private List<ItemStack> aggregateOperationMaterials(List<Integer> operationIds) {
         if (operationIds.size() == 1) {
-            return copyStacksKeepingEmpty(operationMaterials.get(operationIds.get(0)));
+            return operationMaterialSlice(operationIds.get(0));
         }
         int perOperation = baseSpecs.size();
         List<ItemStack> aggregated = new ArrayList<>(perOperation);
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
             ItemStack combined = ItemStack.EMPTY;
             for (int operationId : operationIds) {
-                ItemStack stack = operationMaterials.get(operationId).get(materialIndex);
+                ItemStack stack = operationMaterialAt(operationId, materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (combined.isEmpty()) combined = stack.copy();
                 else combined.grow(stack.getCount());
@@ -556,6 +553,22 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             aggregated.add(combined);
         }
         return List.copyOf(aggregated);
+    }
+
+    private ItemStack operationMaterialAt(int operationId, int materialIndex) {
+        int perOperation = baseSpecs.size();
+        return operationMaterials.get(operationId * perOperation + materialIndex);
+    }
+
+    private List<ItemStack> operationMaterialSlice(int operationId) {
+        int perOperation = baseSpecs.size();
+        int offset = operationId * perOperation;
+        List<ItemStack> slice = new ArrayList<>(perOperation);
+        for (int i = 0; i < perOperation; i++) {
+            ItemStack material = operationMaterials.get(offset + i);
+            slice.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
+        }
+        return List.copyOf(slice);
     }
 
     @Override
