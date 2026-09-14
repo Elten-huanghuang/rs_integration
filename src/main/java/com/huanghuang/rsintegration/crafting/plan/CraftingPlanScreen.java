@@ -479,7 +479,11 @@ public final class CraftingPlanScreen extends Screen {
         embersInferMode = !hasEmbers;
 
         // Compute missing items area — items flow inline with wrapping
-        int missingCount = plan.missing() != null ? plan.missing().size() : 0;
+        // The structured material bill is authoritative. Diagnostics may be
+        // empty even when concrete shortages exist.
+        List<MissingMaterialBookmarkList.TextEntry> missingEntries =
+                MissingMaterialBookmarkList.textEntries(plan);
+        int missingCount = missingEntries.size();
         int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
         boolean hasMachineCandidates = plan.machineCandidates() != null
                 && !plan.machineCandidates().isEmpty();
@@ -488,8 +492,7 @@ public final class CraftingPlanScreen extends Screen {
             int maxLineW = contentW - 24;
             if (missingCount > 0) {
                 lines++; // header
-                lines += missingTextLineCount(font,
-                        MissingMaterialBookmarkList.textEntries(plan), maxLineW);
+                lines += missingTextLineCount(font, missingEntries, maxLineW);
             }
             if (modWarnCount > 0) {
                 lines += modWarnCount;
@@ -1069,7 +1072,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // Missing items + mod warnings
         if (missingAreaHeight > 0 && (
-                (plan.missing() != null && !plan.missing().isEmpty()) ||
+                !MissingMaterialBookmarkList.textEntries(plan).isEmpty() ||
                 (plan.modWarnings() != null && !plan.modWarnings().isEmpty()) ||
                 (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()))) {
             renderMissingArea(gfx, font, left, missingAreaTop, contentW);
@@ -1820,7 +1823,9 @@ public final class CraftingPlanScreen extends Screen {
     // ── Missing area ──────────────────────────────────────────────
 
     private void renderMissingArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
-        boolean hasMissing = plan.missing() != null && !plan.missing().isEmpty();
+        List<MissingMaterialBookmarkList.TextEntry> missingEntries =
+                MissingMaterialBookmarkList.textEntries(plan);
+        boolean hasMissing = !missingEntries.isEmpty();
         boolean hasModWarnings = plan.modWarnings() != null && !plan.modWarnings().isEmpty();
 
         // Background — dark warm tone, red accent
@@ -1842,7 +1847,7 @@ public final class CraftingPlanScreen extends Screen {
 
             my += font.lineHeight + 4;
             my = renderMissingTextEntries(gfx, font,
-                    MissingMaterialBookmarkList.textEntries(plan), left + 10, my, maxLineW);
+                    missingEntries, left + 10, my, maxLineW);
         }
         // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {

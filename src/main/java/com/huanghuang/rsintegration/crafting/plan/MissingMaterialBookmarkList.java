@@ -38,12 +38,34 @@ public final class MissingMaterialBookmarkList {
                 if (!label.isEmpty()) result.add(new TextEntry(label, ItemStack.EMPTY, 0));
                 continue;
             }
-            usedCandidates.add(match.index());
+            // A diagnostic may resolve to a registered item that is not part
+            // of this plan's shortage bill. Keep it bookmarkable, but do not
+            // mark a real candidate as consumed.
+            if (match.index() >= 0) {
+                usedCandidates.add(match.index());
+            }
             ItemStack stack = match.stack().copyWithCount(1);
             PlanResponse.Availability availability = plan.availability(stack);
             int shortage = availability == null ? 1
                     : Math.max(1, availability.needed() - availability.available());
             result.add(new TextEntry(stack.getHoverName().getString(), stack, shortage));
+        }
+
+        // The resolver's diagnostic list is intentionally compact and can be
+        // empty when the material bill itself is what discovered the shortage
+        // (for example, a direct terminal preview or a partially supplied
+        // alternative).  The material bill is authoritative for the concrete
+        // item/count pair, so append every shortage that was not represented by
+        // a diagnostic entry.  This keeps the warning complete without
+        // reintroducing duplicate rows for the same shortage.
+        for (int i = 0; i < candidates.size(); i++) {
+            if (usedCandidates.contains(i)) continue;
+            ItemStack stack = candidates.get(i);
+            PlanResponse.Availability availability = plan.availability(stack);
+            int shortage = availability == null ? 1
+                    : Math.max(1, availability.needed() - availability.available());
+            result.add(new TextEntry(stack.getHoverName().getString(),
+                    stack.copyWithCount(1), shortage));
         }
         return List.copyOf(result);
     }

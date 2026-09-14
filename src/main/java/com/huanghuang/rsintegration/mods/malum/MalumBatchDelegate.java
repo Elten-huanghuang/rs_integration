@@ -568,32 +568,30 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!craftStarted) return false;
 
-        // The altar's tick() sets isCrafting=true when recipe is active,
-        // and sets isCrafting=false when recipe becomes null (items consumed).
-        // We detect the true→false transition to know the craft finished.
+        // isCrafting becoming false is not a completion signal. Malum also
+        // clears it when the central input is removed while the animation is
+        // running. Completion is confirmed only by the produced item entity
+        // (or by output capture handled by AsyncCraftChain).
         Boolean crafting = (Boolean) getField(be, "isCrafting");
         if (Boolean.TRUE.equals(crafting)) {
             craftWasSeenActive = true;
             return false;
         }
 
-        if (craftWasSeenActive) {
-            craftWasSeenActive = false;
-            RSIntegrationMod.debug("[RSI-Batch-Malum] Native craft finished (isCrafting false transition)");
-            return true;
+        // Scan for the actual result entity. This covers a craft that finished
+        // between poll ticks and whose isCrafting transition was not observed.
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty()) {
+            expected = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
         }
-
-        // Fallback: scan for ItemEntity near the altar (it may have finished
-        // between our poll ticks and we missed the transition)
-        ItemStack expected = RecipeIndex
-                .tryGetResultItem(recipe, level.registryAccess());
         if (!expected.isEmpty()) {
+            final ItemStack expectedOutput = expected;
             BlockPos pos = be.getBlockPos();
             var entities = level.getEntitiesOfClass(
                     net.minecraft.world.entity.item.ItemEntity.class,
                     new net.minecraft.world.phys.AABB(pos).inflate(3),
-                    e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
-                            || ItemStack.isSameItem(e.getItem(), expected));
+                    e -> ItemStack.isSameItemSameTags(e.getItem(), expectedOutput)
+                            || ItemStack.isSameItem(e.getItem(), expectedOutput));
             if (!entities.isEmpty()) return true;
         }
 
@@ -649,32 +647,20 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         craftStarted = false;
         craftWasSeenActive = false;
-        // Retrieve items from altar slots before clearing, so we can return
-        // them to their source instead of creating duplicate items.
-        if (ledger != null && ledger.isCommitted()) {
-            recoverFromAltar();
-        } else {
-            clearPedestals();
-            try { setIHandlerSlot(invMain, 0, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-            try {
-                List<?> spirits = (List<?>) getField(recipe, "spirits");
-                if (spirits != null) {
-                    for (int i = 0; i < spirits.size(); i++) {
-                        setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
-                    }
-                }
-            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
-        }
+        // Always account for the physical stacks before clearing. The chain's
+        // ledger refunds only committed quantities not recovered here.
+        recordFailureRecoveredInputs(recoverFromAltar());
         resetState();
     }
 
-    /** Retrieve items from altar slots and return them to the network/player. */
-    private void recoverFromAltar() {
+    /** Retrieve items from altar slots for audited ledger reconciliation. */
+    private List<ItemStack> recoverFromAltar() {
+        List<ItemStack> recovered = new ArrayList<>();
         // Recover main slot
         try {
             ItemStack mainStack = (ItemStack) invMain.getClass().getMethod("getStackInSlot", int.class).invoke(invMain, 0);
             if (mainStack != null && !mainStack.isEmpty()) {
-                returnItem(mainStack);
+                recovered.add(mainStack.copy());
             }
             setIHandlerSlot(invMain, 0, ItemStack.EMPTY);
         } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
@@ -689,7 +675,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
                     ItemStack stack = (ItemStack) inv.getClass().getMethod("getStackInSlot", int.class).invoke(inv, 0);
                     if (stack != null && !stack.isEmpty()) {
-                        returnItem(stack);
+                        recovered.add(stack.copy());
                     }
                     inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class).invoke(inv, 0, ItemStack.EMPTY);
                 } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
@@ -704,7 +690,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     try {
                         ItemStack stack = (ItemStack) invSpirit.getClass().getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
                         if (stack != null && !stack.isEmpty()) {
-                            returnItem(stack);
+                            recovered.add(stack.copy());
                         }
                         setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                     } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
@@ -717,6 +703,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             altar.getClass().getMethod("init").invoke(altar);
             setField(altar, "isCrafting", false);
         } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+        return recovered;
     }
 
     private void returnItem(ItemStack stack) {

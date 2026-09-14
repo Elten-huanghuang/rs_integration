@@ -56,18 +56,17 @@ class PreviewRateLimiterTest {
                 "after logout the next request is treated as a fresh first request");
     }
 
-    /**
-     * Contract nuance vs {@link com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter}:
-     * PreviewRateLimiter refreshes the timestamp on EVERY call (even a dropped
-     * one), so a sustained burst keeps sliding the window forward.
-     */
+    /** Rejected requests must not keep extending the throttle window. */
     @Test
-    void sustainedBurstStaysDropped() {
+    void rejectedBurstDoesNotSlideTheWindow() {
         UUID player = UUID.randomUUID();
-        assertFalse(PreviewRateLimiter.isRateLimited(player));
+        long startedAt = 1_000;
+        assertFalse(PreviewRateLimiter.isRateLimited(player, startedAt, 100));
         for (int i = 0; i < 5; i++) {
-            assertTrue(PreviewRateLimiter.isRateLimited(player),
+            assertTrue(PreviewRateLimiter.isRateLimited(player, startedAt + i + 1, 100),
                     "each rapid follow-up within the window stays dropped");
         }
+        assertFalse(PreviewRateLimiter.isRateLimited(player, 1_100, 100),
+                "after the original interval, a request must be admitted even if rejected calls arrived in between");
     }
 }

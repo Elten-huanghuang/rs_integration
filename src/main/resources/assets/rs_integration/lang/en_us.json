@@ -484,6 +484,7 @@
   "rsi.plan.failure.machines_leased": "Failure reason: all bound machines are occupied by active crafting orders",
   "rsi.plan.failure.nbt_mismatch": "Failure reason: the item exists, but its data does not match the recipe",
   "rsi.plan.failure.planner_busy": "The crafting planner is busy. Please try again shortly.",
+  "rsi.plan.failure.request_pending": "A crafting preview is already being requested. Please wait a moment.",
   "rsi.plan.failure.catalog_unavailable": "The recipe catalog failed to load. Check the server log and reload recipes before trying again.",
   "rsi.plan.failure.max_craftable_unknown": "The recipe is too complex to determine the maximum craftable amount.",
   "rsi.plan.failure.complexity_limit": "The recipe exceeds the safe branch or step limit. Lock a concrete material or recipe.",
