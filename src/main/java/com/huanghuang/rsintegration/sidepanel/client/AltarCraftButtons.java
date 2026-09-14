@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -27,7 +29,10 @@ public final class AltarCraftButtons {
     private static final List<BlockPos> MACHINE_POSES = new ArrayList<>();
     private static final List<ModType> MOD_TYPES = new ArrayList<>();
     private static final List<String> TOOLTIPS = new ArrayList<>();
-    // Dedup: prevent duplicate plan requests for the same recipe within 1.5s
+    // Dedup only the same click burst. A long planning operation must remain
+    // retryable, otherwise the button appears dead while the first request is
+    // still being calculated.
+    private static final long CLICK_DEDUP_MS = 250L;
     private static final Map<ResourceLocation, Long> LAST_REQUEST_MS = new ConcurrentHashMap<>();
 
     // Machine GUI button — parallel to "+" button, opens bound machine directly
@@ -124,14 +129,20 @@ public final class AltarCraftButtons {
     public static void triggerClick(int index) {
         if (index >= 0 && index < HANDLERS.size() && HANDLERS.get(index) != null
                 && isVisible(index)) {
-            // Dedup: skip if same recipe was requested within 1.5s
+            // Dedup only an accidental double click, while keeping retries
+            // available when the first request is slow or rejected.
             if (index < RECIPE_IDS.size()) {
                 ResourceLocation rid = RECIPE_IDS.get(index);
                 long now = Util.getMillis();
                 Long last = LAST_REQUEST_MS.get(rid);
-                if (last != null && now - last < 1500L) {
+                if (last != null && now - last < CLICK_DEDUP_MS) {
                     RSIntegrationMod.LOGGER.debug("[RSI-AltarBtn] Dedup: skipped {} ({}ms since last request)",
                             rid, now - last);
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player != null) {
+                        mc.player.displayClientMessage(
+                                Component.translatable("rsi.plan.failure.request_pending"), true);
+                    }
                     return;
                 }
                 LAST_REQUEST_MS.put(rid, now);

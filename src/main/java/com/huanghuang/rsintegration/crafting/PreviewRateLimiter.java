@@ -27,14 +27,20 @@ public final class PreviewRateLimiter {
     private static final Map<UUID, Long> LAST_PREVIEW_TIME = new ConcurrentHashMap<>();
     private PreviewRateLimiter() {}
 
-    /** Returns true if this request should be silently dropped. */
+    /** Returns true if this request should be rejected for arriving too soon. */
     public static boolean isRateLimited(UUID playerId) {
         return isRateLimited(playerId, System.currentTimeMillis(), configuredIntervalMs());
     }
 
     static boolean isRateLimited(UUID playerId, long now, long intervalMs) {
-        Long prev = LAST_PREVIEW_TIME.put(playerId, now);
-        return prev != null && (now - prev) < intervalMs;
+        Long prev = LAST_PREVIEW_TIME.get(playerId);
+        if (prev != null && (now - prev) < intervalMs) {
+            // Do not slide the window on rejected requests. Otherwise a burst
+            // can starve the next legitimate preview forever.
+            return true;
+        }
+        LAST_PREVIEW_TIME.put(playerId, now);
+        return false;
     }
 
     private static long configuredIntervalMs() {

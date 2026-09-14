@@ -78,6 +78,23 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
         assertEquals("dynamic recipe unavailable", entry.label());
     }
 
+    @Test
+    void structuredShortagesAreShownWhenDiagnosticsAreEmpty() {
+        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        materials.put(IngredientKey.of(new ItemStack(Items.DIAMOND)),
+                new PlanResponse.Availability(4, 2));
+        materials.put(IngredientKey.of(new ItemStack(Items.EMERALD)),
+                new PlanResponse.Availability(3, 0));
+        PlanResponse plan = planWithMissing(materials, List.of());
+
+        var entries = MissingMaterialBookmarkList.textEntries(plan);
+
+        assertEquals(List.of(Items.DIAMOND, Items.EMERALD),
+                entries.stream().map(entry -> entry.bookmark().getItem()).toList());
+        assertEquals(List.of(2, 3),
+                entries.stream().map(MissingMaterialBookmarkList.TextEntry::missingCount).toList());
+    }
+
     private static PlanResponse planWithMissing(
             Map<IngredientKey, PlanResponse.Availability> materials, List<String> missing) {
         return new PlanResponse(false, "", ItemStack.EMPTY,

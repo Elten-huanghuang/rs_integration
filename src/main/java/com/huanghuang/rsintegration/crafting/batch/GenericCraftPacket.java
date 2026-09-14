@@ -677,6 +677,7 @@ public final class GenericCraftPacket {
         if (packet.preview && PreviewRateLimiter.isRateLimited(player.getUUID())) {
             RSIntegrationMod.debug("[RSI-Generic] handle() DROP: rate-limited, recipeId={} player={}",
                     packet.recipeId, player.getGameProfile().getName());
+            player.sendSystemMessage(Component.translatable("rsi.plan.failure.request_pending"));
             context.setPacketHandled(true);
             return;
         }

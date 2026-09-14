@@ -18,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 final class EmiCraftButtonWidget extends Widget {
     private static final int SIZE = 10;
-    private static final long CLICK_DEDUP_MS = 1_500L;
+    // Keep double-click protection short so a slow preview remains retryable.
+    private static final long CLICK_DEDUP_MS = 250L;
     private static final Map<ResourceLocation, Long> LAST_REQUEST_MS = new ConcurrentHashMap<>();
 
     private final Bounds bounds;
@@ -86,6 +87,11 @@ final class EmiCraftButtonWidget extends Widget {
         if (previous != null && now - previous < CLICK_DEDUP_MS) {
             RSIntegrationMod.LOGGER.debug("[RSI-EMI] Dedup: skipped {} ({}ms since last request)",
                     spec.recipeId(), now - previous);
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            if (mc.player != null) {
+                mc.player.displayClientMessage(
+                        Component.translatable("rsi.plan.failure.request_pending"), true);
+            }
             return true;
         }
         LAST_REQUEST_MS.put(spec.recipeId(), now);

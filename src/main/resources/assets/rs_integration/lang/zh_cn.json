@@ -490,6 +490,7 @@
   "rsi.plan.failure.machines_leased": "失败原因：所有已绑定机器都被其他合成订单占用",
   "rsi.plan.failure.nbt_mismatch": "失败原因：物品存在，但物品数据与配方要求不匹配",
   "rsi.plan.failure.planner_busy": "合成规划任务繁忙，请稍后重试。",
+  "rsi.plan.failure.request_pending": "合成预览请求正在处理中，请稍等片刻。",
   "rsi.plan.failure.catalog_unavailable": "配方目录加载失败，请检查服务端日志并重新加载配方后重试。",
   "rsi.plan.failure.max_craftable_unknown": "配方过于复杂，无法确定最大可合成数量。",
   "rsi.plan.failure.complexity_limit": "配方分支或步骤超过安全规划上限，请锁定具体材料或配方。",
