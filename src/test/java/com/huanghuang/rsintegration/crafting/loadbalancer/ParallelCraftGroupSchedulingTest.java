@@ -18,6 +18,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ParallelCraftGroupSchedulingTest extends BootstrapTest {
@@ -74,6 +75,29 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
             assertTrue(merged.get(operation * 5 + 4).is(Items.BOWL));
         }
     }
+
+    @Test
+    void repeatedSpecsKeepOperationMajorOrderWithoutMaterializingAnArray() {
+        IngredientSpec bowl = new IngredientSpec(Ingredient.of(Items.BOWL), 1);
+        IngredientSpec sugar = new IngredientSpec(Ingredient.of(Items.SUGAR), 1);
+
+        List<IngredientSpec> repeated = ParallelCraftGroup.repeatSpecs(List.of(bowl, sugar), 3);
+
+        assertEquals(6, repeated.size());
+        assertEquals(List.of(bowl, sugar, bowl, sugar, bowl, sugar), repeated);
+        assertEquals(List.of(bowl, sugar, bowl), repeated.subList(0, 3));
+        assertThrows(UnsupportedOperationException.class, () -> repeated.set(0, sugar));
+    }
+
+    @Test
+    void repeatedSpecsFailClearlyWhenTheLegacyListContractCannotRepresentTheSize() {
+        IngredientSpec bowl = new IngredientSpec(Ingredient.of(Items.BOWL), 1);
+        IngredientSpec sugar = new IngredientSpec(Ingredient.of(Items.SUGAR), 1);
+
+        assertThrows(ArithmeticException.class,
+                () -> ParallelCraftGroup.repeatSpecs(List.of(bowl, sugar), Integer.MAX_VALUE));
+    }
+
     @Test
     void exclusiveDelegateCanDrainOperationsThroughOneSerialWorker() {
         assertTrue(ParallelCraftGroup.operationGroupAcceptsChild(true, 1));

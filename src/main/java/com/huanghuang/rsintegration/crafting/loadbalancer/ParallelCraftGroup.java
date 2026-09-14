@@ -34,7 +34,9 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.AbstractList;
 import java.util.List;
+import java.util.RandomAccess;
 import java.util.function.BiFunction;
 
 /**
@@ -80,6 +82,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private List<IngredientSpec> baseSpecs;
     private List<IngredientSpec> graphSpecs = List.of();
     private List<IngredientSpec> supplementalSpecs = List.of();
+    @Nullable
+    private List<IngredientSpec> requiredSpecsView;
+    private List<IngredientSpec> supplementalSpecsView = List.of();
     private ItemStack targetOutput;
     private OperationBudget craftOperationBudget;
     private OperationBudget globalOperationBudget;
@@ -226,10 +231,17 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        if (baseSpecs == null || baseSpecs.isEmpty()) return null;
-        List<IngredientSpec> all = new ArrayList<>(baseSpecs.size() * operations.totalOperations());
-        for (int i = 0; i < operations.totalOperations(); i++) all.addAll(baseSpecs);
-        return all;
+        return requiredSpecsView;
+    }
+
+    /**
+     * Graph reservations use the child's graph contract, which is already
+     * expressed once per operation. Do not route this through the legacy full
+     * material list above.
+     */
+    @Override
+    public List<IngredientSpec> getGraphSpecs() {
+        return graphSpecs;
     }
 
     @Nullable
@@ -245,7 +257,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public List<IngredientSpec> getSupplementalSpecs() {
-        return repeatSpecs(supplementalSpecs, operations.totalOperations());
+        return supplementalSpecsView;
     }
 
     @Override
@@ -260,10 +272,35 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     static List<IngredientSpec> repeatSpecs(List<IngredientSpec> specs, int operationCount) {
+        return repeatedSpecView(specs, operationCount);
+    }
+
+    private static List<IngredientSpec> repeatedSpecView(List<IngredientSpec> specs, int operationCount) {
         if (specs.isEmpty() || operationCount <= 0) return List.of();
-        List<IngredientSpec> all = new ArrayList<>(specs.size() * operationCount);
-        for (int i = 0; i < operationCount; i++) all.addAll(specs);
-        return List.copyOf(all);
+        List<IngredientSpec> base = List.copyOf(specs);
+        return new RepeatedSpecView(base, operationCount);
+    }
+
+    private static final class RepeatedSpecView extends AbstractList<IngredientSpec>
+            implements RandomAccess {
+        private final List<IngredientSpec> base;
+        private final int size;
+
+        private RepeatedSpecView(List<IngredientSpec> base, int operationCount) {
+            this.base = base;
+            this.size = Math.multiplyExact(base.size(), operationCount);
+        }
+
+        @Override
+        public IngredientSpec get(int index) {
+            if (index < 0 || index >= size) throw new IndexOutOfBoundsException("index: " + index);
+            return base.get(index % base.size());
+        }
+
+        @Override
+        public int size() {
+            return size;
+        }
     }
 
     static List<ItemStack> mergeOperationSlices(
@@ -1025,6 +1062,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             baseSpecs = null;
             graphSpecs = List.of();
             supplementalSpecs = List.of();
+            requiredSpecsView = null;
+            supplementalSpecsView = List.of();
             return;
         }
         IBatchDelegate child = workers.get(0).delegate;
@@ -1032,6 +1071,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         baseSpecs = required == null ? null : List.copyOf(required);
         graphSpecs = List.copyOf(child.getGraphSpecs());
         supplementalSpecs = List.copyOf(child.getSupplementalSpecs());
+        requiredSpecsView = baseSpecs == null || baseSpecs.isEmpty()
+                ? null : repeatedSpecView(baseSpecs, operations.totalOperations());
+        supplementalSpecsView = repeatedSpecView(supplementalSpecs, operations.totalOperations());
     }
 
     private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {
