@@ -145,19 +145,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
-        // Pre-compute expected output
-        this.expectedOutput = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+        // Pre-compute the authoritative output. Malum's focusing recipe keeps
+        // it in a concrete `output` field; read that first so an inherited
+        // display/result method cannot arm capture for the wrong stack.
+        this.expectedOutput = findRecipeOutput(recipe);
         if (expectedOutput.isEmpty()) {
-            // Fallback: read output field directly
-            Reflect.findField(recipe.getClass(), "output").ifPresent(f -> {
-                try {
-                    Object v = f.get(recipe);
-                    if (v instanceof ItemStack s && !s.isEmpty())
-                        this.expectedOutput = s.copy();
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-Malum] IngredientWithCount parse failed", e);
-                }
-            });
+            this.expectedOutput = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
         }
 
         // Read inventories
@@ -763,7 +756,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!craftStarted) return false;
 
-        if (!MalumReflection.crucibleBEClass.isInstance(be)) return true; // BE gone → consider done
+        // A missing/replaced core is not proof that the output was produced.
+        // Let the chain fail and refund unless a captured output was observed.
+        if (!MalumReflection.crucibleBEClass.isInstance(be)) return false;
 
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
         if (currentRecipe != null) {
@@ -771,18 +766,22 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
-        // Recipe went null — if we saw it active before, craft is complete
-        if (craftWasSeenActive) return true;
-
-        // Fallback: scan for ItemEntity result
-        if (!expectedOutput.isEmpty()) {
+        // Malum clears/selects the recipe again immediately after craft(). A
+        // null recipe therefore only means the current operation is no longer
+        // active; it is not a completion signal. Confirm the actual output.
+        ItemStack expected = expectedOutput;
+        if (expected == null || expected.isEmpty()) {
+            expected = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+        }
+        if (!expected.isEmpty()) {
+            final ItemStack scanTarget = expected;
             BlockPos pos = be.getBlockPos();
             List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class,
-                    new AABB(pos).inflate(3),
+                    new AABB(pos).inflate(4),
                     e -> net.minecraft.world.item.ItemStack.isSameItemSameTags(
-                            e.getItem(), expectedOutput)
+                            e.getItem(), scanTarget)
                             || net.minecraft.world.item.ItemStack.isSameItem(
-                                    e.getItem(), expectedOutput));
+                                    e.getItem(), scanTarget));
             if (!entities.isEmpty()) return true;
         }
 
@@ -795,15 +794,15 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public ItemStack collectResult(ServerPlayer player) {
         if (myLevel == null || myPos == null) return ItemStack.EMPTY;
 
-        ItemStack target = expectedOutput;
-        if (target.isEmpty()) {
+        ItemStack target = getExpectedOutput();
+        if (target == null || target.isEmpty()) {
             target = ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
         }
         final ItemStack scanTarget = target;
 
         // Scan for ItemEntity matching the expected output
         List<ItemEntity> entities = myLevel.getEntitiesOfClass(ItemEntity.class,
-                new AABB(myPos).inflate(3),
+                new AABB(myPos).inflate(4),
                 e -> {
                     if (!e.isAlive()) return false;
                     ItemStack ei = e.getItem();
@@ -823,16 +822,18 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return result;
         }
 
-        // Fallback: check player inventory
+        // Fallback: a magnet or auto-pickup can move the result into any player
+        // inventory slot if an external collector won the race with the capture
+        // interceptor. Recover it from the complete inventory before declaring
+        // the world output missing.
         if (!target.isEmpty()) {
-            for (var inv : new net.minecraft.world.item.ItemStack[]{
-                    player.getInventory().getSelected(),
-                    player.getInventory().offhand.get(0)}) {
-                var slot = inv;
-                if (net.minecraft.world.item.ItemStack.isSameItemSameTags(slot, target)) {
-                    ItemStack result = slot.copy();
-                    result.setCount(Math.min(result.getCount(), target.getMaxStackSize()));
-                    slot.shrink(result.getCount());
+            List<ItemStack> slots = new ArrayList<>(player.getInventory().items);
+            slots.addAll(player.getInventory().offhand);
+            for (ItemStack slot : slots) {
+                if (net.minecraft.world.item.ItemStack.isSameItemSameTags(slot, target)
+                        || net.minecraft.world.item.ItemStack.isSameItem(slot, target)) {
+                    int amount = Math.min(slot.getCount(), target.getCount());
+                    ItemStack result = slot.split(amount);
                     if (!result.isEmpty()) return result;
                 }
             }
@@ -898,7 +899,23 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public ItemStack getExpectedOutput() {
         // Output drops as a world ItemEntity near the crucible — expose it so the
         // interceptor can grab it before any magnet does.
-        return (expectedOutput != null && !expectedOutput.isEmpty()) ? expectedOutput : null;
+        if (expectedOutput != null && !expectedOutput.isEmpty()) return expectedOutput.copy();
+        if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copy();
+        return recipe == null || myLevel == null ? null : findRecipeOutput(recipe);
+    }
+
+    private static ItemStack findRecipeOutput(@Nullable Recipe<?> recipe) {
+        if (recipe == null) return ItemStack.EMPTY;
+        Field field = findField(recipe.getClass(), "output");
+        if (field == null) return ItemStack.EMPTY;
+        try {
+            field.setAccessible(true);
+            Object value = field.get(recipe);
+            return value instanceof ItemStack stack && !stack.isEmpty()
+                    ? stack.copy() : ItemStack.EMPTY;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return ItemStack.EMPTY;
+        }
     }
 
     // ── helpers ───────────────────────────────────────────────────

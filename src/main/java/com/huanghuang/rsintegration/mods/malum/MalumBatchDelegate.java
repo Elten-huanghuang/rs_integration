@@ -42,6 +42,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Object altar;                 // SpiritAltarBlockEntity
     private Object invMain;              // main inventory
+    private Object invExtras;            // consumed pedestal items during craft
     private Object invSpirit;            // spirit inventory
     private Recipe<?> recipe;
     private List<Integer> filledPedestalIndices;
@@ -64,6 +65,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // validateAndInit() call that failed partway through.
         this.altar = null;
         this.invMain = null;
+        this.invExtras = null;
         this.invSpirit = null;
         this.recipe = null;
         this.filledPedestalIndices = null;
@@ -102,8 +104,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         // Resolve inventories
         this.invMain = getField(altar, "inventory");
+        this.invExtras = getField(altar, "extrasInventory");
         this.invSpirit = getField(altar, "spiritInventory");
-        if (invMain == null || invSpirit == null) {
+        if (invMain == null || invExtras == null || invSpirit == null) {
             player.sendSystemMessage(Component.translatable("rsi.malum.error.inventory_error"));
             return false;
         }
@@ -680,6 +683,21 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class).invoke(inv, 0, ItemStack.EMPTY);
                 } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
             }
+        }
+
+        // Malum moves consumed pedestal items into extrasInventory before the
+        // final craft call. If the center input is removed during that window,
+        // the pedestals are empty but these stacks still belong to this job.
+        if (invExtras != null) {
+            try {
+                int slots = (int) invExtras.getClass().getMethod("getSlots").invoke(invExtras);
+                for (int i = 0; i < slots; i++) {
+                    ItemStack stack = (ItemStack) invExtras.getClass()
+                            .getMethod("getStackInSlot", int.class).invoke(invExtras, i);
+                    if (stack != null && !stack.isEmpty()) recovered.add(stack.copy());
+                    setIHandlerSlot(invExtras, i, ItemStack.EMPTY);
+                }
+            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
         }
 
         // Recover spirit slots
