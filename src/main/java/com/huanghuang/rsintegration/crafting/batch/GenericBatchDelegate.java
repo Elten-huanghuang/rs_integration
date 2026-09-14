@@ -169,6 +169,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             this.pendingResult = assembled;
+        } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingRecipe smithing) {
+            // Re-Avaritia's ExtremeSmithingRecipe is a SmithingRecipe, not a
+            // SmithingTransformRecipe. Its five-slot contract is template,
+            // base, and three additions; assemble from the extracted stacks
+            // so the base item's NBT is preserved by the mod recipe.
+            ItemStack assembled = assembleSmithingRecipe(
+                    smithing, templates, player.serverLevel().registryAccess());
+            if (assembled.isEmpty()) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-Batch-Generic] Smithing assembly failed for recipe {}", recipe.getId());
+                this.pendingResult = ItemStack.EMPTY;
+                return false;
+            }
+            this.pendingResult = assembled;
         } else if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
             captureActualCraftingOutputs(cr, templates, player);
         }
@@ -195,6 +209,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             return smithing.getResultItem(player.serverLevel().registryAccess()).copy();
         }
         return ItemStack.EMPTY;
+    }
+
+    /** Assemble vanilla three-slot and Re-Avaritia five-slot smithing recipes. */
+    private static ItemStack assembleSmithingRecipe(
+            net.minecraft.world.item.crafting.SmithingRecipe recipe,
+            List<ItemStack> materials, RegistryAccess access) {
+        int slotCount = materials.size() >= 5 ? 5 : 3;
+        ItemStack[] slots = new ItemStack[slotCount];
+        java.util.Arrays.fill(slots, ItemStack.EMPTY);
+        for (int i = 0; i < slotCount && i < materials.size(); i++) {
+            ItemStack material = materials.get(i);
+            if (material != null && !material.isEmpty()) slots[i] = material.copyWithCount(1);
+        }
+        return recipe.assemble(new net.minecraft.world.SimpleContainer(slots), access);
     }
 
     // ── shared-ledger path for AsyncCraftChain ───────────────────────
@@ -250,6 +278,25 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                             ? ItemStack.EMPTY : materials.get(i).copyWithCount(spec.count()));
                 }
                 ItemStack assembled = SmithingRecipeHandler.assembleTransform(
+                        smithing, operationMaterials, player.serverLevel().registryAccess());
+                if (assembled.isEmpty()) return false;
+                int executions = materialExecutions(
+                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        preparedGraphExecutions);
+                if (executions <= 0) return false;
+                assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
+                pendingResult = assembled;
+                this.pendingSecondary.addAll(ModRecipeHandlers.tryGetSecondaryOutputs(
+                        recipe, player.serverLevel().registryAccess()));
+            } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingRecipe smithing) {
+                List<ItemStack> operationMaterials = new ArrayList<>();
+                List<IngredientSpec> specs = getRequiredMaterials();
+                for (int i = 0; i < specs.size() && i < materials.size(); i++) {
+                    IngredientSpec spec = specs.get(i);
+                    operationMaterials.add(spec.isEmpty() || materials.get(i) == null
+                            ? ItemStack.EMPTY : materials.get(i).copyWithCount(spec.count()));
+                }
+                ItemStack assembled = assembleSmithingRecipe(
                         smithing, operationMaterials, player.serverLevel().registryAccess());
                 if (assembled.isEmpty()) return false;
                 int executions = materialExecutions(

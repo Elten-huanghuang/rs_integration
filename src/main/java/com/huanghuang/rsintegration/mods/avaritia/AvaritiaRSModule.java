@@ -82,7 +82,12 @@ public final class AvaritiaRSModule implements IModIntegration {
                 "avaritia", ModType.byId(ModIds.ID_AVARITIA_SMITHING),
                 RSIntegrationConfig.ENABLE_AVARITIA,
                 List.of("committee.nova.mods.avaritia.common.block.extreme.ExtremeSmithingTableBlock"),
-                ModIds.ID_AVARITIA_SMITHING));
+                // Re-Avaritia keeps this registry ID stable across releases,
+                // while forks/recompiled builds may expose a different block
+                // implementation class.  Match the concrete ID as well so
+                // the bindable target remains compatible with those builds.
+                List.of("avaritia:extreme_smithing_table"),
+                ModIds.ID_AVARITIA_SMITHING, true));
 
         // GUI-only storage, collectors, and anvils do not execute recipes and are
         // intentionally not exposed as bindable crafting machines.
