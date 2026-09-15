@@ -232,6 +232,13 @@ public final class BeyondDimensionsReflection {
         return ((ItemStack) key.getClass().getMethod("getReadOnlyStack").invoke(key)).copy();
     }
 
+    static ItemStack keyStack(Object key, Set<net.minecraft.world.item.Item> itemTypes) throws Exception {
+        ItemStack stack = (ItemStack) key.getClass().getMethod("getReadOnlyStack").invoke(key);
+        // Inspect only the item type on BD's read-only stack; copy matching
+        // stacks before handing them to any identity or ingredient code.
+        return itemTypes == null || itemTypes.contains(stack.getItem()) ? stack.copy() : ItemStack.EMPTY;
+    }
+
     /** UnifiedStorage can contain fluids, mana and other typed keys. */
     static boolean isItemKey(Object key) {
         if (key == null) return false;

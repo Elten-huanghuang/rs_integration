@@ -19,6 +19,7 @@ public final class StorageItemKey {
     private final CompoundTag backendPayload;
     private final byte[] canonicalIdentity;
     private final ItemStack displayStack;
+    private final int hashCode;
 
     /** Uses deterministic vanilla-compatible NBT identity; NaN is rejected as non-equivalent. */
     public StorageItemKey(StorageBackendId backendId, CompoundTag backendPayload, ItemStack displayStack) {
@@ -46,6 +47,8 @@ public final class StorageItemKey {
         this.backendPayload = backendPayload.copy();
         this.canonicalIdentity = canonicalIdentity.clone();
         this.displayStack = displayStack.copyWithCount(1);
+        int hash = 31 * backendId.hashCode() + itemType.hashCode();
+        this.hashCode = 31 * hash + Arrays.hashCode(this.canonicalIdentity);
     }
 
     /** Creates a key using the backend's authoritative equality/hash representation. */
@@ -78,6 +81,7 @@ public final class StorageItemKey {
 
     public StorageBackendId backendId() { return backendId; }
     public ResourceLocation itemType() { return itemType; }
+    net.minecraft.world.item.Item displayItem() { return displayStack.getItem(); }
     public CompoundTag backendPayload() { return backendPayload.copy(); }
     /** @deprecated use backendPayload(); retained while the adapter prototype is being revised. */
     @Deprecated(forRemoval = false)
@@ -95,7 +99,6 @@ public final class StorageItemKey {
 
     @Override
     public int hashCode() {
-        int result = 31 * backendId.hashCode() + itemType.hashCode();
-        return 31 * result + Arrays.hashCode(canonicalIdentity);
+        return hashCode;
     }
 }

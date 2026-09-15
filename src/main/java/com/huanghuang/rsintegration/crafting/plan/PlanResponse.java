@@ -128,7 +128,17 @@ public record PlanResponse(
         return materials.get(IngredientKey.of(new ItemStack(key.item())));
     }
 
-    public record Availability(int needed, int available) {
+    /** Gross tree demand and real stock are separate from the net external shortage. */
+    public record Availability(int needed, int available, int missingCount) {
+        public Availability(int needed, int available) {
+            this(needed, available, (int) Math.max(0L, Math.min(Integer.MAX_VALUE,
+                    (long) needed - available)));
+        }
+
+        public Availability {
+            if (missingCount < 0) throw new IllegalArgumentException("negative material shortage");
+        }
+
         public boolean isEnough() { return available >= needed; }
         public boolean isPartial() { return available > 0 && available < needed; }
     }

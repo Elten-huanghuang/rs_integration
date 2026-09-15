@@ -22,6 +22,48 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
     private static final int OVERSIZED_COUNT = 4097;
 
     @Test
+    void roundTripPreservesNetShortageSeparatelyFromGrossDemandAndNbt() {
+        var intermediate = com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
+                new ItemStack(net.minecraft.world.item.Items.IRON_INGOT));
+        ItemStack strict = new ItemStack(net.minecraft.world.item.Items.POTION);
+        strict.getOrCreateTag().putString("Potion", "minecraft:water");
+        var raw = com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(strict);
+        var materials = Map.of(intermediate, new PlanResponse.Availability(64, 0, 0),
+                raw, new PlanResponse.Availability(10, 2, 3));
+        var plan = new PlanResponse(false, "", new ItemStack(net.minecraft.world.item.Items.DIAMOND),
+                List.of(), materials, List.of(), "test:recipe");
+        FriendlyByteBuf buf = buffer();
+        try {
+            new PlanResponsePacket(plan).encode(buf);
+            PlanResponse decoded = PlanResponsePacket.decode(buf).plan();
+            org.junit.jupiter.api.Assertions.assertEquals(materials, decoded.materials());
+            var entries = MissingMaterialBookmarkList.textEntries(decoded);
+            org.junit.jupiter.api.Assertions.assertEquals(1, entries.size());
+            org.junit.jupiter.api.Assertions.assertEquals(3, entries.get(0).missingCount());
+            org.junit.jupiter.api.Assertions.assertEquals(strict.getTag(), entries.get(0).bookmark().getTag());
+        } finally {
+            buf.release();
+        }
+    }
+
+    @Test
+    void decodeRejectsNegativeMaterialShortage() {
+        FriendlyByteBuf buf = packetPrefix();
+        try {
+            buf.writeVarInt(0);
+            buf.writeVarInt(1);
+            com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
+                    new ItemStack(net.minecraft.world.item.Items.IRON_INGOT)).write(buf);
+            buf.writeVarInt(2);
+            buf.writeVarInt(0);
+            buf.writeVarInt(-1);
+            assertThrows(DecoderException.class, () -> PlanResponsePacket.decode(buf));
+        } finally {
+            buf.release();
+        }
+    }
+
+    @Test
     void decodeRejectsMaliciousStepCountBeforeAllocating() {
         FriendlyByteBuf buf = packetPrefix();
         buf.writeVarInt(Integer.MAX_VALUE);

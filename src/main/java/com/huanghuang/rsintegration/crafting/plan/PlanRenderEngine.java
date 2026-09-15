@@ -244,7 +244,8 @@ public final class PlanRenderEngine {
 
                 int needed = entry.getValue().needed();
                 int have = entry.getValue().available();
-                int border = have >= needed ? C_GREEN : (have > 0 ? C_ORANGE : C_RED);
+                int missing = entry.getValue().missingCount();
+                int border = have >= needed ? C_GREEN : (missing == 0 || have > 0 ? C_ORANGE : C_RED);
 
                 ItemStack stack = entry.getKey().stack(1);
                 UIRenderer.slotBg(gfx, cx, cy, SLOT_SIZE, border);
@@ -254,7 +255,7 @@ public final class PlanRenderEngine {
                 // vanilla stack-count overlay to avoid a second number.
                 gfx.renderItemDecorations(font, stack, cx + 1, cy + 1, "");
 
-                if (have < needed) {
+                if (missing > 0) {
                     int bookmarkX = cx + 9;
                     int bookmarkY = cy;
                     int bookmarkSize = 9;
@@ -268,7 +269,7 @@ public final class PlanRenderEngine {
                         int hitBottom = Math.min(bookmarkY + bookmarkSize, gridBottom);
                         if (hitBottom > hitTop) {
                             bookmarkSink.addBookmarkButton(stack, bookmarkX, hitTop,
-                                    bookmarkSize, hitBottom - hitTop, needed - have);
+                                    bookmarkSize, hitBottom - hitTop, missing);
                         }
                     }
                 }
@@ -290,7 +291,7 @@ public final class PlanRenderEngine {
                 int pillBg, pillFg;
                 if (have >= needed) {
                     pillBg = C_PILL_GREEN_BG; pillFg = C_PILL_GREEN_FG;
-                } else if (have > 0) {
+                } else if (missing == 0 || have > 0) {
                     pillBg = C_PILL_ORANGE_BG; pillFg = C_PILL_ORANGE_FG;
                 } else {
                     pillBg = C_PILL_RED_BG; pillFg = C_PILL_RED_FG;

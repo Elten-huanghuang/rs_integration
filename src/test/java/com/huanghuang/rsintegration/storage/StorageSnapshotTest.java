@@ -17,6 +17,64 @@ class StorageSnapshotTest extends BootstrapTest {
     private static final StorageBackendId BACKEND = new StorageBackendId("test");
 
     @Test
+    void equivalentTypeSetsReuseCandidatesButNbtPredicatesRemainIndependent() {
+        var snapshot = new StorageSnapshot(BACKEND, List.of(new StoredItem(key(namedDiamond("a")), 2),
+                new StoredItem(key(namedDiamond("b")), 3), new StoredItem(key(namedStack(Items.APPLE, "a")), 4)));
+        var first = snapshot.match(Ingredient.of(Items.DIAMOND, Items.APPLE));
+        var second = snapshot.match(Ingredient.of(Items.APPLE, Items.DIAMOND));
+        org.junit.jupiter.api.Assertions.assertSame(first.items(), second.items());
+        CompoundTag a = namedDiamond("a").getTag();
+        CompoundTag b = namedDiamond("b").getTag();
+        assertEquals(List.of(2L, 4L), snapshot.match(
+                net.minecraftforge.common.crafting.PartialNBTIngredient.of(a, Items.DIAMOND, Items.APPLE)).items().stream()
+                .map(StoredItem::amount).toList());
+        assertEquals(List.of(3L), snapshot.match(
+                net.minecraftforge.common.crafting.PartialNBTIngredient.of(b, Items.DIAMOND, Items.APPLE)).items().stream()
+                .map(StoredItem::amount).toList());
+    }
+
+    @Test
+    void oversizedCandidateListsAreNotRetainedAndSnapshotsDoNotShareCounts() {
+        java.util.List<StoredItem> items = new java.util.ArrayList<>();
+        for (int i = 0; i < 4100; i++) items.add(new StoredItem(key(namedDiamond("v" + i)), i + 1));
+        var snapshot = new StorageSnapshot(BACKEND, items);
+        var demand = Ingredient.of(Items.APPLE, Items.DIAMOND);
+        org.junit.jupiter.api.Assertions.assertNotSame(snapshot.match(demand).items(), snapshot.match(demand).items());
+        var other = new StorageSnapshot(BACKEND, List.of(new StoredItem(key(namedDiamond("v0")), 50)));
+        assertEquals(50, other.match(demand).items().get(0).amount());
+        assertEquals(1, snapshot.match(demand).items().get(0).amount());
+    }
+
+    @Test
+    void customPredicateIsReevaluatedAndCannotMutateSnapshotStacks() {
+        var enabled = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Ingredient custom = new Ingredient(Stream.of(new Ingredient.ItemValue(new ItemStack(Items.DIAMOND)))) {
+            @Override public boolean test(ItemStack stack) {
+                stack.getOrCreateTag().putString("variant", "mutated");
+                return enabled.get();
+            }
+        };
+        var snapshot = new StorageSnapshot(BACKEND,
+                List.of(new StoredItem(key(namedDiamond("original")), 3)));
+        assertEquals(1, snapshot.match(custom).items().size());
+        enabled.set(false);
+        assertEquals(0, snapshot.match(custom).items().size());
+        assertEquals("original", snapshot.items().get(0).stack().getTag().getString("variant"));
+    }
+
+    @Test
+    void vanillaMatchingDoesNotCopyCandidateStacksButStrictNbtStillDoes() {
+        ItemStack stack = namedDiamond("first");
+        StorageItemKey itemKey = org.mockito.Mockito.spy(key(stack));
+        var snapshot = new StorageSnapshot(BACKEND, List.of(new StoredItem(itemKey, 3)));
+        org.mockito.Mockito.clearInvocations(itemKey);
+        assertEquals(1, snapshot.match(Ingredient.of(Items.DIAMOND)).items().size());
+        org.mockito.Mockito.verify(itemKey, org.mockito.Mockito.never()).displayStack();
+        assertEquals(1, snapshot.match(net.minecraftforge.common.crafting.StrictNBTIngredient.of(stack)).items().size());
+        org.mockito.Mockito.verify(itemKey).displayStack();
+    }
+
+    @Test
     void partialUnbreakableDemandFindsTheActualModifiedSwordInStorage() throws Exception {
         ItemStack actual = new ItemStack(Items.WOODEN_SWORD);
         actual.setTag(net.minecraft.nbt.TagParser.parseTag(

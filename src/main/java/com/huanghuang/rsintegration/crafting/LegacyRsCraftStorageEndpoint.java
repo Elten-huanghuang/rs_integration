@@ -79,6 +79,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
 
     private static final class LegacyRsStorageSession implements StorageSession {
         private final INetwork network;
+        private StorageSession matchingSession;
         LegacyRsStorageSession(INetwork network) { this.network = network; }
 
         @Override public com.huanghuang.rsintegration.storage.StorageReference reference() {
@@ -99,6 +100,11 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         }
 
         @Override public StorageSnapshotResult snapshotItems(ServerPlayer player) {
+            return snapshotItems(player, null);
+        }
+
+        @Override public StorageSnapshotResult snapshotItems(ServerPlayer player,
+                java.util.Set<net.minecraft.world.item.Item> itemTypes) {
             var cache = network.getItemStorageCache();
             if (cache == null || cache.getList() == null) {
                 return StorageSnapshotResult.failure(com.huanghuang.rsintegration.storage.StorageSnapshotStatus.UNAVAILABLE);
@@ -106,7 +112,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
             java.util.List<com.huanghuang.rsintegration.storage.StoredItem> items = new java.util.ArrayList<>();
             for (var entry : cache.getList().getStacks()) {
                 ItemStack stack = entry.getStack();
-                if (!stack.isEmpty() && stack.getCount() > 0) {
+                if (!stack.isEmpty() && stack.getCount() > 0
+                        && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
                     items.add(new com.huanghuang.rsintegration.storage.StoredItem(itemKey(stack), stack.getCount()));
                 }
             }
@@ -132,12 +139,11 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
 
         @Override public StorageOperationResult extractMatching(ServerPlayer player, Ingredient ingredient,
                                                                  long amount, boolean simulate) {
-            ItemStack result = RSIntegrationNetwork.extractFromNetwork(network, ingredient,
-                    Math.toIntExact(amount), player, simulate);
-            return StorageOperationResult.extracted(
-                    simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                            : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
-                    amount, result.isEmpty() ? java.util.List.of() : java.util.List.of(result));
+            if (matchingSession == null) {
+                matchingSession = new com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend()
+                        .openSession(network);
+            }
+            return matchingSession.extractMatching(player, ingredient, amount, simulate);
         }
 
         @Override public StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate) {

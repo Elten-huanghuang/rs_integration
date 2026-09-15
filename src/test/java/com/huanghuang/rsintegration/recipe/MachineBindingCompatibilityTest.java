@@ -55,17 +55,6 @@ public class MachineBindingCompatibilityTest extends BootstrapTest {
                 "crockpot||block.crockpot.crock_pot"));
     }
 
-    @Test
-    void crystalRitualRecipeUsesArcaneIteratorRatherThanCrystalBlock() {
-        WRRecipeHandler handler = new WRRecipeHandler();
-        Recipe<?> recipe = new CrystalRitualRecipe();
-
-        assertTrue(handler.isCompatibleBinding(recipe,
-                "wizards_reborn||block.wizards_reborn.arcane_iterator"));
-        assertFalse(handler.isCompatibleBinding(recipe,
-                "crystal_ritual||block.wizards_reborn.crystal"));
-    }
-
     public abstract static class StubRecipe implements Recipe<Container> {
         @Override public boolean matches(Container container, Level level) { return false; }
         @Override public ItemStack assemble(Container container, RegistryAccess access) {
@@ -80,7 +69,6 @@ public class MachineBindingCompatibilityTest extends BootstrapTest {
 
     public static final class CrucibleRecipe extends StubRecipe {}
     public static final class ItemRitualRecipe extends StubRecipe {}
-    public static final class CrystalRitualRecipe extends StubRecipe {}
 
     public static final class TieredAvaritiaRecipe extends StubRecipe {
         private final int tier;

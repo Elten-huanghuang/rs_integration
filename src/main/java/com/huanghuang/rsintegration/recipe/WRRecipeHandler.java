@@ -39,26 +39,6 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
         return isArcaneWorkbenchRecipeId(recipe) || super.canHandle(recipe);
     }
 
-    @Override
-    public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
-        if (blockKey == null) return false;
-        String required = requiredMachineKey(recipe);
-        return required == null
-                || blockKey.toLowerCase(java.util.Locale.ROOT).contains(required);
-    }
-
-    @Nullable
-    static String requiredMachineKey(Recipe<?> recipe) {
-        if (isArcaneWorkbenchRecipeId(recipe)) return "arcane_workbench";
-        String name = recipe.getClass().getName().toLowerCase(java.util.Locale.ROOT);
-        if (name.endsWith("wissencrystallizerrecipe")) return "wissen_crystallizer";
-        if (name.endsWith("arcaneworkbenchrecipe")) return "arcane_workbench";
-        if (name.endsWith("arcaneiteratorrecipe")) return "arcane_iterator";
-        if (name.endsWith("crystalinfusionrecipe")) return "crystal_ritual";
-        if (name.endsWith("crystalritualrecipe")) return "arcane_iterator";
-        return null;
-    }
-
     /** Stable datapack/KubeJS identity for CT-wrapped Arcane Workbench recipes. */
     public static boolean isArcaneWorkbenchRecipeId(Recipe<?> recipe) {
         return recipe != null && isArcaneWorkbenchRecipeId(recipe.getId());

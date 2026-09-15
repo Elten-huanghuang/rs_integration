@@ -32,6 +32,12 @@ public interface CraftStorageEndpoint {
         return session().snapshotItems(Objects.requireNonNull(player, "player"));
     }
 
+    default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player,
+                                           java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+        return itemTypes == null ? snapshot(player)
+                : session().snapshotItems(Objects.requireNonNull(player, "player"), itemTypes);
+    }
+
     default StorageOperationResult extractExact(@Nonnull ServerPlayer player,
                                                 @Nonnull ItemStack template,
                                                 long amount, boolean simulate) {

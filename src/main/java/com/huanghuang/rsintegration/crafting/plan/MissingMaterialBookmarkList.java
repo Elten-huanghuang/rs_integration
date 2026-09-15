@@ -18,7 +18,7 @@ public final class MissingMaterialBookmarkList {
 
     public static List<ItemStack> from(PlanResponse plan) {
         return plan.materials().entrySet().stream()
-                .filter(entry -> !entry.getValue().isEnough())
+                .filter(entry -> entry.getValue().missingCount() > 0)
                 .map(entry -> entry.getKey().stack(1))
                 .toList();
     }
@@ -47,7 +47,7 @@ public final class MissingMaterialBookmarkList {
             ItemStack stack = match.stack().copyWithCount(1);
             PlanResponse.Availability availability = plan.availability(stack);
             int shortage = availability == null ? 1
-                    : Math.max(1, availability.needed() - availability.available());
+                    : Math.max(1, availability.missingCount());
             result.add(new TextEntry(stack.getHoverName().getString(), stack, shortage));
         }
 
@@ -63,7 +63,7 @@ public final class MissingMaterialBookmarkList {
             ItemStack stack = candidates.get(i);
             PlanResponse.Availability availability = plan.availability(stack);
             int shortage = availability == null ? 1
-                    : Math.max(1, availability.needed() - availability.available());
+                    : Math.max(1, availability.missingCount());
             result.add(new TextEntry(stack.getHoverName().getString(),
                     stack.copyWithCount(1), shortage));
         }

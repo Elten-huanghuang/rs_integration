@@ -41,7 +41,10 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ExtractionLedger implements AutoCloseable {
+    private static final org.apache.logging.log4j.Logger LOGGER =
+            org.apache.logging.log4j.LogManager.getLogger("RS Integration");
     private static final LogSampler SETTLEMENT_MIRROR_LOGS = new LogSampler(60_000L);
+    private static final LogSampler REFUND_LOGS = new LogSampler(60_000L);
 
     public enum State {
         IDLE, RESERVING, RESERVED, COMMITTING, COMMITTED, ROLLED_BACK
@@ -156,7 +159,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private void transition(State to) {
-        RSIntegrationMod.LOGGER.debug(fmt("Ledger {} → {}"), state, to);
+        LOGGER.debug(fmt("Ledger {} → {}"), state, to);
         Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
                 state + "→" + to + " entries=" + entries.size());
         state = to;
@@ -208,7 +211,7 @@ public final class ExtractionLedger implements AutoCloseable {
             // The compatibility ledger must never change the established
             // physical extraction path; an unavailable descriptive key is
             // recorded in diagnostics and handled by the legacy ledger.
-            RSIntegrationMod.LOGGER.debug("[RSI-Ledger] settlement mirror skipped for entry {}", entry.id, ex);
+            LOGGER.debug("[RSI-Ledger] settlement mirror skipped for entry {}", entry.id, ex);
         }
     }
 
@@ -547,30 +550,28 @@ public final class ExtractionLedger implements AutoCloseable {
             List<com.huanghuang.rsintegration.storage.StoredItem> matches, int count,
             Map<CraftingResolver.StackKey, Integer> pending) {
         if (count <= 0) return EndpointReservation.EMPTY;
-        long available = 0;
         ItemStack template = ItemStack.EMPTY;
-        for (var stored : matches) {
-            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stored.stack(), true);
-            long unreserved = Math.max(0L,
-                    stored.amount() - pending.getOrDefault(key, 0));
-            if (unreserved <= 0) continue;
-            if (template.isEmpty()) template = stored.stack().copyWithCount(1);
-            available = Math.min(Integer.MAX_VALUE, available + unreserved);
-        }
-        if (template.isEmpty() || available < count) return EndpointReservation.EMPTY;
-
         Map<CraftingResolver.StackKey, Integer> allocations = new LinkedHashMap<>();
+        Map<CraftingResolver.StackKey, Long> seenAmounts = new HashMap<>();
         int remaining = count;
         for (var stored : matches) {
             if (remaining <= 0) break;
-            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stored.stack(), true);
+            ItemStack stack = stored.stack();
+            CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
+            // Backend identities may share one crafting key. Charge existing
+            // reservations once against their cumulative physical quantity.
+            long available = seenAmounts.merge(key, stored.amount(), ExtractionLedger::saturatedAdd);
             long unreserved = Math.max(0L,
-                    stored.amount() - pending.getOrDefault(key, 0));
+                    available - pending.getOrDefault(key, 0) - allocations.getOrDefault(key, 0));
             int contribution = (int) Math.min(remaining, unreserved);
             if (contribution <= 0) continue;
+            if (template.isEmpty()) template = stack;
             allocations.merge(key, contribution, Integer::sum);
             remaining -= contribution;
+            if (remaining == 0) break;
         }
+        // Failed reservations must not publish provisional allocations.
+        if (remaining > 0) return EndpointReservation.EMPTY;
         allocations.forEach((key, amount) -> pending.merge(key, amount, Integer::sum));
         return new EndpointReservation(template.copyWithCount(count), Map.copyOf(allocations));
     }
@@ -725,7 +726,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         // ── Phase 1: Pre-check ──────────────────────────────────
         if (!preCheck(network, player)) {
-            RSIntegrationMod.LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
+            LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
             resetSettlementMirror();
             transition(State.ROLLED_BACK);
             return false;
@@ -733,30 +734,29 @@ public final class ExtractionLedger implements AutoCloseable {
 
         // ── Phase 2: Batch extract ──────────────────────────────
         List<ExtractRecord> extracted = new ArrayList<>(entries.size());
+        boolean extractionFailed = false;
         try {
             for (Entry entry : entries) {
-                ItemStack item = extractOne(entry, network, player);
-                if (item.isEmpty() || item.getCount() < entry.count) {
-                    RSIntegrationMod.LOGGER.warn(fmt("Ledger commit: extractOne returned empty/insufficient for entry {} (need {}, got {})"),
-                            entry.id, entry.count, item.getCount());
-                    // Include the partial extract so rollback can return already-split items
-                    if (!item.isEmpty()) {
-                        extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
-                                entry.altarDim, entry.altarPos, entry.sourceNetwork));
-                    }
-                    rollbackExtractedPhases(extracted, player);
-                    resetSettlementMirror();
-                    transition(State.ROLLED_BACK);
-                    return false;
-                }
-                extracted.add(new ExtractRecord(entry.id, entry.source, item.copy(),
+                StorageOperationResult result = extractOne(entry, network, player);
+                extracted.add(new ExtractRecord(entry.id, entry.source, result,
                         entry.altarDim, entry.altarPos, entry.sourceNetwork));
+                if (result.kind() != StorageOperationResult.Kind.EXTRACT
+                        || !result.complete() || result.mode() != StorageOperationMode.PERFORM
+                        || result.transferredAmount().orElse(-1L) != entry.count) {
+                    LOGGER.warn(fmt("Ledger commit: extraction incomplete for entry {} (need {}, status {})"),
+                            entry.id, entry.count, result.status());
+                    extractionFailed = true;
+                    break;
+                }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
-            rollbackExtractedPhases(extracted, player);
+            LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
+            extractionFailed = true;
+        }
+        if (extractionFailed) {
             resetSettlementMirror();
             transition(State.ROLLED_BACK);
+            rollbackExtractedPhases(extracted, player);
             return false;
         }
 
@@ -776,20 +776,18 @@ public final class ExtractionLedger implements AutoCloseable {
                 transition(State.ROLLED_BACK);
                 return false;
             }
-            entry.confirmExtracted(record.stack);
-                StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
-                if (settlementId != null) {
-                    try {
-                    StorageOperationResult result = StorageOperationResult.extracted(
-                            StorageOperationMode.PERFORM, entry.count, List.of(record.stack));
+            entry.confirmExtracted(record.result.extractedStacks());
+            StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
+            if (settlementId != null) {
+                try {
                     CraftStorageEndpoint endpoint = endpointFor(entry.sourceNetwork);
-                    settlementLedger.recordExtraction(settlementId, result,
+                    settlementLedger.recordExtraction(settlementId, record.result,
                             stack -> settlementKey(entry, endpoint));
                 } catch (RuntimeException mirrorFailure) {
                     String key = "extraction:" + mirrorFailure.getClass().getName()
                             + ":" + String.valueOf(mirrorFailure.getMessage());
                     if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
-                        RSIntegrationMod.LOGGER.warn(
+                        LOGGER.warn(
                                 "[RSI-Ledger] settlement mirror extraction skipped; legacy extraction committed ({}: {})",
                                 mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
                         RSIntegrationMod.debug(
@@ -811,7 +809,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 String key = "commit:" + mirrorFailure.getClass().getName()
                         + ":" + String.valueOf(mirrorFailure.getMessage());
                 if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
-                    RSIntegrationMod.LOGGER.warn(
+                    LOGGER.warn(
                             "[RSI-Ledger] settlement mirror commit skipped; legacy extraction committed ({}: {})",
                             mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
                     RSIntegrationMod.debug(
@@ -846,7 +844,8 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             if (!neededByIngredient.isEmpty()) {
                 if (storageEndpoint != null) {
-                    var snapshot = storageEndpoint.snapshot(player).snapshot().orElse(null);
+                    var snapshot = storageEndpoint.snapshot(player,
+                            IngredientMatcher.itemTypesForAll(neededByIngredient.keySet())).snapshot().orElse(null);
                     if (snapshot == null) return false;
                     for (var ingEntry : neededByIngredient.entrySet()) {
                         if (isContainerFluidIngredient(ingEntry.getKey())) continue;
@@ -857,14 +856,14 @@ public final class ExtractionLedger implements AutoCloseable {
                             available = saturatedAdd(available, item.amount());
                         }
                         if (available < ingEntry.getValue()) {
-                            RSIntegrationMod.LOGGER.warn(
+                            LOGGER.warn(
                                     "[RSI-Ledger] Pre-check endpoint: insufficient {} in storage (need {}, have {})",
                                     CraftPacketUtils.describeIngredient(ingEntry.getKey()),
                                     ingEntry.getValue(), available);
                             return false;
                         }
                     }
-                    return true;
+                    return preCheckResonance();
                 }
                 var cache = network.getItemStorageCache();
                 if (cache == null) return false;
@@ -877,13 +876,17 @@ public final class ExtractionLedger implements AutoCloseable {
                         }
                     }
                     if (available < ingEntry.getValue()) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Pre-check: insufficient {} in network (need {}, have {})",
+                        LOGGER.warn("[RSI-Ledger] Pre-check: insufficient {} in network (need {}, have {})",
                                 CraftPacketUtils.describeIngredient(ingEntry.getKey()), ingEntry.getValue(), available);
                         return false;
                     }
                 }
             }
         }
+        return preCheckResonance();
+    }
+
+    private boolean preCheckResonance() {
         for (Entry entry : entries) {
             if (entry.source != Source.RESONANCE_DISK) continue;
             if (entry.resonanceView == null) return false;
@@ -891,7 +894,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     entry.resonanceSlot, entry.template, entry.count, true);
             if (simulated.getCount() != entry.count
                     || !MaterialMatcher.sameRuntimeFragment(entry.template, simulated)) {
-                RSIntegrationMod.LOGGER.warn(
+                LOGGER.warn(
                         "[RSI-Ledger] Resonance tool changed before commit: backend={} slot={} expected={}",
                         entry.resonanceView.backendId(), entry.resonanceSlot, entry.template);
                 return false;
@@ -905,57 +908,86 @@ public final class ExtractionLedger implements AutoCloseable {
     /** Return extracted items back to their original source. */
     private void rollbackExtractedPhases(List<ExtractRecord> extracted, ServerPlayer player) {
         for (ExtractRecord rec : extracted) {
-            ItemStack s = rec.stack;
-            if (s.isEmpty()) continue;
-            switch (rec.source) {
-                case ALTAR_BINDING -> {
-                    if (rec.sourceNetwork != null) {
-                        var tracker = rec.sourceNetwork.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, s.copy());
-                        ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
-                        if (!leftover.isEmpty()) {
-                            PlayerUtils.safeGiveToPlayer(player, leftover, rec.sourceNetwork);
-                        }
-                    } else {
-                        PlayerUtils.safeGiveToPlayer(player, s, null);
-                    }
+            if (rec.result.kind() != StorageOperationResult.Kind.EXTRACT
+                    || rec.result.mode() != StorageOperationMode.PERFORM) continue;
+            List<ItemStack> fragments = new ArrayList<>(rec.result.extractedStacks());
+            fragments.addAll(rec.result.recoveryStacks());
+            for (ItemStack s : fragments) {
+                try {
+                    rollbackFragment(rec, s, player);
+                } catch (RuntimeException failure) {
+                    logUncertainRefund(rec.entryId, s, failure.getClass().getSimpleName());
                 }
-                case NETWORK -> {
-                    if (storageEndpoint != null) {
-                        ItemStack leftover = storageEndpoint.insert(player, s, false)
-                                .remainder().orElse(ItemStack.EMPTY);
-                        if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, null);
-                        continue;
-                    }
-                    if (rec.sourceNetwork != null) {
-                        var tracker = rec.sourceNetwork.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, s.copy());
-                        ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
-                        if (!leftover.isEmpty()) {
-                            PlayerUtils.safeGiveToPlayer(player, leftover, rec.sourceNetwork);
-                        }
-                    } else {
-                        PlayerUtils.safeGiveToPlayer(player, s, null);
-                    }
-                }
-                case RESONANCE_DISK -> {
-                    Entry entry = entriesById.get(rec.entryId);
-                    if (entry == null || entry.resonanceView == null) {
-                        PlayerUtils.safeGiveToPlayer(player, s, null);
-                        continue;
-                    }
-                    ItemStack remainder = entry.resonanceView.insertView(
-                            entry.resonanceSlot, s, s.getCount(), false);
-                    entry.resonanceView.markDirty(player);
-                    if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
-                }
-                case PLAYER_INVENTORY -> PlayerUtils.safeGiveToPlayer(player, s, null);
             }
         }
     }
 
+    private void rollbackFragment(ExtractRecord rec, ItemStack s, ServerPlayer player) {
+        if (s.isEmpty()) return;
+        switch (rec.source) {
+            case ALTAR_BINDING -> {
+                if (rec.sourceNetwork != null) {
+                    var tracker = rec.sourceNetwork.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(player, s.copy());
+                    ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        PlayerUtils.safeGiveToPlayer(player, leftover, rec.sourceNetwork);
+                    }
+                } else {
+                    PlayerUtils.safeGiveToPlayer(player, s, null);
+                }
+            }
+            case NETWORK -> {
+                if (storageEndpoint != null) {
+                    ItemStack leftover = refundRemainder(
+                            storageEndpoint.insert(player, s, false), rec.entryId, s);
+                    if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, null);
+                    return;
+                }
+                if (rec.sourceNetwork != null) {
+                    var tracker = rec.sourceNetwork.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(player, s.copy());
+                    ItemStack leftover = rec.sourceNetwork.insertItem(s, s.getCount(), Action.PERFORM);
+                    if (!leftover.isEmpty()) {
+                        PlayerUtils.safeGiveToPlayer(player, leftover, rec.sourceNetwork);
+                    }
+                } else {
+                    PlayerUtils.safeGiveToPlayer(player, s, null);
+                }
+            }
+            case RESONANCE_DISK -> {
+                Entry entry = entriesById.get(rec.entryId);
+                if (entry == null || entry.resonanceView == null) {
+                    PlayerUtils.safeGiveToPlayer(player, s, null);
+                    return;
+                }
+                ItemStack remainder = entry.resonanceView.insertView(
+                        entry.resonanceSlot, s, s.getCount(), false);
+                entry.resonanceView.markDirty(player);
+                if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
+            }
+            case PLAYER_INVENTORY -> PlayerUtils.safeGiveToPlayer(player, s, null);
+        }
+    }
+
+    private static ItemStack refundRemainder(StorageOperationResult result, int entryId, ItemStack stack) {
+        var remainder = result.remainder();
+        if (remainder.isEmpty()) logUncertainRefund(entryId, stack, result.status().name());
+        return remainder.orElse(ItemStack.EMPTY);
+    }
+
+    private static void logUncertainRefund(int entryId, ItemStack stack, String reason) {
+        // Unknown transfer amounts must not be retried: storage may have
+        // accepted the item before reporting an exception.
+        if (REFUND_LOGS.allow(reason)) {
+            LOGGER.error("[RSI-Ledger] Refund outcome unknown; not retried: entry={} item={} count={} reason={}",
+                    entryId, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack),
+                    stack.getCount(), reason);
+        }
+    }
+
     /** Lightweight record for extracted items during commit rollback. */
-    private record ExtractRecord(int entryId, Source source, ItemStack stack,
+    private record ExtractRecord(int entryId, Source source, StorageOperationResult result,
                                   @Nullable ResourceKey<Level> altarDim,
                                   @Nullable BlockPos altarPos,
                                   @Nullable INetwork sourceNetwork) {}
@@ -1136,7 +1168,7 @@ public final class ExtractionLedger implements AutoCloseable {
         // (e.g. the WR Arcane Iterator per-level scheduler). Only warn when
         // reservations are actually being discarded.
         if (state != State.IDLE || !entries.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
+            LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
         }
         entries.clear();
         entriesById.clear();
@@ -1172,8 +1204,7 @@ public final class ExtractionLedger implements AutoCloseable {
         final int resonanceSlot;
         @Nullable final ResonanceReservationKey resonanceKey;
         final Map<CraftingResolver.StackKey, Integer> pendingNetworkAllocation = new HashMap<>();
-        ItemStack extracted = ItemStack.EMPTY;
-        int refundableCount;
+        List<ItemStack> extracted = List.of();
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
@@ -1207,7 +1238,6 @@ public final class ExtractionLedger implements AutoCloseable {
             this.resonanceView = resonanceView;
             this.resonanceSlot = resonanceSlot;
             this.resonanceKey = resonanceKey;
-            this.refundableCount = this.count;
         }
 
         static Entry resonance(Ingredient ingredient, ItemStack template,
@@ -1217,18 +1247,40 @@ public final class ExtractionLedger implements AutoCloseable {
                     null, null, null, null, true, view, slot, key);
         }
 
-        void confirmExtracted(ItemStack stack) {
-            this.extracted = stack.copy();
-        }
-
-        ItemStack refundableStack() {
-            return extracted.isEmpty() || refundableCount <= 0
-                    ? ItemStack.EMPTY
-                    : extracted.copyWithCount(Math.min(refundableCount, extracted.getCount()));
+        void confirmExtracted(List<ItemStack> stacks) {
+            // Callers hand over copies owned by the operation result or refund matcher.
+            this.extracted = List.copyOf(stacks);
         }
     }
 
-    private ItemStack extractOne(Entry entry, INetwork network, ServerPlayer player) {
+    private StorageOperationResult extractOne(Entry entry, INetwork network, ServerPlayer player) {
+        if (entry.source == Source.NETWORK && storageEndpoint != null) {
+            if (storageSupportsFluidContainers(storageEndpoint)
+                    && (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
+                    || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+                return storageEndpoint.session().extractContainerFluid(player,
+                        new ItemStack(net.minecraft.world.item.Items.BUCKET), entry.template,
+                        entry.count, false);
+            }
+            return entry.exactIdentity && entry.template.getTag() != null
+                    ? storageEndpoint.extractExact(player, entry.template, entry.count, false)
+                    : storageEndpoint.extractMatching(player, entry.originalIngredient, entry.count, false);
+        }
+        if (entry.source == Source.NETWORK) {
+            INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
+            if (source != null) {
+                CraftStorageEndpoint endpoint = CraftStorageEndpoints.fromLegacyNetwork(source);
+                return entry.exactIdentity && entry.template.getTag() != null
+                        ? endpoint.extractExact(player, entry.template, entry.count, false)
+                        : endpoint.extractMatching(player, entry.originalIngredient, entry.count, false);
+            }
+        }
+        ItemStack stack = extractLegacyOne(entry, player);
+        return StorageOperationResult.extracted(StorageOperationMode.PERFORM, entry.count,
+                stack.isEmpty() ? List.of() : List.of(stack));
+    }
+
+    private ItemStack extractLegacyOne(Entry entry, ServerPlayer player) {
         return switch (entry.source) {
             case ALTAR_BINDING -> {
                 if (entry.preExtracted != null) yield entry.preExtracted.copy();
@@ -1241,35 +1293,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         entry.altarDim, entry.altarPos,
                         entry.originalIngredient, entry.count);
             }
-            case NETWORK -> {
-                INetwork source = entry.sourceNetwork != null ? entry.sourceNetwork : network;
-                if (storageEndpoint != null) {
-                    if (storageSupportsFluidContainers(storageEndpoint)
-                            && (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                            || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
-                        yield storageEndpoint.session().extractContainerFluid(player,
-                                new ItemStack(net.minecraft.world.item.Items.BUCKET), entry.template,
-                                entry.count, false).extractedStacks().stream().findFirst()
-                                .orElse(ItemStack.EMPTY);
-                    }
-                    var result = entry.exactIdentity
-                            && entry.template.getTag() != null
-                            ? storageEndpoint.extractExact(player, entry.template, entry.count, false)
-                            : storageEndpoint.extractMatching(player, entry.originalIngredient, entry.count, false);
-                    ItemStack extracted = ItemStack.EMPTY;
-                    for (ItemStack part : result.extractedStacks()) {
-                        if (extracted.isEmpty()) extracted = part.copy();
-                        else extracted.grow(part.getCount());
-                    }
-                    yield extracted;
-                }
-                if (source == null) yield ItemStack.EMPTY;
-                yield entry.exactIdentity && entry.template.getTag() != null
-                        ? RSIntegrationNetwork.extractExactFromNetwork(
-                                source, entry.template, entry.count, player)
-                        : RSIntegrationNetwork.extractFromNetwork(
-                                source, entry.originalIngredient, entry.count, player);
-            }
+            case NETWORK -> ItemStack.EMPTY;
             case RESONANCE_DISK -> {
                 if (entry.resonanceView == null) yield ItemStack.EMPTY;
                 ItemStack extracted = entry.resonanceView.extractExactView(
@@ -1363,7 +1387,7 @@ public final class ExtractionLedger implements AutoCloseable {
             pending.merge(key, needed, Integer::sum);
             return true;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error scanning exact network stack", e);
+            LOGGER.warn("[RSI-Ledger] Error scanning exact network stack", e);
             return false;
         }
     }
@@ -1394,7 +1418,7 @@ public final class ExtractionLedger implements AutoCloseable {
             return Math.max(0, available - pendingNet.getOrDefault(
                     CraftingResolver.StackKey.of(template, true), 0));
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error counting exact network stack", e);
+            LOGGER.warn("[RSI-Ledger] Error counting exact network stack", e);
             return 0;
         }
     }
@@ -1563,7 +1587,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             return chosen;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Error scanning network storage", e);
+            LOGGER.warn("[RSI-Ledger] Error scanning network storage", e);
         }
         return ItemStack.EMPTY;
     }
@@ -1740,7 +1764,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 return opt.get().getInventoryForUpgradeProcessing();
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Ledger] Backpack inventory lookup failed", e);
+            LOGGER.debug("[RSI-Ledger] Backpack inventory lookup failed", e);
         }
         return null;
     }
@@ -1793,7 +1817,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Curios backpack scan failed", e);
+            LOGGER.warn("[RSI-Ledger] Curios backpack scan failed", e);
         }
     }
 
@@ -1840,7 +1864,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /**
-     * Refund all committed entries by re-inserting their templates back to
+     * Refund all committed entries by re-inserting their actual fragments back to
      * the original source (network, altar binding, or player inventory).
      * Best-effort: individual failures are logged but do not abort the loop.
      */
@@ -1856,18 +1880,30 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void refundEntry(Entry e, @Nullable INetwork network,
                                     @Nullable ServerPlayer player) {
-        ItemStack refund = e.refundableStack();
-        if (refund.isEmpty()) {
-            RSIntegrationMod.LOGGER.error("[RSI-Ledger] Committed entry {} has no recorded extracted fragment", e.id);
+        if (e.extracted.isEmpty()) {
+            LOGGER.error("[RSI-Ledger] Committed entry {} has no recorded extracted fragment", e.id);
             return;
         }
+        List<ItemStack> fragments = e.extracted;
+        e.extracted = List.of();
+        for (ItemStack fragment : fragments) {
+            try {
+                refundFragment(e, fragment.copy(), network, player);
+            } catch (RuntimeException failure) {
+                logUncertainRefund(e.id, fragment, failure.getClass().getSimpleName());
+            }
+        }
+    }
+
+    private void refundFragment(Entry e, ItemStack refund, @Nullable INetwork network,
+                                @Nullable ServerPlayer player) {
         switch (e.source) {
             case NETWORK, ALTAR_BINDING -> {
                 if (storageEndpoint != null && player != null) {
                     var result = storageEndpoint.insert(player, refund, false);
-                    ItemStack leftover = result.remainder().orElse(ItemStack.EMPTY);
+                    ItemStack leftover = refundRemainder(result, e.id, refund);
                     if (!leftover.isEmpty()) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
+                        LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
                                 com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
@@ -1879,7 +1915,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     if (tracker != null && player != null) tracker.changed(player, refund.copy());
                     ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
                     if (!leftover.isEmpty()) {
-                        RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
+                        LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
                                 com.huanghuang.rsintegration.util.ItemStackUtils.registryId(refund), refund.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
@@ -1934,14 +1970,14 @@ public final class ExtractionLedger implements AutoCloseable {
                         pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, leftover.copy());
                 drop.setDeltaMovement(0, 0.2, 0);
                 serverLevel.addFreshEntity(drop);
-                RSIntegrationMod.LOGGER.warn("[RSI-Ledger] Player offline & network full — dropped refund at {} {}: {} x{}",
+                LOGGER.warn("[RSI-Ledger] Player offline & network full — dropped refund at {} {}: {} x{}",
                         level.dimension().location(), pos,
                         com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
                 return;
             }
         }
 
-        RSIntegrationMod.LOGGER.error("[RSI-Ledger] CRITICAL: could not refund/drop item (no network level) — LOST: {} x{}",
+        LOGGER.error("[RSI-Ledger] CRITICAL: could not refund/drop item (no network level) — LOST: {} x{}",
                 com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
     }
 
@@ -1974,6 +2010,18 @@ public final class ExtractionLedger implements AutoCloseable {
         Entry last = entries.remove(entries.size() - 1);
         entriesById.remove(last.id);
         decrementPending(last);
+        cancelSettlementEntry(last);
+    }
+
+    private void cancelSettlementEntry(Entry entry) {
+        StorageSettlementLedger.EntryId id = settlementEntries.remove(entry.id);
+        if (id == null) return;
+        try {
+            settlementLedger.cancelReservation(id);
+        } catch (RuntimeException failure) {
+            resetSettlementMirror();
+            LOGGER.debug("[RSI-Ledger] cancellation mirror reset for entry {}", entry.id, failure);
+        }
     }
 
     /** Undo every uncommitted reservation created after the supplied mark. */
@@ -1996,7 +2044,17 @@ public final class ExtractionLedger implements AutoCloseable {
      */
     public void releaseCommittedEntries(List<ItemStack> stacks) {
         requireState(State.COMMITTED);
-        removeMatchingEntries(stacks, false);
+        List<ItemStack> committed = entries.stream().flatMap(entry -> entry.extracted.stream()).toList();
+        List<ItemStack> reversed = new ArrayList<>(committed);
+        Collections.reverse(reversed);
+        List<ItemStack> released = new ArrayList<>(matchRecoveredRefunds(reversed, stacks));
+        Collections.reverse(released);
+        List<ItemStack> retained = new ArrayList<>(committed.size());
+        for (int i = 0; i < committed.size(); i++) {
+            retained.add(committed.get(i).copyWithCount(
+                    committed.get(i).getCount() - released.get(i).getCount()));
+        }
+        replaceCommittedRefunds(retained);
     }
 
     /**
@@ -2006,18 +2064,23 @@ public final class ExtractionLedger implements AutoCloseable {
     public void retainCommittedRefunds(List<ItemStack> recovered) {
         requireState(State.COMMITTED);
         List<ItemStack> committed = entries.stream()
-                .map(entry -> entry.extracted.copy())
+                .flatMap(entry -> entry.extracted.stream())
                 .toList();
         List<ItemStack> refundable = matchRecoveredRefunds(committed, recovered);
+        replaceCommittedRefunds(refundable);
+    }
+
+    private void replaceCommittedRefunds(List<ItemStack> refundable) {
         List<Entry> removed = new ArrayList<>();
-        for (int i = 0; i < entries.size(); i++) {
-            Entry entry = entries.get(i);
-            int count = refundable.get(i).getCount();
-            if (count <= 0) {
+        int offset = 0;
+        for (Entry entry : entries) {
+            int end = offset + entry.extracted.size();
+            entry.confirmExtracted(refundable.subList(offset, end).stream()
+                    .filter(stack -> !stack.isEmpty()).toList());
+            offset = end;
+            if (entry.extracted.isEmpty()) {
                 removed.add(entry);
-                continue;
             }
-            entry.refundableCount = count;
         }
         entries.removeAll(removed);
         for (Entry entry : removed) {
@@ -2078,6 +2141,7 @@ public final class ExtractionLedger implements AutoCloseable {
             if (idsToRemove.contains(entries.get(i).id)) {
                 Entry removed = entries.remove(i);
                 entriesById.remove(removed.id);
+                if (updatePending) cancelSettlementEntry(removed);
             }
         }
     }

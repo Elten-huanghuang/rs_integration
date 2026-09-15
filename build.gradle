@@ -106,10 +106,11 @@ dependencies {
     // JUnit 5. Tests run against the deobf Minecraft on the compile
     // classpath (ForgeGradle adds it to every source set), so layer-2
     // tests can exercise real ItemStack/NBT after Bootstrap.bootStrap().
-    // Do NOT touch classes that reach RSIntegrationMod — the RS API is
-    // compileOnly and absent at test runtime (NoClassDefFoundError).
+    // Ledger boundary tests also use the same remapped RS API as dev runs.
+    // This does not bootstrap the mod entry point or a running Forge server.
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation fg.deobf("local:refinedstorage:1.12.4")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

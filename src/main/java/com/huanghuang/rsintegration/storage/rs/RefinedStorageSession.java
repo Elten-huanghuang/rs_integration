@@ -28,8 +28,6 @@ final class RefinedStorageSession implements StorageSession {
     private final RefinedStorageDriver driver;
     private final StorageReference reference;
     private final StorageInsertObserver insertObserver;
-    private long snapshotTick = Long.MIN_VALUE;
-    private StorageSnapshotResult snapshotCache;
 
     RefinedStorageSession(RefinedStorageDriver driver, StorageReference reference,
                           StorageInsertObserver insertObserver) {
@@ -48,33 +46,25 @@ final class RefinedStorageSession implements StorageSession {
 
     @Override
     public StorageSnapshotResult snapshotItems(ServerPlayer player) {
+        return snapshotItems(player, null);
+    }
+
+    @Override
+    public StorageSnapshotResult snapshotItems(ServerPlayer player,
+            java.util.Set<net.minecraft.world.item.Item> itemTypes) {
         StorageThreadGuard.requireServerThread(player);
-        long currentTick = player.server.getTickCount();
-        if (snapshotCache != null && snapshotTick == currentTick) return snapshotCache;
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.VIEW);
         if (!permission.allowedAccess()) {
-            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(
-                    toSnapshotStatus(permission), permission.diagnosticCode()));
+            return StorageSnapshotResult.failure(toSnapshotStatus(permission), permission.diagnosticCode());
         }
         try {
-            return cacheSnapshot(currentTick, RefinedStorageSnapshotMapper.map(driver.snapshotItems()));
+            return RefinedStorageSnapshotMapper.map(driver.snapshotItems(itemTypes));
         } catch (RefinedStorageUnavailableException e) {
-            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE));
+            return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
         } catch (RuntimeException | LinkageError e) {
-            return cacheSnapshot(currentTick, StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
-                    StorageDiagnosticCode.BACKEND_EXCEPTION));
+            return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
+                    StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
-    }
-
-    private StorageSnapshotResult cacheSnapshot(long tick, StorageSnapshotResult result) {
-        snapshotTick = tick;
-        snapshotCache = result;
-        return result;
-    }
-
-    private void invalidateSnapshot() {
-        snapshotTick = Long.MIN_VALUE;
-        snapshotCache = null;
     }
 
     @Override
@@ -121,7 +111,6 @@ final class RefinedStorageSession implements StorageSession {
         // snapshot rebuild per committed exact ledger entry.
         StorageOperationResult result = RefinedStorageOperationExecutor.extract(
                 driver, key, template, amount, amount, simulate);
-        if (!simulate) invalidateSnapshot();
         return result;
     }
 
@@ -136,7 +125,15 @@ final class RefinedStorageSession implements StorageSession {
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return failedPermissionExtraction(
                 amount, permission, mode(simulate));
-        StorageSnapshotResult snapshot = snapshotItems(player);
+        StorageSnapshotResult snapshot;
+        try {
+            snapshot = snapshotItems(player, com.huanghuang.rsintegration.crafting.IngredientMatcher
+                    .itemTypesForMatching(ingredient));
+        } catch (RuntimeException | LinkageError failure) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.FAILED, List.of(), List.of(),
+                    StorageDiagnosticCode.INGREDIENT_MATCH_FAILED);
+        }
         if (!snapshot.successful()) return StorageOperationResult.failedExtraction(
                 mode(simulate), amount, toOperationStatus(snapshot.status()), List.of(), List.of(),
                 snapshot.diagnosticCode());
@@ -172,7 +169,6 @@ final class RefinedStorageSession implements StorageSession {
             remaining -= result.transferredAmount().orElseThrow();
         }
         StorageOperationResult result = StorageOperationResult.extracted(mode(simulate), amount, extracted);
-        if (!simulate) invalidateSnapshot();
         return result;
     }
 
@@ -192,7 +188,6 @@ final class RefinedStorageSession implements StorageSession {
         StorageOperationResult result = RefinedStorageOperationExecutor.insert(driver, input, simulate,
                 accepted -> driver.recordInsertion(player, accepted),
                 accepted -> insertObserver.beforePerform(player, reference, accepted));
-        if (!simulate) invalidateSnapshot();
         return result;
     }
 

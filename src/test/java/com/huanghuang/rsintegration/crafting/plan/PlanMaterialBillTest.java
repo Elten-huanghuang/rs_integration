@@ -25,6 +25,66 @@ class PlanMaterialBillTest extends BootstrapTest {
             new ResourceLocation("test", "target");
 
     @Test
+    void allRawMaterialsAvailableMakesZeroStockIntermediateReadyWithoutWarnings() {
+        var result = intermediatePlan(2, 0, false);
+        assertTrue(result.feasible());
+        var intermediate = result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(new PlanResponse.Availability(2, 0, 0), intermediate);
+        var plan = new PlanResponse(true, "", new ItemStack(Items.DIAMOND), List.of(),
+                result.materials(), List.of(), TARGET_RECIPE.toString());
+        assertTrue(MissingMaterialBookmarkList.textEntries(plan).isEmpty());
+        assertTrue(MissingMaterialBookmarkList.from(plan).isEmpty());
+    }
+
+    @Test
+    void partiallyProducedIntermediateStillReportsItsExternalShortfall() {
+        var result = intermediatePlan(2, 1, false);
+        assertFalse(result.feasible());
+        assertEquals(1, result.materials().get(
+                IngredientKey.of(new ItemStack(Items.IRON_INGOT))).missingCount());
+    }
+
+    @Test
+    void producerWithSameItemDoesNotSuppressExplicitResolverFailure() {
+        assertFalse(intermediatePlan(2, 0, true).feasible());
+    }
+
+    private static PlanMaterialBill.Result intermediatePlan(int oreAvailable, int ingotNet,
+                                                            boolean resolverMissing) {
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        var producer = new PlanStep(new ResourceLocation("test", "iron"),
+                new ItemStack(Items.IRON_INGOT), 2, List.of(new ItemStack(Items.IRON_ORE)));
+        var terminal = new PlanStep(TARGET_RECIPE, target, 1, List.of(new ItemStack(Items.IRON_INGOT, 2)));
+        return PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, ingotNet, Items.IRON_ORE, 2),
+                Map.of(Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT),
+                        Items.IRON_ORE, Ingredient.of(Items.IRON_ORE)),
+                Map.of(Items.IRON_ORE, oreAvailable),
+                Map.of(new StackKey(Items.IRON_ORE, null), oreAvailable),
+                target, List.of(producer, terminal), 1, null, resolverMissing);
+    }
+
+    @Test
+    void producedIntermediateHasNoExternalShortageAndRawShortageIsRetained() {
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        PlanStep producer = new PlanStep(new ResourceLocation("test", "iron"),
+                new ItemStack(Items.IRON_INGOT), 2, List.of(new ItemStack(Items.IRON_ORE)));
+        PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1,
+                List.of(new ItemStack(Items.IRON_INGOT, 2)));
+        var result = PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, 0, Items.IRON_ORE, 2),
+                Map.of(Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT),
+                        Items.IRON_ORE, Ingredient.of(Items.IRON_ORE)),
+                Map.of(Items.IRON_ORE, 1), Map.of(new StackKey(Items.IRON_ORE, null), 1),
+                target, List.of(producer, terminal), 1, null, false);
+        assertFalse(result.feasible());
+        assertEquals(0, result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT))).missingCount());
+        assertEquals(1, result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_ORE))).missingCount());
+        PlanResponse plan = new PlanResponse(false, "", target, List.of(producer, terminal),
+                result.materials(), List.of(), TARGET_RECIPE.toString());
+        assertEquals(List.of(Items.IRON_ORE), MissingMaterialBookmarkList.from(plan).stream()
+                .map(ItemStack::getItem).toList());
+    }
+
+    @Test
     void keepsNetFeasibilitySeparateFromGrossTreeDemand() {
         ItemStack target = new ItemStack(Items.DIAMOND);
         PlanStep targetStep = new PlanStep(TARGET_RECIPE, target, 2,
@@ -38,7 +98,7 @@ class PlanMaterialBillTest extends BootstrapTest {
                 target, List.of(targetStep), 2, null, false);
 
         assertTrue(result.feasible(), "one net ingot is available for execution");
-        assertEquals(new PlanResponse.Availability(2, 1),
+        assertEquals(new PlanResponse.Availability(2, 1, 0),
                 result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT))));
     }
 

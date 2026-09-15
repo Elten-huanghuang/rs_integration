@@ -54,6 +54,13 @@ public final class CraftPacketUtils {
 
     private CraftPacketUtils() {}
 
+    /** Keep the item-name component unresolved until it reaches the player's client. */
+    public static Component craftCompletedMessage(@Nullable ItemStack output, int executions) {
+        Component name = output == null || output.isEmpty()
+                ? Component.translatable("rsi.plan.unknown_item") : output.getHoverName().copy();
+        return Component.translatable("rsi.generic.craft_completed", name, Math.max(1, executions));
+    }
+
     /** Public bridge to {@link StepExecutor#mulCount} for callers outside this package. */
     public static int mulCount(int count, int factor) {
         return StepExecutor.mulCount(count, factor);

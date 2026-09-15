@@ -122,6 +122,7 @@ public final class PlanResponsePacket {
             e.getKey().write(buf);
             buf.writeVarInt(e.getValue().needed());
             buf.writeVarInt(e.getValue().available());
+            buf.writeVarInt(e.getValue().missingCount());
         }
         // Missing
         buf.writeVarInt(plan.missing().size());
@@ -275,7 +276,8 @@ public final class PlanResponsePacket {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
-            materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt()));
+            materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt(),
+                    readNonNegativeVarInt(buf, "material shortage")));
         }
         // Missing
         int missCount = readBoundedCount(buf);

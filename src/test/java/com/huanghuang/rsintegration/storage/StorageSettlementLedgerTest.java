@@ -17,6 +17,54 @@ class StorageSettlementLedgerTest extends BootstrapTest {
     private static final StorageBackendId BACKEND = new StorageBackendId("test");
 
     @Test
+    void cancellingMiddleAndLastReservationsPreservesOtherTokens() {
+        var ledger = new StorageSettlementLedger();
+        var first = ledger.reserve(source(), key(Items.DIAMOND), 1);
+        var token = ledger.tokenSince(0);
+        var middle = ledger.reserve(source(), key(Items.GOLD_INGOT), 1);
+        var last = ledger.reserve(source(), key(Items.APPLE), 1);
+        ledger.cancelReservation(middle);
+        ledger.cancelReservation(last);
+        assertEquals(1, ledger.size());
+        assertTrue(ledger.entry(middle).isEmpty());
+        assertTrue(ledger.entry(last).isEmpty());
+        ledger.beginCommit();
+        ledger.recordExtraction(first, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
+                1, List.of(new ItemStack(Items.DIAMOND))));
+        assertEquals(StorageSettlementLedger.State.COMMITTED, ledger.finishCommit());
+        ledger.settle(token);
+        assertEquals(StorageSettlementLedger.State.SETTLED, ledger.state());
+    }
+
+    @Test
+    void cancellationRejectsStaleAndForeignIdsWithoutChangingLiveReservations() {
+        var ledger = new StorageSettlementLedger();
+        var stale = ledger.reserve(source(), key(Items.DIAMOND), 1);
+        ledger.cancelReservation(stale);
+        var live = ledger.reserve(source(), key(Items.APPLE), 1);
+        var foreign = new StorageSettlementLedger().reserve(source(), key(Items.APPLE), 1);
+        assertThrows(IllegalArgumentException.class, () -> ledger.cancelReservation(stale));
+        assertThrows(IllegalArgumentException.class, () -> ledger.cancelReservation(foreign));
+        assertEquals(1, ledger.size());
+        assertTrue(ledger.entry(live).isPresent());
+    }
+
+    @Test
+    void cancellationCannotRemoveCommittingOrCommittedAssets() {
+        var ledger = new StorageSettlementLedger();
+        var entry = ledger.reserve(source(), key(Items.DIAMOND), 1);
+        ledger.beginCommit();
+        assertThrows(IllegalStateException.class, () -> ledger.cancelReservation(entry));
+        ledger.recordExtraction(entry, StorageOperationResult.extracted(StorageOperationMode.PERFORM,
+                1, List.of(new ItemStack(Items.DIAMOND))));
+        ledger.finishCommit();
+        assertThrows(IllegalStateException.class, () -> ledger.cancelReservation(entry));
+        assertEquals(1, ledger.size());
+        ledger.beginRecovery();
+        assertEquals(1, ledger.recoveryAssets(entry).get(0).stack().getCount());
+    }
+
+    @Test
     void committedGroupsCanSettleIndependently() {
         StorageSettlementLedger ledger = new StorageSettlementLedger();
         int firstMark = ledger.reservationMark();
