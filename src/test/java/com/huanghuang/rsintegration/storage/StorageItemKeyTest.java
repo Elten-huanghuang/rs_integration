@@ -41,6 +41,35 @@ class StorageItemKeyTest extends BootstrapTest {
     }
 
     @Test
+    void cachedHashAndTypeRemainStableWhenInputsAndReturnedCopiesChange() {
+        StorageBackendId backend = new StorageBackendId("test");
+        CompoundTag payload = new CompoundTag();
+        payload.putString("value", "original");
+        byte[] identity = new byte[] {1, 2, 3};
+        ItemStack display = new ItemStack(Items.DIAMOND);
+        StorageItemKey key = StorageItemKey.withCanonicalIdentity(backend, payload, identity, display);
+        int expected = 31 * (31 * backend.hashCode() + key.itemType().hashCode())
+                + java.util.Arrays.hashCode(identity);
+        var lookup = java.util.Map.of(key, 42);
+        identity[0] = 9;
+        payload.putString("value", "changed");
+        display.setCount(0);
+        key.canonicalIdentity()[0] = 8;
+        key.backendPayload().putString("value", "changed again");
+        key.displayStack().setCount(0);
+        assertEquals(expected, key.hashCode());
+        assertEquals(Items.DIAMOND, key.displayItem());
+        assertEquals(42, lookup.get(key));
+        CompoundTag alternatePayload = new CompoundTag();
+        alternatePayload.putString("native", "different payload, same identity");
+        StorageItemKey equal = StorageItemKey.withCanonicalIdentity(backend, alternatePayload,
+                new byte[] {1, 2, 3}, new ItemStack(Items.DIAMOND));
+        assertEquals(key, equal);
+        assertEquals(key.hashCode(), equal.hashCode());
+        assertEquals(42, lookup.get(equal));
+    }
+
+    @Test
     void backendCanonicalIdentityOverridesPayloadEquality() {
         CompoundTag firstPayload = new CompoundTag();
         firstPayload.putString("native", "first");

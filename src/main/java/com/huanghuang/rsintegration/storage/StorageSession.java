@@ -32,6 +32,12 @@ public interface StorageSession {
 
     StorageSnapshotResult snapshotItems(ServerPlayer player);
 
+    /** Fresh candidates including all NBT variants; null requests all item types. */
+    default StorageSnapshotResult snapshotItems(ServerPlayer player,
+                                                Set<net.minecraft.world.item.Item> itemTypes) {
+        return snapshotItems(player);
+    }
+
     StoragePermissionResult checkPermission(ServerPlayer player, StoragePermission permission);
 
     default boolean hasPermission(ServerPlayer player, StoragePermission permission) {

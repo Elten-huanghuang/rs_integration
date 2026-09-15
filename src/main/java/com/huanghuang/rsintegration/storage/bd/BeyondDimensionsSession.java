@@ -5,6 +5,7 @@ import com.google.common.cache.CacheBuilder;
 import com.huanghuang.rsintegration.storage.*;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluids;
@@ -53,13 +54,17 @@ final class BeyondDimensionsSession implements StorageSession {
     }
 
     @Override public StorageSnapshotResult snapshotItems(ServerPlayer player) {
+        return snapshotItems(player, null);
+    }
+
+    @Override public StorageSnapshotResult snapshotItems(ServerPlayer player, Set<Item> itemTypes) {
         StorageThreadGuard.requireServerThread(player);
         StoragePermissionResult permission = checkPermission(player, StoragePermission.VIEW);
         if (!permission.allowedAccess()) return snapshotFailure(permission);
         try {
             Object nativeStorage = storage();
             Object list = nativeStorage.getClass().getMethod("getStorage").invoke(nativeStorage);
-            return StorageSnapshotResult.success(readItemSnapshot(reference.backendId(), list,
+            return StorageSnapshotResult.success(readItemSnapshot(reference.backendId(), list, itemTypes,
                     (stack, failure) -> warnSkippedItem(player, stack, failure)));
         } catch (Exception | LinkageError e) {
             com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
@@ -72,6 +77,12 @@ final class BeyondDimensionsSession implements StorageSession {
 
     static StorageSnapshot readItemSnapshot(StorageBackendId backendId, Object nativeEntries,
                                            BiConsumer<ItemStack, IllegalArgumentException> skipped) throws Exception {
+        return readItemSnapshot(backendId, nativeEntries, null, skipped);
+    }
+
+    static StorageSnapshot readItemSnapshot(StorageBackendId backendId, Object nativeEntries,
+                                           Set<Item> itemTypes,
+                                           BiConsumer<ItemStack, IllegalArgumentException> skipped) throws Exception {
         if (!(nativeEntries instanceof Iterable<?> values)) {
             throw new IllegalArgumentException("BD storage did not return iterable entries");
         }
@@ -79,7 +90,7 @@ final class BeyondDimensionsSession implements StorageSession {
         for (Object value : values) {
             Object key = BeyondDimensionsReflection.key(value);
             if (!BeyondDimensionsReflection.isItemKey(key)) continue;
-            ItemStack stack = BeyondDimensionsReflection.keyStack(key);
+            ItemStack stack = BeyondDimensionsReflection.keyStack(key, itemTypes);
             long amount = BeyondDimensionsReflection.amount(value);
             if (stack.isEmpty() || amount <= 0) continue;
             StorageItemKey itemKey;
@@ -213,7 +224,14 @@ final class BeyondDimensionsSession implements StorageSession {
                                                           long amount, boolean simulate) {
         if (amount < 0) throw new IllegalArgumentException("amount must not be negative");
         if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
-        StorageSnapshotResult snapshot = snapshotForExtraction(player);
+        StorageSnapshotResult snapshot;
+        try {
+            snapshot = snapshotForExtraction(player, extractionItemTypes(ingredient));
+        } catch (RuntimeException | LinkageError failure) {
+            return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                    StorageOperationStatus.FAILED, List.of(), List.of(),
+                    StorageDiagnosticCode.INGREDIENT_MATCH_FAILED);
+        }
         if (!snapshot.successful()) return StorageOperationResult.failedExtraction(mode(simulate), amount,
                 snapshot.status() == StorageSnapshotStatus.DENIED ? StorageOperationStatus.DENIED
                         : snapshot.status() == StorageSnapshotStatus.UNAVAILABLE ? StorageOperationStatus.UNAVAILABLE
@@ -250,16 +268,20 @@ final class BeyondDimensionsSession implements StorageSession {
         return StorageOperationResult.extracted(mode(simulate), amount, result);
     }
 
-    private StorageSnapshotResult snapshotForExtraction(ServerPlayer player) {
+    static Set<Item> extractionItemTypes(Ingredient ingredient) {
+        return com.huanghuang.rsintegration.crafting.IngredientMatcher.itemTypesForMatching(ingredient);
+    }
+
+    private StorageSnapshotResult snapshotForExtraction(ServerPlayer player, Set<Item> itemTypes) {
         ExtractionSnapshotScope scope = extractionSnapshotScope;
-        if (scope == null || scope.player != player) return snapshotItems(player);
-        if (scope.snapshot == null) scope.snapshot = snapshotItems(player);
+        if (scope == null || scope.player != player) return snapshotItems(player, itemTypes);
+        if (scope.snapshot == null) scope.snapshot = snapshotItems(player, itemTypes);
         return scope.snapshot;
     }
 
     private <T> T withExtractionSnapshotScope(ServerPlayer player, Supplier<T> action) {
         ExtractionSnapshotScope previous = extractionSnapshotScope;
-        if (previous != null && previous.player == player) return action.get();
+        // Nested matching may require item types absent from the outer snapshot.
         ExtractionSnapshotScope scope = new ExtractionSnapshotScope(player);
         extractionSnapshotScope = scope;
         try {
@@ -374,7 +396,8 @@ final class BeyondDimensionsSession implements StorageSession {
         java.lang.reflect.Method extract;
         try {
             nativeStorage = storage();
-            StorageItemKey storedKey = snapshotForExtraction(player).snapshot()
+            StorageItemKey storedKey = snapshotForExtraction(player,
+                    Set.of(BuiltInRegistries.ITEM.get(key.itemType()))).snapshot()
                     .map(snapshot -> storedPayloadKey(snapshot, key))
                     .orElse(key);
             nativeKey = BeyondDimensionsReflection.itemKey(ItemStack.of(storedKey.backendPayload()));

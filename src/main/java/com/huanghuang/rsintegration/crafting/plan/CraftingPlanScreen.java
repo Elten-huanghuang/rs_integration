@@ -69,6 +69,11 @@ public final class CraftingPlanScreen extends Screen {
     private static final int STEPS_TOP_MIN = 40;
     /** Material grid caps at this many visible rows; extras scroll (§ material overflow fix). */
     private static final int MATERIAL_MAX_ROWS = 3;
+    /**
+     * In tree view the missing-material panel is a secondary diagnostic.  Keep it bounded so a
+     * large shortage list cannot consume the whole tree viewport (or draw past its background).
+     */
+    private static final int TREE_MISSING_MAX_HEIGHT = 96;
     private int stepsTop = STEPS_TOP_MIN; // dynamic — grows when title wraps
     private static final int INDENT = 28;
     private static final int CONNECTOR_GAP = 18;
@@ -101,6 +106,9 @@ public final class CraftingPlanScreen extends Screen {
     private boolean dragging;
     private int missingAreaTop;
     private int missingAreaHeight;
+    private int missingMaxScroll;
+    private int missingScroll;
+    private final ScrollbarUI missingBar = new ScrollbarUI();
     private int machineSelectorY;
     private int machineModeX, machineModeY, machineModeW, machineModeH;
     private int machineCandidateX, machineCandidateY, machineCandidateW, machineCandidateH;
@@ -498,9 +506,17 @@ public final class CraftingPlanScreen extends Screen {
                 lines += modWarnCount;
             }
             int warningHeight = lines > 0 ? font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4 : 0;
-            missingAreaHeight = warningHeight + (hasMachineCandidates ? 34 : 0);
+            int fullMissingHeight = warningHeight + (hasMachineCandidates ? 34 : 0);
+                    missingAreaHeight = viewMode == ViewMode.TREE
+                    ? Math.min(fullMissingHeight, TREE_MISSING_MAX_HEIGHT)
+                            : fullMissingHeight;
+                    missingMaxScroll = viewMode == ViewMode.TREE
+                            ? Math. max(0, fullMissingHeight - missingAreaHeight) : 0;
+                    missingScroll = Math.min(missingScroll, missingMaxScroll);
         } else {
             missingAreaHeight = 0;
+            missingMaxScroll = 0;
+            missingScroll = 0;
         }
 
         // Compute material grid layout
@@ -2717,6 +2733,12 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (viewMode == ViewMode.TREE && missingMaxScroll > 0
+                && mouseY >= missingAreaTop && mouseY < missingAreaTop + missingAreaHeight) {
+            missingScroll = Math.max(0, Math.min(missingMaxScroll,
+                    missingScroll - (int) delta * 10));
+            return true;
+        }
         if (materialDropdownNode != null) {
             int total = filteredMaterialOptions(materialDropdownNode).size();
             int maxVisible = Math.max(1, materialDropHits.size() - 1);
@@ -2767,6 +2789,7 @@ public final class CraftingPlanScreen extends Screen {
             int s = draggingBar.scrollForThumbTop((int) my - scrollbarGrabDy);
             if (draggingBar == cardBar) scrollOffset = s;
             else if (draggingBar == materialBar) materialScroll = s;
+            else if (draggingBar == missingBar) missingScroll = s;
             return true;
         }
         if (viewMode == ViewMode.TREE && (button == 1 || button == 2)) {
@@ -2918,7 +2941,7 @@ public final class CraftingPlanScreen extends Screen {
             return true;
         }        // Scrollbar thumbs first (both view modes) — grab the thumb, or click the track to jump.
         if (button == 0) {
-            for (ScrollbarUI bar : new ScrollbarUI[]{cardBar, materialBar}) {
+            for (ScrollbarUI bar : new ScrollbarUI[]{cardBar, materialBar, missingBar}) {
                 if (bar.overThumb(mx, my)) {
                     draggingBar = bar;
                     scrollbarGrabDy = (int) my - bar.thumbY;
@@ -2928,7 +2951,7 @@ public final class CraftingPlanScreen extends Screen {
                     draggingBar = bar;
                     scrollbarGrabDy = bar.thumbH / 2; // center the thumb under the cursor
                     int s = bar.scrollForThumbTop((int) my - scrollbarGrabDy);
-                    if (bar == cardBar) scrollOffset = s; else materialScroll = s;
+                    if (bar == cardBar) scrollOffset = s; else if (bar == materialBar) materialScroll = s; else missingScroll = s;
                     return true;
                 }
             }
@@ -3289,6 +3312,12 @@ public final class CraftingPlanScreen extends Screen {
         lines.add(Component.literal(
                 Component.translatable("rsi.plan.tooltip.available").getString()
                 + ": " + availStr).withStyle(style -> style.withColor(statusColor)));
+
+        PlanResponse.Availability availability = plan.availability(hoveredItemForTooltip);
+        if (availability != null && !availability.isEnough() && availability.missingCount() == 0) {
+            lines.add(Component.translatable("rsi.plan.tooltip.planned")
+                    .withStyle(ChatFormatting.GOLD));
+        }
 
         // This single call triggers Forge's RenderTooltipEvent — Legendary
         // Tooltips intercepts it to draw its polished gradient-bordered cards

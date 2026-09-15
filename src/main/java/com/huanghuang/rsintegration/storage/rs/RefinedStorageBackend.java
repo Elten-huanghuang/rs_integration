@@ -77,8 +77,13 @@ public final class RefinedStorageBackend implements StorageBackend {
     }
 
     private StorageResolutionResult createSession(INetwork network) {
+        return StorageResolutionResult.resolved(openSession(network));
+    }
+
+    /** Adapts an already resolved native handle without another coordinate lookup. */
+    public com.huanghuang.rsintegration.storage.StorageSession openSession(INetwork network) {
         StorageReference reference = RefinedStorageReference.fromNetwork(network);
-        return StorageResolutionResult.resolved(new RefinedStorageSession(
-                new NativeRefinedStorageDriver(network), reference, insertObserver));
+        return new RefinedStorageSession(
+                new NativeRefinedStorageDriver(network), reference, insertObserver);
     }
 }

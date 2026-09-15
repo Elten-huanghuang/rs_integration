@@ -29,6 +29,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GenericCraftPacketFailureReasonTest extends BootstrapTest {
     @Test
+    void plannedNbtIntermediateDoesNotBecomeNbtMismatch() {
+        ItemStack intermediate = new ItemStack(Items.POTION);
+        intermediate.getOrCreateTag().putString("Potion", "minecraft:water");
+        assertFalse(GenericCraftPacket.hasNbtMismatch(Map.of(IngredientKey.of(intermediate),
+                new PlanResponse.Availability(3, 0, 0)), Map.of(Items.POTION, 3)));
+    }
+
+    @Test
     void identifiesExactNbtShortageWhenEnoughSameItemExists() {
         ItemStack expected = new ItemStack(Items.POTION);
         expected.getOrCreateTag().putString("Potion", "minecraft:water");

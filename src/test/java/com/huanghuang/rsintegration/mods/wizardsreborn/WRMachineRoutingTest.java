@@ -60,6 +60,15 @@ class WRMachineRoutingTest {
     }
 
     @Test
+    void crystalInfusionDatapackIdUsesCrystalBlock() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "wizards_reborn", "crystal_infusion/apotheosis_ancient_material");
+
+        assertEquals(WRBatchDelegate.MachineType.CRYSTAL_RITUAL,
+                WRBatchDelegate.expectedMachineType(recipeId, UnknownRecipe.class));
+    }
+
+    @Test
     void arcaneWorkbenchDatapackIdsAreRecognizedWithoutNativeRecipeClass() {
         assertTrue(WRRecipeHandler.isArcaneWorkbenchRecipeId(
                 new ResourceLocation("wizards_reborn", "arcane_workbench/avaritia_infinity_sword")));

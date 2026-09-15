@@ -133,6 +133,13 @@ public final class PlanMaterialBill {
                     new PlanResponse.Availability(left.needed() + right.needed(),
                             Math.max(left.available(), right.available())));
         }
+        // Keep gross demand for tree nodes without treating planned production
+        // as missing stock. Only the net bill describes external shortages.
+        displayMaterials.replaceAll((key, gross) -> {
+            PlanResponse.Availability net = netMaterials.get(key);
+            return new PlanResponse.Availability(gross.needed(), gross.available(),
+                    net == null ? 0 : net.missingCount());
+        });
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : netMaterials.entrySet()) {
             displayMaterials.putIfAbsent(entry.getKey(), entry.getValue());
         }

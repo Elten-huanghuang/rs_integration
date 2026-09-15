@@ -2,7 +2,14 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeSerializer;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -176,6 +183,26 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void wizardCrystalInfusionUsesCrystalRitualBinding() {
+        registerLeafType(ModIds.WIZARDS_REBORN);
+        ModType wr = ModType.byId(ModIds.WIZARDS_REBORN);
+        ResourceLocation recipeId = new ResourceLocation(
+                "wizards_reborn", "crystal_infusion/apotheosis_ancient_material");
+        ModType.configureJei(ModIds.WIZARDS_REBORN, null,
+                new String[][]{{CrystalInfusionRecipe.class.getName(), "crystal_ritual"}}, null);
+
+        assertEquals("crystal_ritual", AltarBindingRegistry.normalizeSubType(
+                AltarBindingRegistry.recipeSubTypeHint(recipeId), wr));
+        String resolved = AltarBindingRegistry.recipeMachineSubType(
+                new CrystalInfusionRecipe(recipeId), wr);
+        assertEquals("crystal_ritual", resolved);
+        assertEquals("crystal_ritual", AltarBindingRegistry.bindingSubTypeFilter(
+                resolved, wr, true));
+        assertEquals("arcane_iterator", AltarBindingRegistry.bindingSubTypeFilter(
+                "crystal_ritual", wr, false));
+    }
+
+    @Test
     void campfireRecipeFolderDoesNotRejectFarmersDelightSkilletBinding() {
         ResourceLocation recipeId = new ResourceLocation(
                 "alexsmobsdelight", "campfire_cooking/cooked_moose_rib_piece");
@@ -237,5 +264,21 @@ class AltarBindingRegistryTest {
         if (ModType.byId(id) == ModType.GENERIC) {
             ModType.register(id, new String[0], new String[]{id}, new String[]{id}, () -> null);
         }
+    }
+
+    private static final class CrystalInfusionRecipe implements Recipe<Container> {
+        private final ResourceLocation id;
+
+        private CrystalInfusionRecipe(ResourceLocation id) {
+            this.id = id;
+        }
+
+        @Override public boolean matches(Container container, Level level) { return false; }
+        @Override public ItemStack assemble(Container container, RegistryAccess access) { return ItemStack.EMPTY; }
+        @Override public boolean canCraftInDimensions(int width, int height) { return false; }
+        @Override public ItemStack getResultItem(RegistryAccess access) { return ItemStack.EMPTY; }
+        @Override public ResourceLocation getId() { return id; }
+        @Override public RecipeSerializer<?> getSerializer() { return RecipeSerializer.SHAPELESS_RECIPE; }
+        @Override public RecipeType<?> getType() { return RecipeType.CRAFTING; }
     }
 }

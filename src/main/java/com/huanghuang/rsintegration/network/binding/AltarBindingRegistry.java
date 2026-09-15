@@ -591,7 +591,7 @@ public final class AltarBindingRegistry {
                 .getRecipeManager().byKey(recipeId).orElse(null);
         String subType = recipe != null
                 ? recipeMachineSubType(recipe, type)
-                : normalizeSubType(recipeSubTypeHint(recipeId), type);
+                : recipeSubTypeHint(recipeId);
         return getBoundMachinesForType(player, type, subType, recipeId, recipe);
     }
 
@@ -663,9 +663,10 @@ public final class AltarBindingRegistry {
                                                 @Nullable net.minecraft.world.item.crafting.Recipe<?> recipe,
                                                 ServerPlayer player,
                                                 List<BoundMachine> out) {
-        // Callers normally pass a canonical hint. Keep this normalization for
-        // public callers that still provide a recipe-ID folder directly.
-        String normalized = normalizeSubType(subTypeHint, type);
+        // A resolved recipe supplies the canonical class/ID mapping from
+        // recipeMachineSubType(). Public callers without a recipe still pass a
+        // raw recipe-folder hint and need the legacy one-time normalization.
+        String normalized = bindingSubTypeFilter(subTypeHint, type, recipe != null);
 
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
@@ -702,6 +703,11 @@ public final class AltarBindingRegistry {
                 out.add(new BoundMachine(entry.dim(), entry.pos(), executionType, entry.blockKey()));
             }
         }
+    }
+
+    static String bindingSubTypeFilter(String hint, ModType type,
+                                       boolean recipeSubtypeAlreadyResolved) {
+        return recipeSubtypeAlreadyResolved ? hint : normalizeSubType(hint, type);
     }
 
     /**
@@ -790,7 +796,9 @@ public final class AltarBindingRegistry {
         if (recipe == null) return null;
         String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
         if (classHint != null && !classHint.equals(type.id())) {
-            return normalizeSubType(classHint, type);
+            // Class mappings already contain the canonical binding filter. A
+            // second normalization misroutes WR crystal infusion to the iterator.
+            return classHint;
         }
         return normalizeSubType(recipeSubTypeHint(recipe.getId()), type);
     }

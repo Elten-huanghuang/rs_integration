@@ -212,6 +212,15 @@ public final class StorageSettlementLedger {
         }
     }
 
+    public void cancelReservation(EntryId id) {
+        requireState(State.OPEN);
+        Entry entry = requireEntry(id);
+        int last = entries.size() - 1;
+        if (entries.get(last) == entry) entries.remove(last);
+        else entries.remove(entry);
+        entriesById.remove(id);
+    }
+
     public void beginCommit() {
         requireState(State.OPEN);
         state = State.COMMITTING;

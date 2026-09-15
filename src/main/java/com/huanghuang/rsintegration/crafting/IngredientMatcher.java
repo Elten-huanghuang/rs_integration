@@ -15,6 +15,9 @@ import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 /** Shared ingredient matching for stateful items whose semantic state may use
  * different numeric NBT tag types across CraftTweaker and the owning mod. */
@@ -30,6 +33,31 @@ public final class IngredientMatcher {
         Class<?> type = ingredient.getClass();
         return type == Ingredient.class || type == StrictNBTIngredient.class
                 || type == net.minecraftforge.common.crafting.PartialNBTIngredient.class;
+    }
+
+    /** Null means the predicate may match outside its display items; never filter those ingredients. */
+    public static Set<Item> itemTypesForMatching(Ingredient ingredient) {
+        if (!hasCompleteItemList(ingredient)) return null;
+        Set<Item> types = new HashSet<>();
+        for (ItemStack template : ingredient.getItems()) {
+            if (!template.isEmpty()) types.add(template.getItem());
+        }
+        return Set.copyOf(types);
+    }
+
+    /** A single unknown predicate requires the complete inventory candidate set. */
+    public static Set<Item> itemTypesForAll(Iterable<Ingredient> ingredients) {
+        Set<Item> types = new HashSet<>();
+        try {
+            for (Ingredient ingredient : ingredients) {
+                Set<Item> candidates = itemTypesForMatching(ingredient);
+                if (candidates == null) return null;
+                types.addAll(candidates);
+            }
+        } catch (RuntimeException | LinkageError failure) {
+            return null;
+        }
+        return Set.copyOf(types);
     }
 
     /**

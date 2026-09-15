@@ -4542,9 +4542,10 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
         if (online != null) {
-            online.sendSystemMessage(Component.translatable(
-                    "rsi.generic.craft_completed", steps.isEmpty() ? "" : steps.get(steps.size() - 1).recipeId().toString(),
-                    Math.max(1, steps.size())));
+            ItemStack completedOutput = targetOutput != null ? targetOutput
+                    : steps.isEmpty() ? ItemStack.EMPTY : displayOutput(steps.get(steps.size() - 1));
+            online.sendSystemMessage(CraftPacketUtils.craftCompletedMessage(
+                    completedOutput, totalExecutionsForNotification()));
         }
         sendTerminalProgress(online);
         fireOnDone();

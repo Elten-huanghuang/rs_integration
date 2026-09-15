@@ -1914,8 +1914,14 @@ public final class GenericCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", failMsg));
             return false;
         }
-        player.sendSystemMessage(Component.translatable(
-                "rsi.generic.craft_completed", recipeId.toString(), totalExecutions(steps)));
+        Recipe<?> completedRecipe = resolveRecipe(player.serverLevel(), recipeId);
+        ItemStack completedOutput = completedRecipe == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(completedRecipe, player.serverLevel().registryAccess());
+        if (!steps.isEmpty()) {
+            ItemStack synthetic = steps.get(steps.size() - 1).syntheticOutput();
+            if (synthetic != null && !synthetic.isEmpty()) completedOutput = synthetic;
+        }
+        player.sendSystemMessage(CraftPacketUtils.craftCompletedMessage(completedOutput, totalExecutions(steps)));
         return true;
     }
 
@@ -5022,7 +5028,7 @@ public final class GenericCraftPacket {
         if (missingExecutionBinding) feasible = false;
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            long shortageCount = materials.values().stream().filter(a -> !a.isEnough()).count();
+            long shortageCount = materials.values().stream().filter(a -> a.missingCount() > 0).count();
             RSIntegrationMod.debug("[RSI-Generic] Plan for {}: {} steps, feasible={}, resolver={}, missing={}, shortages={}",
                     recipeId, steps.size(), feasible, usedTypedResolver ? "typed" : "fallback",
                     missing.size(), shortageCount);
@@ -5061,7 +5067,8 @@ public final class GenericCraftPacket {
                                 materials.merge(key,
                                         new PlanResponse.Availability(1, itemAvailable.getOrDefault(key.item(), 0)),
                                         (old, neu) -> new PlanResponse.Availability(
-                                                old.needed(), Math.max(old.available(), neu.available())));
+                                                old.needed(), Math.max(old.available(), neu.available()),
+                                                Math.max(old.missingCount(), neu.missingCount())));
                             }
                         }
                     }
@@ -5071,7 +5078,7 @@ public final class GenericCraftPacket {
             }
             // Reassess feasibility after injecting catalyst items — the player
             // may be missing aspectus items that are required for execution.
-            feasible = feasible && materials.values().stream().allMatch(PlanResponse.Availability::isEnough);
+            feasible = feasible && materials.values().stream().allMatch(a -> a.missingCount() == 0);
         }
 
         boolean executionMachineSupportsGui = false;
@@ -5124,7 +5131,7 @@ public final class GenericCraftPacket {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.nbt_mismatch"));
             } else if (!dedupedMissing.isEmpty() || materials.values().stream()
-                    .anyMatch(a -> !a.isEnough())) {
+                    .anyMatch(a -> a.missingCount() > 0)) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.missing_materials"));
             } else if (missingExecutionBinding || (recipeModType != null
@@ -5309,8 +5316,9 @@ public final class GenericCraftPacket {
                                   Map<Item, Integer> itemAvailable) {
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
             PlanResponse.Availability availability = entry.getValue();
-            if (availability.isEnough() || !entry.getKey().stack(1).hasTag()) continue;
-            if (itemAvailable.getOrDefault(entry.getKey().item(), 0) >= availability.needed()) {
+            if (availability.missingCount() == 0 || !entry.getKey().stack(1).hasTag()) continue;
+            if ((long) itemAvailable.getOrDefault(entry.getKey().item(), 0)
+                    >= (long) availability.available() + availability.missingCount()) {
                 return true;
             }
         }

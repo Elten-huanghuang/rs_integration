@@ -53,14 +53,27 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
 
     @Override
     public RefinedStorageSnapshotRead snapshotItems() {
+        return snapshotItems(null);
+    }
+
+    @Override
+    public RefinedStorageSnapshotRead snapshotItems(java.util.Set<net.minecraft.world.item.Item> itemTypes) {
         requireAvailable();
         var cache = network.getItemStorageCache();
         if (cache == null || cache.getList() == null) return RefinedStorageSnapshotRead.unavailable();
         List<ItemStack> items = new ArrayList<>();
-        for (var entry : cache.getList().getStacks()) {
+        var list = cache.getList();
+        // RS's single-item bucket contains every NBT variant in native order.
+        // Preserve full traversal for multi-type queries and unknown implementations.
+        var candidates = itemTypes != null && itemTypes.size() == 1
+                && list.getClass() == com.refinedmods.refinedstorage.apiimpl.util.ItemStackList.class
+                ? list.getStacks(new ItemStack(itemTypes.iterator().next())) : list.getStacks();
+        for (var entry : candidates) {
             ItemStack stack = entry.getStack();
-            if (!stack.isEmpty() && stack.getCount() > 0) items.add(stack.copy());
+            if (!stack.isEmpty() && stack.getCount() > 0
+                    && (itemTypes == null || itemTypes.contains(stack.getItem()))) items.add(stack);
         }
+        // The response takes defensive copies before these native references leave the driver.
         return RefinedStorageSnapshotRead.available(items);
     }
 

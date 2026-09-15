@@ -10,6 +10,11 @@ interface RefinedStorageDriver {
 
     RefinedStorageSnapshotRead snapshotItems();
 
+    /** Optional candidate filter. Drivers may return a superset; matching remains authoritative. */
+    default RefinedStorageSnapshotRead snapshotItems(java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+        return snapshotItems();
+    }
+
     boolean hasPermission(ServerPlayer player, StoragePermission permission);
 
     ItemStack extract(ItemStack template, int amount, boolean simulate);

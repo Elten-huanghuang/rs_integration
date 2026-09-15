@@ -7,7 +7,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +23,8 @@ public final class StorageSnapshot {
     private final Map<StorageItemKey, Integer> itemOrdinals;
     private final Map<Item, List<StoredItem>> itemsByType;
     private final long revision;
+    private static final int CANDIDATE_CACHE_WEIGHT = 4096;
+    private com.google.common.cache.Cache<Set<Item>, List<StoredItem>> candidateCache;
 
     public enum MatchStatus { SUCCESS, EMPTY_INGREDIENT, FAILED }
 
@@ -76,7 +77,7 @@ public final class StorageSnapshot {
             StoredItem item = normalized.get(ordinal);
             exact.put(item.key(), item);
             ordinals.put(item.key(), ordinal);
-            byType.computeIfAbsent(item.stack().getItem(), ignored -> new ArrayList<>())
+            byType.computeIfAbsent(item.key().displayItem(), ignored -> new ArrayList<>())
                     .add(item);
         }
         this.exactItems = Map.copyOf(exact);
@@ -107,6 +108,11 @@ public final class StorageSnapshot {
                 return new MatchResult(MatchStatus.EMPTY_INGREDIENT, List.of(),
                         StorageDiagnosticCode.NONE);
             }
+            // Vanilla Ingredient is item-only. Its complete candidate list is
+            // already the match result; NBT/custom predicates still get copies.
+            if (ingredient.getClass() == Ingredient.class) {
+                return new MatchResult(MatchStatus.SUCCESS, candidates(ingredient), StorageDiagnosticCode.NONE);
+            }
             List<StoredItem> matches = new ArrayList<>();
             for (StoredItem item : candidates(ingredient)) {
                 if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, item.stack())) {
@@ -120,24 +126,40 @@ public final class StorageSnapshot {
         }
     }
 
-    private Iterable<StoredItem> candidates(Ingredient ingredient) {
-        if (!com.huanghuang.rsintegration.crafting.IngredientMatcher.hasCompleteItemList(ingredient)) {
+    private List<StoredItem> candidates(Ingredient ingredient) {
+        Set<Item> requestedTypes = com.huanghuang.rsintegration.crafting.IngredientMatcher
+                .itemTypesForMatching(ingredient);
+        if (requestedTypes == null) {
             return items;
-        }
-        Set<Item> requestedTypes = new HashSet<>();
-        for (ItemStack template : ingredient.getItems()) {
-            if (!template.isEmpty()) requestedTypes.add(template.getItem());
         }
         if (requestedTypes.isEmpty()) return List.of();
         if (requestedTypes.size() == 1) {
             return itemsByType.getOrDefault(requestedTypes.iterator().next(), List.of());
         }
+        var cache = candidateCache();
+        List<StoredItem> cached = cache.getIfPresent(requestedTypes);
+        if (cached != null) return cached;
         List<StoredItem> selected = new ArrayList<>();
         for (Item type : requestedTypes) {
             selected.addAll(itemsByType.getOrDefault(type, List.of()));
         }
         selected.sort(Comparator.comparingInt(item -> itemOrdinals.get(item.key())));
-        return selected;
+        List<StoredItem> result = List.copyOf(selected);
+        // Cache only immutable candidates, never the outcome of an NBT predicate.
+        if (1L + requestedTypes.size() + result.size() <= CANDIDATE_CACHE_WEIGHT) {
+            cache.put(requestedTypes, result);
+        }
+        return result;
+    }
+
+    private synchronized com.google.common.cache.Cache<Set<Item>, List<StoredItem>> candidateCache() {
+        if (candidateCache == null) {
+            candidateCache = com.google.common.cache.CacheBuilder.newBuilder()
+                    .concurrencyLevel(1).maximumWeight(CANDIDATE_CACHE_WEIGHT)
+                    .weigher((Set<Item> types, List<StoredItem> matches) -> 1 + types.size() + matches.size())
+                    .build();
+        }
+        return candidateCache;
     }
 
     private static long saturatedAdd(long left, long right) {
