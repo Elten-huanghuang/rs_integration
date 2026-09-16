@@ -28,6 +28,7 @@ public final class AnvilMemoryNetworkHandler {
 
     public static void sendSync(ServerPlayer player, AnvilMemoryAdapter adapter) {
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                AnvilMemorySyncPacket.sync(adapter.id(), AnvilMemoryData.get(player, adapter.id())));
+                AnvilMemorySyncPacket.syncEntries(adapter.id(),
+                        AnvilMemoryData.getEntries(player, adapter.id())));
     }
 }

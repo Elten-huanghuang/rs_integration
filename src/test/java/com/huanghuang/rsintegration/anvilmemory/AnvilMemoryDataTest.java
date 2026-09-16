@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AnvilMemoryDataTest {
     @BeforeAll
@@ -49,6 +50,41 @@ class AnvilMemoryDataTest {
         List<ItemStack> merged = AnvilMemoryData.update(List.of(first), second, false);
         assertEquals(1, merged.size());
         assertFalse(merged.get(0).hasTag());
+    }
+
+    @Test
+    void lockedEntriesStayAtTopWhileUnlockedEntriesRotate() {
+        List<AnvilMemoryData.MemoryEntry> memories = List.of(
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.IRON_INGOT), true),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.GOLD_INGOT), false),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.DIAMOND), false),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.EMERALD), false),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.LAPIS_LAZULI), false),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.REDSTONE), false));
+
+        List<AnvilMemoryData.MemoryEntry> updated = AnvilMemoryData.updateEntries(
+                memories, new ItemStack(Items.QUARTZ), true);
+
+        assertEquals(AnvilMemoryData.LIMIT, updated.size());
+        assertEquals(Items.IRON_INGOT, updated.get(0).stack().getItem());
+        assertEquals(Items.QUARTZ, updated.get(1).stack().getItem());
+        assertEquals(Items.LAPIS_LAZULI, updated.get(5).stack().getItem());
+        assertEquals(1, updated.stream().filter(AnvilMemoryData.MemoryEntry::locked).count());
+    }
+
+    @Test
+    void rememberingLockedEntryDoesNotMoveOrDuplicateIt() {
+        List<AnvilMemoryData.MemoryEntry> memories = List.of(
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.IRON_INGOT), true),
+                new AnvilMemoryData.MemoryEntry(new ItemStack(Items.GOLD_INGOT), false));
+
+        List<AnvilMemoryData.MemoryEntry> updated = AnvilMemoryData.updateEntries(
+                memories, new ItemStack(Items.IRON_INGOT), true);
+
+        assertEquals(2, updated.size());
+        assertEquals(Items.IRON_INGOT, updated.get(0).stack().getItem());
+        assertEquals(Items.GOLD_INGOT, updated.get(1).stack().getItem());
+        assertTrue(updated.get(0).locked());
     }
 
     private static ItemStack taggedDiamond(int value) {

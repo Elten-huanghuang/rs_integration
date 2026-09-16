@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public record AnvilMemoryRequestPacket(Action action, String adapterId, int memoryIndex) {
-    public enum Action { SYNC, RESTOCK, SWAP, IPN_RESTOCK, REMEMBER_RESULT }
+    public enum Action { SYNC, RESTOCK, SWAP, IPN_RESTOCK, REMEMBER_RESULT, TOGGLE_LOCK }
 
     public static void encode(AnvilMemoryRequestPacket packet, FriendlyByteBuf buf) {
         buf.writeEnum(packet.action); buf.writeUtf(packet.adapterId, 64); buf.writeVarInt(packet.memoryIndex);
@@ -42,6 +42,8 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
             rememberResultMaterial(player, adapter);
         } else if (request.action == Action.SWAP) {
             swap(player, adapter);
+        } else if (request.action == Action.TOGGLE_LOCK) {
+            toggleLock(player, adapter, request.memoryIndex);
         } else if (request.action == Action.IPN_RESTOCK) {
             if (!RSIntegrationConfig.ANVIL_MEMORY_IPN_COMPAT.get()) return;
             restock(player, adapter, 0, false);
@@ -71,14 +73,22 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
         ItemStack a = first.getItem().copy();
         ItemStack b = second.getItem().copy();
         if ((!b.isEmpty() && !first.mayPlace(b)) || (!a.isEmpty() && !second.mayPlace(a))) {
-            send(player, AnvilMemorySyncPacket.result(adapter.id(), AnvilMemorySyncPacket.Status.OCCUPIED,
-                    0, 0, ItemStack.EMPTY, 0, AnvilMemoryData.get(player, adapter.id())));
+            send(player, AnvilMemorySyncPacket.resultEntries(adapter.id(), AnvilMemorySyncPacket.Status.OCCUPIED,
+                    0, 0, ItemStack.EMPTY, 0, AnvilMemoryData.getEntries(player, adapter.id())));
             return;
         }
         first.set(b); second.set(a);
         player.containerMenu.broadcastChanges();
-        send(player, AnvilMemorySyncPacket.result(adapter.id(), AnvilMemorySyncPacket.Status.SWAPPED,
-                0, 0, ItemStack.EMPTY, 0, AnvilMemoryData.get(player, adapter.id())));
+        send(player, AnvilMemorySyncPacket.resultEntries(adapter.id(), AnvilMemorySyncPacket.Status.SWAPPED,
+                0, 0, ItemStack.EMPTY, 0, AnvilMemoryData.getEntries(player, adapter.id())));
+    }
+
+    private static void toggleLock(ServerPlayer player, AnvilMemoryAdapter adapter, int index) {
+        if (!AnvilMemoryData.toggleLocked(player, adapter.id(), index)) {
+            send(player, AnvilMemorySyncPacket.invalid(adapter.id()));
+            return;
+        }
+        AnvilMemoryNetworkHandler.sendSync(player, adapter);
     }
 
     private static void restock(ServerPlayer player, AnvilMemoryAdapter adapter, int index) {
@@ -87,20 +97,20 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
 
     private static void restock(ServerPlayer player, AnvilMemoryAdapter adapter, int index,
                                 boolean allowInventory) {
-        List<ItemStack> memories = AnvilMemoryData.get(player, adapter.id());
-        if (index < 0 || index >= memories.size()) {
+        List<AnvilMemoryData.MemoryEntry> entries = AnvilMemoryData.getEntries(player, adapter.id());
+        if (index < 0 || index >= entries.size()) {
             send(player, AnvilMemorySyncPacket.invalid(adapter.id())); return;
         }
-        ItemStack wanted = memories.get(index);
+        ItemStack wanted = entries.get(index).stack();
         var slot = player.containerMenu.getSlot(adapter.materialSlot());
         ItemStack current = slot.getItem();
         if (!current.isEmpty() && !ItemStack.isSameItemSameTags(current, wanted)) {
-            send(player, AnvilMemorySyncPacket.result(adapter.id(), AnvilMemorySyncPacket.Status.OCCUPIED,
-                    0, 0, wanted, 0, memories)); return;
+            send(player, AnvilMemorySyncPacket.resultEntries(adapter.id(), AnvilMemorySyncPacket.Status.OCCUPIED,
+                    0, 0, wanted, 0, entries)); return;
         }
         if (!slot.mayPlace(wanted)) {
-            send(player, AnvilMemorySyncPacket.result(adapter.id(), AnvilMemorySyncPacket.Status.REJECTED,
-                    0, 0, wanted, 0, memories)); return;
+            send(player, AnvilMemorySyncPacket.resultEntries(adapter.id(), AnvilMemorySyncPacket.Status.REJECTED,
+                    0, 0, wanted, 0, entries)); return;
         }
         int target = Math.min(slot.getMaxStackSize(wanted),
                 RSIntegrationConfig.ANVIL_MEMORY_RESTOCK_TARGET.get());
@@ -139,8 +149,8 @@ public record AnvilMemoryRequestPacket(Action action, String adapterId, int memo
                 : AnvilMemorySyncPacket.Status.PARTIAL;
         ItemStack missingStack = needed > 0 && RSIntegrationConfig.ANVIL_MEMORY_BOOKMARK_MISSING.get()
                 ? wanted : ItemStack.EMPTY;
-        send(player, AnvilMemorySyncPacket.result(adapter.id(), status, inventory, fromRs,
-                missingStack, needed, memories));
+        send(player, AnvilMemorySyncPacket.resultEntries(adapter.id(), status, inventory, fromRs,
+                missingStack, needed, AnvilMemoryData.getEntries(player, adapter.id())));
     }
 
     private static int takeInventory(ServerPlayer player, ItemStack wanted, int needed) {

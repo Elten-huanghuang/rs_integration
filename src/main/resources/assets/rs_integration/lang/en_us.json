@@ -1072,6 +1072,8 @@
   "rsi.ftb_quest.missing": "Missing %s x %s; recipe browser favorites are unavailable",
   "rsi.anvil_memory.swap": "Swap anvil inputs",
   "rsi.anvil_memory.restock": "Click to restock",
+  "rsi.anvil_memory.lock": "Right-click to lock this memory",
+  "rsi.anvil_memory.unlock": "Right-click to unlock this memory",
   "rsi.anvil_memory.complete": "Restocked (inventory %s, storage network %s)",
   "rsi.anvil_memory.partial": "Partially restocked; missing %s",
   "rsi.anvil_memory.no_network": "No usable storage network; missing %s",
