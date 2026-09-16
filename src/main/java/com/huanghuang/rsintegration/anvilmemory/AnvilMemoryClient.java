@@ -19,6 +19,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.fml.ModList;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class AnvilMemoryClient {
@@ -28,6 +29,7 @@ public final class AnvilMemoryClient {
     private static boolean initialized;
     private static String activeAdapter;
     private static List<ItemStack> memories = List.of();
+    private static List<Boolean> lockedMemories = List.of();
     private static AnvilMemorySyncPacket lastResult;
     private static long resultUntil;
     private static int ipnRestockTicks = -1;
@@ -49,6 +51,7 @@ public final class AnvilMemoryClient {
         if (adapter == null) return;
         activeAdapter = null;
         memories = List.of();
+        lockedMemories = List.of();
         NetworkHandler.CHANNEL.sendToServer(new AnvilMemoryRequestPacket(
                 AnvilMemoryRequestPacket.Action.SYNC, adapter.id(), 0));
     }
@@ -57,16 +60,28 @@ public final class AnvilMemoryClient {
     public static void onClose(ScreenEvent.Closing event) {
         if (event.getScreen() instanceof AbstractContainerScreen<?> screen
                 && AnvilMemoryClientAdapters.find(screen) != null) {
-            activeAdapter = null; memories = List.of(); lastResult = null;
+            activeAdapter = null; memories = List.of(); lockedMemories = List.of(); lastResult = null;
             clearIpnRestock();
         }
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onMouse(ScreenEvent.MouseButtonPressed.Pre event) {
-        if (event.getButton() != 0 || !(event.getScreen() instanceof AbstractContainerScreen<?> screen)) return;
+        if (!(event.getScreen() instanceof AbstractContainerScreen<?> screen)) return;
         AnvilMemoryClientAdapter adapter = AnvilMemoryClientAdapters.find(screen);
         if (adapter == null || !adapter.id().equals(activeAdapter)) return;
+        var panel = adapter.memoryPanel(screen);
+        if (event.getButton() == 1) {
+            for (int i = 0; i < memories.size(); i++) {
+                var row = new AnvilMemoryClientAdapter.Bounds(panel.x() + 2, panel.y() + 2 + i * 20, 18, 18);
+                if (row.contains(event.getMouseX(), event.getMouseY())) {
+                    send(AnvilMemoryRequestPacket.Action.TOGGLE_LOCK, adapter.id(), i);
+                    event.setCanceled(true); return;
+                }
+            }
+            return;
+        }
+        if (event.getButton() != 0) return;
         if (adapter.swapButton(screen).contains(event.getMouseX(), event.getMouseY())) {
             send(AnvilMemoryRequestPacket.Action.SWAP, adapter.id(), 0);
             event.setCanceled(true); return;
@@ -78,7 +93,6 @@ public final class AnvilMemoryClient {
         if (adapter.resultSlot(screen).contains(event.getMouseX(), event.getMouseY())) {
             send(AnvilMemoryRequestPacket.Action.REMEMBER_RESULT, adapter.id(), 0);
         }
-        var panel = adapter.memoryPanel(screen);
         for (int i = 0; i < memories.size(); i++) {
             var row = new AnvilMemoryClientAdapter.Bounds(panel.x() + 2, panel.y() + 2 + i * 20, 18, 18);
             if (row.contains(event.getMouseX(), event.getMouseY())) {
@@ -105,10 +119,11 @@ public final class AnvilMemoryClient {
         AnvilMemoryClientAdapter adapter = AnvilMemoryClientAdapters.find(screen);
         if (adapter == null || !adapter.id().equals(packet.adapterId())) return;
         if (packet.status() == AnvilMemorySyncPacket.Status.INVALID) {
-            activeAdapter = null; memories = List.of(); return;
+            activeAdapter = null; memories = List.of(); lockedMemories = List.of(); return;
         }
         activeAdapter = packet.adapterId();
         memories = packet.memories();
+        lockedMemories = packet.locked();
         if (packet.status() != AnvilMemorySyncPacket.Status.SYNC) {
             lastResult = packet; resultUntil = System.currentTimeMillis() + 4500;
             if (packet.missingCount() > 0 && !packet.missingStack().isEmpty()) bookmark(packet.missingStack());
@@ -191,12 +206,27 @@ public final class AnvilMemoryClient {
             graphics.blit(icon, x + 1, y + 1, 0, 0, 16, 16, 16, 16);
             if (i < memories.size()) {
                 ItemStack stack = memories.get(i);
+                boolean locked = i < lockedMemories.size() && lockedMemories.get(i);
                 graphics.renderItem(stack, x + 1, y + 1);
-                if (hover) graphics.renderTooltip(minecraft.font,
-                        List.of(stack.getHoverName(), Component.translatable("rsi.anvil_memory.restock")),
-                        stack.getTooltipImage(), (int) mouseX, (int) mouseY);
+                if (locked) renderLock(graphics, x, y);
+                if (hover) {
+                    List<Component> tooltip = new ArrayList<>();
+                    tooltip.add(stack.getHoverName());
+                    tooltip.add(Component.translatable("rsi.anvil_memory.restock"));
+                    tooltip.add(Component.translatable(locked
+                            ? "rsi.anvil_memory.unlock" : "rsi.anvil_memory.lock"));
+                    graphics.renderTooltip(minecraft.font, tooltip, stack.getTooltipImage(),
+                            (int) mouseX, (int) mouseY);
+                }
             }
         }
+    }
+
+    private static void renderLock(GuiGraphics graphics, int x, int y) {
+        int lockX = x + 11, lockY = y + 1;
+        graphics.fill(lockX + 1, lockY, lockX + 5, lockY + 4, 0xD0000000);
+        graphics.fill(lockX, lockY + 3, lockX + 6, lockY + 9, 0xE0D7B34A);
+        graphics.fill(lockX + 2, lockY + 5, lockX + 4, lockY + 7, 0xFF3A2B0A);
     }
 
     private static void renderResult(GuiGraphics graphics, AbstractContainerScreen<?> screen) {
