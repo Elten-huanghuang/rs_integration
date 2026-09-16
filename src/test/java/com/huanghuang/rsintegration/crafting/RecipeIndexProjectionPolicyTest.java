@@ -74,6 +74,30 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
                 ModType.CUSTOM_GUI, recipe));
     }
 
+    @Test
+    void flatExecutorCanOptIntoIntermediateProjection() {
+        Recipe<?> recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "flat_intermediate_projection"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
+        ModRecipeHandler handler = new ModRecipeHandler() {
+            @Override public ModType modType() { return ModType.CUSTOM_GUI; }
+            @Override public boolean canHandle(Recipe<?> ignored) { return true; }
+            @Override public ItemStack getResultItem(Recipe<?> ignored, RegistryAccess access) {
+                return new ItemStack(Items.DIAMOND);
+            }
+            @Override public List<IngredientSpec> getIngredients(Recipe<?> ignored) {
+                return List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+            }
+            @Override public boolean supportsIntermediateProjection(Recipe<?> ignored) {
+                return true;
+            }
+        };
+
+        assertTrue(RecipeIndex.isTypedPureProjectionCandidate(handler,
+                ModType.CUSTOM_GUI, recipe));
+    }
+
     private static ModRecipeHandler handler(boolean deterministic) {
         return new ModRecipeHandler() {
             @Override public ModType modType() {

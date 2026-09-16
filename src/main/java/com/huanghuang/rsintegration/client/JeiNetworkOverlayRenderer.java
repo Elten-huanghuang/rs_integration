@@ -20,7 +20,7 @@ public final class JeiNetworkOverlayRenderer {
     public static void render(GuiGraphics graphics, ItemStack stack, int x, int y) {
         Font font = Minecraft.getInstance().font;
         if (inventoryEnabled() && JeiNetworkItemCache.INSTANCE.isConnected()) {
-            long amount = JeiNetworkItemCache.INSTANCE.amount(stack);
+            long amount = JeiNetworkItemCache.INSTANCE.amountForDisplay(stack);
             if (amount > 0) drawRightBottom(graphics, font, format(amount), x, y);
         }
         if (shortageEnabled()) {
