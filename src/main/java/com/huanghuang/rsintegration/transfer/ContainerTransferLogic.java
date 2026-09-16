@@ -31,6 +31,8 @@ final class ContainerTransferLogic {
 
     private static final String TETRA_WORKBENCH_MENU =
             "se.mickelus.tetra.blocks.workbench.WorkbenchContainer";
+    private static final String TETRA_FORGED_CONTAINER_MENU =
+            "se.mickelus.tetra.blocks.forged.container.ForgedContainerMenu";
     private static final String DISK_DRIVE_MENU =
             "com.refinedmods.refinedstorage.container.DiskDriveContainerMenu";
     private static final String RESONANCE_BACKPACK_MENU =
@@ -58,6 +60,7 @@ final class ContainerTransferLogic {
 
     // 0 = RS Network, 1 = Backpack, 2 = Beyond Dimensions
     static void transferAll(ServerPlayer player, AbstractContainerMenu menu, byte mode) {
+        if (isEnderChestMenu(menu)) return;
         // BD handheld item configuration screens expose virtual slots (for
         // example the feeder/magnet filter item). They are not inventories;
         // treating their display stacks as source slots duplicates items.
@@ -428,11 +431,16 @@ final class ContainerTransferLogic {
         // Tetra wraps the player's inventory in InvWrapper, so container identity cannot
         // distinguish it from workbench storage. WorkbenchContainer always appends the
         // 27 main-inventory and 9 hotbar slots after its own slots.
-        return isTetraWorkbenchPlayerSlot(menu.getClass().getName(), slotIndex, menu.slots.size());
+        return isTetraWrappedPlayerSlot(menu.getClass().getName(), slotIndex, menu.slots.size());
     }
 
     static boolean isTetraWorkbenchPlayerSlot(String menuClassName, int slotIndex, int slotCount) {
-        return TETRA_WORKBENCH_MENU.equals(menuClassName)
+        return isTetraWrappedPlayerSlot(menuClassName, slotIndex, slotCount);
+    }
+
+    static boolean isTetraWrappedPlayerSlot(String menuClassName, int slotIndex, int slotCount) {
+        return (TETRA_WORKBENCH_MENU.equals(menuClassName)
+                || TETRA_FORGED_CONTAINER_MENU.equals(menuClassName))
                 && slotCount >= PLAYER_MAIN_INVENTORY_SLOTS
                 && slotIndex >= slotCount - PLAYER_MAIN_INVENTORY_SLOTS;
     }
@@ -443,7 +451,24 @@ final class ContainerTransferLogic {
         if (isVirtualSlot(slot) || isUpgradeSlot(slot)) return false;
         if (isPlayerInventorySlot(player, menu, slotIndex, slot)) return false;
         if (hasCrafting && isResultSlot(slot)) return false;
+        if (isFurnaceLikeMenu(menu.getClass().getName()) && !isResultSlot(slot)) return false;
         return !(slot.container instanceof CraftingContainer);
+    }
+
+    static boolean isEnderChestMenu(AbstractContainerMenu menu) {
+        if (menu == null) return false;
+        for (Slot slot : menu.slots) {
+            if (slot != null && slot.container != null
+                    && "net.minecraft.world.inventory.PlayerEnderChestContainer".equals(
+                    slot.container.getClass().getName())) return true;
+        }
+        return false;
+    }
+
+    static boolean isFurnaceLikeMenu(String menuClassName) {
+        String name = simpleClassName(menuClassName);
+        return name.contains("furnace") || name.contains("smoker")
+                || name.contains("smelter") || name.contains("kiln");
     }
 
     static boolean isSelfNetworkStorageMenu(String menuClassName) {

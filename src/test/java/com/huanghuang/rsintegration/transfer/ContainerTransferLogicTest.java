@@ -27,6 +27,24 @@ class ContainerTransferLogicTest {
     }
 
     @Test
+    void identifiesWrappedPlayerInventoryInTetraForgedContainer() {
+        String menu = "se.mickelus.tetra.blocks.forged.container.ForgedContainerMenu";
+        assertFalse(ContainerTransferLogic.isTetraWrappedPlayerSlot(menu, 161, 198));
+        assertTrue(ContainerTransferLogic.isTetraWrappedPlayerSlot(menu, 162, 198));
+        assertTrue(ContainerTransferLogic.isTetraWrappedPlayerSlot(menu, 197, 198));
+    }
+
+    @Test
+    void recognizesFurnaceLikeMenus() {
+        assertTrue(ContainerTransferLogic.isFurnaceLikeMenu(
+                "net.minecraft.world.inventory.FurnaceMenu"));
+        assertTrue(ContainerTransferLogic.isFurnaceLikeMenu(
+                "example.machine.AlloySmelterContainer"));
+        assertFalse(ContainerTransferLogic.isFurnaceLikeMenu(
+                "net.minecraft.world.inventory.ChestMenu"));
+    }
+
+    @Test
     void blocksMenusWhoseStorageCanBeMountedByTheDestinationNetwork() {
         assertTrue(ContainerTransferLogic.isSelfNetworkStorageMenu(
                 "com.refinedmods.refinedstorage.container.DiskDriveContainerMenu"));
