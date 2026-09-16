@@ -50,7 +50,7 @@ public final class GoetyRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.CursedInfuserBatchDelegate"));
         ModType.configureJei("goety_cursed_infuser",
                 new String[][]{{"goety:cursed_infuser"}},
-                new String[][]{{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes", "goety:cursed_infuser"}}, null);
+                new String[][]{{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes", "goety_cursed_infuser"}}, null);
         ModType.register("goety",
                 new String[]{"com.Polarice3.Goety.common.crafting.RitualRecipe"},
                 new String[]{"dark_altar"},

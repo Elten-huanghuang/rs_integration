@@ -2415,8 +2415,17 @@ public final class GenericCraftPacket {
                 if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
                     ServerLevel crockPotLevel = CraftPacketUtils.resolveLevel(
                             player.server, effectiveDim, player);
-                    List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                            recipe, network, crockPotLevel, effectivePos);
+                    // Use the same backend selected for the request.  Non-RS
+                    // backends (and RS requests resolved through a qualified
+                    // endpoint) intentionally leave the legacy INetwork null;
+                    // passing it here made the category resolver report that
+                    // no food-value items were available even though the plan
+                    // preview had just resolved them from the endpoint.
+                    List<IngredientSpec> categorySpecs = storageEndpoint != null
+                            ? CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                                    recipe, storageEndpoint, player, crockPotLevel, effectivePos)
+                            : CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                                    recipe, network, crockPotLevel, effectivePos);
                     if (categorySpecs == null || categorySpecs.isEmpty()) {
                         player.sendSystemMessage(Component.translatable(
                                 "rsi.crockpot.error.food_values"));

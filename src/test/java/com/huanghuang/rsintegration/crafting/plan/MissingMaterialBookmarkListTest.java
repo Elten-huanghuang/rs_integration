@@ -51,6 +51,35 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
     }
 
     @Test
+    void diagnosticOnlyItemIsIncludedInTheBookmarkAllList() {
+        PlanResponse plan = planWithMissing(Map.of(), List.of("minecraft:apple"));
+
+        var entries = MissingMaterialBookmarkList.textEntries(plan);
+
+        assertTrue(entries.get(0).bookmarkable());
+        assertEquals(Items.APPLE, entries.get(0).bookmark().getItem());
+        assertEquals(List.of(Items.APPLE), MissingMaterialBookmarkList.bookmarkableItems(plan)
+                .stream().map(ItemStack::getItem).toList());
+    }
+
+    @Test
+    void resourceIdWithFormattedNbtHintRemainsBookmarkable() {
+        PlanResponse plan = planWithMissing(Map.of(),
+                List.of("minecraft:apple \u00a77NBT requirement"));
+
+        var entry = MissingMaterialBookmarkList.textEntries(plan).get(0);
+
+        assertTrue(entry.bookmarkable());
+        assertEquals(Items.APPLE, entry.bookmark().getItem());
+    }
+
+    @Test
+    void clientLocalizationPreservesMachineReadableItemIdentity() {
+        assertEquals(List.of("minecraft:apple"),
+                PlanResponseClientPacketHandler.localizeItemNames(List.of("item.minecraft.apple")));
+    }
+
+    @Test
     void singleLocalizedMissingNameUsesTheOnlyStructuredShortage() {
         PlanResponse plan = planWithMissing(
                 Map.of(IngredientKey.of(new ItemStack(Items.APPLE)),

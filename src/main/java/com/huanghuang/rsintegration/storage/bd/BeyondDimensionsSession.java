@@ -49,6 +49,21 @@ final class BeyondDimensionsSession implements StorageSession {
         return BeyondDimensionsItemKeys.fromStack(reference.backendId(), stack);
     }
 
+    @Override
+    public java.util.Optional<StorageItemSubscription> subscribeItemChanges(
+            StorageItemChangeListener listener) {
+        Objects.requireNonNull(listener, "listener");
+        try {
+            Object nativeStorage = storage();
+            return java.util.Optional.of(BeyondDimensionsReflection.subscribeItemChanges(
+                    network, nativeStorage, reference.networkId(), listener));
+        } catch (Exception | LinkageError failure) {
+            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI] BD item subscription unavailable", failure);
+            return java.util.Optional.empty();
+        }
+    }
+
     private Object storage() throws Exception {
         return network.getClass().getMethod("getUnifiedStorage").invoke(network);
     }

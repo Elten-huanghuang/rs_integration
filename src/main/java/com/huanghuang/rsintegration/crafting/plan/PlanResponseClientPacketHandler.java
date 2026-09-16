@@ -10,6 +10,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,7 +56,7 @@ final class PlanResponseClientPacketHandler {
         openScreen(localized, requestId);
     }
 
-    private static List<String> localizeItemNames(List<String> names) {
+    static List<String> localizeItemNames(List<String> names) {
         if (names.isEmpty()) return names;
         LinkedHashSet<String> localized = new LinkedHashSet<>(names.size());
         for (String name : names) {
@@ -63,18 +64,32 @@ final class PlanResponseClientPacketHandler {
             int hintStart = name.indexOf(" \u00a7");
             String key = hintStart >= 0 ? name.substring(0, hintStart) : name;
             String suffix = hintStart >= 0 ? name.substring(hintStart) : "";
-            if (I18n.exists(key)) {
+            ResourceLocation descriptionItemId = itemIdForDescriptionId(key);
+            ResourceLocation itemId = ResourceLocation.tryParse(key);
+            var registeredItem = itemId != null ? ForgeRegistries.ITEMS.getValue(itemId) : null;
+            if (descriptionItemId != null) {
+                // Keep a machine-readable identity until the bookmark list turns it
+                // into a localized ItemStack label. Localizing here loses the item id.
+                translated = descriptionItemId + suffix;
+            } else if (registeredItem != null && !new ItemStack(registeredItem).isEmpty()) {
+                translated = itemId + suffix;
+            } else if (I18n.exists(key)) {
                 translated = I18n.get(key) + suffix;
-            } else {
-                ResourceLocation itemId = ResourceLocation.tryParse(key);
-                var item = itemId != null ? ForgeRegistries.ITEMS.getValue(itemId) : null;
-                if (item != null && !new ItemStack(item).isEmpty()) {
-                    translated = new ItemStack(item).getHoverName().getString() + suffix;
-                }
             }
             localized.add(translated);
         }
         return new ArrayList<>(localized);
+    }
+
+    @Nullable
+    private static ResourceLocation itemIdForDescriptionId(String descriptionId) {
+        for (var item : ForgeRegistries.ITEMS.getValues()) {
+            ItemStack stack = new ItemStack(item);
+            if (descriptionId.equals(stack.getDescriptionId())) {
+                return ForgeRegistries.ITEMS.getKey(item);
+            }
+        }
+        return null;
     }
 
     private static void openScreen(PlanResponse plan, long requestId) {

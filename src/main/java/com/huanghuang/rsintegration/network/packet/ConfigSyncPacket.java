@@ -18,6 +18,8 @@ public class ConfigSyncPacket {
     public final int machineTabThreshold;
     public final boolean enableAutoEat;
     public final boolean enableJei;
+    public final boolean enableJeiNetworkOverlay;
+    public final boolean enableJeiCraftingShortageOverlay;
     public final boolean enableJeiMarquee;
     public final boolean enableJeiBookmarkMarquee;
     public final boolean enableGridSwipeExtract;
@@ -30,7 +32,8 @@ public class ConfigSyncPacket {
     public final int repeatCountMax;
 
     public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold,
-                            boolean enableAutoEat, boolean enableJei, boolean enableJeiMarquee,
+                            boolean enableAutoEat, boolean enableJei, boolean enableJeiNetworkOverlay,
+                            boolean enableJeiCraftingShortageOverlay, boolean enableJeiMarquee,
                             boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
                             boolean enableApotheosis, boolean enableDistantWorlds,
                             boolean enableEmbersAlchemyCalc, int recipeTreeMaxCandidates,
@@ -39,6 +42,8 @@ public class ConfigSyncPacket {
         this.machineTabThreshold = machineTabThreshold;
         this.enableAutoEat = enableAutoEat;
         this.enableJei = enableJei;
+        this.enableJeiNetworkOverlay = enableJeiNetworkOverlay;
+        this.enableJeiCraftingShortageOverlay = enableJeiCraftingShortageOverlay;
         this.enableJeiMarquee = enableJeiMarquee;
         this.enableJeiBookmarkMarquee = enableJeiBookmarkMarquee;
         this.enableGridSwipeExtract = enableGridSwipeExtract;
@@ -55,6 +60,8 @@ public class ConfigSyncPacket {
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_AUTO_EAT.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_NETWORK_OVERLAY.get(),
+                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_MARQUEE_SELECTION.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get(),
                 com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get(),
@@ -70,6 +77,8 @@ public class ConfigSyncPacket {
         buf.writeVarInt(packet.machineTabThreshold);
         buf.writeBoolean(packet.enableAutoEat);
         buf.writeBoolean(packet.enableJei);
+        buf.writeBoolean(packet.enableJeiNetworkOverlay);
+        buf.writeBoolean(packet.enableJeiCraftingShortageOverlay);
         buf.writeBoolean(packet.enableJeiMarquee);
         buf.writeBoolean(packet.enableJeiBookmarkMarquee);
         buf.writeBoolean(packet.enableGridSwipeExtract);
@@ -82,7 +91,7 @@ public class ConfigSyncPacket {
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
         return new ConfigSyncPacket(buf.readBoolean(), Math.max(0, Math.min(buf.readVarInt(), 4096)), buf.readBoolean(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 // Clamp to the config's own declared range (2-32).
                 Math.max(2, Math.min(buf.readVarInt(), 32)),

@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.storage.StorageResolutionResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageResolutionStatus;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
+import com.huanghuang.rsintegration.storage.StorageItemSubscription;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
@@ -16,6 +18,7 @@ import net.minecraftforge.fluids.FluidStack;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -266,5 +269,73 @@ public final class BeyondDimensionsReflection {
 
     static Object key(Object keyAmount) throws Exception {
         return keyAmount.getClass().getMethod("key").invoke(keyAmount);
+    }
+
+    static StorageItemSubscription subscribeItemChanges(Object network, Object storage,
+                                                        String networkId,
+                                                        StorageItemChangeListener listener)
+            throws Exception {
+        ClassLoader loader = BeyondDimensionsReflection.class.getClassLoader();
+        Class<?> deltaType = Class.forName(
+                "com.wintercogs.beyonddimensions.api.storage.handler.impl.AbstractUnorderedStackHandler$DeltaListener",
+                false, loader);
+        Object owner = new Object();
+        Object proxy = Proxy.newProxyInstance(loader, new Class<?>[]{deltaType}, (ignored, method, args) -> {
+            if (method.getDeclaringClass() == Object.class) {
+                return switch (method.getName()) {
+                    case "toString" -> "RSI-BD-ItemDeltaListener";
+                    case "hashCode" -> System.identityHashCode(ignored);
+                    case "equals" -> ignored == args[0];
+                    default -> null;
+                };
+            }
+            if (!"onDelta".equals(method.getName()) || args == null || args.length < 1) return null;
+            Object nativeKey = args[0];
+            if (!isItemKey(nativeKey)) return null;
+            try {
+                ItemStack stack = keyStack(nativeKey);
+                if (stack.isEmpty()) return null;
+                Class<?> keyType = Class.forName(
+                        "com.wintercogs.beyonddimensions.api.storage.key.IStackKey", false, loader);
+                Object keyAmount = storage.getClass().getMethod("getStackByKey", keyType)
+                        .invoke(storage, nativeKey);
+                long absolute = keyAmount == null ? 0L : Math.max(0L, amount(keyAmount));
+                listener.onChanged(stack.copyWithCount(1), absolute);
+            } catch (Exception | LinkageError failure) {
+                RSIntegrationMod.LOGGER.debug("[RSI-JEI] BD delta lookup failed", failure);
+                listener.onInvalidated();
+            }
+            return null;
+        });
+        AutoCloseable nativeSubscription = (AutoCloseable) storage.getClass()
+                .getMethod("subscribeDelta", Object.class, deltaType)
+                .invoke(storage, owner, proxy);
+        return new StorageItemSubscription() {
+            private boolean closed;
+
+            @Override
+            public boolean isValid() {
+                if (closed || !isCurrentNetwork(network, networkId)) return false;
+                try {
+                    return network.getClass().getMethod("getUnifiedStorage").invoke(network) == storage;
+                } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+                    return false;
+                }
+            }
+
+            @Override
+            public void close() {
+                if (closed) return;
+                closed = true;
+                try {
+                    nativeSubscription.close();
+                } catch (Exception ignored) {
+                    // Native storage may already have discarded the subscription.
+                }
+                // Keep owner/proxy strongly reachable for the lifetime of this wrapper.
+                owner.hashCode();
+                proxy.hashCode();
+            }
+        };
     }
 }

@@ -132,6 +132,10 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
+    public static ForgeConfigSpec.BooleanValue ENABLE_JEI_NETWORK_OVERLAY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY;
+    public static ForgeConfigSpec.DoubleValue JEI_NETWORK_OVERLAY_SCALE;
+    public static ForgeConfigSpec.DoubleValue JEI_CRAFTING_SHORTAGE_OVERLAY_SCALE;
     public static ForgeConfigSpec.BooleanValue ENABLE_VILLAGER_TRADE_LOCK;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_MARQUEE_SELECTION;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION;
@@ -479,6 +483,16 @@ public final class RSIntegrationConfig {
                 .comment("Show '+' buttons in JEI recipe views for remote crafting.",
                         "Client-side; the server value is synced to the client.")
                 .define("enableJeiIntegration", true);
+        ENABLE_JEI_NETWORK_OVERLAY = c
+                .comment("Show the current RS/BD network item count in JEI item slots.",
+                        "Uses one initial snapshot followed by incremental updates.",
+                        "Client-side rendering; the server value is synced to clients.")
+                .define("enableJeiNetworkOverlay", true);
+        ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY = c
+                .comment("Show the active recursive crafting plan shortage in JEI item slots.",
+                        "The red shortage marker is separate from the network inventory number.",
+                        "Client-side rendering; the server value is synced to clients.")
+                .define("enableJeiCraftingShortageOverlay", true);
         ENABLE_JEI_MARQUEE_SELECTION = c
                 .comment("Enable drag-to-select (marquee) in JEI ingredient list for batch bookmarking/hiding.",
                         "Disable if you find drag gestures interfere with your workflow.",
@@ -1074,6 +1088,16 @@ public final class RSIntegrationConfig {
         AUTO_EAT_MENU_EXPANDED = cl
                 .comment("Remember whether the compact Auto Eat flyout is expanded.")
                 .define("menuExpanded", false);
+        cl.pop();
+        cl.push("jeiOverlay");
+        JEI_NETWORK_OVERLAY_SCALE = cl
+                .comment("Scale of the white RS/BD network count in the JEI item slot bottom-right.",
+                        "This is a local visual preference. Range: 0.4-1.0.")
+                .defineInRange("networkCountScale", 0.70D, 0.40D, 1.00D);
+        JEI_CRAFTING_SHORTAGE_OVERLAY_SCALE = cl
+                .comment("Maximum scale of the red crafting shortage in the JEI item slot top-left.",
+                        "Long values still shrink automatically to fit. Range: 0.4-1.0.")
+                .defineInRange("craftingShortageScale", 0.75D, 0.40D, 1.00D);
         cl.pop();
         cl.push("gridSearch");
         GRID_SEARCH_IDLE_BUDGET_MICROS = cl

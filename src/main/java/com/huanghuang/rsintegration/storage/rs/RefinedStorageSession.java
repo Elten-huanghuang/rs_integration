@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.storage.rs;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageInsertObserver;
+import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
+import com.huanghuang.rsintegration.storage.StorageItemSubscription;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
@@ -22,6 +24,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** StorageSession backed by one RS network. Native RS types do not escape the driver. */
 final class RefinedStorageSession implements StorageSession {
@@ -42,6 +45,11 @@ final class RefinedStorageSession implements StorageSession {
     @Override
     public StorageItemKey itemKey(ItemStack stack) {
         return RefinedStorageItemKeys.fromStack(stack);
+    }
+
+    @Override
+    public Optional<StorageItemSubscription> subscribeItemChanges(StorageItemChangeListener listener) {
+        return driver.subscribeItemChanges(listener);
     }
 
     @Override

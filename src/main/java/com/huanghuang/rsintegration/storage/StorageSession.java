@@ -5,6 +5,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -31,6 +32,15 @@ public interface StorageSession {
     }
 
     StorageSnapshotResult snapshotItems(ServerPlayer player);
+
+    /**
+     * Subscribes to absolute item-count changes without exposing backend-native types.
+     * Unsupported backends return empty and may be handled by a bounded polling fallback.
+     */
+    default Optional<StorageItemSubscription> subscribeItemChanges(StorageItemChangeListener listener) {
+        Objects.requireNonNull(listener, "listener");
+        return Optional.empty();
+    }
 
     /** Fresh candidates including all NBT variants; null requests all item types. */
     default StorageSnapshotResult snapshotItems(ServerPlayer player,

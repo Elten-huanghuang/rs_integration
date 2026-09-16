@@ -52,6 +52,8 @@ public final class ClientEventBootstrap {
 
     private static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         RecipeAvailabilityClient.clear();
+        JeiNetworkItemCache.INSTANCE.clear();
+        JeiCraftingPlanContext.INSTANCE.clear();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout();
         }

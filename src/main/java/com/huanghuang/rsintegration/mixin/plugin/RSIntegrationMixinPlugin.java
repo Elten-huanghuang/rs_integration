@@ -302,6 +302,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("mezz.jei.gui.overlay.IngredientListRenderer")
                     && hasMethod(targetClassName, "renderBatch");
         }
+        if (mixinClassName.contains("jei.IngredientListRendererNetworkOverlayMixin")
+                || mixinClassName.contains("jei.IngredientListRendererLegacyNetworkOverlayMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "render");
+        }
         if (mixinClassName.contains("jei.ItemStackRendererGridMixin")) {
             return isClassPresent("mezz.jei.library.render.ItemStackRenderer")
                     && hasMethod(targetClassName, "render");
