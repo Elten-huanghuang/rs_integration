@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.client.JeiCraftingPlanContext;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -337,6 +338,7 @@ public final class CraftingPlanScreen extends Screen {
         this.treeRenderer = new PlanTreeRenderer(Minecraft.getInstance().font);
         this.treeRenderer.setIconRenderer(recipePreview::drawCategoryIcon);
         rebuildTreeModel(true);
+        JeiCraftingPlanContext.INSTANCE.activate(plan);
     }
 
     /** Exposed for {@link PlanResponsePacket} dedup check. */
@@ -370,6 +372,7 @@ public final class CraftingPlanScreen extends Screen {
     public void updatePlan(PlanResponse newPlan) {
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
+        JeiCraftingPlanContext.INSTANCE.activate(newPlan);
         // The server response is authoritative.  Accepting only non-null
         // references leaves a stale RS selection alive after a backend switch
         // or an unavailable network response.
@@ -862,7 +865,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void bookmarkAllMissingMaterials() {
-        List<ItemStack> missing = MissingMaterialBookmarkList.from(plan);
+        List<ItemStack> missing = MissingMaterialBookmarkList.bookmarkableItems(plan);
         int added = 0;
         int existing = 0;
         int unavailable = 0;
@@ -2039,7 +2042,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y) {
-        if (MissingMaterialBookmarkList.from(plan).isEmpty()) return;
+        if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return;
 
         String action = Component.translatable("rsi.plan.bookmark_all.action").getString();
         int accentW = 3;

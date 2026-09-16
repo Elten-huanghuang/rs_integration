@@ -23,6 +23,18 @@ public final class MissingMaterialBookmarkList {
                 .toList();
     }
 
+    /** Every concrete item exposed by the missing list, including diagnostic-only items. */
+    public static List<ItemStack> bookmarkableItems(PlanResponse plan) {
+        List<ItemStack> result = new ArrayList<>();
+        for (TextEntry entry : textEntries(plan)) {
+            if (!entry.bookmarkable()) continue;
+            boolean duplicate = result.stream().anyMatch(existing ->
+                    ItemStack.isSameItemSameTags(existing, entry.bookmark()));
+            if (!duplicate) result.add(entry.bookmark().copyWithCount(1));
+        }
+        return List.copyOf(result);
+    }
+
     /** Resolve plain missing diagnostics into localized, individually bookmarkable labels. */
     public static List<TextEntry> textEntries(PlanResponse plan) {
         List<ItemStack> candidates = from(plan);
@@ -73,7 +85,9 @@ public final class MissingMaterialBookmarkList {
     private static Match resolve(String raw, List<ItemStack> candidates,
                                  Set<Integer> usedCandidates, boolean singleFallback) {
         String normalized = normalize(raw);
-        ResourceLocation id = ResourceLocation.tryParse(normalized);
+        int hintStart = raw.indexOf(" \u00a7");
+        String identity = hintStart >= 0 ? raw.substring(0, hintStart) : raw;
+        ResourceLocation id = ResourceLocation.tryParse(normalize(identity));
         if (id != null) {
             var item = ForgeRegistries.ITEMS.getValue(id);
             if (item != null && item != Items.AIR) {

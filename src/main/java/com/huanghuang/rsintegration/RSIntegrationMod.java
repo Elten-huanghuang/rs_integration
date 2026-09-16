@@ -42,6 +42,7 @@ import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.autoeat.network.AutoEatNetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import com.huanghuang.rsintegration.network.packet.ResonanceNetworkHandler;
 import com.huanghuang.rsintegration.storage.StorageBackendDescriptors;
 import com.huanghuang.rsintegration.storage.StorageBackendLoadResult;
@@ -622,6 +623,20 @@ public final class RSIntegrationMod {
                 () -> com.huanghuang.rsintegration.anvilmemory.AnvilMemoryClient::init);
         ConfigSyncPacket.register();
         com.huanghuang.rsintegration.mods.jei.JeiCheatDropPacket.register();
+        com.huanghuang.rsintegration.network.packet.StorageSearchTextPacket.register();
+        NetworkHandler.CHANNEL.registerMessage(NetworkPacketIds.JEI_NETWORK_INVENTORY,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket.class,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket::encode,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket::decode,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        NetworkHandler.CHANNEL.registerMessage(NetworkPacketIds.JEI_NETWORK_INVENTORY_RESYNC,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryResyncRequestPacket.class,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryResyncRequestPacket::encode,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryResyncRequestPacket::decode,
+                com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryResyncRequestPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.server.JeiNetworkInventorySyncManager.class);
 
         // Altar binding registry (BINDINGS cache + scan caches)
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)

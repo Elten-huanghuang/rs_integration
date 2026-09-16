@@ -15,6 +15,8 @@ public final class ClientSyncedConfig {
     public static int MACHINE_TAB_THRESHOLD = 5;
     public static boolean ENABLE_AUTO_EAT = true;
     public static boolean ENABLE_JEI = true;
+    public static boolean ENABLE_JEI_NETWORK_OVERLAY = true;
+    public static boolean ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY = true;
     public static boolean ENABLE_JEI_MARQUEE = true;
     public static boolean ENABLE_JEI_BOOKMARK_MARQUEE = true;
     public static boolean ENABLE_GRID_SWIPE_EXTRACT = true;
@@ -32,6 +34,8 @@ public final class ClientSyncedConfig {
         MACHINE_TAB_THRESHOLD = packet.machineTabThreshold;
         ENABLE_AUTO_EAT = packet.enableAutoEat;
         ENABLE_JEI = packet.enableJei;
+        ENABLE_JEI_NETWORK_OVERLAY = packet.enableJeiNetworkOverlay;
+        ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY = packet.enableJeiCraftingShortageOverlay;
         ENABLE_JEI_MARQUEE = packet.enableJeiMarquee;
         ENABLE_JEI_BOOKMARK_MARQUEE = packet.enableJeiBookmarkMarquee;
         ENABLE_GRID_SWIPE_EXTRACT = packet.enableGridSwipeExtract;
@@ -52,6 +56,8 @@ public final class ClientSyncedConfig {
         MACHINE_TAB_THRESHOLD = 5;
         ENABLE_AUTO_EAT = true;
         ENABLE_JEI = true;
+        ENABLE_JEI_NETWORK_OVERLAY = true;
+        ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY = true;
         ENABLE_JEI_MARQUEE = true;
         ENABLE_JEI_BOOKMARK_MARQUEE = true;
         ENABLE_GRID_SWIPE_EXTRACT = true;

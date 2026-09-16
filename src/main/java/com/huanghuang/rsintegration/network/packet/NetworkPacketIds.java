@@ -119,4 +119,8 @@ public final class NetworkPacketIds {
     public static final int RECIPE_AVAILABILITY_REQUEST = 137;
     public static final int RECIPE_AVAILABILITY_RESULT = 138;
     public static final int VOID_UPGRADE_CONFIG = 139;
+    /** Server-originated storage-terminal search text, scoped by container id. */
+    public static final int STORAGE_SEARCH_TEXT = 140;
+    public static final int JEI_NETWORK_INVENTORY = 141;
+    public static final int JEI_NETWORK_INVENTORY_RESYNC = 142;
 }

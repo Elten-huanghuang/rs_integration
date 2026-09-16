@@ -103,6 +103,8 @@
     "jei.IngredientFilterSolCarrotMixin",
     "jei.ElementSearchSolCarrotMixin",
     "jei.ElementSearchLowMemSolCarrotMixin",
+    "jei.IngredientListRendererNetworkOverlayMixin",
+    "jei.IngredientListRendererLegacyNetworkOverlayMixin",
     "emi.RecipeDisplayMixin",
     "minecraft.MerchantScreenAccessor",
     "minecraft.MerchantScreenSelectionMixin",

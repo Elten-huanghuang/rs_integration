@@ -11,6 +11,7 @@ public final class StorageClientBootstrap {
 
     public static void register() {
         RSIKeyBindings.registerKeyMappings();
+        StorageSearchClient.register();
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.network.binding.BindingTooltipHandler.class);
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(

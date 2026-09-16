@@ -35,6 +35,8 @@ public final class RSIKeyBindings {
     public static KeyMapping KEY_JEI_GIVE_ONE;
     public static KeyMapping KEY_JEI_GIVE_STACK;
     public static KeyMapping KEY_JEI_DROP;
+    /** Fills the active RS/BD storage terminal search field from JEI or EMI. */
+    public static KeyMapping KEY_FILL_STORAGE_SEARCH;
 
     private static volatile boolean registered;
 
@@ -99,6 +101,9 @@ public final class RSIKeyBindings {
         KEY_JEI_DROP = new KeyMapping(
                 "key.rsi.jei_drop", KeyConflictContext.GUI, KeyModifier.CONTROL,
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_Q, "key.categories.rsi");
+        KEY_FILL_STORAGE_SEARCH = new KeyMapping(
+                "key.rsi.fill_storage_search", KeyConflictContext.GUI,
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F, "key.categories.rsi");
 
         RSIntegrationMod.MOD_BUS.addListener(
                 (RegisterKeyMappingsEvent e) -> {
@@ -111,6 +116,7 @@ public final class RSIKeyBindings {
                     e.register(KEY_JEI_GIVE_ONE);
                     e.register(KEY_JEI_GIVE_STACK);
                     e.register(KEY_JEI_DROP);
+                    e.register(KEY_FILL_STORAGE_SEARCH);
                 });
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onKeyInput);
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onMouseInput);
