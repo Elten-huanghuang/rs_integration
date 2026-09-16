@@ -11,6 +11,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
@@ -410,6 +411,17 @@ public final class ContainerTransferClient {
         if (!KEY_STORE_ALL.isActiveAndMatches(
                 InputConstants.getKey(event.getKeyCode(), event.getScanCode())))
             return;
+
+        // Vanilla uses the same key to swap the hovered stack with the
+        // offhand.  A deliberate slot interaction takes precedence over the
+        // bulk-transfer shortcut.
+        Slot hovered = ((AbstractContainerScreen<?>) screen).getSlotUnderMouse();
+        if (hovered != null && hovered.isActive() && hovered.hasItem()) return;
+
+        // Ender-chest contents are intentionally kept separate from bulk
+        // storage targets.  Leave F inert when no stack is hovered.
+        if (ContainerTransferLogic.isEnderChestMenu(
+                ((AbstractContainerScreen<?>) screen).getMenu())) return;
 
         // Don't steal input when a text field is focused —
         // walk the entire widget tree because mods like Sophisticated
