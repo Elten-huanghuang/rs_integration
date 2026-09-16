@@ -26,8 +26,52 @@ public final class TaczRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("tacz"); }
 
     @Override
+    public boolean supportsIntermediateProjection(Recipe<?> recipe) {
+        // TACZ validates the bound workbench during execution; material inputs
+        // and the initialized output are still safe to expose to the graph.
+        return true;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess registryAccess) {
         Class<?> clazz = recipe.getClass();
+
+        // GunSmithTableRecipe exposes the initialized result through getOutput;
+        // this is more reliable for generated gun/ammo/attachment recipes than
+        // the deprecated Recipe#getResultItem overload.
+        try {
+            Method m = clazz.getMethod("getOutput");
+            Object value = m.invoke(recipe);
+            if (value instanceof ItemStack result && !result.isEmpty()) return result.copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] TACZ getOutput probe failed", e);
+        }
+        // Older/generated TACZ recipes expose the result wrapper instead of a
+        // directly initialized ItemStack. Unwrap it before falling back to the
+        // generic Recipe API.
+        try {
+            Method getResult = clazz.getMethod("getResult");
+            Object wrapper = getResult.invoke(recipe);
+            if (wrapper != null) {
+                Method nested = wrapper.getClass().getMethod("getResult");
+                Object value = nested.invoke(wrapper);
+                if (value instanceof ItemStack result && !result.isEmpty()) return result.copy();
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] TACZ result-wrapper probe failed", e);
+        }
+        // Resource-generated recipes can reach the catalog before TACZ has run
+        // its result-wrapper initialization hook.  Initialize once and retry
+        // the canonical output accessors; init() is idempotent in TACZ.
+        try {
+            Method init = clazz.getMethod("init");
+            init.invoke(recipe);
+            Method getOutput = clazz.getMethod("getOutput");
+            Object value = getOutput.invoke(recipe);
+            if (value instanceof ItemStack result && !result.isEmpty()) return result.copy();
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] TACZ init/output probe failed", e);
+        }
 
         // 1. Standard 1.20+ RegistryAccess overload
         try {

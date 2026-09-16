@@ -92,6 +92,19 @@ public final class JeiNetworkItemCache {
         return entry == null ? 0L : entry.amount;
     }
 
+    /**
+     * Amount used by the JEI overlay. JEI commonly renders a tagless
+     * representative while a backend exposes tagged display variants.
+     */
+    public synchronized long amountForDisplay(ItemStack stack) {
+        long exact = amount(stack);
+        if (exact > 0L || stack == null || stack.isEmpty()
+                || (stack.getTag() != null && !stack.getTag().isEmpty())) {
+            return exact;
+        }
+        return amount(stack.getItem());
+    }
+
     /** Sum every stored NBT variant for a plan material that matches by item type. */
     public synchronized long amount(Item item) {
         long total = 0L;

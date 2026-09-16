@@ -105,6 +105,14 @@ public interface ModRecipeHandler {
     }
 
     /**
+     * Allows a value-only recipe into the recursive dependency graph even when
+     * its mod type still requires the legacy flat executor at runtime.
+     */
+    default boolean supportsIntermediateProjection(@Nonnull Recipe<?> recipe) {
+        return false;
+    }
+
+    /**
      * Whether the JEI stack clicked by the player selects a concrete output
      * variant that cannot be recovered from the recipe's declared result alone.
      */

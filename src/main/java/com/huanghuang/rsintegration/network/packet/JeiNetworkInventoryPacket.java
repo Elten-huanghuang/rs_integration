@@ -116,6 +116,9 @@ public final class JeiNetworkInventoryPacket {
     public static String key(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "";
         var id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        return id + "|" + (stack.getTag() == null ? "" : stack.getTag().toString());
+        // Backends may return an explicitly-created empty CompoundTag while JEI's
+        // ingredient stack has no tag at all. They are the same display variant.
+        var tag = stack.getTag();
+        return id + "|" + (tag == null || tag.isEmpty() ? "" : tag.toString());
     }
 }
