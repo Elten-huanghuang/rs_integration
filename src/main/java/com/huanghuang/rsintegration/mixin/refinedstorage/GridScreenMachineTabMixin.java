@@ -24,6 +24,7 @@ import java.util.List;
 public abstract class GridScreenMachineTabMixin {
 
     private static final int BUTTON_SIZE = 18;
+    private static final int BUTTON_GAP = 2;
     private static final ResourceLocation MACHINE_CENTER_TEX =
             new ResourceLocation("rs_integration", "textures/gui/machine_center_sidebutton.png");
     private static final ResourceLocation MACHINE_CENTER_HOVER_TEX =
@@ -67,13 +68,13 @@ public abstract class GridScreenMachineTabMixin {
         var screen = (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;
         int topPos = screen.getGuiTop();
 
-        int sideButtonBottom = 0;
+        int sideButtonBottom = 4;
         try {
             var base = (com.refinedmods.refinedstorage.screen.BaseScreen<?>) (Object) this;
             var sbs = base.getSideButtons();
-            if (!sbs.isEmpty()) {
-                var last = sbs.get(sbs.size() - 1);
-                sideButtonBottom = (last.getY() - topPos) + last.getHeight();
+            for (var sideButton : sbs) {
+                sideButtonBottom = Math.max(sideButtonBottom,
+                        (sideButton.getY() - topPos) + sideButton.getHeight());
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-RS-Mixin] side button layout probe failed", e);
@@ -81,7 +82,7 @@ public abstract class GridScreenMachineTabMixin {
 
         // ── Machine Center button ──
         rsi$machineCenterRelX = -BUTTON_SIZE - 2;
-        rsi$machineCenterRelY = sideButtonBottom + 4;
+        rsi$machineCenterRelY = sideButtonBottom + BUTTON_GAP;
 
         rsi$machineCenterHovered = mouseX >= rsi$machineCenterRelX
                 && mouseX < rsi$machineCenterRelX + BUTTON_SIZE
@@ -110,7 +111,7 @@ public abstract class GridScreenMachineTabMixin {
         if (!RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) return;
 
         rsi$resonanceBackpackRelX = -BUTTON_SIZE - 2;
-        rsi$resonanceBackpackRelY = rsi$machineCenterRelY + BUTTON_SIZE + 2;
+        rsi$resonanceBackpackRelY = rsi$machineCenterRelY + BUTTON_SIZE + BUTTON_GAP;
 
         rsi$resonanceBackpackHovered = mouseX >= rsi$resonanceBackpackRelX
                 && mouseX < rsi$resonanceBackpackRelX + BUTTON_SIZE
