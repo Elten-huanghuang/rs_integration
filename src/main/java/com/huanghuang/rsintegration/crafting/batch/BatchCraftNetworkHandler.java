@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
+import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmPacket;
 import com.huanghuang.rsintegration.util.ModIds;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
@@ -72,6 +73,9 @@ public final class BatchCraftNetworkHandler {
                     QuestMissingBookmarkPacket::decode,
                     QuestMissingBookmarkPacket::handle,
                     java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+            ch.registerMessage(NetworkPacketIds.FTB_QUEST_CONFIRM_CHECKMARKS, CheckmarkConfirmPacket.class,
+                    CheckmarkConfirmPacket::encode, CheckmarkConfirmPacket::decode, CheckmarkConfirmPacket::handle,
+                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         }
         registered = true;
     }

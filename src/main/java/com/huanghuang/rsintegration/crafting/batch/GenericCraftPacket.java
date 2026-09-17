@@ -1143,7 +1143,7 @@ public final class GenericCraftPacket {
                                     machineSelectionMode, storageReference, Map.of());
                             return;
                         }
-                        String key = missingTouchesBlockedOutput(
+                        String key = allMissingRequireBlockedOutput(
                                 result.missing(), snapshot.bindingBlockedOutputIds())
                                 ? "rsi.plan.failure.no_bound_machine"
                                 : purePlanningFailureKey(result, snapshot.availableItems());
@@ -1286,7 +1286,7 @@ public final class GenericCraftPacket {
                                     machineSelectionMode, storageReference, materialLocks);
                             return;
                         }
-                        String key = missingTouchesBlockedOutput(
+                        String key = allMissingRequireBlockedOutput(
                                 result.missing(), snapshot.bindingBlockedOutputIds())
                                 ? "rsi.plan.failure.no_bound_machine"
                                 : purePlanningFailureKey(result, snapshot.availableItems());
@@ -4223,15 +4223,10 @@ public final class GenericCraftPacket {
                     recipeId, precomputedPlan.status(), precomputedPlan.feasibility(),
                     summarizePureDemands(precomputedPlan.missing()), precomputedPlan.expandedStates(),
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
-            if (precomputedPlan.missing().isEmpty()) {
-                sink.error(Component.translatable(
-                        precomputedPlan.status() == PureRecipePlanner.Status.TIME_LIMIT
-                                ? "rsi.plan.failure.planning_timeout"
-                                : "rsi.plan.failure.complexity_limit"));
-            } else {
-                sink.error(Component.translatable("rsi.generic.error.missing_materials",
-                        formatPureMissingMaterials(precomputedPlan.missing())));
-            }
+            // UNKNOWN means the planner did not prove feasibility. Its
+            // diagnostic trace is not an authoritative shortage report.
+            sink.error(Component.translatable(
+                    boundedPreviewFailureKey(precomputedPlan)));
             return;
         }
         boolean requiresTypedCatalystRoute = requiresTypedCatalystRoute(
@@ -4243,9 +4238,9 @@ public final class GenericCraftPacket {
                 && !requiresTypedCatalystRoute
                 && !requiresTypedIncompleteRoute;
         if (requiresTypedIncompleteRoute) {
-            RSIntegrationMod.LOGGER.info(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-plan] retrying typed preview after incomplete pure plan recipe={} missing={}",
-                    recipeId, precomputedPlan.missing());
+                    recipeId, summarizePureDemands(precomputedPlan.missing()));
         }
         boolean needsTypedResolver = !selectedPureResolver;
         if (needsTypedResolver && !typedResolverAvailable) {
@@ -4334,18 +4329,21 @@ public final class GenericCraftPacket {
         } else if (selectedPureResolver) {
             if (timedOutMissingRoute) {
                 if (precomputedPlan.missing().isEmpty()) {
-                    missing.add(demandTree.unresolved().itemId().toString());
+                    missing.add(CraftPacketUtils.missingMaterialKey(
+                            demandTree.unresolved().itemId()));
                 } else {
                     for (var unresolved : precomputedPlan.missing()) {
                         if (!unresolved.alternatives().isEmpty()) {
-                            missing.add(unresolved.alternatives().get(0).itemId().toString());
+                            missing.add(CraftPacketUtils.missingMaterialKey(
+                                    unresolved.alternatives().get(0).itemId()));
                         }
                     }
                 }
             } else {
                 for (var unresolved : precomputedPlan.missing()) {
                     if (!unresolved.alternatives().isEmpty()) {
-                        missing.add(unresolved.alternatives().get(0).itemId().toString());
+                        missing.add(CraftPacketUtils.missingMaterialKey(
+                                unresolved.alternatives().get(0).itemId()));
                     }
                 }
             }
@@ -4376,15 +4374,40 @@ public final class GenericCraftPacket {
                         directTerminalPlan, demandTree.status(), demandTree.unresolved(),
                         demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
                         planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty());
-                if (missing.isEmpty()) {
-                    sink.error(Component.translatable(
-                            "rsi.plan.failure.dynamic_plan_unavailable"));
+                // A typed retry can time out after the immutable planner has already
+                // produced a bounded dependency trace. Keep that trace as an
+                // explicitly infeasible preview so the player can inspect and open
+                // recursive sub-recipes instead of losing the whole screen to a
+                // transient 500 ms resolver deadline. This path never authorizes
+                // execution: the response remains infeasible and retains its
+                // shortage/machine warnings below.
+                if (canFallbackToBoundedPlanAfterTypedTimeout(
+                        precomputedPlan, demandTree, directTerminalPlan)) {
+                    if (missing.isEmpty()) {
+                        for (var unresolved : precomputedPlan.missing()) {
+                            if (!unresolved.alternatives().isEmpty()) {
+                                missing.add(CraftPacketUtils.missingMaterialKey(
+                                        unresolved.alternatives().get(0).itemId()));
+                            }
+                        }
+                    }
+                    selectedTypedResolver = false;
+                    selectedPureResolver = true;
+                    usedPurePlan = true;
+                    resolutionSteps = PurePlanAdapter.toResolutionSteps(
+                            precomputedPlan, planningSnapshot.recipeGraph());
+                    planGraph = null;
                 } else {
-                    sink.error(Component.translatable(
-                            "rsi.generic.error.missing_materials",
-                            CraftPacketUtils.formatMissingSummary(missing)));
+                    if (missing.isEmpty()) {
+                        sink.error(Component.translatable(
+                                "rsi.plan.failure.dynamic_plan_unavailable"));
+                    } else {
+                        sink.error(Component.translatable(
+                                "rsi.generic.error.missing_materials",
+                                CraftPacketUtils.formatMissingSummary(missing)));
+                    }
+                    return;
                 }
-                return;
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-plan] Typed resolver failed for {}", recipeId, failure);
@@ -4393,17 +4416,20 @@ public final class GenericCraftPacket {
             } finally {
                 PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);
             }
-            Map<NodeId,
-                    CraftNode> graphNodes = planGraph.nodesById();
-            resolutionSteps = planGraph.topologicalOrder().stream()
-                    .map(graphNodes::get)
-                    .filter(Objects::nonNull)
-                    .map(node -> new ResolutionStep(node.recipeId(), ModType.byId(node.modTypeId()),
-                            node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
-                            node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()))
-                    .toList();
+            if (planGraph != null) {
+                Map<NodeId,
+                        CraftNode> graphNodes = planGraph.nodesById();
+                resolutionSteps = planGraph.topologicalOrder().stream()
+                        .map(graphNodes::get)
+                        .filter(Objects::nonNull)
+                        .map(node -> new ResolutionStep(node.recipeId(), ModType.byId(node.modTypeId()),
+                                node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
+                                node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput()))
+                        .toList();
+            }
         }
-        boolean usedTypedResolver = resolutionSteps != null && !resolutionSteps.isEmpty();
+        boolean usedTypedResolver = selectedTypedResolver
+                && resolutionSteps != null && !resolutionSteps.isEmpty();
 
         // ── OR debug: log resolution results ──
         RSIntegrationMod.debug("[RSI-OR] tryBuildPlan recipe={} typedResolver={} steps={} alts={}",
@@ -5173,7 +5199,7 @@ public final class GenericCraftPacket {
         if (!feasible) {
             boolean nbtMismatch = hasNbtMismatch(materials, itemAvailable);
             boolean bindingBlocked = precomputedPlan != null
-                    && missingTouchesBlockedOutput(precomputedPlan.missing(),
+                    && allMissingRequireBlockedOutput(precomputedPlan.missing(),
                     planningSnapshot.bindingBlockedOutputIds());
             if (allExecutionMachinesLeased) {
                 modWarnings.add(Component.translatable(
@@ -5389,15 +5415,10 @@ public final class GenericCraftPacket {
                 : "rsi.plan.failure.missing_materials";
     }
 
-    private static List<String> formatPureMissingMaterials(
-            List<ImmutableRecipeGraph.IngredientRef> missing) {
-        List<String> result = new ArrayList<>();
-        for (ImmutableRecipeGraph.IngredientRef demand : missing) {
-            if (demand == null || demand.alternatives().isEmpty()) continue;
-            String item = demand.alternatives().get(0).itemId().toString();
-            result.add(item + " x" + demand.count());
-        }
-        return result;
+    static String boundedPreviewFailureKey(PureRecipePlanner.Result result) {
+        return result.status() == PureRecipePlanner.Status.TIME_LIMIT
+                ? "rsi.plan.failure.planning_timeout"
+                : "rsi.plan.failure.complexity_limit";
     }
 
     static String summarizePureDemands(
@@ -5435,12 +5456,23 @@ public final class GenericCraftPacket {
                 blockedOutputIds.contains(material.itemId())));
     }
 
+    static boolean allMissingRequireBlockedOutput(
+            List<ImmutableRecipeGraph.IngredientRef> missing,
+            Set<ResourceLocation> blockedOutputIds) {
+        if (missing == null || missing.isEmpty() || blockedOutputIds == null
+                || blockedOutputIds.isEmpty()) return false;
+        return missing.stream().allMatch(demand -> demand != null
+                && !demand.alternatives().isEmpty()
+                && demand.alternatives().stream().allMatch(material ->
+                blockedOutputIds.contains(material.itemId())));
+    }
+
     static boolean shouldRetryTypedPlanning(
             PureRecipePlanner.Result result,
             Set<ResourceLocation> blockedOutputIds) {
         return result != null
                 && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
-                && missingTouchesBlockedOutput(result.missing(), blockedOutputIds);
+                && allMissingRequireBlockedOutput(result.missing(), blockedOutputIds);
     }
 
     static boolean requiresTypedCatalystRoute(
@@ -5737,6 +5769,17 @@ public final class GenericCraftPacket {
                 && plan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
                 && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS
                 && demandTree.unresolved() != null;
+    }
+
+    static boolean canFallbackToBoundedPlanAfterTypedTimeout(
+            @Nullable PureRecipePlanner.Result plan,
+            PureDemandTreeInspector.Result demandTree,
+            boolean directTerminalPlan) {
+        return !directTerminalPlan
+                && plan != null
+                && !plan.missing().isEmpty()
+                && demandTree != null
+                && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS;
     }
 
     /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */

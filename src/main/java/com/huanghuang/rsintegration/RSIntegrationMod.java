@@ -272,6 +272,10 @@ public final class RSIntegrationMod {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge.class);
+        if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+            MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmService.class);
+        }
     }
 
     private static void migrateServerConfig(ModConfig config) {

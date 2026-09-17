@@ -3,7 +3,9 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -230,6 +233,89 @@ class PlanMaterialBillTest extends BootstrapTest {
         IngredientKey chargedKey = IngredientKey.of(charged);
         assertFalse(result.feasible());
         assertEquals(new PlanResponse.Availability(2, 1), result.materials().get(chargedKey));
+    }
+
+    @Test
+    void graphKeepsDifferentEnchantedBooksSeparateInBillAndTree() {
+        ItemStack protection = taggedBook("protection");
+        ItemStack mending = taggedBook("mending");
+        ItemStack infinity = taggedBook("infinity");
+        ItemStack unbreaking = taggedBook("unbreaking");
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        ResourceLocation recipe = new ResourceLocation("test", "eternium");
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+
+        List<ItemStack> books = List.of(protection, mending, infinity, unbreaking);
+        List<PlanGraphView.InputView> inputs = new java.util.ArrayList<>();
+        List<PlanGraphView.EdgeView> edges = new java.util.ArrayList<>();
+        for (int i = 0; i < books.size(); i++) {
+            inputs.add(new PlanGraphView.InputView(i, books.get(i), 1,
+                    DemandRole.CONSUMED.ordinal()));
+            edges.add(new PlanGraphView.EdgeView(1, i, initial, books.get(i), 1));
+        }
+        PlanGraphView.NodeView terminal = new PlanGraphView.NodeView(1, recipe, "generic", 1,
+                target, inputs, List.of(new PlanGraphView.OutputView(0, target, 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(terminal), edges,
+                List.of(new PlanGraphView.RootView(target, 1, 0, List.of(
+                        new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 1, 0), target, 1)))),
+                List.of(), List.of(1));
+
+        Map<StackKey, Integer> availableStacks = Map.of(
+                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1,
+                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1);
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(Items.ENCHANTED_BOOK, 4),
+                Map.of(Items.ENCHANTED_BOOK, StrictNBTIngredient.of(protection)),
+                Map.of(Items.ENCHANTED_BOOK, 2), availableStacks,
+                target, List.of(), 1, graph, false);
+
+        long distinctBookEntries = result.materials().keySet().stream()
+                .filter(key -> key.item() == Items.ENCHANTED_BOOK).count();
+        assertEquals(4, distinctBookEntries);
+        assertEquals(1, result.materials().get(IngredientKey.of(protection)).missingCount());
+        assertEquals(0, result.materials().get(IngredientKey.of(mending)).missingCount());
+        assertEquals(1, result.materials().get(IngredientKey.of(infinity)).missingCount());
+        assertEquals(0, result.materials().get(IngredientKey.of(unbreaking)).missingCount());
+
+        PlanResponse plan = new PlanResponse(true, "root", target, List.of(), result.materials(),
+                List.of(), recipe.toString(), null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0, false, false, false, null, Set.of(),
+                Map.of(), null, graph);
+        PlanTreeModel model = PlanTreeModel.from(plan);
+        assertEquals(4, model.root.children.get(0).children.size());
+    }
+
+    @Test
+    void legacyPlanFallbackAlsoKeepsStrictBookVariantsSeparate() {
+        ItemStack protection = taggedBook("protection");
+        ItemStack mending = taggedBook("mending");
+        ItemStack infinity = taggedBook("infinity");
+        ItemStack unbreaking = taggedBook("unbreaking");
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1,
+                List.of(protection, mending, infinity, unbreaking));
+        Map<StackKey, Integer> availableStacks = Map.of(
+                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1,
+                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1);
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(Items.ENCHANTED_BOOK, 4),
+                Map.of(Items.ENCHANTED_BOOK, StrictNBTIngredient.of(protection)),
+                Map.of(Items.ENCHANTED_BOOK, 2), availableStacks,
+                target, List.of(terminal), 1, null, false);
+
+        assertEquals(4, result.materials().keySet().stream()
+                .filter(key -> key.item() == Items.ENCHANTED_BOOK).count());
+        assertEquals(1, result.materials().get(IngredientKey.of(protection)).missingCount());
+        assertEquals(1, result.materials().get(IngredientKey.of(infinity)).missingCount());
+    }
+
+    private static ItemStack taggedBook(String name) {
+        ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
+        CompoundTag tag = book.getOrCreateTag();
+        tag.putString("TestEnchantment", name);
+        return book;
     }
 
     @Test

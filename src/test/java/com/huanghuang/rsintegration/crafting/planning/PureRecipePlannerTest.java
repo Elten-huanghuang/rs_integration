@@ -813,10 +813,13 @@ class PureRecipePlannerTest {
     void reachabilityIndexStopsAtTheSearchDeadline() {
         MaterialRef target = material("reachability_target");
         MaterialRef missing = material("reachability_missing");
-        RecipeNode producer = recipe("reachability_producer", target, 1,
-                ingredient(missing, 1));
+        List<RecipeNode> targetProducers = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            targetProducers.add(recipe("reachability_producer_" + index, target, 1,
+                    ingredient(missing, 1)));
+        }
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
-        recipes.put(target, List.of(producer));
+        recipes.put(target, targetProducers);
         for (int index = 0; index < 128; index++) {
             MaterialRef output = material("reachability_output_" + index);
             recipes.put(output, List.of(recipe("reachability_recipe_" + index,
@@ -832,6 +835,31 @@ class PureRecipePlannerTest {
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, result.feasibility());
         assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
+    }
+
+    @Test
+    void singleProducerDoesNotScanUnrelatedGraphBeforeResolvingItsMissingInput() {
+        MaterialRef target = material("focused_target");
+        MaterialRef missing = material("focused_missing");
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        recipes.put(target, List.of(recipe("focused_producer", target, 1,
+                ingredient(missing, 1))));
+        for (int index = 0; index < 128; index++) {
+            MaterialRef output = material("unrelated_output_" + index);
+            recipes.put(output, List.of(recipe("unrelated_recipe_" + index,
+                    output, 1, ingredient(material("unrelated_input_" + index), 1))));
+        }
+        AtomicLong clock = new AtomicLong();
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes), Map.of(),
+                List.of(ingredient(target, 1)), 20, 100, 100, 20L,
+                clock::incrementAndGet);
+
+        assertFalse(result.feasible());
+        assertEquals(PureRecipePlanner.Feasibility.INFEASIBLE, result.feasibility());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(List.of(ingredient(missing, 1)), result.missing());
     }
 
     @Test

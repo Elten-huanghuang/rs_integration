@@ -1,13 +1,15 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-class CraftPacketUtilsMissingMaterialNameTest {
+class CraftPacketUtilsMissingMaterialNameTest extends BootstrapTest {
 
     @Test
     void potionCharmTemplateSuppliesTheMissingPotionNameArgument() {
@@ -33,5 +35,13 @@ class CraftPacketUtilsMissingMaterialNameTest {
                 TranslatableContents.class, name.getContents());
         assertEquals("item.minecraft.iron_ingot", contents.getKey());
         assertEquals(0, contents.getArgs().length);
+    }
+
+    @Test
+    void plannerItemIdsBecomeClientTranslationKeys() {
+        assertEquals("item.minecraft.iron_ingot", CraftPacketUtils.missingMaterialKey(
+                new ResourceLocation("minecraft", "iron_ingot")));
+        assertEquals("missing_mod:unknown_item", CraftPacketUtils.missingMaterialKey(
+                new ResourceLocation("missing_mod", "unknown_item")));
     }
 }

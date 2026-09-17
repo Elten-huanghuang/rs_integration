@@ -22,6 +22,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
@@ -139,6 +140,13 @@ public final class CraftPacketUtils {
                     Component.translatable("item.minecraft.potion"));
         }
         return Component.translatable(descriptionId);
+    }
+
+    /** Converts a value-only planner material into the translation-key protocol used by missing lists. */
+    public static String missingMaterialKey(@Nonnull ResourceLocation itemId) {
+        return BuiltInRegistries.ITEM.getOptional(itemId)
+                .map(Item::getDescriptionId)
+                .orElse(itemId.toString());
     }
 
     /**
