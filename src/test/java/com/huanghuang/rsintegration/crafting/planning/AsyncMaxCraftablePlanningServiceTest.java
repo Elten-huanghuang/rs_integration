@@ -88,7 +88,7 @@ class AsyncMaxCraftablePlanningServiceTest {
             assertTrue(actual.determined());
             assertEquals(20, actual.maximum());
             var stats = PlanningLookupCache.preparationStats(PlanningLookupCache.PreparationStage.SMITHING);
-            assertEquals(2, stats.builds());
+            assertEquals(1, stats.builds());
             assertTrue(stats.hits() > 1);
             System.out.printf("[RSI-max-preparation] maximum=%d smithingBuilds=%d reused=%d%n",
                     actual.maximum(), stats.builds(), stats.hits());

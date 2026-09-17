@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -867,6 +868,56 @@ class GenericCraftPacketTest extends BootstrapTest {
 
         assertFalse(filtered.graph().recipesByOutput().containsKey(output));
         assertTrue(filtered.blockedOutputIds().isEmpty());
+    }
+
+    @Test
+    void combinedRecipeFilterEvaluatesMachineStateOnlyAfterRuntimeState() {
+        var output = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "diamond"), "");
+        var input = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "coal"), "")), 1);
+        var runtimeRejected = new ImmutableRecipeGraph.RecipeNode(
+                new ResourceLocation("test", "runtime_rejected"), output, 1, List.of(input));
+        var usable = new ImmutableRecipeGraph.RecipeNode(
+                new ResourceLocation("test", "usable"), output, 1, List.of(input));
+        AtomicInteger runtimeChecks = new AtomicInteger();
+        AtomicInteger machineChecks = new AtomicInteger();
+
+        var filtered = GenericCraftPacket.filterRecipeGraph(
+                new ImmutableRecipeGraph(Map.of(output, List.of(runtimeRejected, usable))),
+                node -> {
+                    runtimeChecks.incrementAndGet();
+                    return node != runtimeRejected;
+                }, node -> {
+                    machineChecks.incrementAndGet();
+                    return true;
+                });
+
+        assertEquals(2, runtimeChecks.get());
+        assertEquals(1, machineChecks.get());
+        assertEquals(List.of(usable), filtered.graph().recipesByOutput().get(output));
+        assertTrue(filtered.blockedOutputIds().isEmpty());
+    }
+
+    @Test
+    void boundedPlannerLogSummaryDoesNotSerializeNbtAlternatives() {
+        var item = new ResourceLocation("minecraft", "iron_chestplate");
+        List<ImmutableRecipeGraph.MaterialRef> alternatives = new java.util.ArrayList<>();
+        for (int index = 0; index < 100; index++) {
+            alternatives.add(new ImmutableRecipeGraph.MaterialRef(item,
+                    "{display:{Name:\"variant-" + index + "\"}}"));
+        }
+        var demand = new ImmutableRecipeGraph.IngredientRef(alternatives, 7,
+                ImmutableRecipeGraph.NbtMatchMode.ANY);
+
+        String summary = GenericCraftPacket.summarizePureDemands(List.of(demand));
+
+        assertTrue(summary.contains("minecraft:iron_chestplate"));
+        assertTrue(summary.contains("count=7"));
+        assertTrue(summary.contains("alternatives=100"));
+        assertFalse(summary.contains("variant-"));
+        assertTrue(summary.length() < 256);
     }
 
     @Test

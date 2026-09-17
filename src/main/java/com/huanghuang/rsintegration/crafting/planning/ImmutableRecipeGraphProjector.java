@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 
 /** Immutable pure-planning projection published with the matching recipe index generation. */
 public final class ImmutableRecipeGraphProjector {
@@ -71,6 +72,7 @@ public final class ImmutableRecipeGraphProjector {
                                                      long buildNanos) {
         cachedProjection = new CachedProjection(source, revision, graph);
         compiledIndexes = CompiledIndexes.build(graph);
+        PlanningLookupCache.replaceSharedNbtCache(graph);
         PerformanceMonitor.recordRecipeGraphProjection(false, buildNanos);
     }
 
@@ -79,8 +81,9 @@ public final class ImmutableRecipeGraphProjector {
     static List<RecipeNode> publishedProducers(ImmutableRecipeGraph graph,
                                                ResourceLocation itemId) {
         CompiledIndexes indexes = compiledIndexes;
-        return indexes != null && indexes.graph() == graph
-                ? indexes.producers().getOrDefault(itemId, List.of()) : null;
+        GraphIndexes graphIndexes = indexes == null ? null : indexes.forGraph(graph);
+        return graphIndexes == null ? null
+                : graphIndexes.producers().getOrDefault(itemId, List.of());
     }
 
     /** Returns the generation-level output-variant index, or null for an uncompiled test graph. */
@@ -88,8 +91,9 @@ public final class ImmutableRecipeGraphProjector {
     static List<MaterialRef> publishedOutputVariants(ImmutableRecipeGraph graph,
                                                      ResourceLocation itemId) {
         CompiledIndexes indexes = compiledIndexes;
-        return indexes != null && indexes.graph() == graph
-                ? indexes.outputs().getOrDefault(itemId, List.of()) : null;
+        GraphIndexes graphIndexes = indexes == null ? null : indexes.forGraph(graph);
+        return graphIndexes == null ? null
+                : graphIndexes.outputs().getOrDefault(itemId, List.of());
     }
 
     /** Captures one ordinary crafting recipe without invoking generic reflective extraction. */
@@ -135,12 +139,24 @@ public final class ImmutableRecipeGraphProjector {
     public static synchronized void clearCache() {
         cachedProjection = null;
         compiledIndexes = null;
+        PlanningLookupCache.clearSharedNbtCache();
     }
 
-    private record CompiledIndexes(ImmutableRecipeGraph graph,
-                                   Map<ResourceLocation, List<RecipeNode>> producers,
-                                   Map<ResourceLocation, List<MaterialRef>> outputs) {
+    private record CompiledIndexes(ImmutableRecipeGraph graph, GraphIndexes root,
+                                   DependencyGraphCache dependencies) {
         private static CompiledIndexes build(ImmutableRecipeGraph graph) {
+            GraphIndexes root = GraphIndexes.build(graph);
+            return new CompiledIndexes(graph, root, new DependencyGraphCache(graph, root));
+        }
+
+        private GraphIndexes forGraph(ImmutableRecipeGraph candidate) {
+            return candidate == graph ? root : dependencies.indexesFor(candidate);
+        }
+    }
+
+    private record GraphIndexes(Map<ResourceLocation, List<RecipeNode>> producers,
+                                Map<ResourceLocation, List<MaterialRef>> outputs) {
+        private static GraphIndexes build(ImmutableRecipeGraph graph) {
             Map<ResourceLocation, List<RecipeNode>> producers = new HashMap<>();
             for (List<RecipeNode> nodes : graph.recipesByOutput().values()) {
                 for (RecipeNode node : nodes) {
@@ -155,9 +171,61 @@ public final class ImmutableRecipeGraphProjector {
                 outputs.computeIfAbsent(output.itemId(), ignored -> new ArrayList<>()).add(output);
             }
             outputs.replaceAll((ignored, variants) -> List.copyOf(variants));
-            return new CompiledIndexes(graph, Map.copyOf(producers), Map.copyOf(outputs));
+            return new GraphIndexes(Map.copyOf(producers), Map.copyOf(outputs));
         }
     }
+
+    /** Small generation-scoped LRU. Entries contain only immutable graph values and indexes. */
+    private static final class DependencyGraphCache {
+        private static final int MAX_ENTRIES = 32;
+
+        private final ImmutableRecipeGraph rootGraph;
+        private final GraphIndexes rootIndexes;
+        private final LinkedHashMap<ResourceLocation, DependencyEntry> entries =
+                new LinkedHashMap<>(16, 0.75f, true);
+        private volatile Map<ImmutableRecipeGraph, GraphIndexes> indexesByGraph =
+                new IdentityHashMap<>();
+
+        private DependencyGraphCache(ImmutableRecipeGraph rootGraph, GraphIndexes rootIndexes) {
+            this.rootGraph = rootGraph;
+            this.rootIndexes = rootIndexes;
+        }
+
+        private ImmutableRecipeGraph getOrBuild(
+                ResourceLocation recipeId,
+                java.util.function.Supplier<ImmutableRecipeGraph> builder) {
+            synchronized (this) {
+                DependencyEntry cached = entries.get(recipeId);
+                if (cached != null) return cached.graph();
+            }
+
+            ImmutableRecipeGraph graph = builder.get();
+            GraphIndexes indexes = graph == rootGraph ? rootIndexes : GraphIndexes.build(graph);
+            synchronized (this) {
+                DependencyEntry concurrent = entries.get(recipeId);
+                if (concurrent != null) return concurrent.graph();
+                entries.put(recipeId, new DependencyEntry(graph, indexes));
+                if (entries.size() > MAX_ENTRIES) {
+                    var eldest = entries.entrySet().iterator();
+                    eldest.next();
+                    eldest.remove();
+                }
+                IdentityHashMap<ImmutableRecipeGraph, GraphIndexes> snapshot =
+                        new IdentityHashMap<>();
+                for (DependencyEntry entry : entries.values()) {
+                    snapshot.put(entry.graph(), entry.indexes());
+                }
+                indexesByGraph = snapshot;
+                return graph;
+            }
+        }
+
+        private GraphIndexes indexesFor(ImmutableRecipeGraph graph) {
+            return indexesByGraph.get(graph);
+        }
+    }
+
+    private record DependencyEntry(ImmutableRecipeGraph graph, GraphIndexes indexes) {}
 
     public static Map<MaterialRef, Integer> projectAvailability(Map<StackKey, Integer> available) {
         Map<MaterialRef, Integer> projected = new java.util.HashMap<>();
@@ -188,8 +256,18 @@ public final class ImmutableRecipeGraphProjector {
      * dependency closure. The catalog remains global, but planning no longer
      * prepares unrelated recipes from the whole modpack.
      */
-    static ImmutableRecipeGraph restrictToDependencies(ImmutableRecipeGraph graph,
-                                                       ResourceLocation targetRecipeId) {
+    public static ImmutableRecipeGraph restrictToDependencies(ImmutableRecipeGraph graph,
+                                                              ResourceLocation targetRecipeId) {
+        CompiledIndexes indexes = compiledIndexes;
+        if (indexes != null && indexes.graph() == graph) {
+            return indexes.dependencies().getOrBuild(targetRecipeId,
+                    () -> restrictToDependenciesUncached(graph, targetRecipeId));
+        }
+        return restrictToDependenciesUncached(graph, targetRecipeId);
+    }
+
+    private static ImmutableRecipeGraph restrictToDependenciesUncached(
+            ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
         RecipeNode target = graph.recipesById().get(targetRecipeId);
         if (target == null) return graph;
 
@@ -356,6 +434,14 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     static boolean matchesIngredient(MaterialRef actual, IngredientRef ingredient) {
+        Boolean cached = PlanningLookupCache.lookupIngredientMatch(actual, ingredient);
+        if (cached != null) return cached;
+        boolean result = matchesIngredientUncached(actual, ingredient);
+        PlanningLookupCache.recordIngredientMatch(actual, ingredient, result);
+        return result;
+    }
+
+    private static boolean matchesIngredientUncached(MaterialRef actual, IngredientRef ingredient) {
         for (MaterialRef expected : ingredient.alternatives()) {
             if (!actual.itemId().equals(expected.itemId())) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;

@@ -59,6 +59,25 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void anyNbtInputConsumesConcreteTaggedStockWithoutGraphBinding() {
+        MaterialRef target = material("tag_agnostic_result");
+        MaterialRef input = material("tag_agnostic_input");
+        MaterialRef enchanted = new MaterialRef(input.itemId(), "{Enchantments:[{lvl:1s}]}" );
+        IngredientRef anyInput = new IngredientRef(List.of(input), 1,
+                NbtMatchMode.ANY, DemandRole.CONSUMED);
+        RecipeNode recipe = recipe("consume_tagged_input", target, 1, anyInput);
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(target, List.of(recipe)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(enchanted, 1), List.of(ingredient(target, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(0, result.remaining().getOrDefault(enchanted, 0));
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("consume_tagged_input"), 1)), result.steps());
+    }
+
+    @Test
     void taggedWoodenSwordCanTraverseSmithingUpgradeChain() {
         MaterialRef woodenSword = material("wooden_sword");
         MaterialRef taggedWoodenSword = new MaterialRef(woodenSword.itemId(), "{Unbreakable:1b}");
@@ -791,20 +810,28 @@ class PureRecipePlannerTest {
     }
 
     @Test
-    void reachabilityIndexDoesNotConsumeSearchDeadline() {
+    void reachabilityIndexStopsAtTheSearchDeadline() {
         MaterialRef target = material("reachability_target");
         MaterialRef missing = material("reachability_missing");
         RecipeNode producer = recipe("reachability_producer", target, 1,
                 ingredient(missing, 1));
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        recipes.put(target, List.of(producer));
+        for (int index = 0; index < 128; index++) {
+            MaterialRef output = material("reachability_output_" + index);
+            recipes.put(output, List.of(recipe("reachability_recipe_" + index,
+                    output, 1, ingredient(material("reachability_input_" + index), 1))));
+        }
         AtomicLong clock = new AtomicLong();
 
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                new ImmutableRecipeGraph(Map.of(target, List.of(producer))), Map.of(),
-                List.of(ingredient(target, 1)), 20, 100, 100, 8L,
+                new ImmutableRecipeGraph(recipes), Map.of(),
+                List.of(ingredient(target, 1)), 20, 100, 100, 32L,
                 clock::incrementAndGet);
 
         assertFalse(result.feasible());
-        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, result.feasibility());
+        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, result.status());
     }
 
     @Test

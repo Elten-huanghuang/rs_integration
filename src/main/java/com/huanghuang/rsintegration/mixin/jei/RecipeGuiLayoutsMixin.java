@@ -1461,6 +1461,7 @@ public class RecipeGuiLayoutsMixin {
                     return;
                 }
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
+                rsi$showPlanRequestStarted();
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
@@ -1514,8 +1515,19 @@ public class RecipeGuiLayoutsMixin {
                     recipeId, dim, machinePos,
                     finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null",
                     finalTargetOutput != null ? finalTargetOutput.getHoverName().getString() : "null");
+            rsi$showPlanRequestStarted();
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
+    }
+
+    @Unique
+    private static void rsi$showPlanRequestStarted() {
+        var player = Minecraft.getInstance().player;
+        if (player != null) {
+            player.displayClientMessage(
+                    net.minecraft.network.chat.Component.translatable(
+                            "rsi.plan.info.background_started"), true);
+        }
     }
 
     /**

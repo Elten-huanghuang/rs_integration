@@ -63,6 +63,24 @@ class PlanningStateValidatorTest extends BootstrapTest {
         assertFalse(PlanningStateValidator.sameState(cached, current));
     }
 
+    @Test
+    void failedPreviewStateIgnoresOnlyUnrelatedItemTypes() {
+        Map<StackKey, Integer> previous = Map.of(
+                new StackKey(Items.COAL, null), 2,
+                new StackKey(Items.DIAMOND, null), 64);
+        Map<StackKey, Integer> unrelatedChange = Map.of(
+                new StackKey(Items.COAL, null), 2,
+                new StackKey(Items.EMERALD, null), 12);
+        Map<StackKey, Integer> relevantChange = Map.of(
+                new StackKey(Items.COAL, null), 1,
+                new StackKey(Items.DIAMOND, null), 64);
+
+        assertTrue(PlanningStateValidator.sameRelevantInventory(
+                previous, unrelatedChange, Set.of(Items.COAL)));
+        assertFalse(PlanningStateValidator.sameRelevantInventory(
+                previous, relevantChange, Set.of(Items.COAL)));
+    }
+
     private static PlanningSnapshot snapshot(Map<StackKey, Integer> available,
                                              String networkFingerprint) {
         return new PlanningSnapshot(UUID.fromString("00000000-0000-0000-0000-000000000001"),

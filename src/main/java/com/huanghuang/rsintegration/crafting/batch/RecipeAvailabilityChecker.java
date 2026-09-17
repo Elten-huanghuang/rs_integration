@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.availability.MaterialAvailability;
 import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
@@ -36,6 +37,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 /** Read-only item-material check using the same recipe catalog and allocation as crafting. */
 public final class RecipeAvailabilityChecker {
@@ -69,7 +72,13 @@ public final class RecipeAvailabilityChecker {
         Map<StackKey, Integer> available = new HashMap<>(MaterialSources.countInventory(player));
         if (endpoint != null) {
             if (!StorageRestockSupport.canExtract(endpoint, player)) return MaterialAvailability.UNKNOWN;
-            var snapshot = endpoint.snapshot(player);
+            // Availability checks only need variants whose item type can satisfy
+            // one of this recipe's ingredients. Unknown custom predicates keep
+            // the complete-snapshot fallback so compatibility is not weakened.
+            Set<Item> itemTypes = itemTypes(specs);
+            var snapshot = itemTypes == null
+                    ? endpoint.snapshot(player)
+                    : endpoint.snapshot(player, itemTypes);
             if (!snapshot.successful()) return MaterialAvailability.UNKNOWN;
             snapshot.snapshot().orElseThrow().items().forEach(item ->
                     add(available, item.stack(), item.amount()));
@@ -97,6 +106,18 @@ public final class RecipeAvailabilityChecker {
         var material = com.huanghuang.rsintegration.crafting.graph.MaterialKey.of(stack);
         items.merge(new StackKey(material.item(), material.tag()), (int) Math.min(Integer.MAX_VALUE, count),
                 (a, b) -> (int) Math.min(Integer.MAX_VALUE, (long) a + b));
+    }
+
+    @Nullable
+    private static Set<Item> itemTypes(List<IngredientSpec> specs) {
+        java.util.HashSet<Item> types = new java.util.HashSet<>();
+        for (IngredientSpec spec : specs) {
+            if (spec == null || spec.isEmpty()) continue;
+            Set<Item> candidates = IngredientMatcher.itemTypesForMatching(spec.ingredient());
+            if (candidates == null) return null;
+            types.addAll(candidates);
+        }
+        return Set.copyOf(types);
     }
 
     @Nullable

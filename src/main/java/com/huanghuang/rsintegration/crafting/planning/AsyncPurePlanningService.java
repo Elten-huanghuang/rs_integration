@@ -110,7 +110,7 @@ public final class AsyncPurePlanningService {
             PureRecipePlanner.Result plan = inspection.backgroundCompatible()
                     && !snapshot.mainThreadOnly() && snapshot.forcedRecipes().isEmpty()
                     ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
-                            maxMemoizedFailures, session) : null;
+                            maxMemoizedFailures, session, scopedGraph) : null;
             return new RoutedPlan(snapshot, routing, inspection, plan);
         });
     }
@@ -119,16 +119,27 @@ public final class AsyncPurePlanningService {
                                                             int maxSteps, int maxSearchStates,
                                                             int maxMemoizedFailures,
                                                             PlanningSession session) {
+        return computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
+                maxMemoizedFailures, session, null);
+    }
+
+    private static PureRecipePlanner.Result computeInScope(PlanningSnapshot snapshot, int repeatCount,
+                                                            int maxSteps, int maxSearchStates,
+                                                            int maxMemoizedFailures,
+                                                            PlanningSession session,
+                                                            ImmutableRecipeGraph routedGraph) {
         PlanningThreadContext.throwIfCancelled();
         session.phase(PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
         session.phase(PlanningSession.Phase.DEPENDENCY_PROJECTION);
-        ImmutableRecipeGraph scopedGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
-                snapshot.recipeGraph(), snapshot.recipeId());
-        session.phase(PlanningSession.Phase.INVENTORY_BINDING);
-        ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(
-                scopedGraph, stock);
+        ImmutableRecipeGraph scopedGraph = routedGraph != null ? routedGraph
+                : ImmutableRecipeGraphProjector.restrictToDependencies(
+                        snapshot.recipeGraph(), snapshot.recipeId());
+        // Inventory matching is performed lazily against the request-local stock buckets.
+        // Only smithing needs a derived graph because its output inherits the base NBT;
+        // PureRecipePlanner creates that single specialization layer.
+        ImmutableRecipeGraph planningGraph = scopedGraph;
         RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());

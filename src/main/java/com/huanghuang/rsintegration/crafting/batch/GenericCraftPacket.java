@@ -855,20 +855,50 @@ public final class GenericCraftPacket {
             ImmutableRecipeGraph graph,
             Predicate<ImmutableRecipeGraph.RecipeNode> runtimeAvailable,
             Predicate<ImmutableRecipeGraph.RecipeNode> machineAvailable) {
-        ImmutableRecipeGraph runtimeGraph = filterRecipeGraph(graph, runtimeAvailable).graph();
-        return filterRecipeGraph(runtimeGraph, machineAvailable);
+        Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> filtered =
+                new LinkedHashMap<>();
+        Set<ResourceLocation> blockedOutputs = new LinkedHashSet<>();
+        boolean[] changed = {false};
+        graph.recipesByOutput().forEach((output, candidates) -> {
+            List<ImmutableRecipeGraph.RecipeNode> runtimeCandidates = new ArrayList<>();
+            List<ImmutableRecipeGraph.RecipeNode> usable = new ArrayList<>();
+            for (ImmutableRecipeGraph.RecipeNode candidate : candidates) {
+                if (!runtimeAvailable.test(candidate)) continue;
+                runtimeCandidates.add(candidate);
+                if (machineAvailable.test(candidate)) usable.add(candidate);
+            }
+            if (!usable.isEmpty()) {
+                filtered.put(output, List.copyOf(usable));
+                if (usable.size() != candidates.size()) changed[0] = true;
+            } else if (!runtimeCandidates.isEmpty()) {
+                // Only a recipe that passed its non-machine prerequisites may
+                // contribute to the no-bound-machine diagnostic.
+                blockedOutputs.add(output.itemId());
+                changed[0] = true;
+            } else if (!candidates.isEmpty()) {
+                changed[0] = true;
+            }
+        });
+        if (!changed[0]) return new BindingAwareGraph(graph, Set.of());
+        return new BindingAwareGraph(new ImmutableRecipeGraph(filtered),
+                Set.copyOf(blockedOutputs));
     }
 
     private static BindingAwareGraph bindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
+        Map<ResourceLocation, Optional<Recipe<?>>> recipes = new HashMap<>();
+        java.util.function.Function<ResourceLocation, Recipe<?>> resolve = recipeId ->
+                recipes.computeIfAbsent(recipeId,
+                        id -> Optional.ofNullable(resolveRecipe(player.serverLevel(), id)))
+                        .orElse(null);
         return filterRecipeGraph(graph, node -> {
-            Recipe<?> recipe = resolveRecipe(player.serverLevel(), node.recipeId());
+            Recipe<?> recipe = resolve.apply(node.recipeId());
             if (recipe == null) return true;
             return isRecipeAvailableForPlanning(player, recipe);
         }, node -> {
             ModType type = ModType.byId(node.modTypeId());
             if (!requiresBoundMachine(type)) return true;
-            Recipe<?> recipe = resolveRecipe(player.serverLevel(), node.recipeId());
+            Recipe<?> recipe = resolve.apply(node.recipeId());
             if (recipe == null || !requiresBoundMachine(recipe, type)) return true;
             // Keep vanilla smithing nodes in the planning graph so recursive
             // previews can show the complete upgrade chain. Execution still
@@ -876,6 +906,12 @@ public final class GenericCraftPacket {
             if (isSmithingRecipe(recipe)) return true;
             return hasBindingForExecutionType(player, recipe, type);
         });
+    }
+
+    private static BindingAwareGraph scopedBindingAwareGraph(
+            ServerPlayer player, ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
+        return bindingAwareGraph(player,
+                ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId));
     }
 
     /**
@@ -1048,8 +1084,8 @@ public final class GenericCraftPacket {
 
         final BindingAwareGraph bindingGraph;
         try {
-            bindingGraph = bindingAwareGraph(player,
-                    ImmutableRecipeGraphProjector.capture(player.serverLevel()));
+            bindingGraph = scopedBindingAwareGraph(player,
+                    ImmutableRecipeGraphProjector.capture(player.serverLevel()), recipeId);
         } catch (RuntimeException unavailable) {
             RSIntegrationMod.debug("[RSI-exec] immutable graph unavailable for {}: {}",
                     recipeId, unavailable.toString());
@@ -1171,8 +1207,8 @@ public final class GenericCraftPacket {
 
         final BindingAwareGraph bindingGraph;
         try {
-            bindingGraph = bindingAwareGraph(player,
-                    ImmutableRecipeGraphProjector.capture(player.serverLevel()));
+            bindingGraph = scopedBindingAwareGraph(player,
+                    ImmutableRecipeGraphProjector.capture(player.serverLevel()), recipeId);
         } catch (RuntimeException unavailable) {
             RSIntegrationMod.debug("[RSI-exec] immutable graph unavailable for physical recipe {}: {}",
                     recipeId, unavailable.toString());
@@ -3955,6 +3991,16 @@ public final class GenericCraftPacket {
             return;
         }
 
+        PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
+        if (cached != null && cached.plan().success() && cached.plan().graph() != null
+                && PlanningStateValidator.revalidateForExecution(player, cached.snapshot(),
+                cached.plan(), planDimKey, planLookupPos, planStorageReference)) {
+            RSIntegrationMod.debug(
+                    "[RSI-tryBuildPlan] Relevant-state cache hit: recipeId={}", recipeId);
+            sink.success(cached.plan(), cached.snapshot());
+            return;
+        }
+
         Map<ResourceLocation, ResourceLocation> effectiveOverrides =
                 forcedOverrides == null ? Map.of() : forcedOverrides;
         Map<StackKey, Integer> available;
@@ -3962,9 +4008,7 @@ public final class GenericCraftPacket {
         if (precomputedSnapshot != null) {
             if (!matchesAsyncRequest(precomputedSnapshot, player.getUUID(), recipeId,
                     previewGeneration, effectiveOverrides)
-                    || (!reuseValidatedSnapshot && !PlanningStateValidator.revalidate(
-                    player, precomputedSnapshot, planDimKey, planLookupPos, PLAN_REQUESTS,
-                    planStorageReference))) {
+                    || !isSnapshotActive(player, precomputedSnapshot, previewGeneration)) {
                 RSIntegrationMod.debug("[RSI-plan] Discarding stale async result before assembly: recipeId={}",
                         recipeId);
                 return;
@@ -3980,8 +4024,8 @@ public final class GenericCraftPacket {
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 BindingAwareGraph bindingGraph = recipe instanceof CraftingRecipe
                         || backgroundProjectable
-                        ? bindingAwareGraph(player,
-                                ImmutableRecipeGraphProjector.capture(player.serverLevel()))
+                        ? scopedBindingAwareGraph(player,
+                                ImmutableRecipeGraphProjector.capture(player.serverLevel()), recipeId)
                         : new BindingAwareGraph(new ImmutableRecipeGraph(Map.of()), Set.of());
                 planningSnapshot = PlanningSnapshotFactory.capture(
                         player.getUUID(), previewGeneration, recipeId, available,
@@ -4019,9 +4063,10 @@ public final class GenericCraftPacket {
 
         final ItemStack planTargetOutput = smithingOutput;
 
-        PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
-        if (cached != null && PlanningStateValidator.sameState(
-                cached.snapshot(), planningSnapshot)) {
+        if (cached != null && (PlanningStateValidator.sameState(
+                cached.snapshot(), planningSnapshot)
+                || cached.plan().graph() != null && PlanningStateValidator.sameRelevantState(
+                cached.snapshot(), planningSnapshot, cached.plan()))) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
             sink.success(cached.plan(), planningSnapshot);
             return;
@@ -4176,7 +4221,7 @@ public final class GenericCraftPacket {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-plan] bounded planner result recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservation=false",
                     recipeId, precomputedPlan.status(), precomputedPlan.feasibility(),
-                    precomputedPlan.missing(), precomputedPlan.expandedStates(),
+                    summarizePureDemands(precomputedPlan.missing()), precomputedPlan.expandedStates(),
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
             if (precomputedPlan.missing().isEmpty()) {
                 sink.error(Component.translatable(
@@ -5276,9 +5321,7 @@ public final class GenericCraftPacket {
         boolean responseFeasible = feasible;
         CraftPlanGraph resolvedGraphForCache = planGraph;
         PLAN_REQUESTS.submitResponse(planningSnapshot, responseDraft, player.getServer()::execute,
-                current -> reuseValidatedSnapshot
-                        ? isSnapshotActive(player, current, previewGeneration)
-                        : PlanningStateValidator.revalidate(player, current,
+                current -> PlanningStateValidator.revalidatePreview(player, current, responseDraft,
                         planDimKey, planLookupPos, PLAN_REQUESTS, planStorageReference),
                 plan -> {
                     if (previewGeneration != 0L
@@ -5355,6 +5398,31 @@ public final class GenericCraftPacket {
             result.add(item + " x" + demand.count());
         }
         return result;
+    }
+
+    static String summarizePureDemands(
+            List<ImmutableRecipeGraph.IngredientRef> demands) {
+        if (demands == null || demands.isEmpty()) return "[]";
+        final int maxDemands = 4;
+        final int maxItems = 3;
+        List<String> summaries = new ArrayList<>();
+        for (int i = 0; i < Math.min(maxDemands, demands.size()); i++) {
+            ImmutableRecipeGraph.IngredientRef demand = demands.get(i);
+            if (demand == null) continue;
+            List<String> items = demand.alternatives().stream()
+                    .map(ImmutableRecipeGraph.MaterialRef::itemId)
+                    .distinct()
+                    .limit(maxItems)
+                    .map(ResourceLocation::toString)
+                    .toList();
+            summaries.add("{items=" + items + ", count=" + demand.count()
+                    + ", mode=" + demand.nbtMatchMode() + ", role=" + demand.role()
+                    + ", alternatives=" + demand.alternatives().size() + '}');
+        }
+        if (demands.size() > maxDemands) {
+            summaries.add("... +" + (demands.size() - maxDemands) + " demands");
+        }
+        return summaries.toString();
     }
 
     static boolean missingTouchesBlockedOutput(

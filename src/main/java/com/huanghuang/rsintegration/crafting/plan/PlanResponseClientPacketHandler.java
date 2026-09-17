@@ -83,13 +83,28 @@ final class PlanResponseClientPacketHandler {
 
     @Nullable
     private static ResourceLocation itemIdForDescriptionId(String descriptionId) {
-        for (var item : ForgeRegistries.ITEMS.getValues()) {
-            ItemStack stack = new ItemStack(item);
-            if (descriptionId.equals(stack.getDescriptionId())) {
-                return ForgeRegistries.ITEMS.getKey(item);
-            }
+        // Vanilla's default item/block translation keys are
+        // "item.<namespace>.<path>" and "block.<namespace>.<path>". Resolve
+        // that shape directly instead of scanning the complete item registry
+        // once for every missing material. The old O(missing * registeredItems)
+        // lookup could stall the render thread for seconds in large modpacks,
+        // making the JEI craft button appear unresponsive.
+        int prefixEnd = descriptionId.indexOf('.');
+        if (prefixEnd <= 0) return null;
+        String prefix = descriptionId.substring(0, prefixEnd);
+        if (!"item".equals(prefix) && !"block".equals(prefix)) return null;
+        int namespaceEnd = descriptionId.indexOf('.', prefixEnd + 1);
+        if (namespaceEnd <= prefixEnd + 1 || namespaceEnd >= descriptionId.length() - 1) {
+            return null;
         }
-        return null;
+        ResourceLocation id = ResourceLocation.tryParse(
+                descriptionId.substring(prefixEnd + 1, namespaceEnd) + ":"
+                        + descriptionId.substring(namespaceEnd + 1));
+        if (id == null) return null;
+        var item = ForgeRegistries.ITEMS.getValue(id);
+        if (item == null) return null;
+        ItemStack stack = new ItemStack(item);
+        return !stack.isEmpty() && descriptionId.equals(stack.getDescriptionId()) ? id : null;
     }
 
     private static void openScreen(PlanResponse plan, long requestId) {

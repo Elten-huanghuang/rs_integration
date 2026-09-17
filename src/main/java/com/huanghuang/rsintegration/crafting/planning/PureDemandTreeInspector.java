@@ -273,9 +273,9 @@ public final class PureDemandTreeInspector {
         private int consumeAcrossAlternatives(IngredientRef ingredient) {
             int mark = ledger.mark();
             int remaining = ingredient.count();
-            for (MaterialRef stocked : ledger.order()) {
+            for (MaterialRef stocked : ledger.matching(ingredient)) {
                 int available = ledger.count(stocked);
-                if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked, ingredient)) continue;
+                if (available <= 0) continue;
                 int take = Math.min(available, remaining);
                 ledger.set(stocked, available - take);
                 remaining -= take;
@@ -469,6 +469,7 @@ public final class PureDemandTreeInspector {
 
             private final Map<MaterialRef, Integer> stock = new HashMap<>();
             private final Map<ResourceLocation, List<MaterialRef>> byItem = new HashMap<>();
+            private final Map<MaterialRef, Integer> orderPositions = new HashMap<>();
             private final List<MaterialRef> order = new ArrayList<>();
             private final List<Change> changes = new ArrayList<>();
 
@@ -476,6 +477,7 @@ public final class PureDemandTreeInspector {
                 available.forEach((material, count) -> {
                     if (material == null || count == null || count <= 0) return;
                     stock.put(material, count);
+                    orderPositions.put(material, order.size());
                     order.add(material);
                     byItem.computeIfAbsent(material.itemId(), ignored -> new ArrayList<>()).add(material);
                 });
@@ -491,13 +493,26 @@ public final class PureDemandTreeInspector {
 
             private int countAcrossAlternatives(IngredientRef ingredient) {
                 int remaining = ingredient.count();
-                for (MaterialRef stocked : order) {
+                for (MaterialRef stocked : matching(ingredient)) {
                     int available = count(stocked);
-                    if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked, ingredient)) continue;
+                    if (available <= 0) continue;
                     remaining -= Math.min(available, remaining);
                     if (remaining == 0) break;
                 }
                 return ingredient.count() - remaining;
+            }
+
+            private Iterable<MaterialRef> matching(IngredientRef ingredient) {
+                java.util.LinkedHashSet<MaterialRef> candidates = new java.util.LinkedHashSet<>();
+                for (MaterialRef alternative : ingredient.alternatives()) {
+                    candidates.addAll(byItem.getOrDefault(alternative.itemId(), List.of()));
+                }
+                candidates.removeIf(material -> !ImmutableRecipeGraphProjector.matchesIngredient(
+                        material, ingredient));
+                return candidates.stream()
+                        .sorted(java.util.Comparator.comparingInt(material ->
+                                orderPositions.getOrDefault(material, Integer.MAX_VALUE)))
+                        .toList();
             }
 
             private List<MaterialRef> byItem(ResourceLocation itemId) {

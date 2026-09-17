@@ -75,8 +75,9 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
 
     @Test
     void clientLocalizationPreservesMachineReadableItemIdentity() {
-        assertEquals(List.of("minecraft:apple"),
-                PlanResponseClientPacketHandler.localizeItemNames(List.of("item.minecraft.apple")));
+        assertEquals(List.of("minecraft:apple", "minecraft:stone"),
+                PlanResponseClientPacketHandler.localizeItemNames(List.of(
+                        "item.minecraft.apple", "block.minecraft.stone")));
     }
 
     @Test
