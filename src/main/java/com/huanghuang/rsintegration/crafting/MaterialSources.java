@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.StackListEntry;
@@ -10,6 +11,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -192,6 +194,39 @@ public final class MaterialSources {
         Map<StackKey, Integer> snapshot = Map.copyOf(available);
         cache.putIfAbsent(cacheKey, snapshot);
         return snapshot;
+    }
+
+    /**
+     * Fresh narrow snapshot used when a completed plan only needs its concrete
+     * initial supplies revalidated. Backends that support typed snapshots avoid
+     * rebuilding canonical identities for unrelated network contents.
+     */
+    public static Map<StackKey, Integer> listAvailableForTypes(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+            Set<Item> itemTypes) {
+        if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
+        Map<StackKey, Integer> available = countInventory(player);
+        available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
+        if (endpoint == null) return Map.copyOf(available);
+
+        StorageSnapshotResult snapshotResult = endpoint.snapshot(player, Set.copyOf(itemTypes));
+        snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item -> {
+            ItemStack stack = item.stack();
+            if (!stack.isEmpty() && itemTypes.contains(stack.getItem())) {
+                mergeAvailable(available, StackKey.of(stack, true), item.amount(),
+                        "revalidation_snapshot");
+            }
+        }));
+        for (ItemStack filled : List.of(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET),
+                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+            if (!itemTypes.contains(filled.getItem())) continue;
+            long derived = endpoint.session().countDerivedContainer(player, filled);
+            if (derived > 0) {
+                mergeAvailable(available, StackKey.of(filled, true), derived,
+                        "revalidation_derived_container");
+            }
+        }
+        return Map.copyOf(available);
     }
 
     /** Invalidate cached counts for a player after items are consumed mid-tick. */

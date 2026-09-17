@@ -47,8 +47,7 @@ final class AsyncMaxCraftablePlanningService {
                                                   int timeoutMs) {
         Map<MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
-        ImmutableRecipeGraph planningGraph = ImmutableRecipeGraphProjector.bindAvailability(
-                snapshot.recipeGraph(), stock);
+        ImmutableRecipeGraph planningGraph = snapshot.recipeGraph();
         RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
         if (target == null) return new CompletedSearch(false, 0, null, snapshot);
         MaxCraftableSearch search = new MaxCraftableSearch(limit);

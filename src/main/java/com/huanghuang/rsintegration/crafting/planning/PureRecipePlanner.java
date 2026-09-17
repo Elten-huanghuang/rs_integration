@@ -190,6 +190,7 @@ public final class PureRecipePlanner {
         private final int maxMemoizedFailures;
         private final long deadlineNanos;
         private final LongSupplier nanoTime;
+        private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
@@ -212,7 +213,11 @@ public final class PureRecipePlanner {
                        long deadlineNanos, LongSupplier nanoTime) {
             this.graph = graph;
             available.forEach((material, count) -> {
-                if (count != null && count > 0) stock.put(material, count);
+                if (count != null && count > 0) {
+                    stock.put(material, count);
+                    stockByItem.computeIfAbsent(material.itemId(), ignored -> new ArrayList<>())
+                            .add(material);
+                }
             });
             initialStock = Map.copyOf(stock);
             this.maxSteps = Math.max(1, maxSteps);
@@ -420,9 +425,7 @@ public final class PureRecipePlanner {
 
         private Map<MaterialRef, Integer> consumeMatchingVariants(
                 IngredientRef ingredient, List<Task> rest) {
-            List<MaterialRef> stocked = stock.keySet().stream()
-                    .filter(material -> stock.getOrDefault(material, 0) > 0
-                            && matchesIngredient(material, ingredient))
+            List<MaterialRef> stocked = matchingStock(ingredient)
                     .sorted(Comparator
                             .comparingLong((MaterialRef material) ->
                                     (long) stock.getOrDefault(material, 0)
@@ -614,12 +617,24 @@ public final class PureRecipePlanner {
 
         private long stockAcross(IngredientRef ingredient) {
             long total = 0L;
-            for (Map.Entry<MaterialRef, Integer> entry : stock.entrySet()) {
-                if (!matchesIngredient(entry.getKey(), ingredient)) continue;
-                total += entry.getValue();
+            for (MaterialRef material : matchingStock(ingredient).toList()) {
+                total += stock.getOrDefault(material, 0);
                 if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
             }
             return total;
+        }
+
+        /** Restricts NBT matching to inventory variants with a compatible item id. */
+        private java.util.stream.Stream<MaterialRef> matchingStock(IngredientRef ingredient) {
+            return ingredient.alternatives().stream()
+                    .map(MaterialRef::itemId)
+                    .distinct()
+                    .flatMap(itemId -> stockByItem.getOrDefault(itemId, List.of()).stream())
+                    .filter(material -> stock.getOrDefault(material, 0) > 0)
+                    .filter(material -> {
+                        checkBudget();
+                        return matchesIngredient(material, ingredient);
+                    });
         }
 
         private static boolean matchesIngredient(MaterialRef stocked, IngredientRef ingredient) {
@@ -761,8 +776,14 @@ public final class PureRecipePlanner {
         }
 
         private void setStock(MaterialRef material, int count) {
-            if (count <= 0) stock.remove(material);
-            else stock.put(material, count);
+            if (count <= 0) {
+                stock.remove(material);
+            } else {
+                stock.put(material, count);
+                List<MaterialRef> variants = stockByItem.computeIfAbsent(
+                        material.itemId(), ignored -> new ArrayList<>());
+                if (!variants.contains(material)) variants.add(material);
+            }
         }
     }
 
@@ -1073,6 +1094,7 @@ public final class PureRecipePlanner {
             }
             for (List<RecipeNode> candidates : graph.recipesByOutput().values()) {
                 for (RecipeNode recipe : candidates) {
+                    budgetCheck.run();
                     if ("smithing".equals(recipe.modTypeId()) && recipe.inputs().size() == 3) {
                         inheritedOutputs.add(recipe.output().itemId());
                     }
@@ -1082,6 +1104,7 @@ public final class PureRecipePlanner {
                     for (int inputIndex = 0; inputIndex < inputCount; inputIndex++) {
                         Set<ResourceLocation> indexedItems = new HashSet<>();
                         for (MaterialRef alternative : recipe.inputs().get(inputIndex).alternatives()) {
+                            budgetCheck.run();
                             if (!indexedItems.add(alternative.itemId())) continue;
                             dependents.computeIfAbsent(alternative.itemId(), ignored -> new ArrayList<>())
                                     .add(new InputRef(recipe, inputIndex));
@@ -1095,13 +1118,14 @@ public final class PureRecipePlanner {
                 }
             }
             while (!queue.isEmpty()) {
-                // This pass is linear in graph edges. It deliberately does not use the search
-                // deadline: reachability is a routing index, not backtracking work, and charging
-                // it against the tiny search budget caused false TIME_LIMIT results at state 1.
-                PlanningThreadContext.throwIfCancelled();
+                // Reachability is part of this request's planning work. It must obey the same
+                // deadline as recursive search, otherwise a broad NBT graph can overrun the
+                // configured timeout before the first search state is expanded.
+                budgetCheck.run();
                 MaterialRef material = queue.removeFirst();
                 int depth = materialResult.getOrDefault(material, 0);
                 for (InputRef ref : dependents.getOrDefault(material.itemId(), List.of())) {
+                    budgetCheck.run();
                     if (!ImmutableRecipeGraphProjector.matchesIngredient(material,
                             ref.recipe().inputs().get(ref.inputIndex()))
                             && !(material.nbt().isEmpty()

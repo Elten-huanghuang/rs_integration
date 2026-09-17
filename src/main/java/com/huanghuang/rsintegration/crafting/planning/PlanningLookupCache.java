@@ -15,9 +15,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class PlanningLookupCache {
-    static final Limits DEFAULT_LIMITS = new Limits(512, 262_144, 4, 65_536);
+    // Large networks can contain thousands of distinct NBT variants. Keeping only the
+    // first 512 tags makes later variants fall back to TagParser on every comparison.
+    // This cache is scoped to one request and is released after planning.
+    static final Limits DEFAULT_LIMITS = new Limits(8_192, 4 * 1024 * 1024, 4, 65_536);
+    private static volatile SharedNbtCache sharedNbtCache;
     private static final ThreadLocal<PlanningLookupCache> CURRENT = new ThreadLocal<>();
     private static final ParsedNbt EMPTY_NBT = new ParsedNbt(null, true);
     private static final ParsedNbt INVALID_NBT = new ParsedNbt(null, false);
@@ -28,12 +33,15 @@ final class PlanningLookupCache {
             new IdentityHashMap<>();
     private final Map<ImmutableRecipeGraph, Map<ResourceLocation, List<ImmutableRecipeGraph.RecipeNode>>>
             producerIndexes = new IdentityHashMap<>();
+    private final Map<ImmutableRecipeGraph.IngredientRef, Map<MaterialRef, Boolean>> ingredientMatches =
+            new IdentityHashMap<>();
     private final List<PreparedGraph> preparedGraphs = new ArrayList<>();
     private final Map<PreparationStage, PreparationCounters> preparationCounters =
             new EnumMap<>(PreparationStage.class);
     private int retainedPreparationUnits;
     private int cachedNbtCharacters;
     private int indexedVariants;
+    private int cachedIngredientMatches;
     private long nbtParses;
     private long nbtCacheHits;
     private long outputIndexBuilds;
@@ -153,6 +161,24 @@ final class PlanningLookupCache {
                 && IngredientMatcher.nbtMatches(expected.tag(), actual.tag(), partial);
     }
 
+    static Boolean lookupIngredientMatch(MaterialRef actual,
+                                         ImmutableRecipeGraph.IngredientRef ingredient) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache == null) return null;
+        Map<MaterialRef, Boolean> matches = cache.ingredientMatches.get(ingredient);
+        return matches == null ? null : matches.get(actual);
+    }
+
+    static void recordIngredientMatch(MaterialRef actual,
+                                      ImmutableRecipeGraph.IngredientRef ingredient,
+                                      boolean result) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache == null || cache.cachedIngredientMatches >= cache.limits.maxOutputVariants()) return;
+        Map<MaterialRef, Boolean> matches = cache.ingredientMatches.computeIfAbsent(
+                ingredient, ignored -> new HashMap<>());
+        if (matches.putIfAbsent(actual, result) == null) cache.cachedIngredientMatches++;
+    }
+
     private ParsedNbt parse(String snbt) {
         if (snbt == null || snbt.isBlank()) return EMPTY_NBT;
         ParsedNbt cached = parsedTags.get(snbt);
@@ -160,14 +186,53 @@ final class PlanningLookupCache {
             nbtCacheHits++;
             return cached;
         }
+        SharedNbtCache shared = sharedNbtCache;
+        if (shared != null) {
+            cached = shared.get(snbt);
+            if (cached != null) {
+                nbtCacheHits++;
+                retainLocally(snbt, cached);
+                return cached;
+            }
+        }
         nbtParses++;
         ParsedNbt parsed = parseUncached(snbt);
+        if (shared != null) parsed = shared.retain(snbt, parsed);
+        retainLocally(snbt, parsed);
+        return parsed;
+    }
+
+    private void retainLocally(String snbt, ParsedNbt parsed) {
         if (parsedTags.size() < limits.maxTags()
-                && snbt.length() <= limits.maxNbtCharacters() - cachedNbtCharacters) {
-            parsedTags.put(snbt, parsed);
+                && snbt.length() <= limits.maxNbtCharacters() - cachedNbtCharacters
+                && parsedTags.putIfAbsent(snbt, parsed) == null) {
             cachedNbtCharacters += snbt.length();
         }
-        return parsed;
+    }
+
+    /** Replaces generation-scoped immutable NBT parsing state after a recipe rebuild. */
+    static void replaceSharedNbtCache(ImmutableRecipeGraph graph) {
+        SharedNbtCache replacement = new SharedNbtCache();
+        if (graph != null) {
+            for (ImmutableRecipeGraph.RecipeNode recipe : graph.recipesById().values()) {
+                retainSharedTag(replacement, recipe.output().nbt());
+                for (ImmutableRecipeGraph.IngredientRef ingredient : recipe.inputs()) {
+                    for (MaterialRef alternative : ingredient.alternatives()) {
+                        retainSharedTag(replacement, alternative.nbt());
+                    }
+                }
+            }
+        }
+        sharedNbtCache = replacement;
+    }
+
+    static void clearSharedNbtCache() {
+        sharedNbtCache = null;
+    }
+
+    private static void retainSharedTag(SharedNbtCache cache, String snbt) {
+        if (snbt == null || snbt.isBlank() || cache.get(snbt) != null) return;
+        cache.retain(snbt, parseUncached(snbt));
     }
 
     private static ParsedNbt parseUncached(String snbt) {
@@ -267,6 +332,28 @@ final class PlanningLookupCache {
                  int cachedNbtCharacters, int indexedGraphs, int indexedVariants) {}
 
     private record ParsedNbt(CompoundTag tag, boolean valid) {}
+
+    /** Atomically replaced on recipe reload; old requests may safely finish on the old instance. */
+    private static final class SharedNbtCache {
+        private final Map<String, ParsedNbt> tags = new ConcurrentHashMap<>();
+        private int retainedCharacters;
+
+        private ParsedNbt get(String snbt) {
+            return tags.get(snbt);
+        }
+
+        private synchronized ParsedNbt retain(String snbt, ParsedNbt parsed) {
+            ParsedNbt existing = tags.get(snbt);
+            if (existing != null) return existing;
+            if (tags.size() >= DEFAULT_LIMITS.maxTags()
+                    || snbt.length() > DEFAULT_LIMITS.maxNbtCharacters() - retainedCharacters) {
+                return parsed;
+            }
+            tags.put(snbt, parsed);
+            retainedCharacters += snbt.length();
+            return parsed;
+        }
+    }
 
     enum PreparationStage { INVENTORY, SMITHING }
 

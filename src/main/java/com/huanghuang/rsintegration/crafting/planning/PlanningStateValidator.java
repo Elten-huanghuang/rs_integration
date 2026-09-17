@@ -6,6 +6,9 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -18,7 +21,9 @@ import net.minecraft.world.level.Level;
 import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /** Server-thread validation for cached and background planning results. */
 public final class PlanningStateValidator {
@@ -97,30 +102,85 @@ public final class PlanningStateValidator {
                 || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) {
             return false;
         }
+        return revalidateRelevantGraph(player, snapshot,
+                plan == null ? null : plan.graph(), dimension, lookupPos, selectedReference);
+    }
+
+    private static boolean revalidateRelevantGraph(ServerPlayer player, PlanningSnapshot snapshot,
+                                                   @Nullable PlanGraphView graph,
+                                                   ResourceKey<Level> dimension, BlockPos lookupPos,
+                                                   @Nullable StorageReference selectedReference) {
         INetwork currentNetwork = selectedReference == null
                 && net.minecraftforge.fml.ModList.get().isLoaded(
                 com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
                 ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
                 : null;
-        Map<StackKey, Integer> currentAvailable;
+        CraftStorageEndpoint endpoint = null;
         if (selectedReference != null) {
-            var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                    .resolve(selectedReference, player);
-            if (endpoint.isEmpty()) return false;
-            currentAvailable = MaterialSources.listAllAvailable(player, endpoint.orElseThrow());
-        } else {
-            currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
+            var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
+            if (resolved.isEmpty()) return false;
+            endpoint = resolved.orElseThrow();
+        } else if (currentNetwork != null) {
+            endpoint = CraftStorageEndpoints.fromLegacyNetwork(currentNetwork);
         }
         String fingerprint = selectedReference == null
-                ? networkFingerprint(currentNetwork, currentAvailable)
-                : networkFingerprint(selectedReference, currentAvailable);
+                ? networkFingerprint(currentNetwork, Map.of())
+                : networkFingerprint(selectedReference, Map.of());
         if (!networkIdentity(snapshot.networkFingerprint()).equals(networkIdentity(fingerprint))) {
             return false;
         }
         if (!snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos))) {
             return false;
         }
-        return plan == null || hasRequiredInitialSupply(plan, currentAvailable);
+        if (graph == null) return true;
+        if (!graph.unresolved().isEmpty()) return false;
+        Map<StackKey, Integer> required = requiredInitialSupply(graph);
+        Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
+                player, endpoint, itemTypes(required));
+        return hasRequiredInitialSupply(required, currentAvailable);
+    }
+
+    /**
+     * Validates a completed preview without treating unrelated network traffic
+     * as a stale result. Failed/incomplete previews remain strict because newly
+     * inserted material may change their answer.
+     */
+    public static boolean revalidatePreview(ServerPlayer player, PlanningSnapshot snapshot,
+                                            PlanResponseDraft draft,
+                                            ResourceKey<Level> dimension, BlockPos lookupPos,
+                                            PlanRequestService requests,
+                                            @Nullable StorageReference selectedReference) {
+        if (player.hasDisconnected() || player.isRemoved()
+                || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())
+                || !requests.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
+            return false;
+        }
+        PlanGraphView graph = draft.graph();
+        if (draft.success() && graph != null) {
+            return revalidateRelevantGraph(player, snapshot, graph, dimension, lookupPos,
+                    selectedReference);
+        }
+
+        Set<net.minecraft.world.item.Item> dependencyTypes = dependencyItemTypes(
+                snapshot.recipeGraph());
+        if (dependencyTypes.isEmpty()) {
+            return revalidate(player, snapshot, dimension, lookupPos, requests, selectedReference);
+        }
+        if (!revalidateRelevantGraph(player, snapshot, null, dimension, lookupPos,
+                selectedReference)) return false;
+        CraftStorageEndpoint endpoint = null;
+        if (selectedReference != null) {
+            var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
+            if (resolved.isEmpty()) return false;
+            endpoint = resolved.orElseThrow();
+        } else if (net.minecraftforge.fml.ModList.get().isLoaded(
+                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)) {
+            INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
+            if (network != null) endpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
+        }
+        Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
+                player, endpoint, dependencyTypes);
+        return sameRelevantInventory(snapshot.availableItems(), currentAvailable, dependencyTypes);
     }
 
     public static boolean sameState(PlanningSnapshot left, PlanningSnapshot right) {
@@ -162,7 +222,12 @@ public final class PlanningStateValidator {
             // the authoritative atomic extraction instead.
             return true;
         }
-        if (!graph.unresolved().isEmpty()) return false;
+        return graph.unresolved().isEmpty()
+                && hasRequiredInitialSupply(requiredInitialSupply(graph), available);
+    }
+
+    private static Map<StackKey, Integer> requiredInitialSupply(PlanGraphView graph) {
+        if (graph == null) return Map.of();
         Map<StackKey, Integer> required = new HashMap<>();
         for (PlanGraphView.EdgeView edge : graph.edges()) {
             if (edge.source().initial()) mergeRequirement(required, edge.material(), edge.quantity());
@@ -174,10 +239,60 @@ public final class PlanningStateValidator {
                 }
             }
         }
+        return Map.copyOf(required);
+    }
+
+    private static boolean hasRequiredInitialSupply(Map<StackKey, Integer> required,
+                                                    Map<StackKey, Integer> available) {
         for (Map.Entry<StackKey, Integer> entry : required.entrySet()) {
             if (available.getOrDefault(entry.getKey(), 0) < entry.getValue()) return false;
         }
         return true;
+    }
+
+    private static Set<net.minecraft.world.item.Item> itemTypes(
+            Map<StackKey, Integer> required) {
+        Set<net.minecraft.world.item.Item> result = new HashSet<>();
+        for (StackKey key : required.keySet()) result.add(key.item());
+        return Set.copyOf(result);
+    }
+
+    private static Set<net.minecraft.world.item.Item> dependencyItemTypes(
+            ImmutableRecipeGraph graph) {
+        if (graph == null || graph.recipesById().isEmpty()) return Set.of();
+        Set<net.minecraft.world.item.Item> result = new HashSet<>();
+        for (ImmutableRecipeGraph.RecipeNode recipe : graph.recipesById().values()) {
+            net.minecraft.world.item.Item output = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    .get(recipe.output().itemId());
+            if (output != null && output != net.minecraft.world.item.Items.AIR) result.add(output);
+            for (ImmutableRecipeGraph.IngredientRef input : recipe.inputs()) {
+                for (ImmutableRecipeGraph.MaterialRef alternative : input.alternatives()) {
+                    net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                            .get(alternative.itemId());
+                    if (item != null && item != net.minecraft.world.item.Items.AIR) result.add(item);
+                }
+            }
+        }
+        return Set.copyOf(result);
+    }
+
+    static boolean sameRelevantInventory(Map<StackKey, Integer> previous,
+                                         Map<StackKey, Integer> current,
+                                         Set<net.minecraft.world.item.Item> itemTypes) {
+        if (itemTypes == null || itemTypes.isEmpty()) return false;
+        Map<StackKey, Integer> expected = new HashMap<>();
+        previous.forEach((key, count) -> {
+            if (itemTypes.contains(key.item()) && count != null && count > 0) {
+                expected.put(key, count);
+            }
+        });
+        Map<StackKey, Integer> actual = new HashMap<>();
+        current.forEach((key, count) -> {
+            if (itemTypes.contains(key.item()) && count != null && count > 0) {
+                actual.put(key, count);
+            }
+        });
+        return expected.equals(actual);
     }
 
     private static void mergeRequirement(Map<StackKey, Integer> required,

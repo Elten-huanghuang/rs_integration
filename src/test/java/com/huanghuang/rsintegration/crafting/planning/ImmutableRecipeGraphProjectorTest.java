@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -194,6 +196,66 @@ class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
         assertEquals("smithing", projected.modTypeId());
         assertEquals(recipeTypeId, projected.recipeTypeId());
         assertEquals(NbtMatchMode.ANY, projected.inputs().get(0).nbtMatchMode());
+    }
+
+    @Test
+    void publishedDependencyGraphsAndIndexesAreReusedOnlyWithinOneGeneration() {
+        ResourceLocation rawId = new ResourceLocation("test", "raw");
+        ResourceLocation middleId = new ResourceLocation("test", "middle");
+        ResourceLocation firstOutputId = new ResourceLocation("test", "first_output");
+        ResourceLocation secondOutputId = new ResourceLocation("test", "second_output");
+        MaterialRef raw = new MaterialRef(rawId, "");
+        MaterialRef middle = new MaterialRef(middleId, "");
+        MaterialRef firstOutput = new MaterialRef(firstOutputId, "");
+        MaterialRef secondOutput = new MaterialRef(secondOutputId, "");
+        ResourceLocation middleRecipeId = new ResourceLocation("test", "make_middle");
+        ResourceLocation firstRecipeId = new ResourceLocation("test", "make_first");
+        ResourceLocation secondRecipeId = new ResourceLocation("test", "make_second");
+        ImmutableRecipeGraph.RecipeNode middleRecipe = new ImmutableRecipeGraph.RecipeNode(
+                middleRecipeId, middle, 1, java.util.List.of(any(raw)));
+        ImmutableRecipeGraph.RecipeNode firstRecipe = new ImmutableRecipeGraph.RecipeNode(
+                firstRecipeId, firstOutput, 1, java.util.List.of(any(middle)));
+        ImmutableRecipeGraph.RecipeNode secondRecipe = new ImmutableRecipeGraph.RecipeNode(
+                secondRecipeId, secondOutput, 1, java.util.List.of(any(raw)));
+        ImmutableRecipeGraph firstGeneration = new ImmutableRecipeGraph(java.util.Map.of(
+                middle, java.util.List.of(middleRecipe),
+                firstOutput, java.util.List.of(firstRecipe),
+                secondOutput, java.util.List.of(secondRecipe)));
+
+        try {
+            ImmutableRecipeGraphProjector.publishCompiled(null, 1L, firstGeneration, 0L);
+            ImmutableRecipeGraph firstScoped = ImmutableRecipeGraphProjector.restrictToDependencies(
+                    firstGeneration, firstRecipeId);
+            assertSame(firstScoped, ImmutableRecipeGraphProjector.restrictToDependencies(
+                    firstGeneration, firstRecipeId));
+            assertNotSame(firstScoped, ImmutableRecipeGraphProjector.restrictToDependencies(
+                    firstGeneration, secondRecipeId));
+
+            PlanningLookupCache.run(() -> {
+                assertEquals(java.util.List.of(firstRecipe),
+                        PlanningLookupCache.producers(firstScoped, firstOutputId));
+                assertEquals(java.util.List.of(firstOutput),
+                        PlanningLookupCache.outputVariants(firstScoped, firstOutputId));
+                assertEquals(0, PlanningLookupCache.currentStats().outputIndexBuilds());
+                return null;
+            });
+
+            ImmutableRecipeGraph secondGeneration = new ImmutableRecipeGraph(java.util.Map.of(
+                    firstOutput, java.util.List.of(firstRecipe)));
+            ImmutableRecipeGraphProjector.publishCompiled(null, 2L, secondGeneration, 0L);
+            ImmutableRecipeGraph replacementScoped =
+                    ImmutableRecipeGraphProjector.restrictToDependencies(
+                            secondGeneration, firstRecipeId);
+            assertNotSame(firstScoped, replacementScoped);
+            assertSame(replacementScoped, ImmutableRecipeGraphProjector.restrictToDependencies(
+                    secondGeneration, firstRecipeId));
+        } finally {
+            ImmutableRecipeGraphProjector.clearCache();
+        }
+    }
+
+    private static IngredientRef any(MaterialRef material) {
+        return new IngredientRef(java.util.List.of(material), 1, NbtMatchMode.ANY);
     }
 
     private static MaterialRef material(String nbt) {

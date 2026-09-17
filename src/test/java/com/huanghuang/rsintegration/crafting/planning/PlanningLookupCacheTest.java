@@ -73,6 +73,52 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     @Test
+    void repeatedIngredientMatchReusesTheCompleteResult() {
+        MaterialRef actual = new MaterialRef(TOOL, STOCKED);
+        IngredientRef ingredient = new IngredientRef(
+                List.of(new MaterialRef(TOOL, REQUIRED)), 1, NbtMatchMode.PARTIAL);
+
+        PlanningLookupCache.run(() -> {
+            for (int repetition = 0; repetition < 100; repetition++) {
+                assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, ingredient));
+            }
+            PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
+            assertEquals(2, stats.nbtParses());
+            assertEquals(0, stats.nbtCacheHits());
+            return null;
+        });
+    }
+
+    @Test
+    void ingredientMatchCacheIsIdentityScopedAndPreservesNbtModes() {
+        MaterialRef actual = new MaterialRef(TOOL, STOCKED);
+        MaterialRef expected = new MaterialRef(TOOL, REQUIRED);
+        IngredientRef exact = new IngredientRef(List.of(expected), 1, NbtMatchMode.EXACT);
+        IngredientRef partial = new IngredientRef(List.of(expected), 1, NbtMatchMode.PARTIAL);
+
+        PlanningLookupCache.run(() -> {
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, exact));
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, partial));
+            assertEquals(2, PlanningLookupCache.currentStats().nbtCacheHits());
+            return null;
+        });
+
+        MaterialRef ordinaryActual = new MaterialRef(TOOL, "{quality:1,owner:7}");
+        MaterialRef ordinaryExpected = new MaterialRef(TOOL, "{quality:1}");
+        IngredientRef ordinaryExact = new IngredientRef(
+                List.of(ordinaryExpected), 1, NbtMatchMode.EXACT);
+        IngredientRef ordinaryPartial = new IngredientRef(
+                List.of(ordinaryExpected), 1, NbtMatchMode.PARTIAL);
+        PlanningLookupCache.run(() -> {
+            assertFalse(ImmutableRecipeGraphProjector.matchesIngredient(
+                    ordinaryActual, ordinaryExact));
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(
+                    ordinaryActual, ordinaryPartial));
+            return null;
+        });
+    }
+
+    @Test
     void nestedScopesReuseParsingAndReleaseItAfterTheRequest() {
         PlanningLookupCache.Stats stats = PlanningLookupCache.run(() -> {
             assertTrue(ImmutableRecipeGraphProjector.exactNbtMatches(REQUIRED, STOCKED));
@@ -92,6 +138,35 @@ class PlanningLookupCacheTest extends BootstrapTest {
             assertEquals(2, PlanningLookupCache.currentStats().nbtParses());
             return null;
         });
+    }
+
+    @Test
+    void generationCacheReusesParsedNbtAcrossRequestsAndClearsOnReload() {
+        ImmutableRecipeGraph graph = lookupGraph(1);
+        String inventoryNbt = "{owner:42,quality:3}";
+        PlanningLookupCache.replaceSharedNbtCache(graph);
+        try {
+            PlanningLookupCache.Stats first = PlanningLookupCache.run(() -> {
+                assertTrue(PlanningLookupCache.matchesNbt(inventoryNbt, inventoryNbt, true));
+                return PlanningLookupCache.currentStats();
+            });
+            PlanningLookupCache.Stats second = PlanningLookupCache.run(() -> {
+                assertTrue(PlanningLookupCache.matchesNbt(inventoryNbt, inventoryNbt, true));
+                return PlanningLookupCache.currentStats();
+            });
+            assertEquals(1, first.nbtParses());
+            assertEquals(0, second.nbtParses());
+            assertTrue(second.nbtCacheHits() > 0);
+
+            PlanningLookupCache.clearSharedNbtCache();
+            PlanningLookupCache.Stats afterReload = PlanningLookupCache.run(() -> {
+                assertTrue(PlanningLookupCache.matchesNbt(inventoryNbt, inventoryNbt, true));
+                return PlanningLookupCache.currentStats();
+            });
+            assertEquals(1, afterReload.nbtParses());
+        } finally {
+            PlanningLookupCache.clearSharedNbtCache();
+        }
     }
 
     @Test
@@ -167,6 +242,25 @@ class PlanningLookupCacheTest extends BootstrapTest {
             assertEquals(10, PlanningLookupCache.currentStats().cachedNbtCharacters());
             return null;
         });
+    }
+
+    @Test
+    void defaultRequestCacheRetainsNbtBeyondTheOldEntryLimit() {
+        PlanningLookupCache.Stats stats = PlanningLookupCache.run(() -> {
+            for (int value = 0; value < 700; value++) {
+                String tag = "{variant:" + value + "}";
+                assertTrue(ImmutableRecipeGraphProjector.partialNbtMatches(tag, tag));
+            }
+            String hotTag = "{variant:699}";
+            for (int repetition = 0; repetition < 1_000; repetition++) {
+                assertTrue(ImmutableRecipeGraphProjector.partialNbtMatches(hotTag, hotTag));
+            }
+            return PlanningLookupCache.currentStats();
+        });
+
+        assertEquals(700, stats.nbtParses());
+        assertEquals(700, stats.cachedTags());
+        assertTrue(stats.nbtCacheHits() >= 2_700);
     }
 
     @Test

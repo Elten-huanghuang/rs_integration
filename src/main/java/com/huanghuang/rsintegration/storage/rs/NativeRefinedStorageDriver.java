@@ -71,10 +71,12 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
         List<ItemStack> items = new ArrayList<>();
         var list = cache.getList();
         // RS's single-item bucket contains every NBT variant in native order.
-        // Preserve full traversal for multi-type queries and unknown implementations.
+        // Preserve full traversal for multi-type queries and unknown implementations:
+        // concatenating multiple buckets would change which variant ANY selects first.
         var candidates = itemTypes != null && itemTypes.size() == 1
                 && list.getClass() == com.refinedmods.refinedstorage.apiimpl.util.ItemStackList.class
-                ? list.getStacks(new ItemStack(itemTypes.iterator().next())) : list.getStacks();
+                ? list.getStacks(new ItemStack(itemTypes.iterator().next()))
+                : list.getStacks();
         for (var entry : candidates) {
             ItemStack stack = entry.getStack();
             if (!stack.isEmpty() && stack.getCount() > 0

@@ -110,7 +110,15 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 return StorageSnapshotResult.failure(com.huanghuang.rsintegration.storage.StorageSnapshotStatus.UNAVAILABLE);
             }
             java.util.List<com.huanghuang.rsintegration.storage.StoredItem> items = new java.util.ArrayList<>();
-            for (var entry : cache.getList().getStacks()) {
+            var list = cache.getList();
+            // A native single-item bucket keeps every NBT variant in RS order.
+            // Multi-type bucket concatenation would change the global order and
+            // could make an ANY ingredient choose a different variant.
+            var candidates = itemTypes != null && itemTypes.size() == 1
+                    && list.getClass() == com.refinedmods.refinedstorage.apiimpl.util.ItemStackList.class
+                    ? list.getStacks(new ItemStack(itemTypes.iterator().next()))
+                    : list.getStacks();
+            for (var entry : candidates) {
                 ItemStack stack = entry.getStack();
                 if (!stack.isEmpty() && stack.getCount() > 0
                         && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
