@@ -51,9 +51,10 @@ public final class RSSidePanelNetworkHandler {
     /** Last validated RS network retained after the side-panel/terminal UI closes. */
     private static final Map<UUID, com.refinedmods.refinedstorage.api.network.INetwork>
             lastKnownNetworks = new ConcurrentHashMap<>();
-    /** One rebind task per invalidated native cache, even when many players share it. */
-    private static final Set<Object> pendingInvalidatedCaches = Collections.synchronizedSet(
-            Collections.newSetFromMap(new IdentityHashMap<>()));
+    /** One tick-deferred rebind per native cache, even when many players share it. */
+    private static final IdentityInvalidationQueue<
+            IStorageCache<ItemStack>, com.refinedmods.refinedstorage.api.network.INetwork>
+            pendingInvalidatedCaches = new IdentityInvalidationQueue<>();
 
     // ── Pending deltas per player — collected during a tick, flushed at end ──
     private static final AtomicBatchQueue<UUID, RSSidePanelDeltaPacket.Entry> pendingDeltas = new AtomicBatchQueue<>();
@@ -156,6 +157,15 @@ public final class RSSidePanelNetworkHandler {
         if (!tickFiringConfirmed) {
             tickFiringConfirmed = true;
             RSIntegrationMod.LOGGER.debug("[RSI-Delta] onServerTickEnd is firing (listener registered OK)");
+        }
+
+        // Never detach an RS cache listener from onInvalidated(). RS 1.12.4
+        // iterates a LinkedList directly, so listener removal in that callback
+        // throws ConcurrentModificationException. This tick boundary is the
+        // first point guaranteed to be outside the native callback stack.
+        for (var invalidation : pendingInvalidatedCaches.drain()) {
+            rebindInvalidatedCache(event.getServer(), invalidation.getValue(),
+                    invalidation.getKey());
         }
 
         // ── Machine status push (every 40 ticks) ─────────────────
@@ -533,11 +543,11 @@ public final class RSSidePanelNetworkHandler {
             public void onInvalidated() {
                 ListenerEntry entry = entryHolder[0];
                 if (entry == null || playerListeners.get(pid) != entry) return;
-                net.minecraft.server.MinecraftServer server = player.getServer();
-                if (server == null || !pendingInvalidatedCaches.add(cache)) return;
-                // RS invokes this callback once per attached listener. Defer the
-                // rebind and process all players sharing this cache together.
-                server.execute(() -> rebindInvalidatedCache(server, network, cache));
+                // RS invokes this callback once per attached listener. Only
+                // enqueue here: MinecraftServer.execute() may run inline when
+                // called from the server thread and is therefore not a safe
+                // deferral boundary for listener removal.
+                pendingInvalidatedCaches.offer(cache, network);
             }
 
             private void queue(ItemStack stack, int change, UUID entryId) {
@@ -631,41 +641,37 @@ public final class RSSidePanelNetworkHandler {
             net.minecraft.server.MinecraftServer server,
             com.refinedmods.refinedstorage.api.network.INetwork network,
             IStorageCache<ItemStack> invalidatedCache) {
+        List<UUID> affected = playerListeners.entrySet().stream()
+                .filter(e -> e.getValue().cache == invalidatedCache
+                        && e.getValue().network == network)
+                .map(Map.Entry::getKey)
+                .toList();
+        if (!affected.isEmpty()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI] Storage cache invalidated; rebinding {} players as one batch",
+                    affected.size());
+        }
+        IStorageCache<ItemStack> freshCache;
         try {
-            List<UUID> affected = playerListeners.entrySet().stream()
-                    .filter(e -> e.getValue().cache == invalidatedCache
-                            && e.getValue().network == network)
-                    .map(Map.Entry::getKey)
-                    .toList();
-            if (!affected.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RSI] Storage cache invalidated; rebinding {} players as one batch",
-                        affected.size());
+            freshCache = network.getItemStorageCache();
+        } catch (RuntimeException | LinkageError failure) {
+            freshCache = null;
+        }
+        for (UUID playerId : affected) {
+            ListenerEntry current = playerListeners.get(playerId);
+            if (current == null || current.cache != invalidatedCache
+                    || current.network != network) continue;
+            ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+            unregisterListener(playerId);
+            if (player == null) continue;
+            if (freshCache != null && freshCache != invalidatedCache) {
+                registerListener(player, network);
+            } else {
+                sendSync(player,
+                        Collections.emptyList(), Collections.emptyList(),
+                        Collections.emptyList(), Collections.emptyList(),
+                        0, false, "");
             }
-            IStorageCache<ItemStack> freshCache;
-            try {
-                freshCache = network.getItemStorageCache();
-            } catch (RuntimeException | LinkageError failure) {
-                freshCache = null;
-            }
-            for (UUID playerId : affected) {
-                ListenerEntry current = playerListeners.get(playerId);
-                if (current == null || current.cache != invalidatedCache
-                        || current.network != network) continue;
-                ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-                unregisterListener(playerId);
-                if (player == null) continue;
-                if (freshCache != null && freshCache != invalidatedCache) {
-                    registerListener(player, network);
-                } else {
-                    sendSync(player,
-                            Collections.emptyList(), Collections.emptyList(),
-                            Collections.emptyList(), Collections.emptyList(),
-                            0, false, "");
-                }
-            }
-        } finally {
-            pendingInvalidatedCaches.remove(invalidatedCache);
         }
     }
 
