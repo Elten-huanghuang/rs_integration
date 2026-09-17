@@ -30,8 +30,10 @@ public final class PlanMaterialBill {
                                    int repeatCount,
                                    @Nullable PlanGraphView graph,
                                    boolean hasMissing) {
-        Map<IngredientKey, PlanResponse.Availability> netMaterials = buildNetMaterials(
-                neededCounts, itemSources, itemAvailable, stackAvailable);
+        Map<IngredientKey, PlanResponse.Availability> netMaterials = graph == null
+                ? buildLegacyNetMaterials(neededCounts, itemSources, itemAvailable, stackAvailable,
+                        targetOutput, steps, repeatCount)
+                : buildGraphNetMaterials(graph, itemAvailable, stackAvailable);
         boolean feasible = !hasMissing
                 && netMaterials.values().stream().allMatch(PlanResponse.Availability::isEnough);
 
@@ -89,6 +91,136 @@ public final class PlanMaterialBill {
         return materials;
     }
 
+    private static Map<IngredientKey, PlanResponse.Availability> buildLegacyNetMaterials(
+            Map<Item, Integer> neededCounts,
+            Map<Item, Ingredient> itemSources,
+            Map<Item, Integer> itemAvailable,
+            Map<StackKey, Integer> stackAvailable,
+            ItemStack targetOutput,
+            List<PlanStep> steps,
+            int repeatCount) {
+        Map<IngredientKey, PlanResponse.Availability> materials = buildNetMaterials(
+                neededCounts, itemSources, itemAvailable, stackAvailable);
+        Map<IngredientKey, Integer> gross = buildGrossDemand(targetOutput, steps, repeatCount, null);
+        Set<Item> nbtItems = new HashSet<>();
+        for (IngredientKey key : gross.keySet()) {
+            if (key.stack(1).hasTag()
+                    && IngredientMatcher.requiresNbt(itemSources.get(key.item()))) {
+                nbtItems.add(key.item());
+            }
+        }
+        if (nbtItems.isEmpty()) return materials;
+
+        // The old Item-keyed bill cannot represent two strict variants of the
+        // same item. Replace only item types that are exclusively represented
+        // by concrete NBT keys in this tree; mixed plain/tag demands retain the
+        // legacy semantic aggregation for their plain portion.
+        for (Item item : nbtItems) {
+            boolean allTagged = gross.keySet().stream()
+                    .filter(key -> key.item() == item)
+                    .allMatch(key -> key.stack(1).hasTag());
+            if (!allTagged) continue;
+            materials.entrySet().removeIf(entry -> entry.getKey().item() == item);
+            for (Map.Entry<IngredientKey, Integer> entry : gross.entrySet()) {
+                IngredientKey key = entry.getKey();
+                if (key.item() != item) continue;
+                int produced = 0;
+                int terminalStep = terminalStepIndex(targetOutput, steps);
+                for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+                    // The final step matching the requested output is the
+                    // terminal operation and must not cancel its own input.
+                    if (stepIndex == terminalStep) continue;
+                    PlanStep step = steps.get(stepIndex);
+                    if (IngredientKey.of(step.output()).equals(key)) {
+                        long total = (long) produced + step.totalOutputCount();
+                        produced = total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+                    }
+                }
+                int externalNeeded = Math.max(0, entry.getValue() - produced);
+                if (externalNeeded == 0) continue;
+                ItemStack display = key.stack(1);
+                materials.put(key, new PlanResponse.Availability(
+                        externalNeeded, countExactStack(display, stackAvailable)));
+            }
+        }
+        return materials;
+    }
+
+    private static Map<IngredientKey, Integer> buildGrossDemand(ItemStack targetOutput,
+                                                                  List<PlanStep> steps,
+                                                                  int repeatCount,
+                                                                  @Nullable PlanGraphView graph) {
+        String recipeId = "";
+        if (graph == null) {
+            int terminal = terminalStepIndex(targetOutput, steps);
+            if (terminal >= 0) recipeId = steps.get(terminal).recipeId().toString();
+        }
+        PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
+                Collections.emptyMap(), Collections.emptyList(), recipeId,
+                null, null, 0, 0, 0, Collections.emptyList(), repeatCount,
+                null, null, null, 0, false, false, false, null,
+                Collections.emptySet(), Collections.emptyMap(), null, graph);
+        return PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
+    }
+
+    private static int terminalStepIndex(ItemStack targetOutput, List<PlanStep> steps) {
+        IngredientKey targetKey = IngredientKey.of(targetOutput);
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            if (IngredientKey.of(steps.get(i).output()).equals(targetKey)) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Builds the external bill from the server-authoritative allocation graph.
+     * The legacy resolver maps demands by Item, which is insufficient for strict
+     * ingredients such as differently enchanted books.  Initial-pool edges and
+     * unresolved demands already contain the exact selected MaterialKey, so they
+     * are the only sources that should enter the external material bill.
+     */
+    private static Map<IngredientKey, PlanResponse.Availability> buildGraphNetMaterials(
+            PlanGraphView graph,
+            Map<Item, Integer> itemAvailable,
+            Map<StackKey, Integer> stackAvailable) {
+        Map<IngredientKey, Integer> needed = new LinkedHashMap<>();
+        for (PlanGraphView.EdgeView edge : graph.edges()) {
+            if (edge.source().initial()) {
+                mergeDemand(needed, edge.material(), edge.quantity());
+            }
+        }
+        for (PlanGraphView.RootView root : graph.roots()) {
+            for (PlanGraphView.RootEdgeView edge : root.allocations()) {
+                if (edge.source().initial()) {
+                    mergeDemand(needed, edge.material(), edge.quantity());
+                }
+            }
+        }
+        for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
+            mergeDemand(needed, unresolved.display(), unresolved.quantity());
+        }
+
+        Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
+        for (Map.Entry<IngredientKey, Integer> entry : needed.entrySet()) {
+            IngredientKey key = entry.getKey();
+            ItemStack display = key.stack(1);
+            int available = display.hasTag()
+                    ? countExactStack(display, stackAvailable)
+                    : itemAvailable.getOrDefault(key.item(), 0);
+            result.put(key, new PlanResponse.Availability(entry.getValue(), available));
+        }
+        return result;
+    }
+
+    private static void mergeDemand(Map<IngredientKey, Integer> demand,
+                                    ItemStack material, int quantity) {
+        if (material == null || material.isEmpty() || quantity <= 0) return;
+        IngredientKey key = IngredientKey.of(material);
+        demand.merge(key, quantity, (left, right) -> {
+            long total = (long) left + right;
+            return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+        });
+    }
+
     private static Map<IngredientKey, PlanResponse.Availability> buildDisplayMaterials(
             Map<IngredientKey, PlanResponse.Availability> netMaterials,
             Map<Item, Ingredient> itemSources,
@@ -98,18 +230,25 @@ public final class PlanMaterialBill {
             List<PlanStep> steps,
             int repeatCount,
             @Nullable PlanGraphView graph) {
-        PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
-                Collections.emptyMap(), Collections.emptyList(), "",
-                null, null, 0, 0, 0, Collections.emptyList(), repeatCount,
-                null, null, null, 0, false, false, false, null,
-                Collections.emptySet(), Collections.emptyMap(), null, graph);
         Map<IngredientKey, Integer> grossDemand =
-                PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
+                buildGrossDemand(targetOutput, steps, repeatCount, graph);
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = new LinkedHashMap<>();
         for (Map.Entry<IngredientKey, Integer> entry : grossDemand.entrySet()) {
             IngredientKey key = entry.getKey();
             ItemStack display = key.stack(1);
+            // Graph allocations preserve the concrete NBT selected by the
+            // planner. Do not fall back to itemSources here: that map is keyed
+            // only by Item, so four strict enchanted-book demands would all be
+            // measured against the first book's enchantment.
+            if (graph != null) {
+                PlanResponse.Availability graphAvailability = netMaterials.get(key);
+                if (graphAvailability != null) {
+                    displayMaterials.put(key, new PlanResponse.Availability(
+                            entry.getValue(), graphAvailability.available()));
+                    continue;
+                }
+            }
             Ingredient source = itemSources.get(key.item());
             boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
             int have;

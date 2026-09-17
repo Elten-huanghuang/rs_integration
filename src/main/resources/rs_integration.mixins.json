@@ -94,6 +94,7 @@
     "apotheosis.ReforgingMenuRestockMixin",
     "ftbquests.ClearRepeatCooldownMessageMixin",
     "ftbquests.FTBQuestsNetClientMixin",
+    "ftbquests.OtherButtonsPanelBottomMixin",
     "jei.GuiIconToggleButtonAccessor",
     "jei.RecipeGuiLayoutsMixin",
     "jei.RecipesGuiMixin",

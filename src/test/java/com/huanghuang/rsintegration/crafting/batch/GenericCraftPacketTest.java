@@ -312,15 +312,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void infeasiblePurePlanFallsBackToTypedResolverForVirtualIntermediates() {
-        PureRecipePlanner.Result incomplete = new PureRecipePlanner.Result(false,
-                List.of(), List.of(), Map.of());
-
-        assertFalse(GenericCraftPacket.canUsePrecomputedPlan(incomplete));
-        assertFalse(GenericCraftPacket.canUsePrecomputedPlan(null));
-    }
-
-    @Test
     void infeasiblePurePlanningRetriesTypedPlannerForCraftableLowerLevel() {
         var smithingOutput = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("test", "smithing_output"), "");
@@ -343,6 +334,51 @@ class GenericCraftPacketTest extends BootstrapTest {
                 Map.of(), PureRecipePlanner.Status.SEARCH_LIMIT, 3, 0, 0);
         assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(complete, Set.of()));
         assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(bounded, Set.of()));
+    }
+
+    @Test
+    void typedMachineFallbackRequiresEveryMissingDemandToBeBlocked() {
+        var blockedOutput = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "bound_machine_output"), "");
+        var rawMaterial = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "prismarine_shard"), "");
+        var blockedDemand = new ImmutableRecipeGraph.IngredientRef(
+                List.of(blockedOutput), 1, ImmutableRecipeGraph.NbtMatchMode.ANY,
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED);
+        var rawDemand = new ImmutableRecipeGraph.IngredientRef(
+                List.of(rawMaterial), 7, ImmutableRecipeGraph.NbtMatchMode.ANY,
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED);
+        PureRecipePlanner.Result mixed = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(),
+                List.of(blockedDemand, rawDemand), Map.of(),
+                PureRecipePlanner.Status.UNRESOLVABLE, 8, 2, 0);
+
+        assertTrue(GenericCraftPacket.missingTouchesBlockedOutput(
+                mixed.missing(), Set.of(blockedOutput.itemId())));
+        assertFalse(GenericCraftPacket.allMissingRequireBlockedOutput(
+                mixed.missing(), Set.of(blockedOutput.itemId())));
+        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(
+                mixed, Set.of(blockedOutput.itemId())));
+
+        var firstOutput = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "first_machine_output"), "{tier:1}");
+        var secondOutput = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "second_machine_output"), "{tier:2}");
+        var firstDemand = new ImmutableRecipeGraph.IngredientRef(
+                List.of(firstOutput), 1, ImmutableRecipeGraph.NbtMatchMode.EXACT,
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED);
+        var secondDemand = new ImmutableRecipeGraph.IngredientRef(
+                List.of(secondOutput), 1, ImmutableRecipeGraph.NbtMatchMode.EXACT,
+                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED);
+        PureRecipePlanner.Result blocked = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(),
+                List.of(firstDemand, secondDemand), Map.of(),
+                PureRecipePlanner.Status.UNRESOLVABLE, 8, 2, 0);
+        Set<ResourceLocation> blockedIds = Set.of(
+                firstOutput.itemId(), secondOutput.itemId());
+
+        assertTrue(GenericCraftPacket.allMissingRequireBlockedOutput(blocked.missing(), blockedIds));
+        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(blocked, blockedIds));
     }
 
     @Test
@@ -382,6 +418,28 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void typedTimeoutKeepsAConfirmedMissingTreeOpenForInspection() {
+        var missingMaterial = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "prismarine_shard"), "");
+        PureRecipePlanner.Result incomplete = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(),
+                List.of(new ImmutableRecipeGraph.IngredientRef(
+                        List.of(missingMaterial), 7,
+                        ImmutableRecipeGraph.NbtMatchMode.ANY)), Map.of(),
+                PureRecipePlanner.Status.UNRESOLVABLE, 12, 3, 0);
+        var missing = new PureDemandTreeInspector.Result(
+                PureDemandTreeInspector.Status.MISSING_MATERIALS, 4,
+                missingMaterial, false);
+
+        assertTrue(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+                incomplete, missing, false));
+        assertFalse(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+                incomplete, missing, true));
+        assertFalse(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+                null, missing, false));
+    }
+
+    @Test
     void compatibilityResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
         assertEquals(2_000, GenericCraftPacket.compatibilityResolverBudgetMs(2_000));
         assertEquals(1, GenericCraftPacket.compatibilityResolverBudgetMs(0));
@@ -400,6 +458,19 @@ class GenericCraftPacketTest extends BootstrapTest {
             assertEquals("rsi.plan.failure.complexity_limit",
                     GenericCraftPacket.purePlanningFailureKey(result, Map.of()));
         }
+        var diagnostic = new ImmutableRecipeGraph.IngredientRef(List.of(
+                new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("test", "diagnostic_only"), "")), 7);
+        PureRecipePlanner.Result timedOut = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(diagnostic), Map.of(),
+                PureRecipePlanner.Status.TIME_LIMIT, 1, 0, 0);
+        PureRecipePlanner.Result searchLimited = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(diagnostic), Map.of(),
+                PureRecipePlanner.Status.SEARCH_LIMIT, 10, 2, 0);
+        assertEquals("rsi.plan.failure.planning_timeout",
+                GenericCraftPacket.boundedPreviewFailureKey(timedOut));
+        assertEquals("rsi.plan.failure.complexity_limit",
+                GenericCraftPacket.boundedPreviewFailureKey(searchLimited));
     }
 
     @Test

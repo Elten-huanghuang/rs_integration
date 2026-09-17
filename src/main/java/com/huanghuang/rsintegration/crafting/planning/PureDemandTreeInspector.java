@@ -93,7 +93,6 @@ public final class PureDemandTreeInspector {
                                          Set<ResourceLocation> reusableCatalystRecipeIds,
                                          Set<ResourceLocation> pureIncompatibleOutputIds,
                                          long deadlineNanos) {
-        graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         boolean targetUsesReusableCatalyst = reusableCatalystRecipeIds != null
                 && reusableCatalystRecipeIds.contains(targetRecipeId);
         RecipeNode target = graph.recipesById().get(targetRecipeId);
@@ -102,11 +101,13 @@ public final class PureDemandTreeInspector {
                     targetUsesReusableCatalyst);
         }
 
+        List<IngredientRef> roots = PureDemandNormalizer.mergeEquivalent(
+                SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount));
+        graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available, roots);
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
                 reusableCatalystOutputIds, pureIncompatibleOutputIds, deadlineNanos);
         Coverage targetCoverage = Coverage.COVERED;
-        for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
-                SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount))) {
+        for (IngredientRef input : roots) {
             Coverage coverage = walker.coverIngredient(input);
             if (coverage == Coverage.NODE_LIMIT) {
                 targetCoverage = coverage;

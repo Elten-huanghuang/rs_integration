@@ -97,12 +97,22 @@ final class PlanningLookupCache {
                                                  ImmutableRecipeGraph graph,
                                                  Map<MaterialRef, Integer> available,
                                                  Supplier<ImmutableRecipeGraph> work) {
+        return reusePreparation(stage, graph, available, null, work);
+    }
+
+    static ImmutableRecipeGraph reusePreparation(PreparationStage stage,
+                                                 ImmutableRecipeGraph graph,
+                                                 Map<MaterialRef, Integer> available,
+                                                 Object discriminator,
+                                                 Supplier<ImmutableRecipeGraph> work) {
         PlanningLookupCache cache = CURRENT.get();
-        return cache == null ? work.get() : cache.prepare(stage, graph, available, work);
+        return cache == null ? work.get()
+                : cache.prepare(stage, graph, available, discriminator, work);
     }
 
     private ImmutableRecipeGraph prepare(PreparationStage stage, ImmutableRecipeGraph graph,
                                           Map<MaterialRef, Integer> available,
+                                          Object discriminator,
                                           Supplier<ImmutableRecipeGraph> work) {
         PlanningThreadContext.throwIfCancelled();
         PreparationCounters counters = preparationCounters.computeIfAbsent(
@@ -111,6 +121,7 @@ final class PlanningLookupCache {
         try {
             for (PreparedGraph prepared : preparedGraphs) {
                 if (prepared.stage() == stage && prepared.source() == graph
+                        && Objects.equals(prepared.discriminator(), discriminator)
                         && matchesAvailability(prepared.available(), available)) {
                     counters.hits++;
                     return prepared.result();
@@ -128,7 +139,8 @@ final class PlanningLookupCache {
             if (captured != null && preparedGraphs.size() < limits.maxGraphs()
                     && retainedUnits <= limits.maxOutputVariants() - retainedPreparationUnits
                     && matchesAvailability(captured, available)) {
-                preparedGraphs.add(new PreparedGraph(stage, graph, captured, result));
+                preparedGraphs.add(new PreparedGraph(
+                        stage, graph, captured, discriminator, result));
                 retainedPreparationUnits += (int) retainedUnits;
             }
             return result;
@@ -363,7 +375,8 @@ final class PlanningLookupCache {
     private record AvailableEntry(MaterialRef material, Integer count) {}
 
     private record PreparedGraph(PreparationStage stage, ImmutableRecipeGraph source,
-                                  List<AvailableEntry> available, ImmutableRecipeGraph result) {}
+                                  List<AvailableEntry> available, Object discriminator,
+                                  ImmutableRecipeGraph result) {}
 
     private static final class PreparationCounters {
         private long builds;

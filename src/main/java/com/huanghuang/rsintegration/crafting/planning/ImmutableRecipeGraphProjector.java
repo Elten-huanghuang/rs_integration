@@ -343,14 +343,33 @@ public final class ImmutableRecipeGraphProjector {
             ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
         return PlanningLookupCache.run(() -> PlanningLookupCache.reusePreparation(
                 PlanningLookupCache.PreparationStage.SMITHING, graph, available,
-                () -> bindSmithingStatesInScope(graph, available)));
+                () -> bindSmithingStatesInScope(graph, available, null)));
+    }
+
+    /**
+     * Propagates concrete equipment state only through smithing paths that feed
+     * an exact or partial NBT demand reachable from this request's roots.
+     */
+    static ImmutableRecipeGraph bindSmithingStates(
+            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+            List<IngredientRef> roots) {
+        List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
+        Set<ResourceLocation> relevantItems =
+                stateSensitiveSmithingItems(graph, normalizedRoots);
+        return PlanningLookupCache.run(() -> PlanningLookupCache.reusePreparation(
+                PlanningLookupCache.PreparationStage.SMITHING, graph, available,
+                relevantItems, () -> bindSmithingStatesInScope(
+                        graph, available, relevantItems)));
     }
 
     private static ImmutableRecipeGraph bindSmithingStatesInScope(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+            @Nullable Set<ResourceLocation> relevantItems) {
+        if (relevantItems != null && relevantItems.isEmpty()) return graph;
         Map<ResourceLocation, List<RecipeNode>> upgrades = new java.util.HashMap<>();
         for (RecipeNode recipe : graph.recipesById().values()) {
             if (!"smithing".equals(recipe.modTypeId()) || recipe.inputs().size() != 3) continue;
+            if (relevantItems != null && !relevantItems.contains(recipe.output().itemId())) continue;
             Set<ResourceLocation> baseItems = new LinkedHashSet<>();
             for (MaterialRef base : recipe.inputs().get(1).alternatives()) baseItems.add(base.itemId());
             for (ResourceLocation item : baseItems) {
@@ -361,7 +380,8 @@ public final class ImmutableRecipeGraphProjector {
         Set<MaterialRef> seen = new LinkedHashSet<>();
         available.forEach((material, count) -> {
             if (count != null && count > 0 && !material.nbt().isEmpty()
-                    && upgrades.containsKey(material.itemId())) {
+                    && upgrades.containsKey(material.itemId())
+                    && (relevantItems == null || relevantItems.contains(material.itemId()))) {
                 seen.add(material);
             }
         });
@@ -394,6 +414,54 @@ public final class ImmutableRecipeGraphProjector {
             projected.put(output, combined);
         });
         return new ImmutableRecipeGraph(projected, graph.recipesById());
+    }
+
+    private static Set<ResourceLocation> stateSensitiveSmithingItems(
+            ImmutableRecipeGraph graph, List<IngredientRef> roots) {
+        Set<ResourceLocation> visitedItems = new LinkedHashSet<>();
+        Set<ResourceLocation> visitedRecipes = new LinkedHashSet<>();
+        Set<ResourceLocation> statefulDemands = new LinkedHashSet<>();
+        java.util.ArrayDeque<IngredientRef> pending = new java.util.ArrayDeque<>(roots);
+        while (!pending.isEmpty()) {
+            PlanningThreadContext.throwIfCancelled();
+            IngredientRef demand = pending.removeFirst();
+            if (demand.nbtMatchMode() != NbtMatchMode.ANY) {
+                demand.alternatives().stream()
+                        .filter(material -> !material.nbt().isEmpty())
+                        .map(MaterialRef::itemId)
+                        .forEach(statefulDemands::add);
+            }
+            for (MaterialRef alternative : demand.alternatives()) {
+                if (!visitedItems.add(alternative.itemId())) continue;
+                for (RecipeNode producer : PlanningLookupCache.producers(
+                        graph, alternative.itemId())) {
+                    if (!visitedRecipes.add(producer.recipeId())) continue;
+                    pending.addAll(producer.inputs());
+                }
+            }
+        }
+        if (statefulDemands.isEmpty()) return Set.of();
+
+        Map<ResourceLocation, List<RecipeNode>> smithingByOutput = new HashMap<>();
+        for (RecipeNode recipe : graph.recipesById().values()) {
+            if ("smithing".equals(recipe.modTypeId()) && recipe.inputs().size() == 3) {
+                smithingByOutput.computeIfAbsent(recipe.output().itemId(), ignored -> new ArrayList<>())
+                        .add(recipe);
+            }
+        }
+        Set<ResourceLocation> relevant = new LinkedHashSet<>(statefulDemands);
+        java.util.ArrayDeque<ResourceLocation> pendingOutputs =
+                new java.util.ArrayDeque<>(statefulDemands);
+        while (!pendingOutputs.isEmpty()) {
+            PlanningThreadContext.throwIfCancelled();
+            ResourceLocation output = pendingOutputs.removeFirst();
+            for (RecipeNode recipe : smithingByOutput.getOrDefault(output, List.of())) {
+                for (MaterialRef base : recipe.inputs().get(1).alternatives()) {
+                    if (relevant.add(base.itemId())) pendingOutputs.addLast(base.itemId());
+                }
+            }
+        }
+        return Set.copyOf(relevant);
     }
 
     static IngredientRef bindIngredient(IngredientRef ingredient,

@@ -117,6 +117,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
     public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
     public static ForgeConfigSpec.BooleanValue ENABLE_WISHING_FOUNTAIN;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> FTB_QUEST_CHECKMARK_BLACKLIST;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> LYCHEE_RECIPE_ALLOWLIST;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
     public static ForgeConfigSpec.BooleanValue DISABLE_DISTANT_WORLDS_FIRON_FAILURE;
@@ -645,6 +646,14 @@ public final class RSIntegrationConfig {
                 .comment("Lock villager trade rerolls when a current trade result is bookmarked in JEI.",
                         "Supports Retraining and Trade Cycling. Disable to bypass all server-side trade-lock checks.")
                 .define("enableVillagerTradeLock", true);
+        FTB_QUEST_CHECKMARK_BLACKLIST = s
+                .comment("Specific FTB Quest IDs excluded from bulk checkmark confirmation.",
+                        "Use the hexadecimal ID from the FTB Quests SNBT file, without a 0x prefix.",
+                        "Use the outer quest node ID, not an ID inside its tasks list.",
+                        "This does not prevent players from confirming the task manually.")
+                .defineListAllowEmpty("ftbQuestCheckmarkBlacklist", List.of(),
+                        value -> value instanceof String id
+                                && id.matches("(?i)[0-9a-f]{1,16}"));
         CROCKPOT_FILLER_ITEM = s
                 .comment("Default filler item for CrockPot recipes when input slots are not",
                         "fully occupied by the recipe's must-contain ingredients.",

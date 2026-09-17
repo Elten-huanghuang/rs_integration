@@ -26,6 +26,8 @@ public final class PureRecipePlanner {
     private static final int MAX_SEARCH_CALL_DEPTH = 512;
     private static final int MAX_REPORTED_MISSING = 64;
     private static final int MAX_DIAGNOSTIC_OPERATIONS = 32_768;
+    private static final int REACHABILITY_PRECHECK_MIN_CANDIDATES = 5;
+    private static final int MAX_LOCAL_SEED_PROBE_NODES = 64;
 
     private PureRecipePlanner() {}
 
@@ -69,8 +71,9 @@ public final class PureRecipePlanner {
                                         List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                                         int maxMemoizedFailures, long deadlineNanos,
                                         LongSupplier nanoTime) {
-        graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available);
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
+        graph = ImmutableRecipeGraphProjector.bindSmithingStates(
+                graph, available, normalizedRoots);
         Search search = new Search(graph, available, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime);
         List<Task> pending = normalizedRoots.stream()
@@ -525,6 +528,11 @@ public final class PureRecipePlanner {
                                                            boolean pruneUnseeded,
                                                            NbtMatchMode mode) {
             List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, wanted, mode);
+            // Tiny producer sets are cheaper to explore directly. Constructing
+            // seeded reachability scans the complete scoped graph before the
+            // first branch, which dominates equipment and upgrade chains.
+            boolean useReachability = pruneUnseeded
+                    && candidates.size() >= REACHABILITY_PRECHECK_MIN_CANDIDATES;
             // Reachability is only a heuristic: it is based on the initial stock
             // snapshot and cannot see dynamic/NBT-sensitive outputs produced while
             // solving this plan. Keep the fast filter in the common case, but fall
@@ -533,9 +541,12 @@ public final class PureRecipePlanner {
             // recipe search traverse the entire graph.
             List<RecipeNode> ordered = candidates.stream()
                     .filter(candidate -> !pruneUnseeded || hasAllInputsInStock(candidate)
-                            || reachability().canReach(candidate))
+                            || (useReachability
+                            ? reachability().canReach(candidate)
+                            : hasLocalSeedPath(candidate, new HashSet<>(),
+                            new int[] { MAX_LOCAL_SEED_PROBE_NODES })))
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-            if (ordered.isEmpty() && pruneUnseeded && !candidates.isEmpty()) {
+            if (ordered.isEmpty() && useReachability && !candidates.isEmpty()) {
                 // A conservative escape hatch for stale reachability results:
                 // require at least one concrete stock seed before reopening a
                 // candidate.  A recipe whose inputs are all absent would only
@@ -549,7 +560,7 @@ public final class PureRecipePlanner {
                     .comparingDouble(this::inputStockCoverage).reversed();
             // Avoid making the sort itself perform a reachability walk for every recipe of a
             // broad tag. Those candidates are checked lazily after the family-gain guard.
-            ordered.sort(pruneUnseeded
+            ordered.sort(useReachability
                     ? coverage.thenComparingInt(reachability()::depth)
                     : coverage);
             return ordered;
@@ -562,6 +573,41 @@ public final class PureRecipePlanner {
         private boolean hasAnyInputInStock(RecipeNode candidate) {
             return candidate.inputs().stream().anyMatch(input ->
                     input.alternatives().stream().anyMatch(material -> stock.getOrDefault(material, 0) > 0));
+        }
+
+        /**
+         * Conservative reachability check for a tiny producer set. Unlike
+         * {@link SeededReachability}, this follows only the candidate's local
+         * dependency closure and never indexes the complete scoped graph.
+         */
+        private boolean hasLocalSeedPath(RecipeNode candidate, Set<MaterialRef> visiting,
+                                         int[] remainingNodes) {
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+                boolean satisfied = input.alternatives().stream().anyMatch(material ->
+                        hasLocalSeed(material, input.nbtMatchMode(), visiting, remainingNodes));
+                if (!satisfied) return false;
+            }
+            return true;
+        }
+
+        private boolean hasLocalSeed(MaterialRef material, NbtMatchMode mode,
+                                     Set<MaterialRef> visiting, int[] remainingNodes) {
+            if (stockAcross(new IngredientRef(List.of(material), 1, mode,
+                    DemandRole.CONSUMED)) > 0) return true;
+            // Cycles and runtime-NBT outputs are left for the main
+            // planner; this helper must never turn an uncertain route into a
+            // false shortage.
+            if (material.runtimeNbt() || remainingNodes[0]-- <= 0
+                    || !visiting.add(material)) return true;
+            try {
+                List<RecipeNode> producers = ImmutableRecipeGraphProjector.candidates(
+                        graph, material, mode);
+                if (producers.isEmpty()) return false;
+                return producers.stream().anyMatch(producer ->
+                        hasLocalSeedPath(producer, visiting, remainingNodes));
+            } finally {
+                visiting.remove(material);
+            }
         }
 
         private SeededReachability reachability() {

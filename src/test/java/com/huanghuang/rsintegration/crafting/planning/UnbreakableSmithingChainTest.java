@@ -223,6 +223,107 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
         });
     }
 
+    @Test
+    void anyOnlySmithingDemandDoesNotExpandUnrelatedInventoryVariants() {
+        MaterialRef base = material("test:any_base", "");
+        MaterialRef output = new MaterialRef(new ResourceLocation("test:any_upgrade"), "", true);
+        RecipeNode upgrade = new RecipeNode(new ResourceLocation("test:any_upgrade_recipe"),
+                output, 1, List.of(any(TEMPLATE, 1), any(base, 1), any(ADDITION, 1)),
+                "smithing", new ResourceLocation("minecraft:smithing"));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(upgrade)));
+        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        for (int index = 0; index < 512; index++) {
+            stock.put(material("test:any_base", "{variant:" + index + "}"), 1);
+        }
+        stock.put(TEMPLATE, 1);
+        stock.put(ADDITION, 1);
+        List<IngredientRef> roots = List.of(any(material("test:any_upgrade", ""), 1));
+
+        PlanningLookupCache.run(() -> {
+            ImmutableRecipeGraph bound = ImmutableRecipeGraphProjector.bindSmithingStates(
+                    graph, stock, roots);
+            assertSame(graph, bound);
+            assertEquals(1, bound.recipesByOutput().size());
+            assertTrue(PureRecipePlanner.resolve(graph, stock, roots, 16).feasible());
+            assertEquals(0, PlanningLookupCache.currentStats().nbtParses());
+            return null;
+        });
+    }
+
+    @Test
+    void strictDemandExpandsOnlyItsRelevantSmithingPath() {
+        MaterialRef relevantBase = material("test:relevant_base", "");
+        MaterialRef relevantOutput = new MaterialRef(
+                new ResourceLocation("test:relevant_upgrade"), "", true);
+        MaterialRef unrelatedBase = material("test:unrelated_base", "");
+        MaterialRef unrelatedOutput = new MaterialRef(
+                new ResourceLocation("test:unrelated_upgrade"), "", true);
+        RecipeNode relevantUpgrade = new RecipeNode(
+                new ResourceLocation("test:relevant_upgrade_recipe"), relevantOutput, 1,
+                List.of(any(TEMPLATE, 1), any(relevantBase, 1), any(ADDITION, 1)),
+                "smithing", new ResourceLocation("minecraft:smithing"));
+        RecipeNode unrelatedUpgrade = new RecipeNode(
+                new ResourceLocation("test:unrelated_upgrade_recipe"), unrelatedOutput, 1,
+                List.of(any(TEMPLATE, 1), any(unrelatedBase, 1), any(ADDITION, 1)),
+                "smithing", new ResourceLocation("minecraft:smithing"));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                relevantOutput, List.of(relevantUpgrade),
+                unrelatedOutput, List.of(unrelatedUpgrade)));
+        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        stock.put(material("test:relevant_base", MODIFIED), 1);
+        for (int index = 0; index < 512; index++) {
+            stock.put(material("test:unrelated_base", "{variant:" + index + "}"), 1);
+        }
+        stock.put(TEMPLATE, 1);
+        stock.put(ADDITION, 1);
+        List<IngredientRef> roots = List.of(new IngredientRef(
+                List.of(material("test:relevant_upgrade", REQUIRED)), 1,
+                NbtMatchMode.PARTIAL));
+
+        ImmutableRecipeGraph bound = ImmutableRecipeGraphProjector.bindSmithingStates(
+                graph, stock, roots);
+        assertNotSame(graph, bound);
+        assertTrue(bound.recipesByOutput().containsKey(
+                material("test:relevant_upgrade", MODIFIED)));
+        assertEquals(1, bound.recipesByOutput().keySet().stream()
+                .filter(material -> material.itemId().equals(unrelatedOutput.itemId()))
+                .count());
+        assertTrue(PureRecipePlanner.resolve(graph, stock, roots, 16).feasible());
+    }
+
+    @Test
+    void mixedStrictAlternativesDoNotExpandTheTaglessSmithingFamily() {
+        MaterialRef taggedBase = material("test:tagged_base", "");
+        MaterialRef taggedOutput = new MaterialRef(
+                new ResourceLocation("test:tagged_upgrade"), "", true);
+        MaterialRef taglessBase = material("test:tagless_base", "");
+        MaterialRef taglessOutput = new MaterialRef(
+                new ResourceLocation("test:tagless_upgrade"), "", true);
+        RecipeNode taggedUpgrade = new RecipeNode(new ResourceLocation("test:tagged_recipe"),
+                taggedOutput, 1, List.of(any(TEMPLATE, 1), any(taggedBase, 1), any(ADDITION, 1)),
+                "smithing", new ResourceLocation("minecraft:smithing"));
+        RecipeNode taglessUpgrade = new RecipeNode(new ResourceLocation("test:tagless_recipe"),
+                taglessOutput, 1, List.of(any(TEMPLATE, 1), any(taglessBase, 1), any(ADDITION, 1)),
+                "smithing", new ResourceLocation("minecraft:smithing"));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                taggedOutput, List.of(taggedUpgrade), taglessOutput, List.of(taglessUpgrade)));
+        Map<MaterialRef, Integer> stock = Map.of(
+                material("test:tagged_base", MODIFIED), 1,
+                material("test:tagless_base", "{irrelevant:1}"), 1,
+                TEMPLATE, 1, ADDITION, 1);
+        List<IngredientRef> roots = List.of(new IngredientRef(List.of(
+                material("test:tagged_upgrade", REQUIRED),
+                material("test:tagless_upgrade", "")), 1, NbtMatchMode.PARTIAL));
+
+        ImmutableRecipeGraph bound = ImmutableRecipeGraphProjector.bindSmithingStates(
+                graph, stock, roots);
+        assertTrue(bound.recipesByOutput().containsKey(
+                material("test:tagged_upgrade", MODIFIED)));
+        assertEquals(1, bound.recipesByOutput().keySet().stream()
+                .filter(material -> material.itemId().equals(taglessOutput.itemId()))
+                .count());
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {0, 1})
     void modifiedSwordKeepsRepairCostAndModifierThroughEveryPlannedUpgrade(int start) throws Exception {
