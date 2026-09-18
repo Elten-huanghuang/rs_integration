@@ -137,15 +137,28 @@ public final class IronSpellBooksRecipeCatalog {
     }
 
     public static void onSpellConfigApplied() {
+        boolean rarityCachesReset = false;
         synchronized (IronSpellBooksRecipeCatalog.class) {
             // Match catalog-build -> native-initialization lock order. Never acquire
             // RecipeIndex's lock here: its worker may be waiting for this catalog.
-            IronSpellRarityCache.resetAll(SpellRegistry.none(), SpellRegistry.REGISTRY.get());
+            try {
+                IronSpellRarityCache.resetAll(SpellRegistry.none(), SpellRegistry.REGISTRY.get());
+                rarityCachesReset = true;
+            } catch (RuntimeException | LinkageError failure) {
+                // Config sync runs inside player login. A compatibility failure must
+                // not escape OnDatapackSyncEvent and reject the joining player.
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-IronSpells] Could not reset native rarity caches; "
+                                + "invalidating dynamic recipes without aborting config sync",
+                        failure);
+            }
             catalog = null;
             com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
         }
-        RSIntegrationMod.LOGGER.info(
-                "[RSI-IronSpells] Applied spell config: reset native rarity caches and invalidated dynamic recipes");
+        if (rarityCachesReset) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-IronSpells] Applied spell config: reset native rarity caches and invalidated dynamic recipes");
+        }
     }
 
     /** Detects spell-config changes applied after the dynamic catalog was built. */
