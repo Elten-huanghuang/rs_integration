@@ -67,6 +67,10 @@ class IronSpellConfigMixinContractTest {
         String hook = source.substring(source.indexOf("public static void onSpellConfigApplied()"),
                 source.indexOf("public static boolean hasRuntimeDrift()"));
         assertTrue(hook.indexOf("IronSpellRarityCache.resetAll") < hook.indexOf("catalog = null;"));
+        assertTrue(hook.contains("catch (RuntimeException | LinkageError failure)"));
+        assertTrue(hook.contains("without aborting config sync"));
+        assertTrue(hook.indexOf("catch (RuntimeException | LinkageError failure)")
+                < hook.indexOf("catalog = null;"));
         assertTrue(hook.contains("CraftPlanningRevision.bump()"));
         assertFalse(hook.contains("RecipeIndex.invalidate("), "avoid index -> catalog lock inversion");
         assertTrue(source.contains("\"fingerprint_rarity\", label, level,"));
