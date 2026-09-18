@@ -487,6 +487,7 @@
   "rsi.plan.tooltip.planned": "由计划内生产或返还提供",
   "rsi.plan.info.background_started": "合成计划正在后台计算，复杂配方可能需要几秒；期间其他请求仍可继续处理。",
   "rsi.plan.failure.missing_materials": "失败原因：缺少合成所需材料",
+  "rsi.plan.dynamic_brewing_recipe": "动态炼药配方：%s",
   "rsi.plan.failure.no_bound_machine": "失败原因：没有可用的已绑定机器",
   "rsi.plan.failure.machines_leased": "失败原因：所有已绑定机器都被其他合成订单占用",
   "rsi.plan.failure.nbt_mismatch": "失败原因：物品存在，但物品数据与配方要求不匹配",

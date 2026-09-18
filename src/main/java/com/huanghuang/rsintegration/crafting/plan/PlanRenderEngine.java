@@ -105,7 +105,7 @@ public final class PlanRenderEngine {
             gfx.renderItem(output, cardX + 30, y + 6);
         }
 
-        String displayName = formatRecipeName(step.recipeId());
+        String displayName = formatRecipeName(step.recipeId(), output);
         if (displayName != null) {
             int maxNameW = cardW - 80;
             String truncated = font.plainSubstrByWidth(displayName, maxNameW);
@@ -343,7 +343,18 @@ public final class PlanRenderEngine {
     // ── Formatting helpers ────────────────────────────────────────────
 
     public static String formatRecipeName(ResourceLocation recipeId) {
+        return formatRecipeName(recipeId, ItemStack.EMPTY);
+    }
+
+    public static String formatRecipeName(ResourceLocation recipeId, ItemStack output) {
         if (recipeId == null) return "Unknown";
+        if (isDynamicBrewingRecipe(recipeId)) {
+            String product = output != null && !output.isEmpty()
+                    ? output.getHoverName().getString()
+                    : recipeId.getPath().substring("vanilla_brewing/".length());
+            return Component.translatable(
+                    "rsi.plan.dynamic_brewing_recipe", product).getString();
+        }
         String path = recipeId.getPath();
         int slash = path.lastIndexOf('/');
         String name = slash >= 0 ? path.substring(slash + 1) : path;
@@ -361,6 +372,11 @@ public final class PlanRenderEngine {
             }
         }
         return sb.toString();
+    }
+
+    public static boolean isDynamicBrewingRecipe(ResourceLocation recipeId) {
+        return "rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("vanilla_brewing/");
     }
 
     /**
