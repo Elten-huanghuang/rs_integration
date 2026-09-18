@@ -362,6 +362,95 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void stockedFallbackVariantIsUsedWithoutCraftingPreferredVariant() {
+        MaterialRef whiteWool = minecraftMaterial("white_wool");
+        MaterialRef greenWool = minecraftMaterial("green_wool");
+        MaterialRef string = minecraftMaterial("string");
+        IngredientRef anyWool = new IngredientRef(List.of(whiteWool, greenWool), 1);
+        RecipeNode makeWhite = recipe("make_white_wool", whiteWool, 1,
+                ingredient(string, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(whiteWool, List.of(makeWhite))),
+                Map.of(greenWool, 1, string, 1), List.of(anyWool), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertTrue(result.steps().isEmpty());
+        assertEquals(1, result.remaining().get(string));
+    }
+
+    @Test
+    void preferredVariantIsProducedFirstOnlyAfterAcceptedStockRunsOut() {
+        MaterialRef whiteWool = minecraftMaterial("white_wool");
+        MaterialRef greenWool = minecraftMaterial("green_wool");
+        MaterialRef string = minecraftMaterial("string");
+        MaterialRef dye = material("green_dye");
+        IngredientRef anyWool = new IngredientRef(List.of(greenWool, whiteWool), 1);
+        RecipeNode makeGreen = recipe("make_green_wool", greenWool, 1,
+                ingredient(dye, 1));
+        RecipeNode makeWhite = recipe("make_white_wool", whiteWool, 1,
+                ingredient(string, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        greenWool, List.of(makeGreen), whiteWool, List.of(makeWhite))),
+                Map.of(string, 1, dye, 1), List.of(anyWool), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("make_white_wool"), 1)), result.steps());
+        assertEquals(1, result.remaining().get(dye));
+    }
+
+    @Test
+    void impossiblePreferredVariantFallsBackToAnotherProductiveVariant() {
+        MaterialRef whiteWool = minecraftMaterial("white_wool");
+        MaterialRef greenWool = minecraftMaterial("green_wool");
+        MaterialRef missing = material("missing_white_input");
+        MaterialRef dye = material("available_green_input");
+        IngredientRef anyWool = new IngredientRef(List.of(whiteWool, greenWool), 1);
+        RecipeNode makeWhite = recipe("blocked_white_wool", whiteWool, 1,
+                ingredient(missing, 1));
+        RecipeNode makeGreen = recipe("make_green_wool", greenWool, 1,
+                ingredient(dye, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        whiteWool, List.of(makeWhite), greenWool, List.of(makeGreen))),
+                Map.of(dye, 1), List.of(anyWool), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("make_green_wool"), 1)), result.steps());
+    }
+
+    @Test
+    void preferredVariantDoesNotAuthorizeAZeroGainRecoloringChain() {
+        MaterialRef whiteWool = minecraftMaterial("white_wool");
+        MaterialRef greenWool = minecraftMaterial("green_wool");
+        MaterialRef redWool = minecraftMaterial("red_wool");
+        MaterialRef purpleWool = minecraftMaterial("purple_wool");
+        IngredientRef anyWool = new IngredientRef(
+                List.of(whiteWool, greenWool, redWool, purpleWool), 2);
+        RecipeNode greenToRed = recipe("green_to_red", redWool, 1,
+                ingredient(greenWool, 1));
+        RecipeNode redToPurple = recipe("red_to_purple", purpleWool, 1,
+                ingredient(redWool, 1));
+        RecipeNode purpleToWhite = recipe("purple_to_white", whiteWool, 1,
+                ingredient(purpleWool, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        redWool, List.of(greenToRed),
+                        purpleWool, List.of(redToPurple),
+                        whiteWool, List.of(purpleToWhite))),
+                Map.of(greenWool, 1), List.of(anyWool), 20);
+
+        assertFalse(result.feasible());
+        assertTrue(result.steps().isEmpty(), result.toString());
+    }
+
+    @Test
     void aggregatesTagVariantsWhilePreservingLaterExactDemand() {
         MaterialRef whiteWool = material("white_wool");
         MaterialRef blackWool = material("black_wool");
@@ -373,6 +462,27 @@ class PureRecipePlannerTest {
 
         assertTrue(result.feasible());
         assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertTrue(result.remaining().isEmpty());
+    }
+
+    @Test
+    void producesOnlyTheUnreservedShortfallForAnyModeTagDemand() {
+        MaterialRef whiteWool = minecraftMaterial("white_wool");
+        MaterialRef greenWool = minecraftMaterial("green_wool");
+        MaterialRef dye = material("spare_green_dye");
+        IngredientRef anyWool = new IngredientRef(List.of(whiteWool, greenWool), 2,
+                NbtMatchMode.ANY, DemandRole.CONSUMED);
+        RecipeNode makeGreen = recipe("make_reserved_green_wool", greenWool, 1,
+                ingredient(dye, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(greenWool, List.of(makeGreen))),
+                Map.of(whiteWool, 2, greenWool, 1, dye, 1),
+                List.of(anyWool, ingredient(whiteWool, 2)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("make_reserved_green_wool"), 1)), result.steps());
         assertTrue(result.remaining().isEmpty());
     }
 
@@ -932,6 +1042,10 @@ class PureRecipePlannerTest {
 
     private static MaterialRef material(String path) {
         return new MaterialRef(id(path), "");
+    }
+
+    private static MaterialRef minecraftMaterial(String path) {
+        return new MaterialRef(new ResourceLocation("minecraft", path), "");
     }
 
     private static ResourceLocation id(String path) {

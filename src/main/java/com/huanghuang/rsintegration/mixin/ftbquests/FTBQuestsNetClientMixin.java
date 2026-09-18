@@ -27,5 +27,6 @@ public abstract class FTBQuestsNetClientMixin {
     }, at = @At("RETURN"))
     private static void rsi$requestQuestRecipeRefresh(CallbackInfo ci) {
         FtbQuestJeiRuntime.requestRefresh();
+        FtbQuestJeiRuntime.requestQuestScreenRefresh();
     }
 }

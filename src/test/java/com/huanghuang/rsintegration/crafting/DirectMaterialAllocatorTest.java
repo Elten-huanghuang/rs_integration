@@ -36,6 +36,37 @@ class DirectMaterialAllocatorTest extends BootstrapTest {
     }
 
     @Test
+    void softPreferenceDoesNotStealStockFromExactDemand() {
+        Ingredient broad = Ingredient.of(Items.WHITE_WOOL, Items.GREEN_WOOL);
+        Ingredient exactWhite = Ingredient.of(Items.WHITE_WOOL);
+
+        DirectMaterialAllocator.Result result = DirectMaterialAllocator.allocate(
+                List.of(new IngredientSpec(broad, 1), new IngredientSpec(exactWhite, 1)),
+                Map.of(new StackKey(Items.WHITE_WOOL, null), 1,
+                        new StackKey(Items.GREEN_WOOL, null), 1));
+
+        assertTrue(result.feasible());
+        assertTrue(result.allocations().stream().anyMatch(allocation ->
+                allocation.ingredientIndex() == 0
+                        && allocation.material().item() == Items.GREEN_WOOL));
+        assertTrue(result.allocations().stream().anyMatch(allocation ->
+                allocation.ingredientIndex() == 1
+                        && allocation.material().item() == Items.WHITE_WOOL));
+    }
+
+    @Test
+    void broadDemandUsesPreferredStockWhenNoConstraintNeedsIt() {
+        DirectMaterialAllocator.Result result = DirectMaterialAllocator.allocate(
+                List.of(new IngredientSpec(
+                        Ingredient.of(Items.GREEN_WOOL, Items.WHITE_WOOL), 1)),
+                Map.of(new StackKey(Items.WHITE_WOOL, null), 1,
+                        new StackKey(Items.GREEN_WOOL, null), 1));
+
+        assertTrue(result.feasible());
+        assertEquals(Items.WHITE_WOOL, result.allocations().get(0).material().item());
+    }
+
+    @Test
     void doesNotCountOneStackForTwoRecipeSlots() {
         DirectMaterialAllocator.Result result = DirectMaterialAllocator.allocate(
                 List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1),
