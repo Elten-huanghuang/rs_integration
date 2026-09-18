@@ -481,6 +481,7 @@
   "rsi.plan.tooltip.planned": "Supplied by planned production or returns",
   "rsi.plan.info.background_started": "The crafting plan is being calculated in the background. Complex recipes may take a few seconds; other requests remain responsive.",
   "rsi.plan.failure.missing_materials": "Failure reason: required crafting materials are missing",
+  "rsi.plan.dynamic_brewing_recipe": "Dynamic brewing recipe: %s",
   "rsi.plan.failure.no_bound_machine": "Failure reason: no bound machine is available",
   "rsi.plan.failure.machines_leased": "Failure reason: all bound machines are occupied by active crafting orders",
   "rsi.plan.failure.nbt_mismatch": "Failure reason: the item exists, but its data does not match the recipe",

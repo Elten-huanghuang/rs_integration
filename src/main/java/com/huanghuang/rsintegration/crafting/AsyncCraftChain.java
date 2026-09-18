@@ -49,6 +49,7 @@ import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -2592,10 +2593,13 @@ public final class AsyncCraftChain {
         if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
             return step.syntheticOutput().copy();
         }
-        return server.getRecipeManager().byKey(step.recipeId())
-                .map(recipe -> ModRecipeHandlers.tryGetResultItem(
-                        recipe, server.overworld().registryAccess()))
-                .orElse(ItemStack.EMPTY);
+        Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
+        if (recipe == null && "rs_integration".equals(step.recipeId().getNamespace())
+                && step.recipeId().getPath().startsWith("vanilla_brewing/")) {
+            recipe = VanillaBrewingCatalog.byId(step.recipeId());
+        }
+        return recipe == null ? ItemStack.EMPTY : ModRecipeHandlers.tryGetResultItem(
+                recipe, server.overworld().registryAccess());
     }
 
     private String flatMachineLabel() {

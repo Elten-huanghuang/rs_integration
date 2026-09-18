@@ -115,6 +115,23 @@ class CraftProgressOverlayStateTest extends BootstrapTest {
                 translationKey((Component) machineArgument));
     }
 
+    @Test
+    void dynamicBrewingProgressUsesProductNameInsteadOfSyntheticHash() {
+        CraftProgressSnapshot.NodeProgress node = new CraftProgressSnapshot.NodeProgress(0,
+                CraftProgressSnapshot.NodeState.RUNNING,
+                "rs_integration:vanilla_brewing/d65d2b42", "vanilla_brewing_stand",
+                new ItemStack(Items.POTION), 0, 1, 1, "",
+                CraftProgressSnapshot.Reason.NONE, "", false);
+
+        Component label = CraftProgressPresentation.outputName(node);
+
+        assertEquals("rsi.plan.dynamic_brewing_recipe", translationKey(label));
+        Object product = ((TranslatableContents) label.getContents()).getArgs()[0];
+        assertTrue(product instanceof Component);
+        assertEquals(translationKey(new ItemStack(Items.POTION).getHoverName()),
+                translationKey((Component) product));
+    }
+
     private static String translationKey(Component component) {
         return component.getContents() instanceof TranslatableContents contents
                 ? contents.getKey() : "";

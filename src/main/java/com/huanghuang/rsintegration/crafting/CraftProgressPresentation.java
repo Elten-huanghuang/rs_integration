@@ -45,12 +45,18 @@ final class CraftProgressPresentation {
 
     static Component outputName(CraftProgressSnapshot.NodeProgress node) {
         ItemStack output = node.displayOutput();
-        if (!output.isEmpty()) return output.getHoverName();
         ResourceLocation recipe = ResourceLocation.tryParse(node.recipeId());
+        if (recipe != null && PlanRenderEngine.isDynamicBrewingRecipe(recipe)) {
+            Component product = output.isEmpty()
+                    ? Component.literal(recipe.getPath().substring("vanilla_brewing/".length()))
+                    : output.getHoverName();
+            return Component.translatable("rsi.plan.dynamic_brewing_recipe", product);
+        }
+        if (!output.isEmpty()) return output.getHoverName();
         return recipe == null
                 ? Component.translatable("rsi.progress.step.unknown")
                 : Component.translatable("rsi.progress.step.recipe",
-                PlanRenderEngine.formatRecipeName(recipe));
+                PlanRenderEngine.formatRecipeName(recipe, output));
     }
 
     static Component state(CraftProgressSnapshot.NodeProgress node) {
