@@ -43,9 +43,14 @@ public final class PlanMaterialBill {
             leftovers.put(IngredientKey.of(new ItemStack(entry.getKey())), -entry.getValue());
         }
 
-        Map<IngredientKey, PlanResponse.Availability> displayMaterials = buildDisplayMaterials(
-                netMaterials, itemSources, itemAvailable, stackAvailable, targetOutput,
-                steps, repeatCount, graph);
+        Map<IngredientKey, PlanResponse.Availability> displayMaterials = graph == null
+                ? buildDisplayMaterials(netMaterials, itemSources, itemAvailable, stackAvailable,
+                        targetOutput, steps, repeatCount, null)
+                // A graph is already the server-authoritative material-flow view.  Do not
+                // rebuild its bill through PlanTreeModel: the visual tree intentionally folds
+                // shared producer nodes, so its gross traversal is not a complete external
+                // leaf-material list and can expose intermediate outputs as materials.
+                : new LinkedHashMap<>(netMaterials);
         return new Result(feasible, displayMaterials, leftovers);
     }
 

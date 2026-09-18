@@ -287,6 +287,48 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void graphMaterialBillContainsOnlyInitialAndUnresolvedLeaves() {
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        ResourceLocation producerRecipe = new ResourceLocation("test", "make_ingot");
+        ResourceLocation consumerRecipe = new ResourceLocation("test", "make_diamond");
+        PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);
+        PlanGraphView.SourceView producer = new PlanGraphView.SourceView(false, 1, 0);
+
+        PlanGraphView.NodeView makeIngot = new PlanGraphView.NodeView(1, producerRecipe,
+                "generic", 1, new ItemStack(Items.IRON_INGOT), List.of(
+                new PlanGraphView.InputView(0, new ItemStack(Items.IRON_ORE), 3,
+                        DemandRole.CONSUMED.ordinal())), List.of(
+                new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 2, 0)));
+        PlanGraphView.NodeView makeDiamond = new PlanGraphView.NodeView(2, consumerRecipe,
+                "generic", 1, target, List.of(
+                new PlanGraphView.InputView(0, new ItemStack(Items.IRON_INGOT), 2,
+                        DemandRole.CONSUMED.ordinal())), List.of(
+                new PlanGraphView.OutputView(0, target, 1, 0)));
+        PlanGraphView graph = new PlanGraphView(1, List.of(makeIngot, makeDiamond), List.of(
+                new PlanGraphView.EdgeView(1, 0, initial, new ItemStack(Items.IRON_ORE), 3),
+                new PlanGraphView.EdgeView(2, 0, producer, new ItemStack(Items.IRON_INGOT), 2)),
+                List.of(new PlanGraphView.RootView(target, 1, 0, List.of(
+                        new PlanGraphView.RootEdgeView(
+                                new PlanGraphView.SourceView(false, 2, 0), target, 1)))),
+                List.of(new PlanGraphView.UnresolvedView(2, 0,
+                        new ItemStack(Items.GOLD_INGOT), 2)), List.of(1, 2));
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(), Map.of(), Map.of(Items.IRON_ORE, 1),
+                Map.of(new StackKey(Items.IRON_ORE, null), 1), target, List.of(), 1,
+                graph, false);
+
+        assertEquals(Map.of(
+                        IngredientKey.of(new ItemStack(Items.IRON_ORE)),
+                        new PlanResponse.Availability(3, 1),
+                        IngredientKey.of(new ItemStack(Items.GOLD_INGOT)),
+                        new PlanResponse.Availability(2, 0)),
+                result.materials());
+        assertFalse(result.materials().containsKey(IngredientKey.of(new ItemStack(Items.IRON_INGOT))));
+        assertFalse(result.feasible());
+    }
+
+    @Test
     void legacyPlanFallbackAlsoKeepsStrictBookVariantsSeparate() {
         ItemStack protection = taggedBook("protection");
         ItemStack mending = taggedBook("mending");
