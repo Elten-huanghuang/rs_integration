@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.autoeat.network;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
+import com.huanghuang.rsintegration.autoeat.AutoEatBlacklistPolicy;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -57,7 +58,7 @@ public class BlacklistSyncPacket {
 
     private static Set<ResourceLocation> readSet(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
-        if (size < 0 || size > 4096) {
+        if (size < 0 || size > AutoEatBlacklistPolicy.MAX_SIZE) {
             throw new io.netty.handler.codec.DecoderException("effect blacklist size out of range: " + size);
         }
         Set<ResourceLocation> set = new HashSet<>(Math.min(size, 256));

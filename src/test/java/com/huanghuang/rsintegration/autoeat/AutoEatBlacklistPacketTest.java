@@ -10,6 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,5 +72,29 @@ class AutoEatBlacklistPacketTest {
 
         assertThrows(DecoderException.class,
                 () -> UpdateAutoEatPreferencesPacket.decode(buffer));
+    }
+
+    @Test
+    void acceptsThousandsOfBlacklistedFoodsWithinWireLimit() {
+        Set<ResourceLocation> added = new HashSet<>();
+        for (int i = 0; i < 3000; i++) {
+            added.add(new ResourceLocation("test", "food_" + i));
+        }
+
+        Set<ResourceLocation> merged = AutoEatBlacklistPolicy.merge(Set.of(), added, Set.of());
+
+        assertEquals(3000, merged.size());
+    }
+
+    @Test
+    void rejectsOversizedBlacklistAtomically() {
+        Set<ResourceLocation> current = Set.of(FOOD);
+        Set<ResourceLocation> added = new HashSet<>();
+        for (int i = 0; i < AutoEatBlacklistPolicy.MAX_SIZE; i++) {
+            added.add(new ResourceLocation("test", "food_" + i));
+        }
+
+        assertEquals(null, AutoEatBlacklistPolicy.merge(current, added, Set.of()));
+        assertEquals(Set.of(FOOD), current);
     }
 }
