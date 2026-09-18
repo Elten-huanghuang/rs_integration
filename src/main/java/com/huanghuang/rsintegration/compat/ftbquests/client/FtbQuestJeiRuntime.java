@@ -3,7 +3,10 @@ package com.huanghuang.rsintegration.compat.ftbquests.client;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestSubmissionScanner;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
+import dev.ftb.mods.ftblibrary.ui.ScreenWrapper;
+import dev.ftb.mods.ftbquests.client.gui.quests.QuestScreen;
 import mezz.jei.api.runtime.IJeiRuntime;
+import net.minecraft.client.Minecraft;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
@@ -19,6 +22,7 @@ public final class FtbQuestJeiRuntime {
     private static final List<QuestSubmissionSnapshot> REGISTERED = new ArrayList<>();
     private static IJeiRuntime runtime;
     private static boolean waiting;
+    private static boolean questScreenRefreshRequested;
     private static int ticksUntilRefresh;
     private static int ticksWaiting;
 
@@ -38,11 +42,17 @@ public final class FtbQuestJeiRuntime {
         ticksUntilRefresh = 0;
         ticksWaiting = 0;
         REGISTERED.clear();
+        questScreenRefreshRequested = false;
     }
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || runtime == null) return;
+        if (event.phase != TickEvent.Phase.END) return;
+        if (questScreenRefreshRequested) {
+            questScreenRefreshRequested = false;
+            refreshOpenQuestScreen();
+        }
+        if (runtime == null) return;
         if (waiting && (++ticksWaiting >= MAX_REFRESH_DELAY_TICKS
                 || --ticksUntilRefresh <= 0)) {
             refreshIfReady();
@@ -54,6 +64,19 @@ public final class FtbQuestJeiRuntime {
         if (!waiting) ticksWaiting = 0;
         waiting = true;
         ticksUntilRefresh = REFRESH_DEBOUNCE_TICKS;
+    }
+
+    /** Defers FTB's quest screen rebuild to the client tick after a network sync. */
+    public static void requestQuestScreenRefresh() {
+        questScreenRefreshRequested = true;
+    }
+
+    private static void refreshOpenQuestScreen() {
+        if (!(Minecraft.getInstance().screen instanceof ScreenWrapper wrapper)) return;
+        if (!(wrapper.getGui() instanceof QuestScreen screen)) return;
+        screen.refreshChapterPanel();
+        screen.refreshQuestPanel();
+        screen.refreshViewQuestPanel();
     }
 
     private static void refreshIfReady() {

@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -46,6 +47,8 @@ public final class DirectMaterialAllocator {
                         && entry.getValue() != null && entry.getValue() > 0
                         && (scanEveryItem || relevantItems.contains(entry.getKey().item())))
                 .toList();
+        MaterialVariantPreferences.Snapshot preferences =
+                MaterialVariantPreferences.snapshot();
         Map<Item, List<Integer>> supplyIndicesByItem = new HashMap<>();
         for (int i = 0; i < supplies.size(); i++) {
             supplyIndicesByItem.computeIfAbsent(supplies.get(i).getKey().item(), ignored ->
@@ -75,7 +78,13 @@ public final class DirectMaterialAllocator {
                     }
                 }
             }
-            for (int j : candidateSupplyIndices) {
+            List<Integer> orderedSupplyIndices = new ArrayList<>(candidateSupplyIndices);
+            orderedSupplyIndices.sort(Comparator
+                    .comparingInt((Integer index) ->
+                            preferences.rank(supplies.get(index).getKey().item()))
+                    .thenComparing(Comparator.comparingInt((Integer index) ->
+                            supplies.get(index).getValue()).reversed()));
+            for (int j : orderedSupplyIndices) {
                 StackKey material = supplies.get(j).getKey();
                 boolean matches;
                 try {

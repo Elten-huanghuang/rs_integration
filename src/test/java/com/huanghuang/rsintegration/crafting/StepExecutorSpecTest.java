@@ -103,6 +103,21 @@ class StepExecutorSpecTest extends BootstrapTest {
     }
 
     @Test
+    void resolutionOrdersExactInputsBeforeBroadInputsAndCatalystsLast() {
+        Ingredient broad = Ingredient.of(Items.WHITE_WOOL, Items.GREEN_WOOL);
+        Ingredient exact = Ingredient.of(Items.WHITE_WOOL);
+        IngredientSpec broadSpec = new IngredientSpec(broad, 1);
+        IngredientSpec exactSpec = new IngredientSpec(exact, 1);
+        IngredientSpec catalyst = new IngredientSpec(exact, 1, DemandRole.CATALYST);
+        List<IngredientSpec> ordered = new java.util.ArrayList<>(
+                List.of(broadSpec, catalyst, exactSpec));
+
+        ordered.sort(StepExecutor.resolutionComparator());
+
+        assertEquals(List.of(exactSpec, broadSpec, catalyst), ordered);
+    }
+
+    @Test
     void machineSlotChoosesOneVariantThatSatisfiesTheWholeTagDemand() {
         ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(
                 new ItemStack(Items.WHITE_WOOL, 64),
@@ -121,6 +136,23 @@ class StepExecutorSpecTest extends BootstrapTest {
         assertEquals(62, context.countMatching(Ingredient.of(Items.WHITE_WOOL)));
         assertEquals(1, context.countMatching(Ingredient.of(Items.RED_WOOL)));
         assertEquals(1, context.countMatching(Ingredient.of(Items.BLUE_WOOL)));
+    }
+
+    @Test
+    void machineSlotUsesCompleteFallbackStockBeforeCraftingPreferredVariant() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(
+                new ItemStack(Items.WHITE_WOOL, 1),
+                new ItemStack(Items.GREEN_WOOL, 2)), null);
+        Ingredient wool = Ingredient.of(Items.WHITE_WOOL, Items.GREEN_WOOL);
+
+        Ingredient selected = StepExecutor.ensureSingleVariantMachineInput(
+                wool, 2, context, 0, new CraftingResolver.EdgeTracker(), null,
+                new java.util.ArrayList<>());
+
+        assertNotNull(selected);
+        assertEquals(Items.GREEN_WOOL, selected.getItems()[0].getItem());
+        assertEquals(1, context.countMatching(Ingredient.of(Items.WHITE_WOOL)));
+        assertEquals(0, context.countMatching(Ingredient.of(Items.GREEN_WOOL)));
     }
 
     @Test

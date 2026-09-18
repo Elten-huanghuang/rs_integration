@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -193,6 +194,7 @@ public final class PureRecipePlanner {
         private final int maxMemoizedFailures;
         private final long deadlineNanos;
         private final LongSupplier nanoTime;
+        private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
@@ -228,6 +230,7 @@ public final class PureRecipePlanner {
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
             this.nanoTime = java.util.Objects.requireNonNull(nanoTime, "nanoTime");
+            this.variantPreferences = MaterialVariantPreferences.snapshot();
 
         }
 
@@ -267,7 +270,7 @@ public final class PureRecipePlanner {
         private boolean solveDemand(IngredientRef ingredient, List<Task> rest,
                                     List<Task> pending) {
             boolean catalyst = ingredient.role() == DemandRole.CATALYST;
-            List<MaterialRef> orderedAlternatives = inventoryFirst(ingredient.alternatives());
+            List<MaterialRef> stockAlternatives = inventoryFirst(ingredient.alternatives());
             if (catalyst) {
                 if (stockAcross(ingredient) >= ingredient.count()) {
                     if (solve(rest)) return true;
@@ -284,7 +287,7 @@ public final class PureRecipePlanner {
                         backtracks++;
                     }
                 }
-                for (MaterialRef alternative : orderedAlternatives) {
+                for (MaterialRef alternative : stockAlternatives) {
                     int have = stock.getOrDefault(alternative, 0);
                     if (have < ingredient.count()) continue;
                     setStock(alternative, have - ingredient.count());
@@ -302,15 +305,17 @@ public final class PureRecipePlanner {
                 backtracks++;
             }
 
-            for (MaterialRef wanted : orderedAlternatives) {
+            for (MaterialRef wanted : productionFirst(ingredient.alternatives())) {
                 checkBudget();
                 if (resolving.contains(wanted)) continue;
                 int have = stock.getOrDefault(wanted, 0);
-                long present = catalyst || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
-                        ? stockAcross(ingredient) : have;
+                boolean broadFamily = ingredient.alternatives().size() > 1;
+                long present = catalyst ? stockAcross(ingredient)
+                        : broadFamily || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                        ? unreservedStockAcross(ingredient, rest)
+                        : unreservedStock(rest, wanted);
                 int needed = (int) Math.max(0L, (long) ingredient.count() - present);
                 if (needed <= 0) continue;
-                boolean broadFamily = ingredient.alternatives().size() > 1;
                 for (RecipeNode candidate : inventoryFirstCandidates(
                         wanted, !broadFamily, ingredient.nbtMatchMode())) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
@@ -346,7 +351,8 @@ public final class PureRecipePlanner {
                     }
                     // Production may have a different NBT identity than the demand.
                     // Consume the combined existing and new variants through the matcher.
-                    if (selfConsumed == 0 && !catalyst && !candidate.output().equals(wanted)) {
+                    if (selfConsumed == 0 && !catalyst
+                            && (broadFamily || !candidate.output().equals(wanted))) {
                         consumeCount = 0;
                         continuation = new ArrayList<>(rest.size() + 1);
                         continuation.add(new DemandTask(ingredient));
@@ -393,10 +399,11 @@ public final class PureRecipePlanner {
             List<MaterialRef> stocked = ingredient.alternatives().stream()
                     .filter(material -> stock.getOrDefault(material, 0) > 0)
                     .sorted(Comparator
-                            .comparingLong((MaterialRef material) ->
-                                    (long) stock.getOrDefault(material, 0)
-                                            - singletonDemand(rest, material))
-                            .reversed()
+                            .comparingInt((MaterialRef material) ->
+                                    variantPreferences.rank(material.itemId()))
+                            .thenComparing(Comparator.comparingLong(
+                                    (MaterialRef material) -> unreservedStock(rest, material))
+                                    .reversed())
                             .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
                     .toList();
             if (stocked.size() < 2) return null;
@@ -408,19 +415,9 @@ public final class PureRecipePlanner {
             }
             if (total < ingredient.count()) return null;
 
-            int remaining = ingredient.count();
-            int contributors = 0;
-            Map<MaterialRef, Integer> previous = new HashMap<>();
-            for (MaterialRef material : stocked) {
-                int have = stock.getOrDefault(material, 0);
-                int take = Math.min(have, remaining);
-                if (take <= 0) continue;
-                previous.put(material, have);
-                setStock(material, have - take);
-                remaining -= take;
-                contributors++;
-                if (remaining == 0) break;
-            }
+            Map<MaterialRef, Integer> previous = consumeStocked(
+                    stocked, ingredient.count(), rest);
+            int contributors = previous.size();
             if (contributors > 1) return previous;
             previous.forEach(this::setStock);
             return null;
@@ -430,10 +427,11 @@ public final class PureRecipePlanner {
                 IngredientRef ingredient, List<Task> rest) {
             List<MaterialRef> stocked = matchingStock(ingredient)
                     .sorted(Comparator
-                            .comparingLong((MaterialRef material) ->
-                                    (long) stock.getOrDefault(material, 0)
-                                            - singletonDemand(rest, material))
-                            .reversed()
+                            .comparingInt((MaterialRef material) ->
+                                    variantPreferences.rank(material.itemId()))
+                            .thenComparing(Comparator.comparingLong(
+                                    (MaterialRef material) -> unreservedStock(rest, material))
+                                    .reversed())
                             .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
                     .toList();
             long total = 0L;
@@ -443,18 +441,46 @@ public final class PureRecipePlanner {
             }
             if (total < ingredient.count()) return null;
 
-            int remaining = ingredient.count();
+            return consumeStocked(stocked, ingredient.count(), rest);
+        }
+
+        private Map<MaterialRef, Integer> consumeStocked(
+                List<MaterialRef> stocked, int count, List<Task> rest) {
+            int remaining = count;
             Map<MaterialRef, Integer> previous = new HashMap<>();
-            for (MaterialRef material : stocked) {
-                int have = stock.getOrDefault(material, 0);
-                int take = Math.min(have, remaining);
-                if (take <= 0) continue;
-                previous.put(material, have);
-                setStock(material, have - take);
-                remaining -= take;
-                if (remaining == 0) break;
+            // Consume only stock above later exact demands first. This makes the soft
+            // preference subordinate to plan feasibility instead of stealing a required item.
+            for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+                for (MaterialRef material : stocked) {
+                    int have = stock.getOrDefault(material, 0);
+                    int capacity = pass == 0
+                            ? (int) Math.min(Integer.MAX_VALUE, unreservedStock(rest, material))
+                            : have;
+                    int take = Math.min(capacity, remaining);
+                    if (take <= 0) continue;
+                    previous.putIfAbsent(material, have);
+                    setStock(material, have - take);
+                    remaining -= take;
+                    if (remaining == 0) break;
+                }
             }
             return previous;
+        }
+
+        private long unreservedStock(List<Task> rest, MaterialRef material) {
+            return Math.max(0L, (long) stock.getOrDefault(material, 0)
+                    - singletonDemand(rest, material));
+        }
+
+        private long unreservedStockAcross(IngredientRef ingredient, List<Task> rest) {
+            long total = 0L;
+            var matching = matchingStock(ingredient).iterator();
+            while (matching.hasNext()) {
+                MaterialRef material = matching.next();
+                total = Math.min(Integer.MAX_VALUE,
+                        total + unreservedStock(rest, material));
+            }
+            return total;
         }
 
         private static long singletonDemand(List<Task> tasks, MaterialRef material) {
@@ -515,13 +541,24 @@ public final class PureRecipePlanner {
             // Do not probe reachability for every member just to sort a broad tag.
             // A large tag (logs, chests, fuels, ...) can contain hundreds of entries;
             // reachability is lazy and will be queried only as each branch is visited.
-            ordered.sort(Comparator.comparingInt(this::alternativeRank));
+            ordered.sort(Comparator.comparingInt(this::stockAlternativeRank)
+                    .thenComparingInt(material -> variantPreferences.rank(material.itemId())));
             return ordered;
         }
 
-        private int alternativeRank(MaterialRef material) {
+        private int stockAlternativeRank(MaterialRef material) {
             if (stock.getOrDefault(material, 0) > 0) return 0;
             return 1;
+        }
+
+        private List<MaterialRef> productionFirst(List<MaterialRef> alternatives) {
+            if (alternatives.size() < 2) return alternatives;
+            List<MaterialRef> ordered = new ArrayList<>(alternatives);
+            ordered.sort(Comparator
+                    .comparingInt((MaterialRef material) ->
+                            variantPreferences.rank(material.itemId()))
+                    .thenComparingInt(this::stockAlternativeRank));
+            return ordered;
         }
 
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,

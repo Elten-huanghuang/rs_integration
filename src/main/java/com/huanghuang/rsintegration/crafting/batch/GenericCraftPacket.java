@@ -5619,7 +5619,7 @@ public final class GenericCraftPacket {
 
     /**
      * Collapse a (possibly tag) ingredient to a single representative for display.
-     * Prefers the tag member with the most stock. When NO member is in stock, a
+     * Prefers configured stocked variants, then stock quantity. When NO member is in stock, a
      * {@code preferred} member — one the plan actually produces — wins over the
      * arbitrary first tag entry, so a wood-tag gun slot shows the crafted oak_log
      * instead of dark_oak_log while the tree below builds oak_log.
@@ -5628,11 +5628,19 @@ public final class GenericCraftPacket {
                                                 java.util.Set<Item> preferred) {
         ItemStack best = null;
         int bestCount = -1;
+        int bestPreference = Integer.MAX_VALUE;
+        var variantPreferences =
+                com.huanghuang.rsintegration.crafting.MaterialVariantPreferences.snapshot();
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
             int count = itemAvailable.getOrDefault(stack.getItem(), 0);
-            if (count > bestCount) {
+            int preference = variantPreferences.rank(stack.getItem());
+            boolean betterStockState = (count > 0) != (bestCount > 0) && count > 0;
+            if (best == null || betterStockState
+                    || (count > 0 && bestCount > 0 && preference < bestPreference)
+                    || (preference == bestPreference && count > bestCount)) {
                 bestCount = count;
+                bestPreference = preference;
                 best = stack;
             }
         }
@@ -5990,6 +5998,8 @@ public final class GenericCraftPacket {
     /** Applies server-configured planner resource limits by replacing the bounded executor. */
     public static synchronized void reloadPlanningConfig() {
         clearPlanResultGates(null);
+        com.huanghuang.rsintegration.crafting.MaterialVariantPreferences.refresh();
+        PLAN_CACHE.clear();
         PlanRequestService previous = PLAN_REQUESTS;
         PLAN_REQUESTS = newPlanRequestService();
         previous.close();

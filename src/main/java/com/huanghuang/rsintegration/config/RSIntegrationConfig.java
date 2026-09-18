@@ -17,6 +17,74 @@ public final class RSIntegrationConfig {
     public static final int SERVER_CONFIG_SCHEMA = 6;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
+    public static final List<String> DEFAULT_PREFERRED_INGREDIENT_VARIANTS = List.of(
+            // Stable color families.
+            "minecraft:white_wool",
+            "minecraft:white_carpet",
+            "minecraft:white_bed",
+            "minecraft:glass",
+            "minecraft:glass_pane",
+            "minecraft:white_stained_glass",
+            "minecraft:white_stained_glass_pane",
+            "minecraft:terracotta",
+            "minecraft:white_terracotta",
+            "minecraft:white_concrete",
+            "minecraft:white_concrete_powder",
+            "minecraft:candle",
+            "minecraft:white_dye",
+            // Canonical oak variants for broad wooden ingredients.
+            "minecraft:oak_log",
+            "minecraft:oak_wood",
+            "minecraft:stripped_oak_log",
+            "minecraft:stripped_oak_wood",
+            "minecraft:oak_planks",
+            "minecraft:oak_slab",
+            "minecraft:oak_stairs",
+            "minecraft:oak_fence",
+            "minecraft:oak_fence_gate",
+            "minecraft:oak_door",
+            "minecraft:oak_trapdoor",
+            "minecraft:oak_pressure_plate",
+            "minecraft:oak_button",
+            "minecraft:oak_sign",
+            "minecraft:oak_hanging_sign",
+            "minecraft:oak_boat",
+            "minecraft:oak_chest_boat",
+            "minecraft:oak_sapling",
+            "minecraft:oak_leaves",
+            "minecraft:chest",
+            "minecraft:barrel",
+            // Common base materials and canonical vanilla mineral forms.
+            "minecraft:cobblestone",
+            "minecraft:stone",
+            "minecraft:dirt",
+            "minecraft:sand",
+            "minecraft:charcoal",
+            "minecraft:iron_ingot",
+            "minecraft:copper_ingot",
+            "minecraft:gold_ingot",
+            "minecraft:netherite_ingot",
+            "minecraft:iron_nugget",
+            "minecraft:gold_nugget",
+            "minecraft:raw_iron",
+            "minecraft:raw_copper",
+            "minecraft:raw_gold",
+            "minecraft:diamond",
+            "minecraft:emerald",
+            "minecraft:lapis_lazuli",
+            "minecraft:quartz",
+            "minecraft:amethyst_shard",
+            "minecraft:redstone",
+            "minecraft:glowstone_dust",
+            "minecraft:iron_block",
+            "minecraft:copper_block",
+            "minecraft:gold_block",
+            "minecraft:diamond_block",
+            "minecraft:emerald_block",
+            "minecraft:lapis_block",
+            "minecraft:redstone_block",
+            "minecraft:coal_block",
+            "minecraft:netherite_block");
     public static final int DEFAULT_CRAFTING_PLANNING_WORKERS = CraftingPlanningConfig.DEFAULT_WORKERS;
     public static final int DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY =
             CraftingPlanningConfig.DEFAULT_QUEUE_CAPACITY;
@@ -84,6 +152,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_CATALYST_RECIPE_PREFERENCE;
     public static ForgeConfigSpec.IntValue CATALYST_RECIPE_PREFERENCE_BONUS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_RECIPES;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> PREFERRED_INGREDIENT_VARIANTS;
     public static ForgeConfigSpec.IntValue MULTIBLOCK_CRAFT_TIMEOUT_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> MULTIBLOCK_RECIPE_BLACKLIST;
@@ -722,6 +791,13 @@ public final class RSIntegrationConfig {
                         "Format: one recipe ID per line, e.g. \"minecraft:oak_planks\".",
                         "Example: prefer 4-plank-from-log over 1-plank-from-log when crafting.")
                 .defineList("preferredRecipes", List.of(), obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
+        PREFERRED_INGREDIENT_VARIANTS = s
+                .comment("Soft item preferences for ingredients that accept multiple variants.",
+                        "Entries are checked in order and apply only when the item is accepted by the ingredient.",
+                        "Existing accepted stock still wins over recursively crafting a preferred variant.",
+                        "Explicit material locks remain hard constraints. Format: one item ID per line.")
+                .defineList("preferredIngredientVariants", DEFAULT_PREFERRED_INGREDIENT_VARIANTS,
+                        obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         MULTIBLOCK_CRAFT_TIMEOUT_SECONDS = s
                 .comment("Maximum time (in seconds) to wait for a multi-block craft to complete.",
                         "If exceeded, the crafting chain is aborted and items are refunded.",

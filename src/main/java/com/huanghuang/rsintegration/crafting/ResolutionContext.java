@@ -594,7 +594,12 @@ final class ResolutionContext {
                     .thenComparing(key -> SpellScrollSelection.spellId(key.toStack()))
                     .thenComparing(key -> key.tag() == null ? "" : key.tag()));
         } else {
-            sortedKeys.sort(Comparator.comparing((CraftingResolver.StackKey k) -> k.tag() != null)
+            MaterialVariantPreferences.Snapshot preferences =
+                    MaterialVariantPreferences.snapshot();
+            sortedKeys.sort(Comparator
+                    .comparingInt((CraftingResolver.StackKey key) ->
+                            preferences.rank(key.item()))
+                    .thenComparing((CraftingResolver.StackKey k) -> k.tag() != null)
                     .thenComparing(k -> {
                         var rl = ForgeRegistries.ITEMS.getKey(k.item());
                         return rl != null ? rl.toString() : "";

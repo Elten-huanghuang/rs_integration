@@ -37,7 +37,8 @@ class PureRecipePlannerPropertyTest {
             assertEquals(uncached, actual, "lookup cache changed plan for case " + caseIndex);
             boolean expected = referenceFeasible(generated);
 
-            assertEquals(expected, actual.feasible(), "case " + caseIndex);
+            assertEquals(expected, actual.feasible(),
+                    "case " + caseIndex + " " + generated + " actual=" + actual);
             assertTrue(actual.expandedStates() <= 200_001, "case " + caseIndex);
             if (actual.feasible()) {
                 assertTrue(actual.steps().size() <= generated.maxSteps(), "case " + caseIndex);
@@ -134,9 +135,10 @@ class PureRecipePlannerPropertyTest {
             List<ReferenceTask> rest = state.pending().subList(1, state.pending().size());
             if (current instanceof ReferenceNeed need) {
                 enqueueDirectChoices(queue, state.stock(), need.ingredient(), rest, state.steps());
+                int availableWithoutStealing = unreservedStock(
+                        state.stock(), need.ingredient(), rest);
                 for (MaterialRef wanted : need.ingredient().alternatives()) {
-                    int have = state.stock().getOrDefault(wanted, 0);
-                    int missing = need.ingredient().count() - have;
+                    int missing = need.ingredient().count() - availableWithoutStealing;
                     if (missing <= 0) continue;
                     for (RecipeNode recipe : generated.graph().recipesByOutput()
                             .getOrDefault(wanted, List.of())) {
@@ -147,8 +149,10 @@ class PureRecipePlannerPropertyTest {
                             pending.add(new ReferenceNeed(new IngredientRef(input.alternatives(),
                                     input.count() * batches)));
                         }
+                        boolean aggregateDemand = need.ingredient().alternatives().size() > 1;
                         pending.add(new ReferenceProduce(recipe.output(), recipe.outputCount(),
-                                need.ingredient().count(), batches));
+                                aggregateDemand ? 0 : need.ingredient().count(), batches));
+                        if (aggregateDemand) pending.add(new ReferenceNeed(need.ingredient()));
                         pending.addAll(rest);
                         queue.addLast(new ReferenceState(state.stock(), List.copyOf(pending), state.steps()));
                     }
@@ -164,6 +168,24 @@ class PureRecipePlannerPropertyTest {
             }
         }
         return false;
+    }
+
+    private static int unreservedStock(Map<MaterialRef, Integer> stock,
+                                       IngredientRef ingredient,
+                                       List<ReferenceTask> rest) {
+        long total = 0L;
+        for (MaterialRef material : ingredient.alternatives()) {
+            long reserved = 0L;
+            for (ReferenceTask task : rest) {
+                if (task instanceof ReferenceNeed need
+                        && need.ingredient().alternatives().size() == 1
+                        && need.ingredient().alternatives().get(0).equals(material)) {
+                    reserved += need.ingredient().count();
+                }
+            }
+            total += Math.max(0L, stock.getOrDefault(material, 0) - reserved);
+        }
+        return (int) Math.min(Integer.MAX_VALUE, total);
     }
 
     private static boolean canReplayToRemaining(GeneratedCase generated,

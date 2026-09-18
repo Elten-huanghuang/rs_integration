@@ -296,7 +296,8 @@ final class StepExecutor {
         List<Integer> resolutionOrder = new ArrayList<>(physicalSpecs.size());
         for (int i = 0; i < physicalSpecs.size(); i++) resolutionOrder.add(i);
         resolutionOrder.sort(Comparator
-                .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0));
+                .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0)
+                .thenComparingInt(i -> ingredientBreadthClass(physicalSpecs.get(i).ingredient())));
         var handler = ModRecipeHandlers.handlerFor(recipe);
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
@@ -352,10 +353,16 @@ final class StepExecutor {
             return resolved ? selected : null;
         }
 
+        MaterialVariantPreferences.Snapshot preferences =
+                MaterialVariantPreferences.snapshot();
         variants.sort(Comparator
-                .comparingInt((ItemStack stack) -> ctx.countMatching(
-                        CraftingResolver.ingredientOf(stack, stack.hasTag())))
+                .comparing((ItemStack stack) -> ctx.countMatching(
+                        CraftingResolver.ingredientOf(stack, stack.hasTag())) >= quantity)
                 .reversed()
+                .thenComparingInt(stack -> preferences.rank(stack.getItem()))
+                .thenComparing(Comparator.comparingInt((ItemStack stack) ->
+                        ctx.countMatching(CraftingResolver.ingredientOf(
+                                stack, stack.hasTag()))).reversed())
                 .thenComparing(stack -> {
                     ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
                     return id != null ? id.toString() : "";
@@ -413,6 +420,21 @@ final class StepExecutor {
 
     static List<IngredientSpec> machineSpecsForGraph(List<IngredientSpec> specs) {
         return specs.stream().filter(spec -> !spec.isEmpty()).toList();
+    }
+
+    static Comparator<IngredientSpec> resolutionComparator() {
+        return Comparator
+                .comparingInt((IngredientSpec spec) ->
+                        spec.role() == DemandRole.CATALYST ? 1 : 0)
+                .thenComparingInt(spec -> ingredientBreadthClass(spec.ingredient()));
+    }
+
+    private static int ingredientBreadthClass(Ingredient ingredient) {
+        try {
+            return ingredient.getItems().length == 1 ? 0 : 1;
+        } catch (RuntimeException | LinkageError ignored) {
+            return 1;
+        }
     }
 
     static List<IngredientSpec> narrowMaterialLocks(ResourceLocation recipeId,

@@ -304,8 +304,7 @@ public final class CraftingResolver {
 
         EdgeTracker edges = new EdgeTracker();
         List<IngredientSpec> rootsToResolve = new ArrayList<>(coalesceRootSpecs(needed));
-        rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
-                spec.role() == DemandRole.CATALYST ? 1 : 0));
+        rootsToResolve.sort(StepExecutor.resolutionComparator());
         for (IngredientSpec spec : rootsToResolve) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {
@@ -469,8 +468,7 @@ public final class CraftingResolver {
                 // intermediate CraftTweaker recipe return a shared catalyst before
                 // the terminal root reserves it.
                 rootsToResolve = new ArrayList<>(rootsToResolve);
-                rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
-                        spec.role() == DemandRole.CATALYST ? 1 : 0));
+                rootsToResolve.sort(StepExecutor.resolutionComparator());
             }
             for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
                 IngredientSpec spec = rootsToResolve.get(rootIndex);
@@ -538,8 +536,7 @@ public final class CraftingResolver {
 
         EdgeTracker edges = new EdgeTracker();
         List<IngredientSpec> rootsToResolve = new ArrayList<>(coalesceRootSpecs(needed));
-        rootsToResolve.sort(java.util.Comparator.comparingInt(spec ->
-                spec.role() == DemandRole.CATALYST ? 1 : 0));
+        rootsToResolve.sort(StepExecutor.resolutionComparator());
         for (IngredientSpec spec : rootsToResolve) {
             if (spec.isEmpty()) continue;
             if (!ensureIngredient(spec.ingredient(), spec.count(), ctx, 0, edges)) {

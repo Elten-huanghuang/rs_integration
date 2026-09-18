@@ -185,6 +185,19 @@ class ResolutionContextSupplyTest extends BootstrapTest {
     }
 
     @Test
+    void broadIngredientConsumesPreferredStoredVariantFirst() {
+        ResolutionContext context = new ResolutionContext(null, Map.of(), List.of(
+                new ItemStack(Items.GREEN_WOOL), new ItemStack(Items.WHITE_WOOL)), null);
+
+        ResolutionContext.SupplyConsumption consumed = context.consumeMatchingDetailed(
+                Ingredient.of(Items.GREEN_WOOL, Items.WHITE_WOOL), 1);
+
+        assertTrue(consumed.complete());
+        assertEquals(Items.WHITE_WOOL, consumed.slices().get(0).material().item());
+        assertEquals(1, context.countMatching(Ingredient.of(Items.GREEN_WOOL)));
+    }
+
+    @Test
     void taggedSupplyLotsRemainDistinct() {
         ItemStack red = taggedDiamond("red", 2);
         ItemStack blue = taggedDiamond("blue", 3);
