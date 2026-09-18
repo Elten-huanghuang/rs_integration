@@ -113,6 +113,7 @@ import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -1143,11 +1144,18 @@ public final class GenericCraftPacket {
                                     machineSelectionMode, storageReference, Map.of());
                             return;
                         }
-                        String key = allMissingRequireBlockedOutput(
-                                result.missing(), snapshot.bindingBlockedOutputIds())
-                                ? "rsi.plan.failure.no_bound_machine"
-                                : purePlanningFailureKey(result, snapshot.availableItems());
-                        player.sendSystemMessage(Component.translatable(key));
+                        if (missingTouchesOutputSet(result.missing(),
+                                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
+                            RSIntegrationMod.debug(
+                                    "[RSI-exec] retrying typed execution for unprojected dependency recipe={}",
+                                    recipeId);
+                            tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos,
+                                    repeatCount, inferMode, baseItem, targetOutput, outputDestination,
+                                    machineSelectionMode, storageReference, Map.of());
+                            return;
+                        }
+                        sendPurePlanningFailure(player, result, snapshot.availableItems(),
+                                snapshot.bindingBlockedOutputIds());
                         return;
                     }
                     if (!PlanningStateValidator.revalidateForExecution(player, snapshot,
@@ -1286,11 +1294,18 @@ public final class GenericCraftPacket {
                                     machineSelectionMode, storageReference, materialLocks);
                             return;
                         }
-                        String key = allMissingRequireBlockedOutput(
-                                result.missing(), snapshot.bindingBlockedOutputIds())
-                                ? "rsi.plan.failure.no_bound_machine"
-                                : purePlanningFailureKey(result, snapshot.availableItems());
-                        player.sendSystemMessage(Component.translatable(key));
+                        if (missingTouchesOutputSet(result.missing(),
+                                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
+                            RSIntegrationMod.debug(
+                                    "[RSI-exec] retrying typed physical execution for unprojected dependency recipe={}",
+                                    recipeId);
+                            tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos,
+                                    repeatCount, inferMode, baseItem, targetOutput, outputDestination,
+                                    machineSelectionMode, storageReference, materialLocks);
+                            return;
+                        }
+                        sendPurePlanningFailure(player, result, snapshot.availableItems(),
+                                snapshot.bindingBlockedOutputIds());
                         return;
                     }
                     if (!PlanningStateValidator.revalidateForExecution(player, snapshot,
@@ -5415,6 +5430,78 @@ public final class GenericCraftPacket {
                 : "rsi.plan.failure.missing_materials";
     }
 
+    /** Sends a planner failure without discarding the exact shortage and quantity. */
+    private static void sendPurePlanningFailure(
+            ServerPlayer player, PureRecipePlanner.Result result,
+            Map<StackKey, Integer> availableItems,
+            Set<ResourceLocation> blockedOutputIds) {
+        String key = allMissingRequireBlockedOutput(result.missing(), blockedOutputIds)
+                ? "rsi.plan.failure.no_bound_machine"
+                : purePlanningFailureKey(result, availableItems);
+        if (!"rsi.plan.failure.missing_materials".equals(key)) {
+            player.sendSystemMessage(Component.translatable(key));
+            return;
+        }
+        Component details = formatPureMissingSummary(result.missing());
+        player.sendSystemMessage(Component.translatable(
+                "rsi.generic.error.missing_materials", details));
+    }
+
+    private static Component formatPureMissingSummary(
+            List<ImmutableRecipeGraph.IngredientRef> demands) {
+        if (demands == null || demands.isEmpty()) {
+            return Component.translatable("rsi.plan.failure.missing_materials");
+        }
+        MutableComponent result = Component.empty();
+        int shown = 0;
+        for (ImmutableRecipeGraph.IngredientRef demand : demands) {
+            if (demand == null || demand.alternatives().isEmpty()) continue;
+            if (shown++ > 0) result.append(", ");
+            result.append(formatPureAlternatives(demand.alternatives()));
+            result.append(" x").append(String.valueOf(Math.max(1, demand.count())));
+            if (shown >= 8) {
+                int remaining = demands.size() - shown;
+                if (remaining > 0) {
+                    result.append(" ").append(Component.translatable(
+                            "rsi.plan.missing_more", remaining));
+                }
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static Component formatPureAlternatives(
+            List<ImmutableRecipeGraph.MaterialRef> alternatives) {
+        MutableComponent result = Component.empty();
+        int shown = 0;
+        for (ImmutableRecipeGraph.MaterialRef material : alternatives) {
+            if (material == null || material.itemId() == null) continue;
+            if (shown++ > 0) result.append(" / ");
+            Item item = BuiltInRegistries.ITEM.getOptional(material.itemId()).orElse(null);
+            Component name = item == null
+                    ? Component.literal(material.itemId().toString())
+                    : CraftPacketUtils.missingMaterialName(item.getDescriptionId());
+            result.append(name);
+            String nbt = material.nbt();
+            if (material.runtimeNbt()) {
+                result.append(" [NBT]");
+            } else if (nbt != null && !nbt.isBlank()) {
+                String compact = nbt.replace('\n', ' ');
+                if (compact.length() > 120) compact = compact.substring(0, 117) + "...";
+                result.append(" [").append(compact).append("]");
+            }
+            // Avoid turning a large tag ingredient into a chat flood while still
+            // showing enough alternatives to diagnose the failed reservation.
+            if (shown >= 4 && alternatives.size() > shown) {
+                result.append(" ").append(Component.translatable(
+                        "rsi.plan.missing_more", alternatives.size() - shown));
+                break;
+            }
+        }
+        return result;
+    }
+
     static String boundedPreviewFailureKey(PureRecipePlanner.Result result) {
         return result.status() == PureRecipePlanner.Status.TIME_LIMIT
                 ? "rsi.plan.failure.planning_timeout"
@@ -5449,11 +5536,17 @@ public final class GenericCraftPacket {
     static boolean missingTouchesBlockedOutput(
             List<ImmutableRecipeGraph.IngredientRef> missing,
             Set<ResourceLocation> blockedOutputIds) {
-        if (missing == null || missing.isEmpty() || blockedOutputIds == null
-                || blockedOutputIds.isEmpty()) return false;
+        return missingTouchesOutputSet(missing, blockedOutputIds);
+    }
+
+    static boolean missingTouchesOutputSet(
+            List<ImmutableRecipeGraph.IngredientRef> missing,
+            Set<ResourceLocation> outputIds) {
+        if (missing == null || missing.isEmpty() || outputIds == null
+                || outputIds.isEmpty()) return false;
         return missing.stream().anyMatch(demand -> !demand.alternatives().isEmpty()
                 && demand.alternatives().stream().allMatch(material ->
-                blockedOutputIds.contains(material.itemId())));
+                outputIds.contains(material.itemId())));
     }
 
     static boolean allMissingRequireBlockedOutput(

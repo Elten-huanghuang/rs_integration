@@ -134,7 +134,7 @@ public final class CraftPacketUtils {
      * ingredients expose an NBT-less template stack. Supply a neutral value for
      * those templates so their raw {@code %s} placeholder is never shown.
      */
-    static Component missingMaterialName(@Nonnull String descriptionId) {
+    public static Component missingMaterialName(@Nonnull String descriptionId) {
         if ("item.apotheosis.potion_charm".equals(descriptionId)) {
             return Component.translatable(descriptionId,
                     Component.translatable("item.minecraft.potion"));
