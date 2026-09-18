@@ -256,7 +256,7 @@ public final class RecipeIndex {
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
             int pmmoSalvageIndexed = indexPmmoSalvage(idx, seen);
             int brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
-                    .VanillaBrewingCatalog.index(level, idx, seen);
+                    .VanillaBrewingCatalog.index(level, idx, seen, projected);
 
             Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
             Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> publishedSpellScrollIndex =

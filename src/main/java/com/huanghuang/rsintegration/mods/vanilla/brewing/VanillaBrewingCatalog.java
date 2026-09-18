@@ -2,7 +2,10 @@ package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
 import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -37,8 +40,22 @@ public final class VanillaBrewingCatalog {
 
     public static synchronized int index(Level level, Map<Item, List<RecipeIndex.Entry>> index,
                                          Set<ResourceLocation> seen) {
+        return index(level, index, seen, null);
+    }
+
+    /**
+     * Builds the runtime index and, when requested, publishes the same dynamic
+     * recipes to the immutable planner graph.  Brewing recipes are not owned by
+     * RecipeManager, so omitting this projection makes preview and execution see
+     * different producer sets for potion intermediates.
+     */
+    public static synchronized int index(
+            Level level, Map<Item, List<RecipeIndex.Entry>> index,
+            Set<ResourceLocation> seen,
+            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
         IncrementalIndex build = incrementalIndex(level, index, seen);
         while (!build.advance(() -> false)) { }
+        if (projected != null) projectDefinitions(projected);
         return build.indexedCount();
     }
 
@@ -269,6 +286,23 @@ public final class VanillaBrewingCatalog {
                 .add(new RecipeIndex.Entry(definition,
                         ModType.byId("vanilla_brewing_stand"),
                         new ResourceLocation("minecraft", "brewing"), true));
+    }
+
+    private static void projectDefinitions(
+            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
+        ResourceLocation recipeType = new ResourceLocation("minecraft", "brewing");
+        for (VanillaBrewingRecipeDefinition definition : BY_ID.values()) {
+            List<IngredientSpec> specs = List.of(
+                    new IngredientSpec(definition.getIngredients().get(0), 3),
+                    new IngredientSpec(definition.getIngredients().get(1), 1),
+                    new IngredientSpec(definition.getIngredients().get(2), 1));
+            ImmutableRecipeGraph.RecipeNode node = ImmutableRecipeGraphProjector.projectRecipe(
+                    definition.getId(), definition.output(), specs,
+                    "vanilla_brewing_stand", recipeType);
+            if (node != null) {
+                projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
+            }
+        }
     }
 
     public static synchronized VanillaBrewingRecipeDefinition byId(ResourceLocation id) {
