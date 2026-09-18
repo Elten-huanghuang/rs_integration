@@ -38,7 +38,8 @@ public final class AutoEatEngine {
     private static final String NBT_KEY = "rsi:food_blacklist";
     private static final String EFFECT_NBT_KEY = "rsi:food_effect_blacklist";
     private static final ResourceLocation GNAWS_GIFT = new ResourceLocation("crockpot", "gnaws_gift");
-    private static final int MAX_BLACKLIST_SIZE = 512;
+    /** Keep this equal to the wire decoder bound: the UI can blacklist the full food registry. */
+    public static final int MAX_BLACKLIST_SIZE = AutoEatBlacklistPolicy.MAX_SIZE;
     private static final Set<UUID> runningTasks = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Request> pendingTasks = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<UUID, Integer> stackRoundRobinOffsets =
@@ -235,17 +236,15 @@ public final class AutoEatEngine {
     private static void updateResourceLocations(net.minecraft.world.entity.player.Player player,
                                                 String key, Set<ResourceLocation> current,
                                                 Set<ResourceLocation> added, Set<ResourceLocation> removed) {
-        current.addAll(added);
-        current.removeAll(removed);
-        if (current.size() > MAX_BLACKLIST_SIZE) {
-            return;
-        }
+        Set<ResourceLocation> merged = AutoEatBlacklistPolicy.merge(current, added, removed);
+        if (merged == null) return;
         ListTag list = new ListTag();
-        for (ResourceLocation rl : current) {
+        for (ResourceLocation rl : merged) {
             list.add(StringTag.valueOf(rl.toString()));
         }
         player.getPersistentData().put(key, list);
     }
+
 
     public static boolean hasBlacklistedEffect(ItemStack stack, LivingEntity consumer,
                                                Set<ResourceLocation> effectBlacklist) {
