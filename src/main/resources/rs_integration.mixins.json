@@ -95,6 +95,7 @@
     "ftbquests.ClearRepeatCooldownMessageMixin",
     "ftbquests.FTBQuestsNetClientMixin",
     "ftbquests.OtherButtonsPanelBottomMixin",
+    "ftbquests.OtherButtonsPanelTopMixin",
     "jei.GuiIconToggleButtonAccessor",
     "jei.RecipeGuiLayoutsMixin",
     "jei.RecipesGuiMixin",
