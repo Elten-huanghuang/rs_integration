@@ -758,8 +758,7 @@ public final class CraftingPlanScreen extends Screen {
                 .isQuestSubmission(targetId)) {
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(
-                            QuestSubmissionTargetIds
-                                    .questId(targetId), false));
+                            QuestSubmissionTargetIds.questId(targetId), false, currentRepeat));
             onClose();
             return;
         }

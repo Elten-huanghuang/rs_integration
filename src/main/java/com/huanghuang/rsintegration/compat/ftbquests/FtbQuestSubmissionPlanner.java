@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -55,7 +56,8 @@ public final class FtbQuestSubmissionPlanner {
                 MaterialSources.listAllAvailable(player, endpoint);
         List<String> missing = new ArrayList<>(overflow);
         var graph = CraftingResolver.resolveGraphForSpecsWithTypes(specs, available,
-                player.serverLevel(), player, network, missing, null, false);
+                player.serverLevel(), player, network, missing, null, false,
+                RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get());
 
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < specs.size(); i++) {

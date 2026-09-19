@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -28,6 +29,10 @@ public final class FtbQuestSubmissionService {
     private FtbQuestSubmissionService() {}
 
     public static void preview(ServerPlayer player, long questId) {
+        preview(player, questId, 1);
+    }
+
+    public static void preview(ServerPlayer player, long questId, int repeatCount) {
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.findServer(player, questId);
         if (snapshot == null || !snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
@@ -37,13 +42,13 @@ public final class FtbQuestSubmissionService {
         INetwork network = endpoint != null && "refinedstorage".equals(
                 endpoint.session().reference().backendId().value())
                 ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
-        if (endpoint == null) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.no_network"));
+        QuestSubmissionPlan questPlan;
+        try {
+            questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot, endpoint, network);
+        } catch (CraftingPlanningTimeoutException timeout) {
+            sendPlanningTimeout(player, repeatCount);
             return;
         }
-
-        QuestSubmissionPlan questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot,
-                endpoint, network);
         List<PlanStep> steps = questPlan.graphView().nodes().stream()
                 .map(node -> node.asPlanStep())
                 .toList();
@@ -54,7 +59,7 @@ public final class FtbQuestSubmissionService {
                 steps, questPlan.materials(), questPlan.missing(),
                 QuestSubmissionTargetIds.of(questId).toString(),
                 "ftb_quest_submission", null, 0, 0, 0,
-                List.of(), 1, null, null, null, 0L,
+                List.of(), Math.max(1, Math.min(repeatCount, 1024)), null, null, null, 0L,
                 false, false, false, null, java.util.Set.of(), java.util.Map.of(),
                 null, questPlan.graphView());
         BatchCraftNetworkHandler.CHANNEL.send(
@@ -62,22 +67,38 @@ public final class FtbQuestSubmissionService {
     }
 
     public static void execute(ServerPlayer player, long questId) {
+        execute(player, questId, 1);
+    }
+
+    public static void execute(ServerPlayer player, long questId, int repeatCount) {
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.findServer(player, questId);
         if (snapshot == null || !snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
             return;
         }
         CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+        int requested = Math.max(1, Math.min(repeatCount, 1024));
+        int executions = snapshot.repeatable() ? requested : 1;
+        executeIteration(player, questId, endpoint, executions);
+    }
+
+    private static void executeIteration(ServerPlayer player, long questId,
+                                         CraftStorageEndpoint endpoint, int remaining) {
+        QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.findServer(player, questId);
+        if (snapshot == null || !snapshot.eligible()) {
+            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
+            return;
+        }
         INetwork network = endpoint != null && "refinedstorage".equals(
                 endpoint.session().reference().backendId().value())
                 ? RSIntegrationNetwork.resolveNetworkFromPlayer(player) : null;
-        if (endpoint == null) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.no_network"));
+        QuestSubmissionPlan plan;
+        try {
+            plan = FtbQuestSubmissionPlanner.plan(player, snapshot, endpoint, network);
+        } catch (CraftingPlanningTimeoutException timeout) {
+            player.sendSystemMessage(Component.translatable("rsi.plan.failure.planning_timeout"));
             return;
         }
-
-        QuestSubmissionPlan plan = FtbQuestSubmissionPlanner.plan(player, snapshot,
-                endpoint, network);
         if (!plan.feasible()) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                     CraftPacketUtils.formatMissingSummary(plan.missing())));
@@ -86,13 +107,17 @@ public final class FtbQuestSubmissionService {
 
         List<CraftingResolver.ResolutionStep> steps = projectSteps(plan);
         if (steps.isEmpty()) {
-            FtbQuestSubmissionExecutor.submit(player, questId, endpoint);
+            if (FtbQuestSubmissionExecutor.submit(player, questId, endpoint)) {
+                continueIfNeeded(player, questId, endpoint, remaining);
+            }
             return;
         }
 
         if (steps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
             if (CraftPacketUtils.executeCraftingSteps(player, steps, network, endpoint)) {
-                FtbQuestSubmissionExecutor.submit(player, questId, endpoint);
+                if (FtbQuestSubmissionExecutor.submit(player, questId, endpoint)) {
+                    continueIfNeeded(player, questId, endpoint, remaining);
+                }
             } else {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
             }
@@ -106,7 +131,9 @@ public final class FtbQuestSubmissionService {
             ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
             if (current == null) return;
             if (chain.state() == AsyncCraftChain.State.COMPLETED) {
-                FtbQuestSubmissionExecutor.submit(current, questId, endpoint);
+                if (FtbQuestSubmissionExecutor.submit(current, questId, endpoint)) {
+                    continueIfNeeded(current, questId, endpoint, remaining);
+                }
             } else {
                 current.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.crafting_failed",
                         chain.abortReason()));
@@ -114,6 +141,20 @@ public final class FtbQuestSubmissionService {
         });
         player.sendSystemMessage(Component.translatable("rsi.ftb_quest.info.crafting_started",
                 steps.size()));
+    }
+
+    private static void continueIfNeeded(ServerPlayer player, long questId,
+                                         CraftStorageEndpoint endpoint, int remaining) {
+        if (remaining > 1) {
+            // Keep large repeat requests off the current call stack and let the
+            // next submission observe FTB's repeat-reset state first.
+            var server = player.getServer();
+            var playerId = player.getUUID();
+            server.execute(() -> {
+                ServerPlayer current = server.getPlayerList().getPlayer(playerId);
+                if (current != null) executeIteration(current, questId, endpoint, remaining - 1);
+            });
+        }
     }
 
     private static List<CraftingResolver.ResolutionStep> projectSteps(QuestSubmissionPlan plan) {
@@ -128,5 +169,16 @@ public final class FtbQuestSubmissionService {
                     node.executions(), node.syntheticInput(), node.syntheticOutput()));
         }
         return steps;
+    }
+
+    /** Return a terminal response so the client cannot remain in a pending preview state. */
+    private static void sendPlanningTimeout(ServerPlayer player, int repeatCount) {
+        PlanResponse failure = new PlanResponse(false, "", ItemStack.EMPTY,
+                List.of(), java.util.Map.of(), List.of(), "", null, null,
+                0, 0, 0,
+                List.of(Component.translatable("rsi.plan.failure.planning_timeout")),
+                Math.max(1, Math.min(repeatCount, 1024)));
+        BatchCraftNetworkHandler.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(failure));
     }
 }

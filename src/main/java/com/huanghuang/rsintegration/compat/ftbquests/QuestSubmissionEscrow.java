@@ -35,7 +35,9 @@ final class QuestSubmissionEscrow implements AutoCloseable {
         int mark = ledger.reservationMark();
         ItemStack stack = endpoint != null
                 ? ledger.reserveFromEndpoint(ingredient, count, endpoint, player)
-                : ledger.reserveFromNetwork(ingredient, count, network, player);
+                : network != null
+                ? ledger.reserveFromNetwork(ingredient, count, network, player)
+                : ItemStack.EMPTY;
         if (stack.isEmpty()) stack = ledger.reserveFromInventory(ingredient, count, player);
         if (stack.isEmpty()) return false;
         entries.add(new Entry(taskId, stack.copy(), ledger.tokenSince(mark)));

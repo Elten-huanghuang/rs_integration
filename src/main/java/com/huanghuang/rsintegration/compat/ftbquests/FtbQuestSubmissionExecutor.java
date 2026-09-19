@@ -17,6 +17,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -28,38 +31,41 @@ import java.util.stream.Stream;
 public final class FtbQuestSubmissionExecutor {
 
     private static final Set<LockKey> ACTIVE = ConcurrentHashMap.newKeySet();
+    private static final Method CHECK_REPEATABLE = findCheckRepeatable();
 
     private FtbQuestSubmissionExecutor() {}
 
-    public static void submit(ServerPlayer player, long questId, INetwork network) {
-        submit(player, questId,
+    public static boolean submit(ServerPlayer player, long questId, INetwork network) {
+        return submit(player, questId,
                 network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
     }
 
-    public static void submit(ServerPlayer player, long questId,
+    public static boolean submit(ServerPlayer player, long questId,
                                CraftStorageEndpoint endpoint) {
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
         if (file == null || file.isLoading() || data == null || data.isLocked()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
-            return;
+            return false;
         }
         Quest quest = file.getQuest(questId);
-        if (quest == null) return;
+        if (quest == null) return false;
         LockKey key = new LockKey(data.getTeamId(), questId);
         if (!ACTIVE.add(key)) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.busy"));
-            return;
+            return false;
         }
         try {
+            final boolean[] completed = {false};
             file.withPlayerContext(player,
-                    () -> submitLocked(player, data, quest, endpoint));
+                    () -> completed[0] = submitLocked(player, data, quest, endpoint));
+            return completed[0];
         } finally {
             ACTIVE.remove(key);
         }
     }
 
-    private static void submitLocked(ServerPlayer player, TeamData data, Quest quest,
+    private static boolean submitLocked(ServerPlayer player, TeamData data, Quest quest,
                                      CraftStorageEndpoint endpoint) {
         INetwork network = endpoint != null && "refinedstorage".equals(
                 endpoint.session().reference().backendId().value())
@@ -67,7 +73,7 @@ public final class FtbQuestSubmissionExecutor {
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.inspect(quest, data, true);
         if (!snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
-            return;
+            return false;
         }
 
         Map<Long, ItemTask> tasks = new HashMap<>();
@@ -78,7 +84,7 @@ public final class FtbQuestSubmissionExecutor {
         try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint, network)) {
             for (QuestItemRequirement requirement : snapshot.requirements()) {
                 ItemTask task = tasks.get(requirement.taskId());
-                if (task == null) return;
+                if (task == null) return false;
                 int remaining = Math.toIntExact(requirement.remaining());
                 // FTB task filters can encode NBT, tags, and custom predicates
                 // that are not represented by the JEI/display item list.
@@ -90,14 +96,14 @@ public final class FtbQuestSubmissionExecutor {
                             "[RSI-FTBQuests] Escrow reservation failed task={} remaining={} display={}",
                             FtbQuestObjectId.getId(task), remaining, requirement.displayStack());
                     player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
-                    return;
+                    return false;
                 }
             }
             if (!escrow.commit()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Escrow commit failed quest={} requirements={}",
                         FtbQuestObjectId.getId(quest), snapshot.requirements().size());
                 player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.material_changed"));
-                return;
+                return false;
             }
 
             boolean questCompleted;
@@ -121,11 +127,13 @@ public final class FtbQuestSubmissionExecutor {
             }
             if (!questCompleted) {
                 player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.partial"));
-                return;
+                return false;
             }
+            ensureCompletionTimestamps(data, quest, tasks.values());
         }
         claimSafeRewards(player, data, quest);
         player.sendSystemMessage(Component.translatable("rsi.ftb_quest.complete", quest.getTitle()));
+        return true;
     }
 
     private static ItemStack submitEntry(ServerQuestFile file, ItemTask task, TeamData data,
@@ -143,7 +151,44 @@ public final class FtbQuestSubmissionExecutor {
             if (!data.getClaimType(player.getUUID(), reward).canClaim()) continue;
             data.claimReward(player, reward, true);
         }
-        quest.checkRepeatable(data, player.getUUID());
+        checkRepeatable(quest, data, player.getUUID());
+    }
+
+    private static void ensureCompletionTimestamps(TeamData data, Quest quest,
+                                                    Iterable<ItemTask> tasks) {
+        Date completedAt = new Date();
+        for (ItemTask task : tasks) {
+            if (data.isCompleted(task)) ensureCompletionTimestamp(data, task, completedAt);
+        }
+        if (data.isCompleted(quest)) ensureCompletionTimestamp(data, quest, completedAt);
+    }
+
+    private static void ensureCompletionTimestamp(TeamData data, Object questObject,
+                                                  Date completedAt) {
+        long id = FtbQuestObjectId.getId(questObject);
+        if (data.getCompletedTime(id).isEmpty()) data.setCompleted(id, completedAt);
+    }
+
+    private static Method findCheckRepeatable() {
+        try {
+            return Quest.class.getMethod("checkRepeatable", TeamData.class, UUID.class);
+        } catch (NoSuchMethodException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    /** FTB Quests 2001.4.10/13 return void; 2001.4.20/22 return boolean. */
+    private static void checkRepeatable(Quest quest, TeamData data, UUID playerId) {
+        try {
+            CHECK_REPEATABLE.invoke(quest, data, playerId);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Cannot invoke FTB Quests repeat reset", exception);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtime) throw runtime;
+            if (cause instanceof Error error) throw error;
+            throw new IllegalStateException("FTB Quests repeat reset failed", cause);
+        }
     }
 
     private record LockKey(UUID teamId, long questId) {}

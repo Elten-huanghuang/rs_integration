@@ -3623,6 +3623,15 @@ public final class GenericCraftPacket {
                                       Map<String, ItemStack> materialLocks,
                                       @Nullable AsyncPurePlanningService.RoutedPlan routedPlan) {
         long planStartNanos = System.nanoTime();
+        if (com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+                .isQuestSubmission(recipeId)) {
+            // FTB quest targets are synthetic JEI entries. Their dedicated
+            // request already built the plan; never send them through the
+            // ordinary recipe resolver during repeat-count refreshes.
+            RSIntegrationMod.debug("[RSI-Generic] Skipping synthetic FTB quest plan refresh: {}",
+                    recipeId);
+            return;
+        }
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sink.error(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
