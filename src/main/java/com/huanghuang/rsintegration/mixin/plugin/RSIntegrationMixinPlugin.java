@@ -202,6 +202,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent("dev.ftb.mods.ftblibrary.icon.Icons")
                     && hasMethod(targetClassName, "addWidgets");
         }
+        if (mixinClassName.contains("ftbquests.OtherButtonsPanelTopMixin")) {
+            return isClassPresent("dev.ftb.mods.ftbquests.client.gui.quests.OtherButtonsPanelTop")
+                    && isClassPresent("dev.ftb.mods.ftblibrary.icon.Icons")
+                    && hasMethod(targetClassName, "addWidgets");
+        }
         if (mixinClassName.contains("ftbquests.ClearRepeatCooldownMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.ClearRepeatCooldownMessage")
                     && hasMethod(targetClassName, "lambda$handle$0");

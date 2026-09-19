@@ -275,6 +275,8 @@ public final class RSIntegrationMod {
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             MinecraftForge.EVENT_BUS.register(
                     com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmService.class);
+            MinecraftForge.EVENT_BUS.register(
+                    com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService.class);
         }
     }
 
