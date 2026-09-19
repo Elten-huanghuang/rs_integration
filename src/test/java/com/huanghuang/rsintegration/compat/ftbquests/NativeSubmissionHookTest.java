@@ -27,12 +27,20 @@ class NativeSubmissionHookTest {
             "dev/ftb/mods/ftbquests/quest/reward/ItemReward.class";
     private static final String CLAIM_ALL_REWARDS_CLASS =
             "dev/ftb/mods/ftbquests/net/ClaimAllRewardsMessage.class";
+    private static final String QUEST_CLASS =
+            "dev/ftb/mods/ftbquests/quest/Quest.class";
+    private static final String TEAM_DATA_CLASS =
+            "dev/ftb/mods/ftbquests/quest/TeamData.class";
     private static final String SUBMIT_HANDLE_DESCRIPTOR =
             "(Ldev/architectury/networking/NetworkManager$PacketContext;)V";
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources",
             "rs_integration.mixins.json");
     private static final Path SERVICE = Path.of("src", "main", "java", "com", "huanghuang",
             "rsintegration", "compat", "ftbquests", "NativeItemTaskSubmissionService.java");
+    private static final Path QUEST_SERVICE = Path.of("src", "main", "java", "com", "huanghuang",
+            "rsintegration", "compat", "ftbquests", "FtbQuestSubmissionService.java");
+    private static final Path QUEST_ESCROW = Path.of("src", "main", "java", "com", "huanghuang",
+            "rsintegration", "compat", "ftbquests", "QuestSubmissionEscrow.java");
 
     @Test
     void rsFallbackIsScopedToExplicitSubmitPackets() throws IOException {
@@ -81,8 +89,22 @@ class NativeSubmissionHookTest {
     }
 
     @Test
+    void jeiQuestSubmissionSupportsInventoryWithoutAStorageNetwork() throws IOException {
+        String service = Files.readString(QUEST_SERVICE, StandardCharsets.UTF_8);
+        String escrow = Files.readString(QUEST_ESCROW, StandardCharsets.UTF_8);
+
+        assertFalse(service.contains("if (endpoint == null)"),
+                "JEI quest preview and execution must keep inventory-only planning available");
+        assertTrue(escrow.contains("network != null\n                ? ledger.reserveFromNetwork"),
+                "network reservation must only run when a network exists");
+        assertTrue(escrow.contains("ledger.reserveFromInventory"),
+                "inventory reservation must remain the no-network fallback");
+    }
+
+    @Test
     void supportedFtbVersionsExposeTheExplicitSubmitEntryPoint() throws IOException {
         List<Path> jars = List.of(
+                Path.of("libs", "[FTB任务]ftb-quests-forge-2001.4.10.jar"),
                 Path.of("libs", "ftb-quests-forge-2001.4.13.jar"),
                 Path.of("libs", "[FTB任务-魔改] ftb-quests-forge-2001.4.20.jar"),
                 Path.of("libs", "[FTB 任务] ftb-quests-forge-2001.4.22.jar"));
@@ -137,7 +159,56 @@ class NativeSubmissionHookTest {
             assertInventoryListenerContract(jar);
             assertItemRewardContract(jar);
             assertClaimAllRewardsContract(jar);
+            assertCompletionTimestampContract(jar);
+            assertRepeatableContract(jar);
         }
+    }
+
+    private static void assertCompletionTimestampContract(Path jar) throws IOException {
+        AtomicBoolean foundGet = new AtomicBoolean();
+        AtomicBoolean foundSet = new AtomicBoolean();
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            var entry = zip.getEntry(TEAM_DATA_CLASS);
+            assertTrue(entry != null, () -> jar + " is missing " + TEAM_DATA_CLASS);
+            try (var input = zip.getInputStream(entry)) {
+                new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        if (name.equals("getCompletedTime")
+                                && descriptor.equals("(J)Ljava/util/Optional;")) foundGet.set(true);
+                        if (name.equals("setCompleted")
+                                && descriptor.equals("(JLjava/util/Date;)Z")) foundSet.set(true);
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
+        }
+        assertTrue(foundGet.get(), () -> jar + " changed completion timestamp reads");
+        assertTrue(foundSet.get(), () -> jar + " changed completion timestamp writes");
+    }
+
+    private static void assertRepeatableContract(Path jar) throws IOException {
+        AtomicBoolean found = new AtomicBoolean();
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            var entry = zip.getEntry(QUEST_CLASS);
+            assertTrue(entry != null, () -> jar + " is missing " + QUEST_CLASS);
+            try (var input = zip.getInputStream(entry)) {
+                new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        if (name.equals("checkRepeatable")
+                                && (descriptor.equals("(Ldev/ftb/mods/ftbquests/quest/TeamData;Ljava/util/UUID;)V")
+                                || descriptor.equals("(Ldev/ftb/mods/ftbquests/quest/TeamData;Ljava/util/UUID;)Z"))) {
+                            found.set(true);
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
+        }
+        assertTrue(found.get(), () -> jar + " changed its repeatable reset contract");
     }
 
     private static void assertInventoryListenerContract(Path jar) throws IOException {
