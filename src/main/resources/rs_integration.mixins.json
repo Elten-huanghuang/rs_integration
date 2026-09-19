@@ -24,6 +24,8 @@
     "minecraft.ServerPlayerTickMixin",
     "minecraft.ServerPlayerMessageMixin",
     "minecraft.ServerGamePacketListenerMixin",
+    "constructionwand.ConstructionWandNetworkMixin",
+    "constructionwand.SupplierInventoryNetworkMixin",
     "beyonddimensions.NetMagnetItemMixin",
     "minecraft.SmithingTransformRecipeAccessor",
     "minecraft.SmithingTrimRecipeAccessor",
@@ -86,6 +88,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "constructionwand.ConstructionWandClientNetworkMixin",
     "minecraft.CraftFailureReportClickMixin",
     "beyonddimensions.BDBaseGuiOverlayMixin",
     "beyonddimensions.DimensionsNetGuiAutoEatMixin",

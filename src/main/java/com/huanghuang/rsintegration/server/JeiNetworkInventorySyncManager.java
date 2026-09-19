@@ -17,6 +17,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
@@ -44,7 +45,11 @@ public final class JeiNetworkInventorySyncManager {
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || !(event.player instanceof ServerPlayer player)) return;
         State state = STATES.computeIfAbsent(player.getUUID(), ignored -> new State());
-        if (!RSIntegrationConfig.ENABLE_JEI_NETWORK_OVERLAY.get()) {
+        // Construction Wand builds its preview entirely on the client. Keep
+        // the authorized item cache alive for that preview even when the
+        // optional JEI count overlay itself is disabled.
+        if (!RSIntegrationConfig.ENABLE_JEI_NETWORK_OVERLAY.get()
+                && !ModList.get().isLoaded("constructionwand")) {
             disconnect(player, state);
             return;
         }

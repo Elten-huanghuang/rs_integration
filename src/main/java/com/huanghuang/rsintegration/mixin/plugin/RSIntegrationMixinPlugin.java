@@ -30,6 +30,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains("constructionwand.")) {
+            return isClassPresent("thetadev.constructionwand.basics.WandUtil")
+                    && isClassPresent("thetadev.constructionwand.wand.supplier.SupplierInventory")
+                    && isClassPresent(targetClassName);
+        }
         if (mixinClassName.contains(".craftflow.")) {
             return isClassPresent("com.ybm.craftflow.CraftFlow")
                     && isClassPresent(targetClassName);
