@@ -19,13 +19,6 @@ public final class PreparationMessageScope {
         return callSilently(() -> delegate.prepare(player, recipeId, dimension, position));
     }
 
-    public static boolean validate(
-            IBatchDelegate delegate, ServerPlayer player, ResourceLocation recipeId,
-            @Nullable ResourceLocation dimension, BlockPos position) {
-        return callSilently(() -> delegate.validateAndInit(
-                player, recipeId, dimension, position));
-    }
-
     public static boolean isSilent() {
         return DEPTH.get() > 0;
     }

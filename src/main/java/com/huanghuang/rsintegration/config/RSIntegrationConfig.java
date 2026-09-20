@@ -257,6 +257,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.ConfigValue<String> CROCKPOT_FILLER_ITEM;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CROCKPOT_FUEL_PRIORITY;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> VANILLA_FURNACE_FUEL_PRIORITY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_FURNACE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue VANILLA_FURNACE_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_ZERO_BLACK_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_LOCK_TIMEOUT_MINUTES;
@@ -750,6 +752,16 @@ public final class RSIntegrationConfig {
                 .defineList("vanillaFurnaceFuelPriority",
                         List.of("minecraft:coal", "minecraft:charcoal"),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
+        ENABLE_VANILLA_FURNACE_INPUT_BUFFER = s
+                .comment("Allow vanilla furnaces, blast furnaces, and smokers to preload several recipe inputs.",
+                        "The machine still consumes one input per cooking cycle; this only reduces RSI dispatch and storage traffic.",
+                        "Compatible modded furnaces remain on the legacy one-item path until explicitly verified.")
+                .define("enableVanillaFurnaceInputBuffer", true);
+        VANILLA_FURNACE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one vanilla furnace input slot.",
+                        "The actual batch is also limited by input/output stack capacity and craftingOperationsPerDispatch.",
+                        "Range: 1-64.")
+                .defineInRange("vanillaFurnaceInputBufferLimit", 64, 1, 64);
         EMBERS_INFER_MAX_ATTEMPTS = s
                 .comment("Maximum trial-and-error attempts for Embers Alchemy inference mode.",
                         "Each failed attempt consumes some materials (per Embers' failure mechanics).",

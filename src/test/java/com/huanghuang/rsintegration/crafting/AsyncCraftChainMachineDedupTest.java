@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -88,6 +90,25 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         assertTrue(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(delegate, List.of()));
         assertFalse(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(
                 delegate, List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1))));
+    }
+
+    @Test
+    void graphReservationScopesFollowStructuredMaterialEntries() {
+        MaterialPlan plan = new MaterialPlan(List.of(
+                new MaterialPlan.Entry("reusable", new IngredientSpec(
+                        Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST),
+                        MaterialPlan.Allocation.GRAPH, true, 0),
+                new MaterialPlan.Entry("direct", new IngredientSpec(
+                        Ingredient.of(Items.IRON_INGOT), 1),
+                        MaterialPlan.Allocation.SUPPLEMENTAL, false, 1),
+                new MaterialPlan.Entry("consumed", new IngredientSpec(
+                        Ingredient.of(Items.COAL), 1),
+                        MaterialPlan.Allocation.GRAPH, false, 2)));
+
+        assertEquals(List.of(
+                        IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
+                        IBatchDelegate.MaterialReservationScope.PER_OPERATION),
+                AsyncCraftChain.materialReservationScopes(plan));
     }
 
     @Test

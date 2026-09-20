@@ -12,6 +12,10 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -60,6 +64,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private int suppliedFurnaceInputCount;
     private ItemStack suppliedFurnaceFuel = ItemStack.EMPTY;
     private int suppliedFurnaceFuelCount;
+    /** Batch selected before reservation; never used as a completion contract. */
+    private int plannedFurnaceOperations = 1;
+    /** Immutable logical operation count for the currently running furnace lease. */
+    private int activeFurnaceOperations = 1;
 
     private enum MachineKind {
         FURNACE,
@@ -151,6 +159,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.pendingResult = ItemStack.EMPTY;
         this.craftDone = false;
         this.furnaceBE = null;
+        this.plannedFurnaceOperations = 1;
+        this.activeFurnaceOperations = 1;
         resetFurnaceOwnership();
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -347,6 +357,151 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) {
+            plannedFurnaceOperations = 1;
+            return remainingOperations > 0 ? 1 : 0;
+        }
+        int batch = inputBufferContract().plan(remainingOperations).operations();
+        plannedFurnaceOperations = Math.max(1, batch);
+        return batch;
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), inputBufferOperationLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (kind != MachineKind.FURNACE || furnaceBE == null || recipe == null || myLevel == null) {
+            return false;
+        }
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(
+                myLevel.getBlockState(myPos).getBlock());
+        return blockId != null && "minecraft".equals(blockId.getNamespace())
+                && vanillaFurnaceInputBufferEnabled();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<Ingredient> ingredients = recipe.getIngredients();
+        ItemStack result = computeResult();
+        if (ingredients.isEmpty() || ingredients.get(0).isEmpty() || result.isEmpty()) {
+            return InputBufferContract.none();
+        }
+        ItemStack prototype = java.util.Arrays.stream(ingredients.get(0).getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        if (prototype.isEmpty()) return InputBufferContract.none();
+        return new InputBufferContract(inputBufferOperationLimit(),
+                List.of(new InputBufferContract.InputSlot(
+                        "vanilla:input", 0, prototype, 1, false,
+                        furnaceInputCapacity(ingredients.get(0)))),
+                outputContract().ports());
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 1 || plan.inputs().get(0).slot() != 0) {
+            return false;
+        }
+        InputBufferPlan.InputSlot input = plan.inputs().get(0);
+        if (input.stack().isEmpty() || input.perOperation() != 1
+                || input.stack().getCount() != plan.operations()) {
+            return false;
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        this.plannedFurnaceOperations = plan.operations();
+        this.activeFurnaceOperations = plan.operations();
+        this.player = player;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        if (storageEndpoint() == null) {
+            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            if (this.network == null) this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        }
+        this.craftDone = false;
+        boolean started = tryStartFurnaceWithMaterials(List.of(input.stack()));
+        if (started) {
+            ExpectedProduction expectedProduction = getExpectedProduction();
+            RSIntegrationMod.LOGGER.info("[RSI-Vanilla] buffered furnace start recipe={} pos={} operations={} input={} expectedOutput={}",
+                    recipe == null ? "<null>" : recipe.getId(), myPos,
+                    activeFurnaceOperations, input.stack().getCount(),
+                    expectedProduction == null ? 0 : expectedProduction.count());
+        }
+        return started;
+    }
+
+    private int inputBufferOperationLimit() {
+        if (recipe == null || furnaceBE == null) return 1;
+        List<Ingredient> ingredients = recipe.getIngredients();
+        ItemStack result = computeResult();
+        if (ingredients.isEmpty() || result.isEmpty()) return 1;
+        int inputCapacity = furnaceInputCapacity(ingredients.get(0));
+        int outputCapacity = result.getCount() <= 0 ? 1
+                : Math.min(result.getMaxStackSize(), furnaceBE.getMaxStackSize()) / result.getCount();
+        return safeFurnaceBufferOperations(Integer.MAX_VALUE,
+                vanillaFurnaceInputBufferLimit(), inputCapacity, outputCapacity, 1);
+    }
+
+    static int furnaceOperationsFromMaterials(List<ItemStack> materials) {
+        if (materials == null || materials.isEmpty()) return 1;
+        ItemStack input = materials.get(0);
+        return input == null || input.isEmpty() ? 1 : Math.max(1, input.getCount());
+    }
+
+    private int furnaceInputCapacity(Ingredient ingredient) {
+        int machineLimit = furnaceBE == null ? 64 : furnaceBE.getMaxStackSize();
+        return java.util.Arrays.stream(ingredient.getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .mapToInt(stack -> Math.min(stack.getMaxStackSize(), machineLimit))
+                .min().orElse(1);
+    }
+
+    static int safeFurnaceBufferOperations(int requested, int configuredLimit,
+                                           int inputCapacity, int outputOperationCapacity,
+                                           int operationsPerCycle) {
+        if (requested <= 0 || configuredLimit <= 0 || inputCapacity <= 0
+                || outputOperationCapacity <= 0 || operationsPerCycle <= 0) return 0;
+        return Math.min(requested, Math.min(configuredLimit,
+                Math.min(inputCapacity, outputOperationCapacity)));
+    }
+
+    private static boolean vanillaFurnaceInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_VANILLA_FURNACE_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int vanillaFurnaceInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.VANILLA_FURNACE_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
@@ -360,6 +515,17 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             }
         }
         this.craftDone = false;
+        // Keep the completion contract aligned with the physical input that is
+        // actually injected.  Some legacy/compatibility dispatch paths still
+        // call this method with a pre-reserved stack of inputs; resetting the
+        // contract to one in that case made the first output finish a whole
+        // six-item order while the remaining inputs were still cooking.
+        int injectedOperations = furnaceOperationsFromMaterials(materials);
+        this.plannedFurnaceOperations = Math.max(1, injectedOperations);
+        this.activeFurnaceOperations = Math.max(1, injectedOperations);
+        RSIntegrationMod.LOGGER.info("[RSI-Vanilla] furnace legacy start recipe={} operations={} input={}",
+                recipe == null ? "<null>" : recipe.getId(), activeFurnaceOperations,
+                materials.isEmpty() ? 0 : materials.get(0).getCount());
 
         if (kind == MachineKind.FURNACE) {
             return tryStartFurnaceWithMaterials(materials);
@@ -416,7 +582,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Phase 4: Supply fuel (real extraction + placement, outside ledger)
-        if (!ensureFuel(player)) {
+        if (!ensureFuel(player, activeFurnaceOperations)) {
             // Discard input from furnace — abort() refunds the ledger, so
             // refunding the physical item here would double-refund.
             removeOwnedFurnaceInput(!usingSharedLedger);
@@ -443,7 +609,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         BrickFurnaceCompat.invalidateRecipeCache(furnaceBE);
 
         // Auto-supply fuel (extracts directly from RS, outside ledger)
-        if (!ensureFuel(player)) {
+        if (!ensureFuel(player, activeFurnaceOperations)) {
             removeOwnedFurnaceInput(false);
             refundLeftoverFuel();
             resetFurnaceOwnership();
@@ -458,7 +624,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private boolean ensureFuel(ServerPlayer player) {
+    private boolean ensureFuel(ServerPlayer player, int operations) {
         int cookingTime = recipe instanceof AbstractCookingRecipe acr
                 ? BrickFurnaceCompat.effectiveCookTicks(furnaceBE, acr) : 200;
 
@@ -471,7 +637,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
         }
-        int remainingCook = Math.max(0, cookingTime - litTime);
+        long requestedCook = (long) cookingTime * Math.max(1, operations);
+        int remainingCook = (int) Math.min(Integer.MAX_VALUE,
+                Math.max(0L, requestedCook - litTime));
         if (remainingCook == 0) return true; // current burn already covers the whole cook
 
         // Existing fuel in slot 1: top up with more of the SAME type until it covers
@@ -858,12 +1026,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (kind == MachineKind.FURNACE && be instanceof AbstractFurnaceBlockEntity current) {
             ItemStack output = current.getItem(2);
             if (!output.isEmpty()) {
-                return matchesFurnaceOutput(output)
-                        ? doneObservation()
-                        // The operation cannot have consumed RSI inputs when the
-                        // output lane was occupied before dispatch. Mark this as
-                        // a pre-start failure so the shared ledger is refunded.
-                        : failObservation("furnace output slot contains another item");
+                if (!matchesFurnaceOutput(output)) {
+                    // The operation cannot have consumed RSI inputs when the
+                    // output lane was occupied before dispatch. Mark this as
+                    // a pre-start failure so the shared ledger is refunded.
+                    return failObservation("furnace output slot contains another item");
+                }
+                ExpectedProduction expected = getExpectedProduction();
+                if (expected != null && output.getCount() >= expected.count()) {
+                    return doneObservation();
+                }
+                // A buffered furnace can expose a partial output stack before
+                // consuming its remaining owned inputs.
+                if (!current.getItem(0).isEmpty()) return workingObservation();
+                return doneObservation();
             }
         }
         if (kind == MachineKind.FURNACE && BrickFurnaceCompat.isBrickFurnace(be)) {
@@ -906,7 +1082,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = furnaceBE.getItem(2);
         // Once AbstractBatchDelegate has observed WORKING, consumed input is
         // sufficient proof of completion even if automation already took output.
-        return matchesFurnaceOutput(result) || furnaceBE.getItem(0).isEmpty();
+        ExpectedProduction expected = getExpectedProduction();
+        // For a buffered batch, an empty input slot only means the furnace has
+        // consumed its queue; it does not prove that all outputs have been
+        // produced (automation may remove each result immediately). Completion
+        // must be based on the accumulated output count.
+        if (expected != null && matchesFurnaceOutput(result)
+                && result.getCount() >= expected.count()) return true;
+        return activeFurnaceOperations <= 1 && furnaceBE.getItem(0).isEmpty();
     }
 
     @Override
@@ -1023,7 +1206,39 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     public ExpectedProduction getExpectedProduction() {
         if (kind != MachineKind.FURNACE) return null;
         ItemStack result = computeResult();
-        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+        if (result.isEmpty()) return null;
+        long expected = (long) result.getCount() * Math.max(1, activeFurnaceOperations);
+        return new ExpectedProduction(result, (int) Math.min(Integer.MAX_VALUE, expected));
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        ItemStack result = computeResult();
+        if (result.isEmpty() || kind == null) return OutputContract.none();
+        return switch (kind) {
+            case FURNACE -> vanillaPrimaryOutputContract(result, OutputContract.Source.SLOT, 2);
+            case CAMPFIRE -> vanillaPrimaryOutputContract(result, OutputContract.Source.WORLD, null);
+            case VIRTUAL -> vanillaPrimaryOutputContract(result, OutputContract.Source.VIRTUAL, null);
+        };
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
+        OutputContract contract = outputContract();
+        if (contract.ports().size() != 1) return List.of();
+        ItemStack result = collectResult(player);
+        if (result.isEmpty()) return List.of();
+        OutputContract.Port port = contract.ports().get(0);
+        return List.of(new OutputAccounting.CollectedOutput(port.portId(), port.source(), result));
+    }
+
+    static OutputContract vanillaPrimaryOutputContract(ItemStack result,
+                                                       OutputContract.Source source,
+                                                       @Nullable Integer physicalPort) {
+        if (result == null || result.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "vanilla:primary", physicalPort, result, result.getCount(),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, source)));
     }
 
     @Nullable
