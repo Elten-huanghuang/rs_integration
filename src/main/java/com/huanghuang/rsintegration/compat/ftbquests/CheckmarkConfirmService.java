@@ -175,6 +175,7 @@ public final class CheckmarkConfirmService {
                                        CheckmarkTask checkmark) {
         Quest quest = checkmark.getQuest();
         return !data.isCompleted(checkmark)
+                && quest.getChapter().isVisible(data)
                 && quest.isVisible(data)
                 && data.canStartTasks(quest)
                 && ((ItemTaskSequenceAccessor) (Object) checkmark).rsi$checkTaskSequence(data)
