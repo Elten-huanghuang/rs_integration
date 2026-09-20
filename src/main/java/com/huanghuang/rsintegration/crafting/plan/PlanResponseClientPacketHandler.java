@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
@@ -40,6 +41,7 @@ final class PlanResponseClientPacketHandler {
             }
             return;
         }
+        PlanningProgressTracker.responseReceived(requestId);
         List<String> missing = localizeItemNames(plan.missing());
         String targetName = plan.targetResult().isEmpty()
                 ? plan.targetName()

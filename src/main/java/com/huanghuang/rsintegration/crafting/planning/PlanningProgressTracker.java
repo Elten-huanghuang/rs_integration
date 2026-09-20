@@ -10,7 +10,8 @@ import javax.annotation.Nullable;
 /** Client-side state for the single current plan-preview request. */
 @OnlyIn(Dist.CLIENT)
 public final class PlanningProgressTracker {
-    private static final long TERMINAL_VISIBLE_MS = 3_000L;
+    static final long SUCCESS_VISIBLE_MS = 400L;
+    static final long TERMINAL_VISIBLE_MS = 3_000L;
     private static final long LOCAL_TIMEOUT_MS = 60_000L;
     private static PlanningProgressSnapshot current;
     private static long localStartedAt;
@@ -59,11 +60,18 @@ public final class PlanningProgressTracker {
         terminalSince = 0L;
     }
 
+    /** Removes the card once its matching normal plan response is ready to display. */
+    public static void responseReceived(long requestId) {
+        if (requestId > 0L && current != null && current.requestId() == requestId) {
+            clear();
+        }
+    }
+
     private static void expire() {
         if (current == null) return;
         long now = System.currentTimeMillis();
         if (current.terminal() && terminalSince > 0L
-                && now - terminalSince >= TERMINAL_VISIBLE_MS) {
+                && now - terminalSince >= terminalVisibleMillis(current.state())) {
             clear();
         } else if (!current.terminal() && localStartedAt > 0L
                 && now - localStartedAt >= LOCAL_TIMEOUT_MS) {
@@ -74,5 +82,10 @@ public final class PlanningProgressTracker {
                     Component.translatable("rsi.planning.detail.no_update"));
             terminalSince = now;
         }
+    }
+
+    static long terminalVisibleMillis(PlanningProgressSnapshot.State state) {
+        return state == PlanningProgressSnapshot.State.SUCCEEDED
+                ? SUCCESS_VISIBLE_MS : TERMINAL_VISIBLE_MS;
     }
 }
