@@ -3550,15 +3550,7 @@ public final class AsyncCraftChain {
                                            ServerPlayer online) {
         int configuredLimit = configuredOperationsPerDispatch();
         if (stepRemaining <= configuredLimit) return configuredLimit;
-        IBatchDelegate capabilityProbe = createStepDelegate(step, machines.get(0).type());
-        try {
-            if (capabilityProbe == null || !capabilityProbe.expandsFlatBatchOperationLimit()) {
-                return configuredLimit;
-            }
-        } finally {
-            if (capabilityProbe != null) releasePreparationQuietly(capabilityProbe);
-        }
-        int effectiveLimit = configuredLimit;
+        List<Integer> physicalCapacities = new ArrayList<>();
         for (BoundMachine machine : machines) {
             IBatchDelegate candidate = null;
             try {
@@ -3569,9 +3561,12 @@ public final class AsyncCraftChain {
                 }
                 IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                         candidate, online, step.recipeId(), machine.dim(), machine.pos());
-                if (preparation.state() == IBatchDelegate.PreparationState.READY) {
-                    effectiveLimit = Math.max(effectiveLimit,
-                            candidate.flatBatchOperationLimit(configuredLimit));
+                if (preparation.state() == IBatchDelegate.PreparationState.READY
+                        && candidate.expandsFlatBatchOperationLimit()) {
+                    // Ask for the native capacity without injecting the generic
+                    // per-dispatch baseline into every worker. The group limit is
+                    // the sum of independently usable physical buffers.
+                    physicalCapacities.add(candidate.flatBatchOperationLimit(1));
                 }
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.debug(ctx.format(
@@ -3580,7 +3575,18 @@ public final class AsyncCraftChain {
                 if (candidate != null) releasePreparationQuietly(candidate);
             }
         }
-        return Math.max(1, effectiveLimit);
+        return combinedParallelDispatchLimit(configuredLimit, physicalCapacities);
+    }
+
+    static int combinedParallelDispatchLimit(int configuredLimit,
+                                             List<Integer> physicalCapacities) {
+        int baseline = Math.max(1, configuredLimit);
+        long combined = 0L;
+        for (Integer capacity : physicalCapacities) {
+            if (capacity == null || capacity <= 0) continue;
+            combined = Math.min(Integer.MAX_VALUE, combined + capacity.longValue());
+        }
+        return (int) Math.max(baseline, combined);
     }
 
     private IBatchDelegate tryStartParallelWindow(List<BoundMachine> machines,

@@ -26,3 +26,7 @@ libs/
 
 # Claude Code local tooling state
 .claude/
+
+# Local agent tooling state
+.agent/
+.agents/
