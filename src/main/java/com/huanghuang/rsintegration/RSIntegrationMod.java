@@ -206,6 +206,7 @@ public final class RSIntegrationMod {
         RSIntegrationConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
             if (e.getConfig().getType() == ModConfig.Type.COMMON) {
+                migrateCommonConfig(e.getConfig());
                 refreshConfigCache();
             }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
@@ -280,6 +281,16 @@ public final class RSIntegrationMod {
             MinecraftForge.EVENT_BUS.register(
                     com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService.class);
         }
+    }
+
+    private static void migrateCommonConfig(ModConfig config) {
+        var currentPassiveItems = RSIntegrationConfig.PASSIVE_TICK_ITEMS.get();
+        var migratedPassiveItems = RSIntegrationConfig.migratePassiveTickItems(currentPassiveItems);
+        if (migratedPassiveItems.equals(currentPassiveItems)) return;
+
+        RSIntegrationConfig.PASSIVE_TICK_ITEMS.set(migratedPassiveItems);
+        LOGGER.info("[RSI-Config] Enabled Composite Material Totem of Blessing resonance support");
+        config.save();
     }
 
     private static void migrateServerConfig(ModConfig config) {
