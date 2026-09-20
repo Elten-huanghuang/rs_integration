@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -74,6 +76,25 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
         for (int operation = 0; operation < 6; operation++) {
             assertTrue(merged.get(operation * 5 + 4).is(Items.BOWL));
         }
+    }
+
+    @Test
+    void reusableWorkerBatchAggregatesConsumablesButNotCatalyst() {
+        MaterialPlan materials = MaterialPlan.fromLegacy(
+                List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1),
+                        new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 2)),
+                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
+                        IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+        RepeatedOperationPlan repeated = new RepeatedOperationPlan(materials, 3, 2,
+                List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),
+                        new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),
+                        new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2)));
+
+        List<ItemStack> aggregated = ParallelCraftGroup.aggregateBatchMaterials(
+                repeated, materials, List.of(0, 1, 2));
+        assertEquals(1, aggregated.get(0).getCount());
+        assertEquals(6, aggregated.get(1).getCount());
+        assertEquals(1, repeated.materialAt(2, 0).getCount());
     }
 
     @Test

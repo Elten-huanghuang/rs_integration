@@ -16,6 +16,10 @@ import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -67,12 +71,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private MinecraftServer machineServer;
     private ServerPlayer player;
     private ExtractionLedger sharedLedger;
+    private final ExtractionLedger delegateExtractedLedger = new ExtractionLedger();
     /**
      * Flat, immutable material layout: operation * materials-per-operation.
      * Keeping one list avoids allocating one list object for every operation
      * before the worker has even claimed it.
      */
-    private List<ItemStack> operationMaterials = List.of();
+    @Nullable
+    private RepeatedOperationPlan repeatedOperationPlan;
     private List<List<ItemStack>> virtualDebits = List.of();
     private List<List<ItemStack>> producerDebits = List.of();
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
@@ -255,6 +261,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return baseSpecs == null || baseSpecs.isEmpty() ? null : List.copyOf(baseSpecs);
     }
 
+    /** Stable material declaration for one row of the outer operation matrix. */
+    public MaterialPlan operationMaterialPlan() {
+        if (baseSpecs == null || baseSpecs.isEmpty()) return MaterialPlan.none();
+        return MaterialPlan.fromLegacy(baseSpecs, getMaterialReservationScopes());
+    }
+
     @Override
     public List<IngredientSpec> getSupplementalSpecs() {
         return supplementalSpecsView;
@@ -389,28 +401,47 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
-                                         ExtractionLedger sharedLedger) {
-        if (baseSpecs == null || baseSpecs.isEmpty()) return false;
-        int perOperation = baseSpecs.size();
-        if (materials.size() != perOperation * operations.totalOperations()
+    public boolean startOperation(@NotNull OperationStartContext context) {
+        RepeatedOperationPlan repeated = context.repeatedOperationPlan();
+        if (repeated == null) {
+            if (context.materialOwnership()
+                    != OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED
+                    || !context.materials().isEmpty() || context.buffered()) return false;
+            this.player = context.player();
+            this.sharedMaterialMode = false;
+            return startInitialWorkers();
+        }
+        if (baseSpecs == null || baseSpecs.isEmpty()
+                || context.materialOwnership()
+                != OperationStartContext.MaterialOwnership.CHAIN_RESERVED
+                || repeated.operations() != operations.totalOperations()
+                || repeated.legacyStride() != baseSpecs.size()
+                || !operationMaterialPlan().entries().equals(repeated.materialPlan().entries())
                 || reservationTokens.size() != operations.totalOperations()
                 || virtualDebits.size() != operations.totalOperations()
                 || (!producerDebits.isEmpty()
                 && producerDebits.size() != operations.totalOperations())) {
             return false;
         }
-        List<ItemStack> flat = new ArrayList<>(materials.size());
-        for (ItemStack material : materials) {
-            flat.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
-        }
-        this.operationMaterials = List.copyOf(flat);
-        this.sharedLedger = sharedLedger;
+        this.repeatedOperationPlan = repeated;
+        this.sharedLedger = context.ledger();
         this.sharedMaterialMode = true;
-        this.player = player;
+        this.player = context.player();
         return startInitialWorkers();
     }
 
+    /** Compatibility adapter for external callers that still use the old group entry point. */
+    @Deprecated
+    @Override
+    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+                                         ExtractionLedger sharedLedger) {
+        if (baseSpecs == null || baseSpecs.isEmpty()) return false;
+        return startOperation(OperationStartContext.repeatedChainReserved(
+                player, sharedLedger, operationMaterialPlan(), operations.totalOperations(),
+                baseSpecs.size(), materials));
+    }
+
+    @Deprecated
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
@@ -418,6 +449,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return startInitialWorkers();
     }
 
+    @Deprecated
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
         return tryStartSingleCraft(player);
@@ -461,7 +493,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                     ? Math.max(1, delegate.preferredParallelBatchSize(
                             operations.totalOperations(), workers.size()))
                     : 1;
-            batchSize = compatibleBatchSize(operationId,
+            batchSize = compatibleBatchSize(delegate, operationId,
                     Math.min(requestedBatch, operations.queuedOperations()));
             delegate.prepareGraphBatch(batchSize);
             delegate.prepareOperationCount(operations.totalOperations());
@@ -520,15 +552,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                     abstractDelegate.useSharedLedger(sharedLedger);
                 }
                 List<ItemStack> batchMaterials = aggregateOperationMaterials(claimedOperations);
+                MaterialPlan materialPlan = delegate.materialPlan();
+                InputBufferPlan inputBuffer = delegate.supportsInputBuffer()
+                        ? delegate.inputBufferPlan(claimedOperations.size())
+                        : InputBufferPlan.none();
+                OperationStartContext startContext = OperationStartContext.chainReserved(
+                        player, sharedLedger, materialPlan, batchMaterials, inputBuffer);
                 accepted = worker.operationSession != null
-                        ? worker.operationSession.tryStart(() -> delegate.tryStartWithMaterials(player,
-                        batchMaterials, sharedLedger))
-                        : delegate.tryStartWithMaterials(player,
-                        batchMaterials, sharedLedger);
+                        ? worker.operationSession.tryStart(() -> delegate.startOperation(startContext))
+                        : delegate.startOperation(startContext);
             } else {
+                OperationStartContext startContext = OperationStartContext.delegateExtracted(
+                        player, sharedLedger != null ? sharedLedger : delegateExtractedLedger);
                 accepted = worker.operationSession != null
-                        ? worker.operationSession.tryStart(() -> delegate.tryStartSingleCraft(player))
-                        : delegate.tryStartSingleCraft(player);
+                        ? worker.operationSession.tryStart(() -> delegate.startOperation(startContext))
+                        : delegate.startOperation(startContext);
             }
             if (!accepted) {
                 handleFailedStart(worker, "worker start failed at " + worker.machine.pos());
@@ -548,8 +586,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
     }
 
-    private int compatibleBatchSize(int firstOperation, int requested) {
+    private int compatibleBatchSize(IBatchDelegate delegate, int firstOperation, int requested) {
         if (!sharedMaterialMode || requested <= 1) return 1;
+        if (!operationMaterialPlan().reusableEntries().isEmpty()
+                && !delegate.supportsReusableBatchAggregation()) return 1;
         int compatible = 1;
         for (int candidate = 2; candidate <= requested; candidate++) {
             if (canAggregateOperationMaterials(firstOperation, candidate)) compatible = candidate;
@@ -561,6 +601,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean canAggregateOperationMaterials(int firstOperation, int operationCount) {
         if (operationCount <= 0 || baseSpecs == null || baseSpecs.isEmpty()) return false;
         int perOperation = baseSpecs.size();
+        List<IBatchDelegate.MaterialReservationScope> scopes = getMaterialReservationScopes();
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
             ItemStack first = ItemStack.EMPTY;
             for (int offset = 0; offset < operationCount; offset++) {
@@ -568,24 +609,41 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 if (stack == null || stack.isEmpty()) continue;
                 if (first.isEmpty()) first = stack;
                 else if (!MaterialMatcher.equivalentRuntimeFragment(first, stack)) return false;
+                if (materialIndex < scopes.size()
+                        && scopes.get(materialIndex) == MaterialReservationScope.PER_WORKER_REUSABLE
+                        && first.getCount() != stack.getCount()) return false;
             }
         }
         return true;
     }
 
     private List<ItemStack> aggregateOperationMaterials(List<Integer> operationIds) {
-        if (operationIds.size() == 1) {
-            return operationMaterialSlice(operationIds.get(0));
+        return aggregateBatchMaterials(repeatedOperationPlan, operationMaterialPlan(), operationIds);
+    }
+
+    static List<ItemStack> aggregateBatchMaterials(RepeatedOperationPlan repeated,
+                                                   MaterialPlan materialPlan,
+                                                   List<Integer> operationIds) {
+        if (repeated == null || operationIds == null || operationIds.isEmpty()) return List.of();
+        if (operationIds.size() == 1) return repeated.legacyMaterials(operationIds.get(0));
+        int perOperation = repeated.legacyStride();
+        boolean[] reusable = new boolean[perOperation];
+        for (MaterialPlan.Entry entry : materialPlan.reusableEntries()) {
+            reusable[entry.inputSlot()] = true;
         }
-        int perOperation = baseSpecs.size();
         List<ItemStack> aggregated = new ArrayList<>(perOperation);
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
             ItemStack combined = ItemStack.EMPTY;
             for (int operationId : operationIds) {
-                ItemStack stack = operationMaterialAt(operationId, materialIndex);
+                ItemStack stack = repeated.materialAt(operationId, materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (combined.isEmpty()) combined = stack.copy();
-                else combined.grow(stack.getCount());
+                else if (!MaterialMatcher.equivalentRuntimeFragment(combined, stack)
+                        || reusable[materialIndex] && combined.getCount() != stack.getCount()) {
+                    throw new IllegalArgumentException("incompatible repeated material at slot " + materialIndex);
+                } else if (!reusable[materialIndex]) {
+                    combined.setCount(Math.addExact(combined.getCount(), stack.getCount()));
+                }
             }
             aggregated.add(combined);
         }
@@ -593,19 +651,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private ItemStack operationMaterialAt(int operationId, int materialIndex) {
-        int perOperation = baseSpecs.size();
-        return operationMaterials.get(operationId * perOperation + materialIndex);
+        if (repeatedOperationPlan == null) return ItemStack.EMPTY;
+        return repeatedOperationPlan.materialAt(operationId, materialIndex);
     }
 
     private List<ItemStack> operationMaterialSlice(int operationId) {
-        int perOperation = baseSpecs.size();
-        int offset = operationId * perOperation;
-        List<ItemStack> slice = new ArrayList<>(perOperation);
-        for (int i = 0; i < perOperation; i++) {
-            ItemStack material = operationMaterials.get(offset + i);
-            slice.add(material == null || material.isEmpty() ? ItemStack.EMPTY : material.copy());
-        }
-        return List.copyOf(slice);
+        return repeatedOperationPlan == null
+                ? List.of() : repeatedOperationPlan.legacyMaterials(operationId);
     }
 
     @Override
@@ -682,11 +734,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 operations.runningOperations(), operations.queuedOperations(), draining);
         for (WorkerSlot worker : workers) {
             if (!worker.running()) continue;
-            ItemStack expected = worker.delegate.getExpectedOutput();
-            if (expected == null || expected.isEmpty()) {
-                ExpectedProduction production = worker.delegate.getExpectedProduction();
-                if (production != null) expected = production.item().copyWithCount(production.count());
-            }
+            ExpectedProduction production = worker.delegate.getExpectedProduction();
+            ItemStack expected = production != null
+                    ? production.item().copyWithCount(production.count())
+                    : worker.delegate.getExpectedOutput();
             String machineState;
             try {
                 machineState = worker.delegate.describeExecutionState();
@@ -1206,9 +1257,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private boolean hasCapturedExpectedOutput(WorkerSlot worker) {
+        List<ItemStack> captured = capturedSnapshot(worker);
+        ExpectedProduction production = worker.delegate.getExpectedProduction();
+        if (production != null) {
+            return containsExpectedWorldProduction(captured, production);
+        }
         ItemStack expected = worker.delegate.getExpectedOutput();
-        if (expected == null || expected.isEmpty()) return false;
-        return containsExpectedWorldOutput(capturedSnapshot(worker), expected);
+        return containsExpectedWorldOutput(captured, expected);
     }
 
     private List<ItemStack> capturedSnapshot(WorkerSlot worker) {
@@ -1227,6 +1282,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 .mapToInt(ItemStack::getCount)
                 .sum();
         return count >= expected.getCount();
+    }
+
+    static boolean containsExpectedWorldProduction(List<ItemStack> captured,
+                                                   ExpectedProduction expected) {
+        if (expected == null || expected.count() <= 0 || expected.item().isEmpty()) return false;
+        ItemStack aggregate = expected.item().copyWithCount(expected.count());
+        return containsExpectedWorldOutput(captured, aggregate);
     }
 
     private List<ItemStack> drainCapture(WorkerSlot worker) {

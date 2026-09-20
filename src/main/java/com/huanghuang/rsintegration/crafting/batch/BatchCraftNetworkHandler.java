@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacke
 import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanPacket;
+import com.huanghuang.rsintegration.compat.ftbquests.InventoryQuestScanPacket;
 import com.huanghuang.rsintegration.util.ModIds;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
@@ -79,6 +80,10 @@ public final class BatchCraftNetworkHandler {
                     java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_STORAGE_SCAN, StorageQuestScanPacket.class,
                     StorageQuestScanPacket::encode, StorageQuestScanPacket::decode, StorageQuestScanPacket::handle,
+                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.FTB_QUEST_INVENTORY_SCAN, InventoryQuestScanPacket.class,
+                    InventoryQuestScanPacket::encode, InventoryQuestScanPacket::decode,
+                    InventoryQuestScanPacket::handle,
                     java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
         }
         registered = true;

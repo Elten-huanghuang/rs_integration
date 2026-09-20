@@ -86,8 +86,8 @@ public final class ConcurrentNodeExecutor {
      * Tells the executor whether a node must run exclusively (no other node may
      * be running alongside it). A node is exclusive when its delegate has not
      * proven it is safe to overlap — the conservative default. This is the
-     * enforcement behind {@code IBatchDelegate.supportsConcurrentNodeExecution()}:
-     * unopted delegates degrade to serial execution instead of silently
+     * enforcement behind {@code IBatchDelegate.concurrencyCapabilities()}:
+     * unproven delegates degrade to serial execution instead of silently
      * overlapping physical crafts.
      */
     @FunctionalInterface

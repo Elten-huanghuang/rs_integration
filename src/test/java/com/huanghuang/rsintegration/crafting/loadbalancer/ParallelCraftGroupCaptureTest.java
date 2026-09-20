@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.ExpectedProduction;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
@@ -21,6 +22,20 @@ class ParallelCraftGroupCaptureTest extends BootstrapTest {
                 List.of(new ItemStack(Items.DIAMOND)), expected));
         assertTrue(ParallelCraftGroup.containsExpectedWorldOutput(
                 List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.DIAMOND)), expected));
+    }
+
+    @Test
+    void bufferedWorkerWaitsForEveryIncrementalWorldDrop() {
+        ExpectedProduction expected = new ExpectedProduction(
+                new ItemStack(Items.DIAMOND), 6);
+
+        assertFalse(ParallelCraftGroup.containsExpectedWorldProduction(
+                List.of(new ItemStack(Items.DIAMOND)), expected));
+        assertFalse(ParallelCraftGroup.containsExpectedWorldProduction(
+                List.of(new ItemStack(Items.DIAMOND, 5)), expected));
+        assertTrue(ParallelCraftGroup.containsExpectedWorldProduction(
+                List.of(new ItemStack(Items.DIAMOND, 4),
+                        new ItemStack(Items.DIAMOND, 2)), expected));
     }
 
     @Test

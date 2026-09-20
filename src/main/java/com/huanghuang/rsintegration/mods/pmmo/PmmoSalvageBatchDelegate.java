@@ -31,7 +31,6 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
     private PmmoSalvageRecipeWrapper recipe;
     private final List<ItemStack> results = new ArrayList<>();
     private int attempts;
-    private int failedTargetAttempts;
     private boolean done;
 
     @Override
@@ -72,7 +71,6 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         this.recipe = found;
         this.results.clear();
         this.attempts = 0;
-        this.failedTargetAttempts = 0;
         this.done = false;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
@@ -116,15 +114,19 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         try {
             PmmoSalvageRuntime.Execution execution =
                     PmmoSalvageRuntime.execute(player, recipe, attempts);
-            results.addAll(execution.outputs());
-            failedTargetAttempts = execution.failedTargetAttempts();
-            done = failedTargetAttempts == 0;
-            if (!done) phase = CraftPhase.FAILED;
+            acceptExecution(execution);
             return true;
-        } catch (ReflectiveOperationException | LinkageError exception) {
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException exception) {
             RSIntegrationMod.LOGGER.error("[RSI-PMMO] Salvage execution failed before publication", exception);
             return false;
         }
+    }
+
+    void acceptExecution(PmmoSalvageRuntime.Execution execution) {
+        results.addAll(execution.outputs());
+        // The requested count is explicitly an attempt count. A random miss
+        // is a valid completed salvage operation, not a craft error.
+        done = true;
     }
 
     @Override
@@ -145,20 +147,6 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
     public ItemStack collectResult(@Nonnull ServerPlayer player) {
         if (results.isEmpty()) return ItemStack.EMPTY;
         return results.remove(0);
-    }
-
-    @Override
-    public boolean failureConsumesInputs(CraftObservation observation) {
-        return observation.phase() == CraftPhase.FAILED && attempts > 0;
-    }
-
-    @Nullable
-    @Override
-    public Component craftFailureMessage(CraftObservation observation) {
-        return Component.translatable("rsi.pmmo.error.salvage_failed",
-                failedTargetAttempts, attempts, recipe == null
-                        ? Component.translatable("rsi.plan.unknown_item")
-                        : recipe.getResultItem(level.registryAccess()).getHoverName());
     }
 
     @Override

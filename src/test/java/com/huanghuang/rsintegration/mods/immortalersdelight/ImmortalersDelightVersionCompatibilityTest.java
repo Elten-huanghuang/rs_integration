@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ImmortalersDelightVersionCompatibilityTest extends BootstrapTest {
@@ -80,6 +81,19 @@ class ImmortalersDelightVersionCompatibilityTest extends BootstrapTest {
         assertTrue(prepared.inputs().get(1).is(Items.CARROT));
         assertTrue(prepared.container().is(Items.IRON_SWORD));
         assertEquals(tag, prepared.container().getTag());
+    }
+
+    @Test
+    void bufferedContainerCountIsPreservedForQueuedCycles() {
+        EnchantalCoolerBatchDelegate.PreparedMaterials prepared =
+                EnchantalCoolerBatchDelegate.splitPreparedMaterials(List.of(
+                        new ItemStack(Items.CARROT, 8),
+                        new ItemStack(Items.BOWL, 8)), 1,
+                        new ItemStack(Items.BOWL));
+
+        assertNotNull(prepared);
+        assertEquals(8, prepared.inputs().get(0).getCount());
+        assertEquals(8, prepared.container().getCount());
     }
 
     @Test

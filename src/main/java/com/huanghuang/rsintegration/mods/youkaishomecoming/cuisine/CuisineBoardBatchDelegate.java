@@ -37,11 +37,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         return BatchConcurrencyCapabilities.delegateResult();
     }
 
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;

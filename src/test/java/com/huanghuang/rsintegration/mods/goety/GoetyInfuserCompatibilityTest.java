@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -59,5 +62,20 @@ class GoetyInfuserCompatibilityTest extends BootstrapTest {
     void adjacentInfusersHaveIndependentWorldOutputCaptureRegions() {
         assertFalse(CursedInfuserBatchDelegate.outputCaptureRegion(BlockPos.ZERO)
                 .intersects(CursedInfuserBatchDelegate.outputCaptureRegion(BlockPos.ZERO.east())));
+    }
+
+    @Test
+    void bufferedInfuserLayoutKeepsWorldOutputAsOnePort() {
+        InputBufferContract contract = new InputBufferContract(64,
+                List.of(new InputBufferContract.InputSlot(
+                        "material", 0, new ItemStack(Items.STONE), 1, false, 64)),
+                List.of(new OutputContract.Port(
+                        "primary", null, new ItemStack(Items.DIAMOND), 1,
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+        InputBufferPlan plan = contract.plan(40);
+        assertEquals(40, plan.operations());
+        assertEquals(40, plan.inputs().get(0).stack().getCount());
+        assertEquals(OutputContract.Source.WORLD, plan.outputs().get(0).source());
+        assertEquals(40, plan.outputs().get(0).expected().getCount());
     }
 }

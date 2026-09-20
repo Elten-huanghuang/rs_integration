@@ -5,9 +5,16 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -35,6 +42,12 @@ import java.util.Optional;
 /** Batch delegate for Malum Spirit Altar (SpiritInfusion recipe). */
 public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
+    static final String CENTER_ENTRY_ID = "malum:altar:center";
+    private static final int EXTRA_SLOT_BASE = 1;
+    private static final int SPIRIT_SLOT_BASE = 16;
+    static String extraEntryId(int index) { return "malum:altar:pedestal:" + index; }
+    static String spiritEntryId(int index) { return "malum:altar:spirit:" + index; }
+
     // ── Instance state ───────────────────────────────────────────
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -49,6 +62,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private List<?> pedestals;           // captured pedestal list
     private boolean craftStarted;
     private boolean craftWasSeenActive;
+    private int bufferedOperations = 1;
     private String validationFailureDetail = "Malum altar validation did not accept the operation";
 
     // ── IBatchDelegate impl ───────────────────────────────────────
@@ -72,6 +86,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         this.pedestals = null;
         this.craftStarted = false;
         this.craftWasSeenActive = false;
+        this.bufferedOperations = 1;
         this.validationFailureDetail = "Malum altar validation did not accept the operation";
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -361,6 +376,171 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        return inputBufferPlan(remainingOperations).operations();
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        bufferedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), malumAltarInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!malumAltarInputBufferEnabled() || recipe == null || invMain == null
+                || invSpirit == null || pedestals == null) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        int extraCount = recipeListSize("extraItems");
+        int spiritCount = recipeListSize("spirits");
+        if (specs == null || specs.size() != 1 + extraCount + spiritCount) return false;
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return false;
+        if (countEmptyPedestalSlots(pedestals) < extraCount) return false;
+        for (IngredientSpec spec : specs) {
+            if (spec == null || spec.isEmpty() || spec.role() != DemandRole.CONSUMED
+                    || ingredientPrototype(spec).isEmpty()) return false;
+        }
+        return true;
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        int extraCount = recipeListSize("extraItems");
+        int spiritCount = recipeListSize("spirits");
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
+        ItemStack center = ingredientPrototype(specs.get(0));
+        inputs.add(new InputBufferContract.InputSlot(
+                CENTER_ENTRY_ID, 0, center, specs.get(0).count(), false,
+                handlerSlotCapacity(invMain, 0, center)));
+        for (int i = 0; i < extraCount; i++) {
+            IngredientSpec spec = specs.get(1 + i);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    extraEntryId(i), EXTRA_SLOT_BASE + i, prototype, spec.count(), false,
+                    pedestalCapacity(i, prototype)));
+        }
+        for (int i = 0; i < spiritCount; i++) {
+            IngredientSpec spec = specs.get(1 + extraCount + i);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    spiritEntryId(i), SPIRIT_SLOT_BASE + i, prototype, spec.count(), false,
+                    handlerSlotCapacity(invSpirit, i, prototype)));
+        }
+        ItemStack expected = getExpectedOutput();
+        return new InputBufferContract(malumAltarInputBufferLimit(), inputs,
+                List.of(new OutputContract.Port(
+                        "malum:altar:primary", null, expected, expected.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+                                           @Nonnull InputBufferPlan plan,
+                                           @Nonnull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        int extraCount = recipeListSize("extraItems");
+        int spiritCount = recipeListSize("spirits");
+        if (plan.inputs().size() != specs.size()) return false;
+
+        List<ItemStack> ordered = new ArrayList<>(specs.size());
+        InputBufferPlan.InputSlot center = inputById(plan, CENTER_ENTRY_ID);
+        if (!validBufferedInput(center, specs.get(0), plan.operations())) return false;
+        ordered.add(center.stack().copy());
+        for (int i = 0; i < extraCount; i++) {
+            InputBufferPlan.InputSlot input = inputById(plan, extraEntryId(i));
+            if (!validBufferedInput(input, specs.get(1 + i), plan.operations())) return false;
+            ordered.add(input.stack().copy());
+        }
+        for (int i = 0; i < spiritCount; i++) {
+            IngredientSpec spec = specs.get(1 + extraCount + i);
+            InputBufferPlan.InputSlot input = inputById(plan, spiritEntryId(i));
+            if (!validBufferedInput(input, spec, plan.operations())) return false;
+            ordered.add(input.stack().copy());
+        }
+        InputBufferPlan expectedPlan = inputBufferPlan(plan.operations());
+        if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
+
+        bufferedOperations = plan.operations();
+        boolean started = tryStartWithMaterials(player, ordered, sharedLedger);
+        if (!started) bufferedOperations = 1;
+        return started;
+    }
+
+    @Override
+    public MaterialPlan materialPlan() {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        return materialPlanForSpecs(specs, recipeListSize("extraItems"), recipeListSize("spirits"));
+    }
+
+    static MaterialPlan materialPlanForSpecs(@Nullable List<IngredientSpec> specs,
+                                             int extraCount, int spiritCount) {
+        if (specs == null || specs.isEmpty()
+                || specs.size() != 1 + Math.max(0, extraCount) + Math.max(0, spiritCount)) {
+            return MaterialPlan.none();
+        }
+        List<MaterialPlan.Entry> entries = new ArrayList<>(specs.size());
+        entries.add(new MaterialPlan.Entry(CENTER_ENTRY_ID, specs.get(0),
+                MaterialPlan.Allocation.GRAPH, false, 0));
+        for (int i = 0; i < extraCount; i++) {
+            entries.add(new MaterialPlan.Entry(extraEntryId(i), specs.get(1 + i),
+                    MaterialPlan.Allocation.GRAPH, false, EXTRA_SLOT_BASE + i));
+        }
+        for (int i = 0; i < spiritCount; i++) {
+            entries.add(new MaterialPlan.Entry(spiritEntryId(i),
+                    specs.get(1 + extraCount + i), MaterialPlan.Allocation.GRAPH,
+                    false, SPIRIT_SLOT_BASE + i));
+        }
+        return new MaterialPlan(entries);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "malum:altar:primary", null, expected, expected.getCount(),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty() || bufferedOperations <= 0) return null;
+        long count = (long) expected.getCount() * bufferedOperations;
+        return count > Integer.MAX_VALUE ? null : new ExpectedProduction(expected, (int) count);
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
@@ -534,6 +714,83 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
+    private int recipeListSize(String fieldName) {
+        Object value = recipe == null ? null : getField(recipe, fieldName);
+        return value instanceof List<?> list ? list.size() : 0;
+    }
+
+    @Nullable
+    private static InputBufferPlan.InputSlot inputById(InputBufferPlan plan, String entryId) {
+        return plan.inputs().stream()
+                .filter(input -> entryId.equals(input.entryId()))
+                .findFirst().orElse(null);
+    }
+
+    private static boolean validBufferedInput(@Nullable InputBufferPlan.InputSlot input,
+                                              IngredientSpec spec, int operations) {
+        if (input == null || input.reusable() || input.stack().isEmpty()
+                || input.perOperation() != spec.count()) return false;
+        long expected = (long) spec.count() * operations;
+        return expected <= Integer.MAX_VALUE && input.stack().getCount() == (int) expected;
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    private static int handlerSlotCapacity(Object handler, int slot, ItemStack prototype) {
+        int capacity = Math.max(1, prototype.getMaxStackSize());
+        if (handler == null) return capacity;
+        try {
+            Object value = handler.getClass().getMethod("getSlotLimit", int.class)
+                    .invoke(handler, slot);
+            if (value instanceof Number number) {
+                capacity = Math.min(capacity, Math.max(1, number.intValue()));
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+        return capacity;
+    }
+
+    private int pedestalCapacity(int logicalIndex, ItemStack prototype) {
+        if (pedestals == null) return Math.max(1, prototype.getMaxStackSize());
+        int seen = 0;
+        for (Object pedestal : pedestals) {
+            if (isSpiritCrucible(pedestal)) continue;
+            try {
+                Object inventory = pedestal.getClass().getMethod("getSuppliedInventory")
+                        .invoke(pedestal);
+                boolean empty = (boolean) inventory.getClass().getMethod("isEmpty")
+                        .invoke(inventory);
+                if (!empty) continue;
+                if (seen++ == logicalIndex) {
+                    return handlerSlotCapacity(inventory, 0, prototype);
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+            }
+        }
+        return Math.max(1, prototype.getMaxStackSize());
+    }
+
+    private static boolean malumAltarInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_MALUM_ALTAR_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int malumAltarInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.MALUM_ALTAR_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
+    }
+
     private static void updateInventoryData(Object inventory) {
         if (inventory == null) return;
         try { inventory.getClass().getMethod("updateData").invoke(inventory); }
@@ -580,6 +837,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             craftWasSeenActive = true;
             return false;
         }
+
+        // A buffered altar emits one entity per native cycle. The capture
+        // owner, not the first visible entity, decides when all cycles arrived.
+        if (bufferedOperations > 1) return false;
 
         // Scan for the actual result entity. This covers a craft that finished
         // between poll ticks and whose isCrafting transition was not observed.
@@ -654,6 +915,12 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // ledger refunds only committed quantities not recovered here.
         recordFailureRecoveredInputs(recoverFromAltar());
         resetState();
+    }
+
+    @Override
+    protected void resetState() {
+        super.resetState();
+        bufferedOperations = 1;
     }
 
     /** Retrieve items from altar slots for audited ledger reconciliation. */

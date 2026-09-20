@@ -3,7 +3,9 @@ package com.huanghuang.rsintegration.crafting.batch;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Immutable physical layout for one input-buffer dispatch. */
 public record InputBufferPlan(
@@ -37,6 +39,25 @@ public record InputBufferPlan(
             ItemStack stack = resolved.get(i);
             if (stack == null || stack.isEmpty()) return none();
             if (stack.getCount() != slot.stack().getCount()) return none();
+            bound.add(new InputSlot(slot.entryId(), slot.slot(), stack,
+                    slot.perOperation(), slot.reusable()));
+        }
+        return new InputBufferPlan(operations, bound, outputs);
+    }
+
+    /** Bind planned slots by stable material entry id rather than list position. */
+    public InputBufferPlan withResolvedMaterials(
+            List<OperationStartContext.ReservedMaterial> resolved) {
+        if (resolved == null || resolved.isEmpty()) return none();
+        Map<String, ItemStack> byId = new HashMap<>();
+        for (OperationStartContext.ReservedMaterial material : resolved) {
+            if (byId.put(material.entryId(), material.stack()) != null) return none();
+        }
+        List<InputSlot> bound = new ArrayList<>(inputs.size());
+        for (InputSlot slot : inputs) {
+            ItemStack stack = byId.get(slot.entryId());
+            if (stack == null || stack.isEmpty()
+                    || stack.getCount() != slot.stack().getCount()) return none();
             bound.add(new InputSlot(slot.entryId(), slot.slot(), stack,
                     slot.perOperation(), slot.reusable()));
         }

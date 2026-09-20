@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -125,22 +126,42 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
                 && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
                 ? pool.getCurrentMana() : 0;
         int manaCost = recipe == null ? 0 : recipe.getManaToConsume();
-        requestedBatch = physicalBatchSize(remainingOperations, mana, manaCost);
+        requestedBatch = configuredPhysicalBatchSize(remainingOperations, mana, manaCost);
         return requestedBatch;
     }
 
     @Override
     public void prepareGraphBatch(int executions) {
-        requestedBatch = graphBatchSize(executions);
+        requestedBatch = batchingEnabled()
+                ? Math.min(graphBatchSize(executions), configuredBatchLimit())
+                : 1;
     }
 
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        if (!batchingEnabled()) return 1;
         int share = parallelWorkerBatchSize(totalOperations, workerCount);
         int mana = level != null && poolPos != null
                 && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
                 ? pool.getCurrentMana() : 0;
-        return physicalBatchSize(share, mana, recipe == null ? 0 : recipe.getManaToConsume());
+        return configuredPhysicalBatchSize(share, mana,
+                recipe == null ? 0 : recipe.getManaToConsume());
+    }
+
+    private int configuredPhysicalBatchSize(int operations, int mana, int manaPerItem) {
+        if (!batchingEnabled()) return operations > 0 ? 1 : 0;
+        return physicalBatchSize(Math.min(operations, configuredBatchLimit()), mana, manaPerItem);
+    }
+
+    private static boolean batchingEnabled() {
+        return RSIntegrationConfig.ENABLE_BOTANIA_MANA_POOL_BATCH == null
+                || RSIntegrationConfig.ENABLE_BOTANIA_MANA_POOL_BATCH.get();
+    }
+
+    private static int configuredBatchLimit() {
+        return RSIntegrationConfig.BOTANIA_MANA_POOL_BATCH_LIMIT == null
+                ? MAX_PHYSICAL_BATCH
+                : RSIntegrationConfig.BOTANIA_MANA_POOL_BATCH_LIMIT.get();
     }
 
     static int parallelWorkerBatchSize(int totalOperations, int workerCount) {

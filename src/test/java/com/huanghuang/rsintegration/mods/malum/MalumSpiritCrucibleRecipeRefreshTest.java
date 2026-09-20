@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
@@ -156,6 +159,42 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
     }
 
     @Test
+    void materialPlanKeepsCatalystAndSpiritSlotsStable() {
+        MaterialPlan plan = MalumSpiritCrucibleBatchDelegate.materialPlanForSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.IRON_PICKAXE), 1, DemandRole.CATALYST),
+                new IngredientSpec(Ingredient.of(Items.BLAZE_POWDER), 2, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.REDSTONE), 1, DemandRole.CONSUMED)));
+
+        assertEquals(List.of("malum:catalyst", "malum:spirit:0", "malum:spirit:1"),
+                plan.entries().stream().map(MaterialPlan.Entry::id).toList());
+        assertEquals(List.of(true, false, false),
+                plan.entries().stream().map(MaterialPlan.Entry::reusable).toList());
+        assertEquals(List.of(0, 1, 2),
+                plan.entries().stream().map(MaterialPlan.Entry::inputSlot).toList());
+    }
+
+    @Test
+    void bufferedCruciblePlanDoesNotMultiplyReusableCatalyst() {
+        InputBufferContract contract = new InputBufferContract(64, List.of(
+                new InputBufferContract.InputSlot(
+                        "malum:catalyst", 0, new ItemStack(Items.IRON_PICKAXE),
+                        1, true, 1),
+                new InputBufferContract.InputSlot(
+                        "malum:spirit:0", 1, new ItemStack(Items.BLAZE_POWDER),
+                        2, false, 64)), List.of());
+
+        InputBufferPlan plan = contract.plan(64);
+
+        assertEquals(32, plan.operations());
+        assertEquals(1, plan.inputs().stream()
+                .filter(input -> "malum:catalyst".equals(input.entryId()))
+                .findFirst().orElseThrow().stack().getCount());
+        assertEquals(64, plan.inputs().stream()
+                .filter(input -> "malum:spirit:0".equals(input.entryId()))
+                .findFirst().orElseThrow().stack().getCount());
+    }
+
+    @Test
     void declaresIndependentWorldCaptureForParallelCrucibles() {
         MalumSpiritCrucibleBatchDelegate delegate =
                 new MalumSpiritCrucibleBatchDelegate();
@@ -165,7 +204,6 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
                 capabilities.materials());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                 capabilities.outputOwnership());
-        assertTrue(delegate.supportsConcurrentNodeExecution());
         assertTrue(delegate.allowsOverlappingOutputCaptureOrigins());
         assertFalse(GraphConcurrencyPolicy.isExclusive("malum", delegate));
     }

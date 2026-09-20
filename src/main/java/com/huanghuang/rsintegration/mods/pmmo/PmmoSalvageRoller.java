@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.pmmo;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.DoubleSupplier;
 import java.util.function.ToIntFunction;
@@ -27,18 +28,17 @@ public final class PmmoSalvageRoller {
         Map<ResourceLocation, Integer> outputs = new LinkedHashMap<>();
         Map<String, Long> xpAwards = new LinkedHashMap<>();
         int failedTargets = 0;
+        List<EligibleOutput> eligible = definition.outputs().stream()
+                .filter(output -> meetsRequirements(output, skillLevel))
+                .map(output -> new EligibleOutput(output, chance(output, skillLevel)))
+                .toList();
 
         for (int attempt = 0; attempt < attempts; attempt++) {
             boolean targetProduced = false;
-            for (PmmoSalvageDefinition.Output output : definition.outputs()) {
-                if (!meetsRequirements(output, skillLevel)) continue;
-                double chance = output.baseChance();
-                for (Map.Entry<String, Double> entry : output.chancePerLevel().entrySet()) {
-                    chance += entry.getValue() * skillLevel.applyAsInt(entry.getKey());
-                }
-                chance = Math.min(output.maxChance(), chance);
+            for (EligibleOutput eligibleOutput : eligible) {
+                PmmoSalvageDefinition.Output output = eligibleOutput.output();
                 for (int roll = 0; roll < output.salvageMax(); roll++) {
-                    if (random.getAsDouble() >= chance) continue;
+                    if (random.getAsDouble() >= eligibleOutput.chance()) continue;
                     outputs.merge(output.outputId(), 1, Math::addExact);
                     if (output.outputId().equals(targetOutput)) targetProduced = true;
                     for (Map.Entry<String, Long> xp : output.xpAwards().entrySet()) {
@@ -50,6 +50,8 @@ public final class PmmoSalvageRoller {
         }
         return new Result(outputs, attempts, failedTargets, xpAwards);
     }
+
+    private record EligibleOutput(PmmoSalvageDefinition.Output output, double chance) {}
 
     public static boolean meetsRequirements(PmmoSalvageDefinition.Output output,
                                             ToIntFunction<String> skillLevel) {

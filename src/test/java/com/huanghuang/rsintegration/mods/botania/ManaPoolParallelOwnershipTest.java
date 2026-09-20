@@ -130,6 +130,7 @@ class ManaPoolParallelOwnershipTest extends BootstrapTest {
         assertTrue(calls.contains("collectResult:getOutputCaptureRegion"));
         assertTrue(calls.contains("isMachineCraftFinished:getOutputCaptureRegion"));
         assertFalse(calls.contains("collectResult:inflate"));
-        assertTrue(calls.contains("preferredParallelBatchSize:physicalBatchSize"));
+        assertTrue(calls.contains("preferredParallelBatchSize:configuredPhysicalBatchSize"));
+        assertTrue(calls.contains("configuredPhysicalBatchSize:physicalBatchSize"));
     }
 }

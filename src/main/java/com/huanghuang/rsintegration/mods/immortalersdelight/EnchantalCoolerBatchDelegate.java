@@ -4,6 +4,11 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -47,11 +52,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
     // Slot layout (matching EnchantalCoolerBlockEntity)
     private static final int INPUT_SLOTS = 4;  // 0..3
     private static final int CONTAINER_SLOT = 4;
@@ -69,6 +69,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private final ItemStack[] baselineSlots = new ItemStack[7];
     private final ItemStack[] suppliedSlotTypes = new ItemStack[7];
     private final int[] suppliedSlotCounts = new int[7];
+    private int plannedOperations = 1;
+    private int activeOperations = 1;
 
     // Cached reflection
     private static volatile Field inventoryField;
@@ -98,6 +100,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.plannedOperations = 1;
+        this.activeOperations = 1;
         resetInventoryLease();
 
         BlockEntity be = level.getBlockEntity(pos);
@@ -155,6 +159,121 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = inputBufferPlan(remainingOperations).operations();
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), coolerInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!coolerInputBufferEnabled() || recipe == null || myLevel == null || myPos == null
+                || !myLevel.hasChunkAt(myPos)) return false;
+        List<IngredientSpec> inputSpecs = EnchantalCoolerRecipeHandler.getInputSpecs(recipe);
+        List<IngredientSpec> allSpecs = getRequiredMaterials();
+        ItemStack result = resultItem();
+        if (inputSpecs == null || inputSpecs.isEmpty() || inputSpecs.size() > INPUT_SLOTS
+                || allSpecs == null || result.isEmpty()) return false;
+        int expectedSpecs = inputSpecs.size()
+                + (EnchantalCoolerRecipeHandler.getContainerItem(recipe).isEmpty() ? 0 : 1);
+        if (allSpecs.size() != expectedSpecs) return false;
+        return allSpecs.stream().allMatch(spec -> spec != null && !spec.isEmpty()
+                && spec.count() == 1 && !ingredientPrototype(spec).isEmpty());
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : getInventory(be);
+        if (handler == null || handler.getSlots() < 7) return InputBufferContract.none();
+        List<IngredientSpec> inputSpecs = EnchantalCoolerRecipeHandler.getInputSpecs(recipe);
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>();
+        int materialIndex = 0;
+        for (int slot = 0; slot < inputSpecs.size(); slot++) {
+            IngredientSpec spec = inputSpecs.get(slot);
+            ItemStack prototype = ingredientPrototype(spec);
+            int capacity = Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize());
+            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex++,
+                    slot, prototype, spec.count(), false, capacity));
+        }
+        ItemStack container = EnchantalCoolerRecipeHandler.getContainerItem(recipe);
+        if (!container.isEmpty()) {
+            int capacity = Math.min(handler.getSlotLimit(CONTAINER_SLOT),
+                    container.getMaxStackSize());
+            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex,
+                    CONTAINER_SLOT, container, 1, false, capacity));
+        }
+        ItemStack output = resultItem();
+        int outputCapacity = Math.min(handler.getSlotLimit(OUTPUT_SLOT), output.getMaxStackSize());
+        int operationLimit = coolerInputBufferLimit();
+        for (InputBufferContract.InputSlot input : inputs) {
+            operationLimit = Math.min(operationLimit, input.capacity() / input.perOperation());
+        }
+        operationLimit = Math.min(operationLimit, outputCapacity / output.getCount());
+        if (operationLimit <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operationLimit, inputs,
+                List.of(new OutputContract.Port("immortalers_delight:cooler:output",
+                        OUTPUT_SLOT, output, output.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || plan.inputs().size() != specs.size()) return false;
+        List<ItemStack> ordered = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            String id = "legacy:material:" + i;
+            InputBufferPlan.InputSlot input = plan.inputs().stream()
+                    .filter(candidate -> id.equals(candidate.entryId()))
+                    .findFirst().orElse(null);
+            long required = (long) specs.get(i).count() * plan.operations();
+            if (input == null || input.reusable() || input.perOperation() != specs.get(i).count()
+                    || required > Integer.MAX_VALUE
+                    || input.stack().getCount() != (int) required) return false;
+            ordered.add(input.stack().copy());
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterialsImpl(player, ordered, true);
+    }
+
+    @Override
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         return tryStartWithMaterialsImpl(player, materials, true);
@@ -196,6 +315,13 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         List<ItemStack> inputMaterials = prepared.inputs();
         ItemStack containerMaterial = prepared.container();
+        int operations = supportsInputBuffer() ? Math.max(1, plannedOperations) : 1;
+        if (inputMaterials.stream().anyMatch(stack -> stack.getCount() != operations)
+                || (!requiredContainer.isEmpty()
+                && containerMaterial.getCount() != operations)) {
+            return false;
+        }
+        activeOperations = operations;
         long materialCount = inputMaterials.stream().filter(s -> !s.isEmpty()).count();
         if (materialCount > INPUT_SLOTS) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Recipe {} has {} ingredients but only {} input slots",
@@ -223,12 +349,12 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         int simulatedSlot = 0;
         for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
-            ItemStack single = mat.copyWithCount(1);
-            if (!itemHandler.insertItem(simulatedSlot, single, true).isEmpty()) {
+            ItemStack batch = mat.copy();
+            if (!itemHandler.insertItem(simulatedSlot, batch, true).isEmpty()) {
                 resetInventoryLease();
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-Cooler] Input slot {} rejected {} during preflight",
-                        simulatedSlot, single);
+                        simulatedSlot, batch);
                 return false;
             }
             simulatedSlot++;
@@ -249,14 +375,14 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         int slot = 0;
         for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
-            ItemStack single = mat.copyWithCount(1);
-            ItemStack remainder = itemHandler.insertItem(slot, single, false);
+            ItemStack batch = mat.copy();
+            ItemStack remainder = itemHandler.insertItem(slot, batch, false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Failed to insert into slot {}: {}",
                         slot, remainder);
                 return rollbackRejectedStart(itemHandler, be);
             }
-            recordSlotSupply(slot, single, 1);
+            recordSlotSupply(slot, batch, batch.getCount());
             slot++;
         }
         be.setChanged();
@@ -292,11 +418,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 return rollbackRejectedStart(itemHandler, be);
             }
             ItemStack remainder = itemHandler.insertItem(
-                    CONTAINER_SLOT, containerMaterial.copyWithCount(1), false);
+                    CONTAINER_SLOT, containerMaterial.copy(), false);
             if (!remainder.isEmpty()) {
                 return rollbackRejectedStart(itemHandler, be);
             }
-            recordSlotSupply(CONTAINER_SLOT, containerMaterial, 1);
+            recordSlotSupply(CONTAINER_SLOT, containerMaterial, containerMaterial.getCount());
             be.setChanged();
         }
 
@@ -326,9 +452,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
         ItemStack output = handler.getStackInSlot(OUTPUT_SLOT);
         if (!output.isEmpty()) {
-            return isExpectedOutput(output)
-                    ? doneObservation()
-                    : failObservation("enchantal cooler output slot was occupied by another item");
+            if (!isExpectedOutput(output)) {
+                return failObservation("enchantal cooler output slot was occupied by another item");
+            }
+            ExpectedProduction expected = getExpectedProduction();
+            if (expected != null && output.getCount() >= expected.count()) return doneObservation();
         }
 
         int progress = getCookingProgress(be);
@@ -351,7 +479,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return false;
 
         ItemStack output = itemHandler.getStackInSlot(OUTPUT_SLOT);
-        return isExpectedOutput(output) || (craftObservedWorking && areInputsEmpty(itemHandler));
+        ExpectedProduction expected = getExpectedProduction();
+        return (expected != null && isExpectedOutput(output)
+                && output.getCount() >= expected.count())
+                || (craftObservedWorking && areInputsEmpty(itemHandler));
     }
 
     @Override
@@ -530,6 +661,17 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return expected != null && matchesExpectedOutput(stack, expected.item());
     }
 
+    private ItemStack resultItem() {
+        return recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
     static boolean matchesExpectedOutput(ItemStack actual, ItemStack declared) {
         return IBatchDelegate.matchesProducedItem(actual, declared);
     }
@@ -548,8 +690,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             if (suppliedCount <= 0) continue;
             ItemStack current = handler.getStackInSlot(slot);
             if (current.isEmpty()
-                    || !ItemStack.isSameItemSameTags(suppliedSlotTypes[slot], current)
-                    || current.getCount() < suppliedCount) {
+                    || !ItemStack.isSameItemSameTags(suppliedSlotTypes[slot], current)) {
                 return false;
             }
         }
@@ -586,9 +727,36 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public ExpectedProduction getExpectedProduction() {
-        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
-                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
-        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+        ItemStack result = resultItem();
+        if (result.isEmpty()) return null;
+        long count = (long) result.getCount() * Math.max(1, activeOperations);
+        return count > Integer.MAX_VALUE ? null : new ExpectedProduction(result, (int) count);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack result = resultItem();
+        return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
+                new OutputContract.Port("immortalers_delight:cooler:output", OUTPUT_SLOT,
+                        result, result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
+    }
+
+    private static boolean coolerInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_ENCHANTAL_COOLER_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int coolerInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.ENCHANTAL_COOLER_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
     }
 
     // ── plan helpers ──
@@ -785,6 +953,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 || !ItemStack.isSameItem(container, requiredContainer)) {
             return null;
         }
-        return new PreparedMaterials(inputs, container.copyWithCount(1));
+        return new PreparedMaterials(inputs, container.copy());
     }
 }

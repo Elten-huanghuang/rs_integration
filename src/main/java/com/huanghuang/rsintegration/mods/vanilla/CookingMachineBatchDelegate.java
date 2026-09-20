@@ -8,6 +8,10 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -140,19 +144,6 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         return delegate != null && delegate.acceptsMachineWithoutBlockEntity(level, pos);
     }
 
-    @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        configureChild();
-        return active().tryStartSingleCraft(player);
-    }
-
-    @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player,
-                                       @Nonnull ExtractionLedger sharedLedger) {
-        configureChild();
-        return active().tryStartSingleCraft(player, sharedLedger);
-    }
-
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
@@ -197,16 +188,30 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return delegate == null || delegate.supportsConcurrentNodeExecution();
+    public boolean supportsInputBuffer() {
+        configureChild();
+        return delegate != null && delegate.supportsInputBuffer();
+    }
+
+    @Nonnull
+    @Override
+    public InputBufferContract inputBufferContract() {
+        configureChild();
+        return delegate == null ? InputBufferContract.none() : delegate.inputBufferContract();
+    }
+
+    @Nonnull
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        configureChild();
+        return delegate == null ? InputBufferPlan.none()
+                : delegate.inputBufferPlan(requestedOperations);
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
-                                         @Nonnull List<ItemStack> materials,
-                                         @Nonnull ExtractionLedger sharedLedger) {
+    public boolean startOperation(@Nonnull OperationStartContext context) {
         configureChild();
-        return active().tryStartWithMaterials(player, materials, sharedLedger);
+        return active().startOperation(context);
     }
 
     @Nonnull
@@ -238,6 +243,19 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean collectsPhysicalSecondaryOutputs() {
         return active().collectsPhysicalSecondaryOutputs();
+    }
+
+    @Nonnull
+    @Override
+    public OutputContract outputContract() {
+        return active().outputContract();
+    }
+
+    @Nonnull
+    @Override
+    public List<com.huanghuang.rsintegration.crafting.batch.OutputAccounting.CollectedOutput>
+    collectStructuredResults(@Nonnull ServerPlayer player) {
+        return active().collectStructuredResults(player);
     }
 
     @Nullable

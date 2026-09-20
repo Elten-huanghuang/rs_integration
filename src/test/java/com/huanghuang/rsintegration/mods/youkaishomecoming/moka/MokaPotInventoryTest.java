@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.items.ItemStackHandler;
@@ -40,5 +41,24 @@ class MokaPotInventoryTest extends BootstrapTest {
                 handler, 1, returned::add));
         assertTrue(returned.isEmpty());
         assertEquals(Items.COCOA_BEANS, handler.getStackInSlot(0).getItem());
+    }
+
+    @Test
+    void bufferedCapacityUsesEveryInputContainerAndOutputLimit() {
+        List<InputBufferContract.InputSlot> inputs = List.of(
+                slot("legacy:material:0", 0, 1, 64),
+                slot("legacy:material:1", 1, 2, 20),
+                slot("legacy:material:2", 5, 1, 8));
+
+        assertEquals(8, MokaPotBatchDelegate.bufferedOperationCapacity(
+                64, inputs, 1, 64));
+        assertEquals(5, MokaPotBatchDelegate.bufferedOperationCapacity(
+                64, inputs, 2, 10));
+    }
+
+    private static InputBufferContract.InputSlot slot(String id, int slot,
+                                                       int perOperation, int capacity) {
+        return new InputBufferContract.InputSlot(id, slot, new ItemStack(Items.COCOA_BEANS),
+                perOperation, false, capacity);
     }
 }

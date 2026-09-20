@@ -48,6 +48,16 @@ class ClibanoInventoryLogicTest extends BootstrapTest {
     }
 
     @Test
+    void bufferedLaneCapacityUsesItsPairedOutputSlot() {
+        assertEquals(ClibanoInventoryLogic.FIRST_OUTPUT_SLOT,
+                ClibanoInventoryLogic.pairedOutputSlot(ClibanoInventoryLogic.FIRST_INPUT_SLOT));
+        assertEquals(ClibanoInventoryLogic.SECOND_OUTPUT_SLOT,
+                ClibanoInventoryLogic.pairedOutputSlot(ClibanoInventoryLogic.SECOND_INPUT_SLOT));
+        assertEquals(16, ClibanoInventoryLogic.bufferedOperationCapacity(
+                64, 1, 64, 4, 64));
+    }
+
+    @Test
     void configuredFuelWinsOverStorageIterationOrder() {
         var selection = ClibanoInventoryLogic.selectFuel(
                 List.of(new ItemStack(Items.BAMBOO, 64), new ItemStack(Items.COAL, 4)),

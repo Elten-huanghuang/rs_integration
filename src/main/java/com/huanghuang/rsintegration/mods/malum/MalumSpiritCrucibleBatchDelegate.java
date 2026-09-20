@@ -12,7 +12,13 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -49,6 +55,9 @@ import java.util.List;
  */
 public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegate {
 
+    static final String CATALYST_ENTRY_ID = "malum:catalyst";
+    static String spiritEntryId(int index) { return "malum:spirit:" + index; }
+
     private static java.lang.reflect.Field iwcIngField;
     private static java.lang.reflect.Field iwcCountField;
 
@@ -76,6 +85,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private ItemStack expectedOutput;
     private boolean craftStarted;
     private boolean craftWasSeenActive;
+    private int bufferedOperations = 1;
     @Nullable
     private CraftStorageEndpoint catalystReturnEndpoint;
     @Nullable
@@ -264,6 +274,201 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return tryStartWithMaterialsImpl(player, materials);
     }
 
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        return inputBufferPlan(remainingOperations).operations();
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        // ParallelCraftGroup uses the legacy material entry point after
+        // aggregating several operations, so keep its output count contract.
+        bufferedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public boolean supportsReusableBatchAggregation() {
+        return supportsInputBuffer() && hasReusableCatalystInput();
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), malumCrucibleInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!malumCrucibleInputBufferEnabled() || recipe == null || invCatalyst == null
+                || invSpirits == null || expectedOutput == null || expectedOutput.isEmpty()) {
+            return false;
+        }
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() < 2
+                || specs.get(0).role() != DemandRole.CATALYST
+                || specs.size() - 1 > invSpirits.getSlots()) return false;
+        for (int i = 1; i < specs.size(); i++) {
+            if (specs.get(i).isEmpty() || ingredientPrototype(specs.get(i)).isEmpty()) return false;
+        }
+        return true;
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
+        ItemStack catalyst = ingredientPrototype(specs.get(0));
+        if (catalyst.isEmpty()) return InputBufferContract.none();
+        inputs.add(new InputBufferContract.InputSlot(
+                CATALYST_ENTRY_ID, 0, catalyst, specs.get(0).count(), true,
+                Math.max(1, specs.get(0).count())));
+        for (int i = 1; i < specs.size(); i++) {
+            ItemStack spirit = ingredientPrototype(specs.get(i));
+            int capacity = spiritCapacity(i - 1, spirit);
+            inputs.add(new InputBufferContract.InputSlot(
+                    spiritEntryId(i - 1), i, spirit, specs.get(i).count(), false, capacity));
+        }
+        return new InputBufferContract(malumCrucibleInputBufferLimit(), inputs,
+                List.of(new OutputContract.Port(
+                        "malum:primary", null, expectedOutput, expectedOutput.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (plan.operations() <= 0 || plan.inputs().size() != specs.size()) return false;
+        InputBufferPlan.InputSlot catalyst = plan.inputs().stream()
+                .filter(input -> CATALYST_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
+        if (catalyst == null || !catalyst.reusable()
+                || catalyst.stack().getCount() != specs.get(0).count()) return false;
+        List<ItemStack> spirits = new ArrayList<>(specs.size() - 1);
+        for (int i = 1; i < specs.size(); i++) {
+            String entryId = spiritEntryId(i - 1);
+            InputBufferPlan.InputSlot input = plan.inputs().stream()
+                    .filter(candidate -> entryId.equals(candidate.entryId()))
+                    .findFirst().orElse(null);
+            int expected = Math.multiplyExact(specs.get(i).count(), plan.operations());
+            if (input == null || input.reusable() || input.perOperation() != specs.get(i).count()
+                    || input.stack().getCount() != expected) return false;
+            spirits.add(input.stack().copy());
+        }
+        InputBufferPlan expectedPlan = inputBufferPlan(plan.operations());
+        if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
+
+        BlockEntity be = myLevel == null ? null : myLevel.getBlockEntity(myPos);
+        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)
+                || Reflect.getField(be, "recipe").orElse(null) != null) return false;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        this.bufferedOperations = plan.operations();
+        this.craftStarted = false;
+
+        ItemStack existing = invCatalyst.getStackInSlot(0);
+        ItemStack catalystToPlace = existing.isEmpty() ? catalyst.stack().copy() : ItemStack.EMPTY;
+        placePreparedInputs(invSpirits, spirits, invCatalyst, catalystToPlace);
+        if (!activateExpectedRecipe(be, player)) {
+            clearUncommittedPlacements();
+            return false;
+        }
+        be.setChanged();
+        this.craftStarted = true;
+        return true;
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer() || expectedOutput.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "malum:primary", null, expectedOutput, expectedOutput.getCount(),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public ExpectedProduction getExpectedProduction() {
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty() || bufferedOperations <= 0) return null;
+        long count = (long) expected.getCount() * bufferedOperations;
+        if (count > Integer.MAX_VALUE) return null;
+        return new ExpectedProduction(expected, (int) count);
+    }
+
+    @Override
+    public MaterialPlan materialPlan() {
+        return materialPlanForSpecs(getRequiredMaterials());
+    }
+
+    static MaterialPlan materialPlanForSpecs(@Nullable List<IngredientSpec> specs) {
+        if (specs == null || specs.isEmpty()) return MaterialPlan.none();
+        List<MaterialPlan.Entry> entries = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            if (spec == null || spec.isEmpty()) continue;
+            boolean catalyst = i == 0 && spec.role() == DemandRole.CATALYST;
+            entries.add(new MaterialPlan.Entry(
+                    catalyst ? CATALYST_ENTRY_ID : spiritEntryId(Math.max(0, i - 1)),
+                    spec, MaterialPlan.Allocation.GRAPH, catalyst, i));
+        }
+        return new MaterialPlan(entries);
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    private int spiritCapacity(int slot, ItemStack prototype) {
+        if (prototype.isEmpty()) return 1;
+        int handlerLimit = 64;
+        try {
+            handlerLimit = Math.max(1, invSpirits.getSlotLimit(slot));
+        } catch (RuntimeException ignored) {
+        }
+        return Math.max(1, Math.min(prototype.getMaxStackSize(), handlerLimit));
+    }
+
+    private static boolean malumCrucibleInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_MALUM_CRUCIBLE_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int malumCrucibleInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.MALUM_CRUCIBLE_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
+    }
+
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
@@ -337,11 +542,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
                 BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 List.of());
-    }
-
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
     }
 
     @Override
@@ -766,6 +966,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
+        // Buffered Crucible operations publish their products through the world
+        // capture scope. A single visible entity must not complete a multi-item
+        // preload; the orchestration layer waits for getExpectedProduction().
+        if (bufferedOperations > 1) return false;
+
         // Malum clears/selects the recipe again immediately after craft(). A
         // null recipe therefore only means the current operation is no longer
         // active; it is not a completion signal. Confirm the actual output.
@@ -849,6 +1054,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         RSIntegrationMod.LOGGER.warn("[RSI-Crucible] Batch failed");
         clearAllSlots();
         resetState();
+    }
+
+    @Override
+    protected void resetState() {
+        super.resetState();
+        bufferedOperations = 1;
     }
 
     @Override

@@ -169,6 +169,13 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
             }
             return null;
         }
+        if (cn.equals(MOKA_RECIPE)) {
+            List<IngredientSpec> specs = new ArrayList<>();
+            for (Ingredient ingredient : recipe.getIngredients()) {
+                if (!ingredient.isEmpty()) specs.add(new IngredientSpec(ingredient, 1));
+            }
+            return appendMokaContainerSpec(specs, getMokaOutputContainer(recipe));
+        }
         if (cn.equals(STEAMING_RECIPE) || recipe instanceof AbstractCookingRecipe) {
             List<Ingredient> ingredients = recipe.getIngredients();
             if (ingredients.isEmpty()) return null;
@@ -186,6 +193,36 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    static List<IngredientSpec> appendMokaContainerSpec(
+            List<IngredientSpec> inputSpecs, ItemStack container) {
+        List<IngredientSpec> specs = new ArrayList<>(inputSpecs == null
+                ? List.of() : inputSpecs);
+        if (container != null && !container.isEmpty()) {
+            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)),
+                    container.getCount()));
+        }
+        return specs.isEmpty() ? null : List.copyOf(specs);
+    }
+
+    public static ItemStack getMokaOutputContainer(Recipe<?> recipe) {
+        if (recipe == null) return ItemStack.EMPTY;
+        try {
+            Object result = recipe.getClass().getMethod("getOutputContainer").invoke(recipe);
+            if (result instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+        java.lang.reflect.Field field = findFieldUp(recipe.getClass(), "container");
+        if (field == null) return ItemStack.EMPTY;
+        try {
+            field.setAccessible(true);
+            Object value = field.get(recipe);
+            return value instanceof ItemStack stack && !stack.isEmpty()
+                    ? stack.copy() : ItemStack.EMPTY;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return ItemStack.EMPTY;
+        }
     }
 
     @Nullable

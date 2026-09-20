@@ -72,8 +72,9 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
         assertEquals(6, IronFurnacesBatchDelegate.requiredFactoryLanes(384, 64));
         assertEquals(2, IronFurnacesBatchDelegate.requiredFactoryLanes(65, 64));
         assertEquals(384, IronFurnacesBatchDelegate.plannedBatchSize(true, true, 400, 64));
-        assertEquals(6, IronFurnacesBatchDelegate.plannedBatchSize(true, false, 400, 64));
+        assertEquals(384, IronFurnacesBatchDelegate.plannedBatchSize(true, false, 400, 64));
         assertEquals(64, IronFurnacesBatchDelegate.plannedBatchSize(false, true, 400, 64));
+        assertEquals(64, IronFurnacesBatchDelegate.plannedBatchSize(false, false, 400, 64));
     }
 
     @Test
@@ -87,6 +88,38 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
     }
 
     @Test
+    void factoryLayoutMapsOneReservationOntoOwnedInputOutputPairs() {
+        boolean[] leased = {false, true, false, true, true, false};
+        boolean[] free = {true, true, true, true, true, true};
+        IronFactoryLanePlan plan = IronFactoryLanePlan.plan(
+                new ItemStack(Items.CLAY_BALL), 9, 4, false, leased, free);
+
+        assertNotNull(plan);
+        assertEquals(9, plan.operations());
+        assertEquals(java.util.List.of(8, 10, 11),
+                plan.lanes().stream().map(IronFactoryLanePlan.Lane::inputSlot).toList());
+        assertEquals(java.util.List.of(14, 16, 17),
+                plan.lanes().stream().map(IronFactoryLanePlan.Lane::outputSlot).toList());
+        assertEquals(java.util.List.of(4, 4, 1),
+                plan.lanes().stream().map(lane -> lane.input().getCount()).toList());
+        assertNull(IronFactoryLanePlan.plan(new ItemStack(Items.CLAY_BALL),
+                10, 4, false, leased, new boolean[]{true, true, true, false, true, true}));
+    }
+
+    @Test
+    void ordinaryFactorySpreadsQueuedWorkAcrossAllSixLanes() {
+        boolean[] all = {true, true, true, true, true, true};
+        IronFactoryLanePlan plan = IronFactoryLanePlan.plan(
+                new ItemStack(Items.IRON_ORE), 64, 64, true, all, all);
+
+        assertNotNull(plan);
+        assertEquals(java.util.List.of(11, 11, 11, 11, 10, 10),
+                plan.lanes().stream().map(lane -> lane.input().getCount()).toList());
+        assertEquals(6, IronFurnacesBatchDelegate.requiredFactoryLanes(64, 64, false));
+        assertEquals(1, IronFurnacesBatchDelegate.requiredFactoryLanes(64, 64, true));
+    }
+
+    @Test
     void oversizedRainbowBatchesSplitByPhysicalMachineCapacity() {
         assertEquals(java.util.List.of(64, 1),
                 IronFurnacesBatchDelegate.physicalBatchSizes(65, 64));
@@ -94,6 +127,43 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
                 IronFurnacesBatchDelegate.physicalBatchSizes(385, 384));
         assertEquals(2, IronFurnacesBatchDelegate.physicalCycleCount(65, 64));
         assertEquals(2, IronFurnacesBatchDelegate.physicalCycleCount(385, 384));
+    }
+
+    @Test
+    void ordinaryFurnaceProfilePreloadsButKeepsSerialCycleSemantics() {
+        IronFurnaceBatchProfile profile = IronFurnaceBatchProfile.of(false, false, 64);
+
+        assertEquals(64, profile.physicalCapacity());
+        assertEquals(64, profile.plannedBatchSize(400));
+        assertEquals(64, profile.processingCycles(64));
+        assertTrue(profile.preloadsInput());
+    }
+
+    @Test
+    void ordinaryFurnaceFuelChecksEveryLogicalInputCycle() {
+        IronFurnaceBatchProfile profile = IronFurnaceBatchProfile.of(false, false, 64);
+
+        assertEquals(64, profile.processingCycles(64));
+        assertEquals(65, profile.processingCycles(65));
+    }
+
+    @Test
+    void ordinaryFactoryProfilePreloadsEachLaneAndRunsSixLanesInParallel() {
+        IronFurnaceBatchProfile profile = IronFurnaceBatchProfile.of(true, false, 64);
+
+        assertEquals(384, profile.physicalCapacity());
+        assertEquals(384, profile.plannedBatchSize(400));
+        assertEquals(11, profile.processingCycles(64));
+        assertTrue(profile.preloadsInput());
+    }
+
+    @Test
+    void rainbowProfileUsesOneMultipliedCyclePerPhysicalBatch() {
+        IronFurnaceBatchProfile profile = IronFurnaceBatchProfile.of(true, true, 64);
+
+        assertEquals(384, profile.physicalCapacity());
+        assertEquals(1, profile.processingCycles(384));
+        assertEquals(2, profile.processingCycles(385));
     }
 
     @Test

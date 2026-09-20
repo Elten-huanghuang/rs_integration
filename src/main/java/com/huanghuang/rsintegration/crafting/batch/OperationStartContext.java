@@ -6,14 +6,16 @@ import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * Structured handoff from the chain-owned reservation to a delegate start.
  *
- * <p>This is a data model only. Existing delegates continue through the legacy
- * start methods until they are migrated one at a time.</p>
+ * <p>Existing delegates are reached through {@link IBatchDelegate#startOperation}
+ * while new delegates can consume the stable material and slot identities directly.</p>
  */
 public record OperationStartContext(
         ServerPlayer player,
@@ -21,7 +23,8 @@ public record OperationStartContext(
         MaterialOwnership materialOwnership,
         MaterialPlan materialPlan,
         List<ReservedMaterial> materials,
-        @Nullable InputBufferPlan inputBufferPlan) {
+        @Nullable InputBufferPlan inputBufferPlan,
+        @Nullable RepeatedOperationPlan repeatedOperationPlan) {
 
     public enum MaterialOwnership {
         CHAIN_RESERVED,
@@ -36,10 +39,86 @@ public record OperationStartContext(
         materialPlan = materialPlan == null ? MaterialPlan.none() : materialPlan;
         materials = materials == null ? List.of() : List.copyOf(materials);
         validateMaterialReferences(materialPlan, materials);
+        if (repeatedOperationPlan != null && (materialOwnership != MaterialOwnership.CHAIN_RESERVED
+                || !materialPlan.entries().isEmpty() || !materials.isEmpty()
+                || inputBufferPlan != null && inputBufferPlan.enabled())) {
+            throw new IllegalArgumentException(
+                    "repeated operation plan must be the sole chain-reserved material payload");
+        }
     }
 
     public boolean buffered() {
         return inputBufferPlan != null && inputBufferPlan.enabled();
+    }
+
+    /** Ordered compatibility projection used only by legacy delegate entry points. */
+    public List<ItemStack> legacyMaterials() {
+        Map<String, ItemStack> byId = new LinkedHashMap<>();
+        for (ReservedMaterial material : materials) {
+            byId.put(material.entryId(), material.stack());
+        }
+        return materialPlan.entries().stream()
+                .map(entry -> {
+                    ItemStack stack = byId.get(entry.id());
+                    if (stack == null || stack.isEmpty()) {
+                        throw new IllegalStateException("missing reserved material " + entry.id());
+                    }
+                    return stack.copy();
+                })
+                .toList();
+    }
+
+    /**
+     * Adapts an existing ordered reservation to stable material identities.
+     * Compact lists map directly to plan order; lists retaining empty legacy
+     * slots use each entry's recorded compatibility index.
+     */
+    public static OperationStartContext chainReserved(
+            ServerPlayer player, ExtractionLedger ledger, MaterialPlan materialPlan,
+            List<ItemStack> orderedMaterials, @Nullable InputBufferPlan inputBufferPlan) {
+        MaterialPlan plan = materialPlan == null ? MaterialPlan.none() : materialPlan;
+        List<ItemStack> ordered = orderedMaterials == null ? List.of() : orderedMaterials;
+        List<ReservedMaterial> reserved = new java.util.ArrayList<>(plan.entries().size());
+        boolean compact = ordered.size() == plan.entries().size()
+                && ordered.stream().allMatch(stack -> stack != null && !stack.isEmpty());
+        for (int index = 0; index < plan.entries().size(); index++) {
+            MaterialPlan.Entry entry = plan.entries().get(index);
+            int sourceIndex = compact ? index
+                    : entry.inputSlot() == null ? -1 : entry.inputSlot();
+            if (sourceIndex < 0 || sourceIndex >= ordered.size()) {
+                throw new IllegalArgumentException("missing ordered material for " + entry.id());
+            }
+            ItemStack stack = ordered.get(sourceIndex);
+            if (stack == null || stack.isEmpty()) {
+                throw new IllegalArgumentException("empty ordered material for " + entry.id());
+            }
+            reserved.add(new ReservedMaterial(entry.id(), stack));
+        }
+        InputBufferPlan buffer = inputBufferPlan == null
+                ? InputBufferPlan.none()
+                : inputBufferPlan.withResolvedMaterials(reserved);
+        if (inputBufferPlan != null && inputBufferPlan.enabled() && !buffer.enabled()) {
+            throw new IllegalArgumentException("input buffer could not bind reserved materials");
+        }
+        return new OperationStartContext(player, ledger, MaterialOwnership.CHAIN_RESERVED,
+                plan, reserved, buffer, null);
+    }
+
+    /** Unified outer-group handoff for an operation-major material matrix. */
+    public static OperationStartContext repeatedChainReserved(
+            ServerPlayer player, ExtractionLedger ledger, MaterialPlan perOperationPlan,
+            int operations, int legacyStride, List<ItemStack> flatMaterials) {
+        return new OperationStartContext(player, ledger, MaterialOwnership.CHAIN_RESERVED,
+                MaterialPlan.none(), List.of(), InputBufferPlan.none(),
+                new RepeatedOperationPlan(perOperationPlan, operations,
+                        legacyStride, flatMaterials));
+    }
+
+    /** Unified start context for delegates that intentionally acquire their own materials. */
+    public static OperationStartContext delegateExtracted(
+            ServerPlayer player, ExtractionLedger ledger) {
+        return new OperationStartContext(player, ledger, MaterialOwnership.DELEGATE_EXTRACTED,
+                MaterialPlan.none(), List.of(), InputBufferPlan.none(), null);
     }
 
     public record ReservedMaterial(String entryId, ItemStack stack) {

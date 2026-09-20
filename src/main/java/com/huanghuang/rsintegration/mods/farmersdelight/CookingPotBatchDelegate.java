@@ -8,6 +8,13 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
@@ -53,6 +60,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private Recipe<?> recipe;
     private boolean craftDone;
     private boolean arcaneCookingPot;
+    private int plannedOperations = 1;
     private final List<ItemStack> placedInputs = new ArrayList<>();
     private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
     private ItemStack placedContainer = ItemStack.EMPTY;
@@ -86,6 +94,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.recipe = found;
         this.craftDone = false;
         this.arcaneCookingPot = false;
+        this.plannedOperations = 1;
         this.placedInputs.clear();
         this.detachedRecoveredInputs.clear();
         this.placedContainer = ItemStack.EMPTY;
@@ -158,6 +167,141 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems();
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = inputBufferPlan(remainingOperations).operations();
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), inputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!inputBufferEnabled() || arcaneCookingPot || recipe == null
+                || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
+        BlockEntity machine = myLevel.getBlockEntity(myPos);
+        if (machine == null || !supportsBufferedMachine(machine)) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.isEmpty() || specs.size() > inputSlots() + 1) return false;
+        ItemStack requiredContainer = getRequiredContainer(recipe, myLevel.registryAccess());
+        ItemStack declaredContainer = getDeclaredContainerItem(recipe);
+        if (!supportsBufferedContainer(requiredContainer, declaredContainer)) return false;
+        int ingredientCount = specs.size() - (requiredContainer.isEmpty() ? 0 : 1);
+        if (ingredientCount <= 0 || ingredientCount > inputSlots()) return false;
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack prototype = ingredientPrototype(spec);
+            if (spec == null || spec.isEmpty() || spec.role() != DemandRole.CONSUMED
+                    || spec.count() <= 0 || prototype.isEmpty()) return false;
+            if (i < ingredientCount && hasIngredientRemainderRisk(spec)) return false;
+        }
+        return !getExpectedRecipeResult(recipe, myLevel.registryAccess()).isEmpty();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : getInventory(be);
+        if (handler == null || handler.getSlots() < inventorySize()) {
+            return InputBufferContract.none();
+        }
+        List<IngredientSpec> specs = getRequiredMaterials();
+        ItemStack container = getRequiredContainer(recipe, myLevel.registryAccess());
+        int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
+        for (int i = 0; i < ingredientCount; i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    "legacy:material:" + i, i, prototype, spec.count(), false,
+                    slotCapacity(handler, i, prototype)));
+        }
+        if (!container.isEmpty()) {
+            IngredientSpec spec = specs.get(specs.size() - 1);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    "legacy:material:" + (specs.size() - 1), containerSlot(), prototype,
+                    spec.count(), false, slotCapacity(handler, containerSlot(), prototype)));
+        }
+        ItemStack output = getExpectedRecipeResult(recipe, myLevel.registryAccess());
+        int outputCapacity = slotCapacity(handler, outputSlot(), output);
+        int operations = bufferedOperationCapacity(inputBufferLimit(), inputs,
+                output.getCount(), outputCapacity);
+        if (operations <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operations, inputs,
+                List.of(new OutputContract.Port(
+                        outputPortId(), outputSlot(), output,
+                        output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (plan.inputs().size() != specs.size()) return false;
+        List<ItemStack> ordered = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
+            IngredientSpec spec = specs.get(i);
+            int expectedSlot = i == specs.size() - 1
+                    && !getRequiredContainer(recipe, myLevel.registryAccess()).isEmpty()
+                    ? containerSlot() : i;
+            long required = (long) spec.count() * plan.operations();
+            if (input == null || input.slot() != expectedSlot || input.reusable()
+                    || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
+                    || input.stack().getCount() != (int) required
+                    || !spec.ingredient().test(input.stack())) return false;
+            ordered.add(input.stack().copy());
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterials(player, ordered, sharedLedger);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack output = getExpectedRecipeResult(recipe, myLevel.registryAccess());
+        return output.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
+                new OutputContract.Port(outputPortId(), outputSlot(),
+                        output, output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -273,7 +417,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                         recipe.getId(), requiredContainer);
                 return false;
             }
-            containerMaterial = suppliedContainer.copyWithCount(requiredContainer.getCount());
+            long requiredCount = (long) requiredContainer.getCount() * plannedOperations;
+            if (requiredCount > Integer.MAX_VALUE || suppliedContainer.getCount() != (int) requiredCount) {
+                return false;
+            }
+            containerMaterial = suppliedContainer.copy();
             inputEnd--;
         }
         for (int i = 0; i < inputEnd; i++) {
@@ -289,12 +437,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Insert ingredients into input slots 0..5
+        List<IngredientSpec> requiredSpecs = getRequiredMaterials();
+        int requiredInputCount = requiredSpecs == null ? 0
+                : requiredSpecs.size() - (requiredContainer.isEmpty() ? 0 : 1);
+        if (requiredInputCount != inputMaterials.size()) return false;
+
+        // Insert one stack per recipe ingredient. The native pot consumes one
+        // item from every occupied input slot after each completed cycle.
         int slot = 0;
         for (ItemStack mat : inputMaterials) {
             if (mat.isEmpty()) continue;
-            ItemStack single = mat.copyWithCount(1);
-            ItemStack remainder = itemHandler.insertItem(slot, single, false);
+            IngredientSpec spec = requiredSpecs.get(slot);
+            long requiredCount = (long) spec.count() * plannedOperations;
+            if (requiredCount > Integer.MAX_VALUE || mat.getCount() != (int) requiredCount
+                    || !spec.ingredient().test(mat)) return false;
+            ItemStack placed = mat.copy();
+            ItemStack remainder = itemHandler.insertItem(slot, placed, false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Failed to insert into slot {}: {}",
                         slot, remainder.getHoverName().getString());
@@ -308,7 +466,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 be.setChanged();
                 return false;
             }
-            placedInputs.add(single.copy());
+            placedInputs.add(placed.copy());
             slot++;
         }
         be.setChanged();
@@ -340,6 +498,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Materials inserted, cooking should start next tick");
+        markCraftStarted();
         return true;
     }
 
@@ -350,8 +509,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null) return false;
 
+        int expectedCount = expectedOutputCount();
         ItemStack output = itemHandler.getStackInSlot(outputSlot());
-        if (!output.isEmpty()) return matchesRecipeOutput(output);
+        if (!output.isEmpty()) return matchesRecipeOutput(output)
+                && output.getCount() >= expectedCount;
 
         ItemStack declared = getDeclaredContainerItem(recipe);
         if (!declared.isEmpty()) return false;
@@ -360,7 +521,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack meal = itemHandler.getStackInSlot(mealDisplaySlot());
         return !inferred.isEmpty()
                 && ItemStack.isSameItemSameTags(inferred, storedContainer)
-                && matchesRecipeOutput(meal);
+                && matchesRecipeOutput(meal) && meal.getCount() >= expectedCount;
     }
 
     @Override
@@ -390,11 +551,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
+        OutputContract contract = outputContract();
+        if (contract.ports().size() != 1) return List.of();
+        ItemStack result = collectResult(player);
+        if (result.isEmpty()) return List.of();
+        OutputContract.Port port = contract.ports().get(0);
+        return List.of(new OutputAccounting.CollectedOutput(port.portId(), port.source(), result));
+    }
+
+    @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         List<ItemStack> recovered = recoverFailureInputs(be);
         recordFailureRecoveredInputs(recovered);
         forceChunkLoad(false);
         craftDone = false;
+        plannedOperations = 1;
     }
 
     @Override
@@ -402,6 +574,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
         craftDone = false;
+        plannedOperations = 1;
         network = null;
     }
 
@@ -413,7 +586,87 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     public ExpectedProduction getExpectedProduction() {
         ItemStack result = getExpectedRecipeResult(recipe,
                 myLevel != null ? myLevel.registryAccess() : null);
-        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+        return result.isEmpty() ? null : new ExpectedProduction(result, expectedOutputCount());
+    }
+
+    static int bufferedOperationCapacity(int configuredLimit,
+                                         List<InputBufferContract.InputSlot> inputs,
+                                         int outputPerOperation, int outputCapacity) {
+        if (configuredLimit <= 0 || inputs == null || inputs.isEmpty()
+                || outputPerOperation <= 0 || outputCapacity <= 0) return 0;
+        int operations = Math.min(configuredLimit, outputCapacity / outputPerOperation);
+        for (InputBufferContract.InputSlot input : inputs) {
+            if (input == null || input.perOperation() <= 0 || input.capacity() <= 0) return 0;
+            operations = Math.min(operations, input.capacity() / input.perOperation());
+        }
+        return Math.max(0, operations);
+    }
+
+    private int expectedOutputCount() {
+        ItemStack result = getExpectedRecipeResult(recipe,
+                myLevel != null ? myLevel.registryAccess() : null);
+        if (result.isEmpty()) return 0;
+        long count = (long) result.getCount() * Math.max(1, plannedOperations);
+        return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
+    }
+
+    @Nullable
+    private static InputBufferPlan.InputSlot inputByEntryId(InputBufferPlan plan, String entryId) {
+        return plan.inputs().stream()
+                .filter(input -> entryId.equals(input.entryId()))
+                .findFirst().orElse(null);
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    private static int slotCapacity(IItemHandler handler, int slot, ItemStack prototype) {
+        return Math.max(1, Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize()));
+    }
+
+    private static boolean hasIngredientRemainderRisk(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return true;
+        Class<?> blockEntityClass = FarmersDelightReflection.cookingPotBEClass;
+        if (blockEntityClass == null) return true;
+        try {
+            Object value = blockEntityClass.getField("INGREDIENT_REMAINDER_OVERRIDES").get(null);
+            if (!(value instanceof Map<?, ?> map)) return true;
+            ItemStack[] candidates = spec.ingredient().getItems();
+            if (candidates.length == 0) return true;
+            for (ItemStack candidate : candidates) {
+                if (candidate == null || candidate.isEmpty()
+                        || candidate.hasCraftingRemainingItem()
+                        || map.containsKey(candidate.getItem())) return true;
+            }
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return true;
+        }
+    }
+
+    protected boolean inputBufferEnabled() {
+        return RSIntegrationConfig.ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER.get();
+    }
+
+    protected int inputBufferLimit() {
+        return Math.max(1, RSIntegrationConfig.FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER_LIMIT.get());
+    }
+
+    protected boolean supportsBufferedMachine(BlockEntity machine) {
+        return FarmersDelightReflection.cookingPotBEClass != null
+                && FarmersDelightReflection.cookingPotBEClass.isInstance(machine);
+    }
+
+    protected boolean supportsBufferedContainer(ItemStack required, ItemStack declared) {
+        return required.isEmpty() || ItemStack.isSameItemSameTags(required, declared);
+    }
+
+    protected String outputPortId() {
+        return "farmersdelight:cooking_pot:output";
     }
 
     // ── plan helpers ──

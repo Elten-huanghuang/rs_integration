@@ -352,11 +352,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
-    @Override
     public int prepareFlatBatch(int remainingOperations) {
         if (!supportsInputBuffer()) {
             plannedFurnaceOperations = 1;
@@ -365,6 +360,22 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         int batch = inputBufferContract().plan(remainingOperations).operations();
         plannedFurnaceOperations = Math.max(1, batch);
         return batch;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        // Planning may run again while the delegate is being admitted. Keep it
+        // separate from activeFurnaceOperations, which becomes immutable only
+        // when startOperation accepts the bound input buffer.
+        plannedFurnaceOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        if (!supportsInputBuffer()) return 1;
+        int workers = Math.max(1, workerCount);
+        int evenShare = Math.max(1, (totalOperations + workers - 1) / workers);
+        return Math.min(inputBufferOperationLimit(), evenShare);
     }
 
     @Override
@@ -386,8 +397,18 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
         ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(
                 myLevel.getBlockState(myPos).getBlock());
-        return blockId != null && "minecraft".equals(blockId.getNamespace())
-                && vanillaFurnaceInputBufferEnabled();
+        boolean brickFurnace = BrickFurnaceCompat.isBrickFurnace(furnaceBE);
+        if (!supportsFurnaceBufferTarget(blockId, brickFurnace)) return false;
+        return brickFurnace
+                ? brickFurnaceInputBufferEnabled()
+                    && BrickFurnaceCompat.canExecute(furnaceBE, recipe).allowed()
+                : vanillaFurnaceInputBufferEnabled();
+    }
+
+    static boolean supportsFurnaceBufferTarget(ResourceLocation blockId, boolean brickFurnace) {
+        return blockId != null && (brickFurnace
+                ? "brickfurnace".equals(blockId.getNamespace())
+                : "minecraft".equals(blockId.getNamespace()));
     }
 
     @Override
@@ -404,7 +425,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (prototype.isEmpty()) return InputBufferContract.none();
         return new InputBufferContract(inputBufferOperationLimit(),
                 List.of(new InputBufferContract.InputSlot(
-                        "vanilla:input", 0, prototype, 1, false,
+                        "legacy:material:0", 0, prototype, 1, false,
                         furnaceInputCapacity(ingredients.get(0)))),
                 outputContract().ports());
     }
@@ -459,7 +480,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         int outputCapacity = result.getCount() <= 0 ? 1
                 : Math.min(result.getMaxStackSize(), furnaceBE.getMaxStackSize()) / result.getCount();
         return safeFurnaceBufferOperations(Integer.MAX_VALUE,
-                vanillaFurnaceInputBufferLimit(), inputCapacity, outputCapacity, 1);
+                BrickFurnaceCompat.isBrickFurnace(furnaceBE)
+                        ? brickFurnaceInputBufferLimit() : vanillaFurnaceInputBufferLimit(),
+                inputCapacity, outputCapacity, 1);
     }
 
     static int furnaceOperationsFromMaterials(List<ItemStack> materials) {
@@ -496,6 +519,22 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private static int vanillaFurnaceInputBufferLimit() {
         try {
             return RSIntegrationConfig.VANILLA_FURNACE_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
+    }
+
+    private static boolean brickFurnaceInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_BRICK_FURNACE_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int brickFurnaceInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.BRICK_FURNACE_INPUT_BUFFER_LIMIT.get();
         } catch (IllegalStateException | NullPointerException ignored) {
             return 64;
         }
@@ -629,14 +668,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 ? BrickFurnaceCompat.effectiveCookTicks(furnaceBE, acr) : 200;
 
         // Burn time already banked in litTime counts toward this item's cook.
-        int litTime = 0;
-        try {
-            if (LIT_TIME_FIELD != null) {
-                litTime = LIT_TIME_FIELD.getInt(furnaceBE);
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
-        }
+        int litTime = readLitTime(furnaceBE);
         long requestedCook = (long) cookingTime * Math.max(1, operations);
         int remainingCook = (int) Math.min(Integer.MAX_VALUE,
                 Math.max(0L, requestedCook - litTime));
@@ -682,6 +714,34 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 stack -> BrickFurnaceCompat.effectiveBurnTicks(furnaceBE, stack, fuelRecipeType()));
         return selection != null && !selection.partial()
                 && supplyFuel(player, selection.fuel(), selection.amount());
+    }
+
+    private static int readLitTime(@Nullable AbstractFurnaceBlockEntity furnace) {
+        if (furnace == null || LIT_TIME_FIELD == null) return 0;
+        try {
+            return Math.max(0, LIT_TIME_FIELD.getInt(furnace));
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] litTime probe failed", e);
+            return 0;
+        }
+    }
+
+    private boolean refillFuelWhileWorking(AbstractFurnaceBlockEntity current) {
+        if (player == null || current == null || current.getItem(0).isEmpty()
+                || readLitTime(current) > 0) return true;
+        furnaceBE = current;
+        int remainingOperations = Math.max(1, current.getItem(0).getCount());
+        boolean ready = ensureFuel(player, remainingOperations);
+        if (ready) {
+            current.setChanged();
+            if (myLevel != null && myPos != null) {
+                myLevel.sendBlockUpdated(myPos, myLevel.getBlockState(myPos),
+                        myLevel.getBlockState(myPos), 3);
+            }
+        } else {
+            warnOnce("fuel-empty", "[RSI-Vanilla] Furnace fuel exhausted while inputs remain at {}", myPos);
+        }
+        return ready;
     }
 
     private RecipeType<?> fuelRecipeType() {
@@ -1024,7 +1084,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
         if (kind == MachineKind.FURNACE && be instanceof AbstractFurnaceBlockEntity current) {
+            // A machine can consume its initial fuel earlier than the estimate
+            // (augments and server-side recipe modifiers are common causes).
+            // Keep a queued input from silently stalling when the furnace goes
+            // dark between ticks.
             ItemStack output = current.getItem(2);
+            if (output.isEmpty() || output.getCount() < output.getMaxStackSize()) {
+                refillFuelWhileWorking(current);
+            }
             if (!output.isEmpty()) {
                 if (!matchesFurnaceOutput(output)) {
                     // The operation cannot have consumed RSI inputs when the

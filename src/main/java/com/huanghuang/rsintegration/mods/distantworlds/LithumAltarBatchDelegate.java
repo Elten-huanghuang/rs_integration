@@ -459,7 +459,5 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }
-    @Override public boolean supportsConcurrentNodeExecution() { return false; }
-
     private record OwnedSlot(BlockPos pos, ItemStack stack) {}
 }
