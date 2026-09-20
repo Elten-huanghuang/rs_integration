@@ -932,7 +932,7 @@
   "item.rs_integration.resonance_storage_disk.tooltip.title": "共振法则",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_1": "盘内物品视同随身携带，可触发被动效果并参与资源查找。",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_2": "耐久、数据和状态变化都会保存回磁盘。",
-  "item.rs_integration.resonance_storage_disk.tooltip.detail_3": "已适配药水护符、混合药水护符、烈焰术士法杖、石英花和幽灵之眼护符。",
+  "item.rs_integration.resonance_storage_disk.tooltip.detail_3": "已适配药水护符、混合药水护符、烈焰术士法杖、石英花、幽灵之眼护符和荒古庇护图腾。",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_4": "也支持九剑书、增益饰品和成组无限药水。",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_5": "细雪、原液、毒液、怨泉等桶装资源可用于递归合成。",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_6": "获取虚空恩惠：将磁盘投入井中；",

@@ -17,6 +17,19 @@ public final class RSIntegrationConfig {
     public static final int SERVER_CONFIG_SCHEMA = 6;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
+    private static final List<String> LEGACY_DEFAULT_PASSIVE_TICK_ITEMS = List.of(
+            "reliquary:pyromancer_staff|mutates",
+            "enigmaticaddons:artificial_flower|mutates",
+            "forbidden_arcanus:spectral_eye_amulet|mutates",
+            "apotheosis:potion_charm|mutates",
+            "muyimeng_charm:fused_potion_charm|mutates");
+    public static final List<String> DEFAULT_PASSIVE_TICK_ITEMS = List.of(
+            "reliquary:pyromancer_staff|mutates",
+            "enigmaticaddons:artificial_flower|mutates",
+            "forbidden_arcanus:spectral_eye_amulet|mutates",
+            "apotheosis:potion_charm|mutates",
+            "muyimeng_charm:fused_potion_charm|mutates",
+            "composite_material:primitive_totem");
     public static final List<String> DEFAULT_PREFERRED_INGREDIENT_VARIANTS = List.of(
             // Stable color families.
             "minecraft:white_wool",
@@ -656,7 +669,7 @@ public final class RSIntegrationConfig {
                         "Items marked |mutates will use extract-tick-insert to persist NBT changes.",
                         "Items without |mutates will be ticked on a snapshot copy (read-only).")
                 .defineList("passiveTickItems",
-                        List.of("reliquary:pyromancer_staff|mutates", "enigmaticaddons:artificial_flower|mutates", "forbidden_arcanus:spectral_eye_amulet|mutates", "apotheosis:potion_charm|mutates", "muyimeng_charm:fused_potion_charm|mutates"),
+                        DEFAULT_PASSIVE_TICK_ITEMS,
                         obj -> obj instanceof String && ((String) obj).contains(":"));
         NINE_SWORD_MAX_COUNT = c
                 .comment("Maximum effective count of Nine Sword Books across inventory + resonance disk.",
@@ -1467,6 +1480,12 @@ public final class RSIntegrationConfig {
             int schema, List<? extends String> currentValue) {
         return schema < 3 && currentValue.equals(List.of("minecraft_anvil"))
                 ? DEFAULT_ANVIL_MEMORY_ADAPTERS : currentValue;
+    }
+
+    public static List<? extends String> migratePassiveTickItems(
+            List<? extends String> currentValue) {
+        return currentValue.equals(LEGACY_DEFAULT_PASSIVE_TICK_ITEMS)
+                ? DEFAULT_PASSIVE_TICK_ITEMS : currentValue;
     }
 
     public static int migrateTypedPreviewTimeoutMs(int schema, int currentValue) {

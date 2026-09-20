@@ -930,7 +930,7 @@
   "item.rs_integration.resonance_storage_disk.tooltip.title": "Resonance Rules",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_1": "Stored items count as carried, enabling passive effects and resource lookups.",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_2": "Durability, data, and state changes are saved back to the disk.",
-  "item.rs_integration.resonance_storage_disk.tooltip.detail_3": "Supports potion charms, mixed potion charms, the Infernal Tear, Quartz Flower, and Spectral Eye Amulet.",
+  "item.rs_integration.resonance_storage_disk.tooltip.detail_3": "Supports potion charms, mixed potion charms, the Infernal Tear, Quartz Flower, Spectral Eye Amulet, and Totem of Blessing.",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_4": "Also supports Nine Swords manuals, buff curios, and grouped infinite potions.",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_5": "Powder Snow, Source, Venom, and Hot Spring buckets can be used in recursive crafting.",
   "item.rs_integration.resonance_storage_disk.tooltip.detail_6": "To gain Void Favor, throw the disk into the well;",
