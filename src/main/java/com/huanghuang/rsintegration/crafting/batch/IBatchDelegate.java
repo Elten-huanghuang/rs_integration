@@ -134,6 +134,45 @@ public interface IBatchDelegate {
     default int preferredParallelBatchSize(int totalOperations, int workerCount) {
         return 1;
     }
+
+    /**
+     * Explicit opt-in for machines that can preload multiple operations while
+     * still consuming one operation per processing cycle. Legacy delegates stay
+     * on the existing one-by-one placement path.
+     */
+    default boolean supportsInputBuffer() {
+        return false;
+    }
+
+    /**
+     * Stable declaration for buffered multi-input and multi-output machines.
+     * Existing delegates remain unbuffered until a machine has verified its
+     * placement, autonomous processing, output capacity, and recovery rules.
+     */
+    @Nonnull
+    default InputBufferContract inputBufferContract() {
+        return InputBufferContract.none();
+    }
+
+    /**
+     * Describe the physical input slots and output ports for one buffered start.
+     * The chain must only call this after {@link #supportsInputBuffer()} returns
+     * true; the default is deliberately disabled for compatibility.
+     */
+    default InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return InputBufferPlan.none();
+    }
+
+    /**
+     * Start a physically laid-out buffered dispatch. Implementations must place
+     * each input by {@link InputBufferPlan.InputSlot#slot()} and keep output
+     * accounting by {@link InputBufferPlan.OutputPort#port()}.
+     */
+    default boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+                                             @Nonnull InputBufferPlan plan,
+                                             @Nonnull ExtractionLedger sharedLedger) {
+        return false;
+    }
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 
@@ -189,6 +228,33 @@ public interface IBatchDelegate {
     @Nullable
     default List<IngredientSpec> getRequiredMaterials() {
         return null;
+    }
+
+    /**
+     * Stable material declaration for new planning and start paths. Legacy
+     * delegates are projected as graph-owned ordered entries until they opt in
+     * with explicit allocation and physical slot identities.
+     */
+    @Nonnull
+    default MaterialPlan materialPlan() {
+        List<IngredientSpec> required = getRequiredMaterials();
+        if (required == null || required.isEmpty()) return MaterialPlan.none();
+        List<IngredientSpec> graph = getGraphSpecs();
+        List<IngredientSpec> supplemental = getSupplementalSpecs();
+        if ((graph == null || graph.isEmpty())
+                && (supplemental == null || supplemental.isEmpty())
+                && requiresPrivateLedgerGraphDispatch()) {
+            return MaterialPlan.none();
+        }
+        try {
+            return MaterialPlan.fromLegacyPartitions(required, graph, supplemental,
+                    getMaterialReservationScopes());
+        } catch (IllegalArgumentException ignored) {
+            // A legacy delegate may recreate non-equal Ingredient instances on
+            // each getter call. Preserve its former all-graph behavior until it
+            // declares stable MaterialPlan entries explicitly.
+            return MaterialPlan.fromLegacy(required, getMaterialReservationScopes());
+        }
     }
 
     /**
@@ -376,6 +442,28 @@ public interface IBatchDelegate {
     /** True when {@link #collectAllResults} already includes physical remainders/byproducts. */
     default boolean collectsPhysicalSecondaryOutputs() {
         return false;
+    }
+
+    /**
+     * Explicit per-operation output declaration for structured accounting.
+     * Returning {@link OutputContract#none()} preserves the legacy collection
+     * path until a delegate has declared every primary and secondary channel.
+     */
+    @Nonnull
+    default OutputContract outputContract() {
+        return OutputContract.none();
+    }
+
+    /**
+     * Removes and identifies outputs that originate from a machine slot or a
+     * virtual operation. World outputs captured by the chain are attached by
+     * the orchestration layer because their entity origin is external to the
+     * delegate's inventory.
+     */
+    @Nonnull
+    default List<OutputAccounting.CollectedOutput> collectStructuredResults(
+            @Nonnull ServerPlayer player) {
+        return List.of();
     }
 
     /**

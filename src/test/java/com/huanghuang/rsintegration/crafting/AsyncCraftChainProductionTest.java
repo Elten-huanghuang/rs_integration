@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
@@ -52,6 +55,35 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
 
         var expected = new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), 2);
         assertEquals(2, AsyncCraftChain.countMatchingProduction(List.of(actualStack), expected));
+    }
+
+    @Test
+    void capturedWorldOutputUsesOnlyItsUniqueDeclaredPort() {
+        OutputContract contract = new OutputContract(List.of(
+                new OutputContract.Port("world:primary", null, new ItemStack(Items.IRON_INGOT), 1,
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+
+        List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
+                contract, List.of(new ItemStack(Items.IRON_INGOT)));
+
+        assertEquals("world:primary", outputs.get(0).portId());
+        assertEquals(OutputContract.Source.WORLD, outputs.get(0).source());
+        assertTrue(OutputAccounting.assess(contract, 1, outputs).complete());
+    }
+
+    @Test
+    void ambiguousCapturedWorldOutputIsNotAssignedToEitherPort() {
+        OutputContract contract = new OutputContract(List.of(
+                new OutputContract.Port("world:first", null, new ItemStack(Items.IRON_INGOT), 1,
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD),
+                new OutputContract.Port("world:second", null, new ItemStack(Items.IRON_INGOT), 1,
+                        InputBufferPlan.OutputPort.Kind.SECONDARY, OutputContract.Source.WORLD)));
+
+        List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
+                contract, List.of(new ItemStack(Items.IRON_INGOT)));
+
+        assertEquals("unmatched:world:0", outputs.get(0).portId());
+        assertFalse(OutputAccounting.assess(contract, 1, outputs).complete());
     }
 
     @Test

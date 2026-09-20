@@ -50,7 +50,22 @@ class PreparedDelegateOwnershipTest extends BootstrapTest {
         assertEquals(0, delegate.preparationReleases);
     }
 
-    private static final class TrackingDelegate implements IBatchDelegate {
+    @Test
+    void preparedValidationUsesStructuredPreparationResult() {
+        TrackingDelegate delegate = new TrackingDelegate(false, true) {
+            @Override
+            public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                             ResourceLocation dimension, BlockPos position) {
+                return PreparationResult.ready();
+            }
+        };
+
+        assertTrue(AsyncCraftChain.validatePreparedDelegate(
+                delegate, null, RECIPE, null, BlockPos.ZERO));
+        assertEquals(0, delegate.preparationReleases);
+    }
+
+    private static class TrackingDelegate implements IBatchDelegate {
         private final boolean validationResult;
         private final boolean throwDuringValidation;
         private int preparationReleases;

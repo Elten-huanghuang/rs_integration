@@ -38,6 +38,10 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
@@ -651,25 +655,46 @@ public final class AsyncCraftChain {
                 }
                 // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
                 // Treat a matching captured output as completion so it settles into the RS inventory.
-                ItemStack expectedCapturedOutput = currentDelegate.getExpectedOutput();
+                // A world capture is only a completion signal when the whole
+                // operation's production has arrived. getExpectedOutput()
+                // describes one spawned stack and is insufficient for buffered
+                // furnace batches (6 operations must not finish at 1).
+                IBatchDelegate.ExpectedProduction expectedCapturedProduction =
+                        currentDelegate.getExpectedProduction();
+                ItemStack expectedCapturedOutput = expectedCapturedProduction == null
+                        ? currentDelegate.getExpectedOutput() : expectedCapturedProduction.item();
+                int expectedCapturedCount = expectedCapturedProduction == null
+                        ? (expectedCapturedOutput == null ? 0 : expectedCapturedOutput.getCount())
+                        : expectedCapturedProduction.count();
                 boolean capturedWorldOutput = capturedOutput
-                        && hasCapturedExpectedCount(expectedCapturedOutput);
+                        && hasCapturedExpectedCount(expectedCapturedOutput, expectedCapturedCount);
                 if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                     if (!currentDelegate.validateExecutionContext(online)) {
                         abort("Execution context changed before output publication",
                                 Component.translatable("rsi.async.abort.execution_context"));
                         return true;
                     }
-                    List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
+                    OutputCollection collectedOutputs = collectOutputsForSettlement(
+                            currentDelegate, online, disarmOutputCapture());
                     closeFlatOperationScope();
-                    actualResults.addAll(currentDelegate.collectAllResults(online));
-                    actualResults.removeIf(stack -> stack == null || stack.isEmpty());
+                    List<ItemStack> actualResults = collectedOutputs.stacks();
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
 
                     IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
                     int actualCount = countMatchingProduction(actualResults, expected);
                     reportCraftedPrimaryOutputs(online, actualResults, expected,
                             currentStepOutputPrototype());
+                    if (collectedOutputs.settlement() != null
+                            && !collectedOutputs.settlement().complete()) {
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        abortWithoutRefund("Structured output settlement failed: "
+                                        + describeOutputSettlement(collectedOutputs.settlement()),
+                                Component.translatable("rsi.async.error.output_extracted",
+                                        expectedStructuredOutputCount(collectedOutputs.settlement()),
+                                        actualStructuredOutputCount(collectedOutputs.settlement())));
+                        return true;
+                    }
                     if (expected != null && expected.count() > actualCount) {
                         RSIntegrationMod.LOGGER.warn(ctx.format(
                                 "Craft output partially extracted: recipe={} delegate={} expected={} actual={}"),
@@ -689,7 +714,8 @@ public final class AsyncCraftChain {
                     // World-output delegates use a separate capture declaration and
                     // may opt out of count comparison while still failing closed.
                     ItemStack expectedWorld = currentDelegate.getExpectedOutput();
-                    if (expected == null && expectedWorld != null && !expectedWorld.isEmpty()
+                    if (collectedOutputs.settlement() == null && expected == null
+                            && expectedWorld != null && !expectedWorld.isEmpty()
                             && actualResults.isEmpty()) {
                         snapshotCommittedVirtual();
                         ledger.reset();
@@ -1297,13 +1323,14 @@ public final class AsyncCraftChain {
     static boolean validatePreparedDelegate(
             IBatchDelegate delegate, ServerPlayer player, ResourceLocation recipeId,
             @Nullable ResourceLocation dimension, BlockPos position) {
-        boolean valid = false;
+        boolean ready = false;
         try {
-            valid = PreparationMessageScope.validate(
+            IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
                     delegate, player, recipeId, dimension, position);
-            return valid;
+            ready = result.state() == IBatchDelegate.PreparationState.READY;
+            return ready;
         } finally {
-            if (!valid) releasePreparationQuietly(delegate);
+            if (!ready) releasePreparationQuietly(delegate);
         }
     }
 
@@ -1447,14 +1474,17 @@ public final class AsyncCraftChain {
                 globalOperationBudget.availableCapacity());
         boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations);
         boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
-        boolean workerReusable = delegate.getMaterialReservationScopes().contains(
+        MaterialPlan delegateMaterials = materialPlanFor(delegate);
+        List<IBatchDelegate.MaterialReservationScope> graphScopes =
+                materialReservationScopes(delegateMaterials);
+        boolean workerReusable = graphScopes.contains(
                 IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
         int operationCost = graphOperationWorkerCount(desiredOperations, availableOperations,
                 eligible.size(), concurrencySafe, workerReusable);
         if (operationGroup && workerReusable) {
             operationCost = Math.min(operationCost, Math.max(1,
-                    reusableWorkerCapacity(delegate.getGraphSpecs(),
-                            delegate.getMaterialReservationScopes(), online, storageEndpoint)));
+                    reusableWorkerCapacity(delegateMaterials.legacyGraphSpecs(),
+                            graphScopes, online, storageEndpoint)));
         }
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
@@ -1482,6 +1512,24 @@ public final class AsyncCraftChain {
         if (!shouldUseGraphOperationGroup(executions, availableOperations)
                 || !concurrencySafe) return 1;
         return Math.max(1, Math.min(Math.min(executions, availableOperations), eligibleMachines));
+    }
+
+    /** Reads the structured contract, treating a null legacy override as an empty plan. */
+    static MaterialPlan materialPlanFor(@Nullable IBatchDelegate delegate) {
+        if (delegate == null) return MaterialPlan.none();
+        MaterialPlan plan = delegate.materialPlan();
+        return plan == null ? MaterialPlan.none() : plan;
+    }
+
+    /** Projects graph-entry reuse flags to the reservation planner's transitional list format. */
+    static List<IBatchDelegate.MaterialReservationScope> materialReservationScopes(
+            MaterialPlan materialPlan) {
+        if (materialPlan == null) return List.of();
+        return materialPlan.graphEntries().stream()
+                .map(entry -> entry.reusable()
+                        ? IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE
+                        : IBatchDelegate.MaterialReservationScope.PER_OPERATION)
+                .toList();
     }
 
     /**
@@ -1569,13 +1617,18 @@ public final class AsyncCraftChain {
                             "operation group could not prepare a worker for serial dispatch");
                 }
             }
+            boolean legacyParallelGroup = delegate instanceof ParallelCraftGroup;
+            MaterialPlan materialPlan = legacyParallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
+            List<IngredientSpec> graphSpecs = legacyParallelGroup
+                    ? delegate.getGraphSpecs() : materialPlan.legacyGraphSpecs();
+            List<IBatchDelegate.MaterialReservationScope> graphScopes = legacyParallelGroup
+                    ? delegate.getMaterialReservationScopes() : materialReservationScopes(materialPlan);
             GraphNodeMaterials reserved;
             if (delegate instanceof CrockPotBatchDelegate crockPot
                     && crockPot.usesPlannedCategoryMaterials()) {
                 reserved = reservePlannedCheckoutMaterials(
                         online, nodeLedger, admission.materialToken());
             } else {
-                List<IngredientSpec> graphSpecs = delegate.getGraphSpecs();
                 if (graphSpecs == null || graphSpecs.isEmpty()) {
                     if (shouldUsePrivateLedgerGraphDispatch(delegate, graphSpecs)) {
                         GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
@@ -1586,20 +1639,23 @@ public final class AsyncCraftChain {
                     return GraphDispatchResult.fatal("delegate did not expose graph materials");
                 }
                 reserved = reserveGraphNodeMaterials(
-                        delegate, graphSpecs, prepared.step().executions(), online,
+                        delegate, graphSpecs, graphScopes, prepared.step().executions(), online,
                         nodeLedger, admission.materialToken());
             }
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
             List<ItemStack> materials = reserved.materials();
 
-            List<IngredientSpec> supplementalSpecs = delegate.getSupplementalSpecs();
+            List<IngredientSpec> supplementalSpecs = legacyParallelGroup
+                    ? delegate.getSupplementalSpecs() : materialPlan.legacySupplementalSpecs();
             if (supplementalSpecs != null && !supplementalSpecs.isEmpty()) {
                 List<ItemStack> supplementalMaterials = reserveSupplementalMaterials(
                         supplementalSpecs, online, nodeLedger);
                 if (supplementalMaterials == null) {
                     return GraphDispatchResult.retry("supplemental materials unavailable");
                 }
-                materials = delegate.mergeSupplementalMaterials(materials, supplementalMaterials);
+                materials = legacyParallelGroup
+                        ? delegate.mergeSupplementalMaterials(materials, supplementalMaterials)
+                        : materialPlan.mergeLegacyReservations(materials, supplementalMaterials);
             }
             if (!delegate.validateExecutionContext(online)) {
                 return GraphDispatchResult.fatal(
@@ -2014,7 +2070,8 @@ public final class AsyncCraftChain {
 
     @Nullable
     private GraphNodeMaterials reserveGraphNodeMaterials(
-            IBatchDelegate delegate, List<IngredientSpec> specs, int executions,
+            IBatchDelegate delegate, List<IngredientSpec> specs,
+            List<IBatchDelegate.MaterialReservationScope> scopes, int executions,
             ServerPlayer online, ExtractionLedger ledger,
             MaterialBroker.ReservationToken materialToken) {
         int reservationMark = ledger.reservationMark();
@@ -2035,8 +2092,9 @@ public final class AsyncCraftChain {
             List<ItemStack> reusable = new ArrayList<>();
             List<List<Integer>> reusableEntryIds = new ArrayList<>();
             List<IngredientSpec> perOperationSpecs = new ArrayList<>();
-            List<IBatchDelegate.MaterialReservationScope> scopes = group.getMaterialReservationScopes();
-            List<Integer> reusableIndices = reusableMaterialIndices(scopes, operationSpecs.size());
+            List<IBatchDelegate.MaterialReservationScope> groupScopes =
+                    group.getMaterialReservationScopes();
+            List<Integer> reusableIndices = reusableMaterialIndices(groupScopes, operationSpecs.size());
             for (int i = 0; i < operationSpecs.size(); i++) {
                 if (!reusableIndices.contains(i)) {
                     perOperationSpecs.add(operationSpecs.get(i));
@@ -2108,7 +2166,6 @@ public final class AsyncCraftChain {
                 ? graphMaterials.checkout(materialToken) : new MaterialBroker.Checkout(List.of());
         List<ItemStack> initialPool = new ArrayList<>(checkout.initialStacks());
         List<ItemStack> producerPool = new ArrayList<>(checkout.producerStacks());
-        List<IBatchDelegate.MaterialReservationScope> scopes = delegate.getMaterialReservationScopes();
         List<IngredientSpec> scaledSpecs = scaleGraphSpecsForExecutions(specs, scopes, executions);
         List<Integer> reusableIndices = reusableMaterialIndices(scopes, specs.size());
         List<IngredientSpec> reusableSpecs = new ArrayList<>();
@@ -2149,48 +2206,24 @@ public final class AsyncCraftChain {
 
     static boolean graphMaterialPoolsDrained(
             List<ItemStack> initialPool, List<ItemStack> producerPool) {
-        return initialPool.stream().allMatch(stack -> stack == null || stack.isEmpty())
-                && producerPool.stream().allMatch(stack -> stack == null || stack.isEmpty());
+        return MaterialReservationPlanner.graphMaterialPoolsDrained(initialPool, producerPool);
     }
 
     static List<IngredientSpec> scaleGraphSpecsForExecutions(
             List<IngredientSpec> specs,
             List<IBatchDelegate.MaterialReservationScope> scopes,
             int executions) {
-        int multiplier = Math.max(1, executions);
-        List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
-        for (int i = 0; i < specs.size(); i++) {
-            IngredientSpec spec = specs.get(i);
-            boolean reusable = i < scopes.size()
-                    && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE;
-            int count = reusable ? spec.count() : StepExecutor.mulCount(spec.count(), multiplier);
-            scaledSpecs.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
-        }
-        return List.copyOf(scaledSpecs);
+        return MaterialReservationPlanner.scaleGraphSpecsForExecutions(specs, scopes, executions);
     }
 
     static List<Integer> reusableMaterialIndices(
             List<IBatchDelegate.MaterialReservationScope> scopes, int specCount) {
-        List<Integer> indices = new ArrayList<>();
-        int limit = Math.min(Math.max(0, specCount), scopes.size());
-        for (int i = 0; i < limit; i++) {
-            if (scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
-                indices.add(i);
-            }
-        }
-        return List.copyOf(indices);
+        return MaterialReservationPlanner.reusableMaterialIndices(scopes, specCount);
     }
 
     private static List<ItemStack> consumedFragments(
             List<ItemStack> before, List<ItemStack> after) {
-        List<ItemStack> consumed = new ArrayList<>();
-        for (int i = 0; i < before.size(); i++) {
-            ItemStack original = before.get(i);
-            int remaining = i < after.size() ? after.get(i).getCount() : 0;
-            int count = original.getCount() - remaining;
-            if (count > 0) consumed.add(original.copyWithCount(count));
-        }
-        return List.copyOf(consumed);
+        return MaterialReservationPlanner.consumedFragments(before, after);
     }
 
     /** Reserve initial allocations physically and checkout exact producer fragments. */
@@ -2790,57 +2823,24 @@ public final class AsyncCraftChain {
     }
 
     static int flatDispatchWindow(int remainingOperations, int dispatchLimit) {
-        return Math.min(Math.max(0, remainingOperations), Math.max(1, dispatchLimit));
+        return BatchDispatchPlanner.flatDispatchWindow(remainingOperations, dispatchLimit);
     }
 
     static int remainingAfterFlatBatch(int remainingOperations, int completedOperations) {
-        if (completedOperations <= 0 || completedOperations > remainingOperations) {
-            throw new IllegalArgumentException("Completed batch exceeds remaining operations or made no progress");
-        }
-        return remainingOperations - completedOperations;
+        return BatchDispatchPlanner.remainingAfterFlatBatch(remainingOperations, completedOperations);
     }
 
     static int completedFlatWindowOperations(int totalOperations, int remainingOperations,
-                                             int completedInWindow) {
-        long completed = (long) completedFlatOperations(totalOperations, remainingOperations)
-                + Math.max(0, completedInWindow);
-        return (int) Math.min(Math.max(1, totalOperations), completed);
+                                              int completedInWindow) {
+        return BatchDispatchPlanner.completedFlatWindowOperations(
+                totalOperations, remainingOperations, completedInWindow);
     }
 
     static VanillaBatchSlice planVanillaBatchSlice(
             List<CraftingResolver.ResolutionStep> sourceSteps,
             int startIdx, int currentRemaining, int operationBudget) {
-        int budget = Math.max(1, operationBudget);
-        int i = Math.max(0, startIdx);
-        int remaining = Math.max(0, currentRemaining);
-        List<CraftingResolver.ResolutionStep> sliceSteps = new ArrayList<>();
-        while (i < sourceSteps.size() && budget > 0) {
-            CraftingResolver.ResolutionStep step = sourceSteps.get(i);
-            if (step.modType() != ModType.GENERIC
-                    || step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
-                break;
-            }
-            int stepExecutions = i == startIdx && remaining > 0
-                    ? remaining : step.executions();
-            int sliceExecutions = Math.min(stepExecutions, budget);
-            sliceSteps.add(copyWithExecutions(step, sliceExecutions));
-            budget -= sliceExecutions;
-            stepExecutions -= sliceExecutions;
-            if (stepExecutions > 0) {
-                return new VanillaBatchSlice(List.copyOf(sliceSteps), i, stepExecutions);
-            }
-            remaining = 0;
-            i++;
-        }
-        return new VanillaBatchSlice(List.copyOf(sliceSteps), i, 0);
-    }
-
-    private static CraftingResolver.ResolutionStep copyWithExecutions(
-            CraftingResolver.ResolutionStep step, int executions) {
-        return new CraftingResolver.ResolutionStep(
-                step.recipeId(), step.modType(), step.recipeTypeId(),
-                step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
-                executions, step.syntheticInput(), step.syntheticOutput());
+        return BatchDispatchPlanner.planVanillaBatchSlice(
+                sourceSteps, startIdx, currentRemaining, operationBudget);
     }
 
     record VanillaBatchSlice(
@@ -2853,31 +2853,18 @@ public final class AsyncCraftChain {
     }
 
     private static int configuredAtomicVanillaGraphLimit() {
-        try {
-            return Math.max(1, Math.min(
-                    RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get(),
-                    RSIntegrationConfig.CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK.get()));
-        } catch (Exception ignored) {
-            return Math.min(RSIntegrationConfig.DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK,
-                    RSIntegrationConfig.DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK);
-        }
+        return BatchDispatchPlanner.configuredAtomicVanillaGraphLimit();
     }
 
     private static int configuredOperationsPerDispatch() {
-        try {
-            return Math.max(1, RSIntegrationConfig.CRAFTING_OPERATIONS_PER_DISPATCH.get());
-        } catch (Exception ignored) {
-            return RSIntegrationConfig.DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH;
-        }
+        return BatchDispatchPlanner.configuredOperationsPerDispatch();
     }
 
     static boolean requiresFlatExecutionForOversizedNode(
             List<CraftingResolver.ResolutionStep> steps, int vanillaOperationLimit,
             int dispatchOperationLimit) {
-        int vanillaLimit = Math.max(1, vanillaOperationLimit);
-        int machineLimit = Math.max(1, dispatchOperationLimit);
-        return steps.stream().anyMatch(step -> step.executions()
-                > (step.modType() == ModType.GENERIC ? vanillaLimit : machineLimit));
+        return BatchDispatchPlanner.requiresFlatExecutionForOversizedNode(
+                steps, vanillaOperationLimit, dispatchOperationLimit);
     }
 
     /**
@@ -2886,13 +2873,15 @@ public final class AsyncCraftChain {
      */
     private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
                                               ServerPlayer online) {
-        return executeVanillaStepsInline(vanillaSteps, online, virtualInventory, ledger, true);
+        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
+                virtualInventory, ledger, true);
     }
 
     private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
                                               ServerPlayer online,
                                               List<ItemStack> workingInventory) {
-        return executeVanillaStepsInline(vanillaSteps, online, workingInventory, ledger, true);
+        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
+                workingInventory, ledger, true);
     }
 
     private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
@@ -2900,248 +2889,63 @@ public final class AsyncCraftChain {
                                               List<ItemStack> workingInventory,
                                               ExtractionLedger executionLedger,
                                               boolean allowPhysicalFallback) {
+        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
+                workingInventory, executionLedger, allowPhysicalFallback);
+    }
+
+    private boolean executeVanillaStepsInlineExtracted(
+            List<CraftingResolver.ResolutionStep> vanillaSteps,
+            ServerPlayer online, List<ItemStack> workingInventory,
+            ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
         ServerLevel overworld = server.overworld();
         if (overworld == null) return false;
-        RecipeManager rm = overworld.getRecipeManager();
-        RSIntegrationMod.LOGGER.debug(ctx.format("executeVanillaStepsInline: {} vanilla steps, currentStepIdx={}"),
-                vanillaSteps.size(), currentStepIdx);
-        logVirtualInventory("before batch");
-
-        for (CraftingResolver.ResolutionStep step : vanillaSteps) {
-            ResourceLocation stepId = step.recipeId();
-            int executions = step.executions();
-            Recipe<?> recipe = rm.byKey(stepId).orElse(null);
-            if (recipe == null) {
-                RSIntegrationMod.LOGGER.debug(ctx.format("  step {} not found in recipe manager"), stepId);
-                continue;
-            }
-
-            RSIntegrationMod.LOGGER.debug(ctx.format("  processing step: {} x{}"), stepId, executions);
-
-            if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
-                List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(cr);
-                ItemStack terminalOutput = terminalOutputFor(
-                        stepId, cr, overworld.registryAccess());
-                if (!terminalOutput.isEmpty()
-                        && !SelfAmplifyingRecipePolicy.isSelfAmplifying(specs, terminalOutput)) {
-                    specs = specs.stream()
-                            .map(spec -> SelfAmplifyingRecipePolicy
-                                    .excludeNonProductiveSelfCandidate(spec, terminalOutput))
-                            .toList();
-                }
-                for (int execution = 0; execution < executions; execution++) {
-                    if (!executeCraftingOnceInline(cr, specs, stepId, online,
-                            workingInventory, executionLedger, allowPhysicalFallback,
-                            overworld.registryAccess())) {
-                        return false;
-                    }
-                }
-            } else {
-                // Non-crafting GENERIC recipe (e.g. sawmill, custom mod type)
-                List<IngredientSpec> specs =
-                        CraftPacketUtils.extractIngredientSpecs(recipe);
-                if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
-                    specs = SmithingRecipeHandler.requireDemandedOutputTag(
-                            smithing, specs, step.syntheticOutput());
-                }
-                if (specs == null || specs.isEmpty()) continue;
-                List<ItemStack> consumedInputs = new ArrayList<>();
-
-                for (IngredientSpec spec : specs) {
-                    if (spec.isEmpty()) continue;
-                    int stillNeeded = CraftPacketUtils.requiredCount(spec, executions);
-                    boolean captured = false;
-                    var iter = workingInventory.iterator();
-                    while (iter.hasNext() && stillNeeded > 0) {
-                        ItemStack vi = iter.next();
-                        if (IngredientMatcher.test(spec.ingredient(), vi)) {
-                            int take = Math.min(stillNeeded, vi.getCount());
-                            if (!captured) consumedInputs.add(vi.copyWithCount(1));
-                            captured = true;
-                            vi.shrink(take);
-                            stillNeeded -= take;
-                            if (vi.isEmpty()) iter.remove();
-                        }
-                    }
-                    if (stillNeeded > 0) {
-                        ItemStack reserved = ItemStack.EMPTY;
-                        if (allowPhysicalFallback) {
-                            // A null network is the normal standalone-backend path.
-                            // Do not invoke an RS-typed method in that case: besides
-                            // being invalid, linking that signature crashes when RS is
-                            // absent from the classpath.
-                            reserved = reserveIngredient(executionLedger, spec.ingredient(), stillNeeded, online);
-                            if (reserved.isEmpty()) {
-                                reserved = executionLedger.reserveFromInventory(
-                                        spec.ingredient(), stillNeeded, online);
+        return FlatCraftExecutor.execute(vanillaSteps, online, workingInventory,
+                executionLedger, allowPhysicalFallback,
+                new FlatCraftExecutor.Context(overworld, ctx, steps, targetOutput,
+                        new FlatCraftExecutor.Host() {
+                            @Override
+                            public ItemStack reserve(ExtractionLedger ledger,
+                                                      Ingredient ingredient, int amount,
+                                                      ServerPlayer player) {
+                                return reserveIngredient(ledger, ingredient, amount, player);
                             }
-                        }
-                        if (reserved.isEmpty()) {
-                            logMissingIngredient(spec.ingredient(), stepId);
-                            logVirtualInventory("at failure for step " + stepId);
-                            logLedgerState(executionLedger);
-                            if (allowPhysicalFallback) {
-                                abort("Missing: " + describeIngredientSafe(spec.ingredient()),
-                                        Component.translatable("rsi.async.abort.missing_material",
-                                                nameIngredientSafe(spec.ingredient())));
+
+                            @Override
+                            public void onMissing(Ingredient ingredient, ResourceLocation stepId,
+                                                   ExtractionLedger ledger,
+                                                   boolean allowPhysicalFallback) {
+                                logMissingIngredient(ingredient, stepId);
+                                logVirtualInventory("at failure for step " + stepId);
+                                logLedgerState(ledger);
+                                if (allowPhysicalFallback) {
+                                    abort("Missing: " + describeIngredientSafe(ingredient),
+                                            Component.translatable("rsi.async.abort.missing_material",
+                                                    nameIngredientSafe(ingredient)));
+                                }
                             }
-                            return false;
-                        }
-                        if (!captured) consumedInputs.add(reserved.copyWithCount(1));
-                    }
-                }
 
-                ItemStack result;
-                if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
-                    result = SmithingRecipeHandler.assembleTransform(
-                            smithing, consumedInputs, server.overworld().registryAccess());
-                } else {
-                    result = ModRecipeHandlers.tryGetResultItem(
-                            recipe, server.overworld().registryAccess());
-                }
-                if (!result.isEmpty()) {
-                    ItemStack produced = result.copyWithCount(
-                            StepExecutor.mulCount(result.getCount(), executions));
-                    addToInventory(workingInventory, produced);
-                    ExternalItemProgressBridge.enqueueCrafted(online, produced);
-                }
-                for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, server.overworld().registryAccess())) {
-                    addToInventory(workingInventory,
-                            secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
-                }
-                for (IngredientSpec spec : specs) {
-                    if (spec.isEmpty()) continue;
-                    for (ItemStack stack : spec.ingredient().getItems()) {
-                        if (stack.isEmpty()) continue;
-                        try {
-                            ItemStack remainder = stack.getCraftingRemainingItem();
-                            if (!remainder.isEmpty()) {
-                                addToInventory(workingInventory, remainder.copyWithCount(
-                                        CraftPacketUtils.requiredCount(spec, executions)));
-                                break;
+                            @Override
+                            public void logVirtualInventory(String context) {
+                                AsyncCraftChain.this.logVirtualInventory(context);
                             }
-                        } catch (Exception e) {
-                            RSIntegrationMod.LOGGER.debug(ctx.format("getCraftingRemainingItem failed"), e);
-                        }
-                    }
-                }
-            }
-        }
-        return true;
-    }
 
-    private ItemStack terminalOutputFor(ResourceLocation stepId,
-                                        net.minecraft.world.item.crafting.CraftingRecipe recipe,
-                                        net.minecraft.core.RegistryAccess registryAccess) {
-        if (steps.isEmpty() || !steps.get(steps.size() - 1).recipeId().equals(stepId)) {
-            return ItemStack.EMPTY;
-        }
-        if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copyWithCount(1);
-        ItemStack declared = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
-        return declared.isEmpty() ? ItemStack.EMPTY : declared.copyWithCount(1);
-    }
-
-    private boolean executeCraftingOnceInline(
-            net.minecraft.world.item.crafting.CraftingRecipe recipe,
-            List<IngredientSpec> specs, ResourceLocation stepId, ServerPlayer online,
-            List<ItemStack> workingInventory, ExtractionLedger executionLedger,
-            boolean allowPhysicalFallback,
-            net.minecraft.core.RegistryAccess registryAccess) {
-        Map<Integer, ItemStack> modifiedSlots = new HashMap<>();
-        ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
-
-        for (int ingIdx = 0; ingIdx < specs.size(); ingIdx++) {
-            IngredientSpec spec = specs.get(ingIdx);
-            if (spec.isEmpty()) continue;
-            Ingredient ingredient = spec.ingredient();
-            int stillNeeded = CraftPacketUtils.requiredCount(spec, 1);
-            boolean captured = false;
-            for (int i = 0; i < workingInventory.size() && stillNeeded > 0; i++) {
-                ItemStack available = workingInventory.get(i);
-                if (available.isEmpty() || !IngredientMatcher.test(ingredient, available)) continue;
-                modifiedSlots.putIfAbsent(i, available.copy());
-                if (!captured && ingIdx < consumed.length) {
-                    consumed[ingIdx] = available.copyWithCount(1);
-                    captured = true;
-                }
-                int take = Math.min(stillNeeded, available.getCount());
-                available.shrink(take);
-                stillNeeded -= take;
-            }
-            if (stillNeeded <= 0) continue;
-
-            ItemStack reserved = ItemStack.EMPTY;
-            if (allowPhysicalFallback) {
-                reserved = reserveIngredient(executionLedger, ingredient, stillNeeded, online);
-                if (reserved.isEmpty()) {
-                    reserved = executionLedger.reserveFromInventory(ingredient, stillNeeded, online);
-                }
-            }
-            if (reserved.isEmpty()) {
-                modifiedSlots.forEach((index, originalStack) -> {
-                    if (index < workingInventory.size()) {
-                        workingInventory.set(index, originalStack);
-                    } else {
-                        workingInventory.add(originalStack);
-                    }
-                });
-                logMissingIngredient(ingredient, stepId);
-                logVirtualInventory("at failure for step " + stepId);
-                logLedgerState(executionLedger);
-                if (allowPhysicalFallback) {
-                    abort("Missing: " + describeIngredientSafe(ingredient),
-                            Component.translatable("rsi.async.abort.missing_material",
-                                    nameIngredientSafe(ingredient)));
-                }
-                return false;
-            }
-            if (!captured && ingIdx < consumed.length) {
-                consumed[ingIdx] = reserved.copyWithCount(1);
-            }
-        }
-
-        ItemStack result = CraftPacketUtils.assembleCraftingOutput(recipe, consumed, online);
-        if (result.isEmpty()) {
-            result = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
-        }
-        if (!result.isEmpty()) {
-            addToInventory(workingInventory, result);
-            ExternalItemProgressBridge.enqueueCrafted(online, result);
-        }
-
-        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe, consumed)) {
-            int remainderExecutions = CraftPacketUtils.remainderExecutions(remainder, specs, 1);
-            addToInventory(workingInventory,
-                    remainder.copyWithCount(StepExecutor.mulCount(
-                            remainder.getCount(), remainderExecutions)));
-        }
-        return true;
+                            @Override
+                            public void logLedgerState(ExtractionLedger ledger) {
+                                AsyncCraftChain.this.logLedgerState(ledger);
+                            }
+                        }));
     }
 
     //  multi-block step execution
 
-    private record MachineIdentity(ResourceLocation dimension, long packedPos, ModType modType) {}
-
     static List<BoundMachine> deduplicateMachines(List<BoundMachine> machines) {
-        java.util.LinkedHashMap<MachineIdentity, BoundMachine> distinct = new java.util.LinkedHashMap<>();
-        for (BoundMachine machine : machines) {
-            MachineIdentity identity = new MachineIdentity(
-                    machine.dim(), machine.pos().asLong(), machine.type());
-            distinct.putIfAbsent(identity, machine);
-        }
-        return new ArrayList<>(distinct.values());
+        return MachineDispatchPlanner.deduplicate(machines);
     }
 
     static List<BoundMachine> filterUnleasedMachines(List<BoundMachine> machines,
                                                       MachineLeaseRegistry leases,
                                                       String logicalType) {
-        List<BoundMachine> available = new ArrayList<>();
-        for (BoundMachine machine : machines) {
-            MachineLeaseRegistry.MachineKey key = new MachineLeaseRegistry.MachineKey(
-                    machine.dim(), machine.pos(), logicalType);
-            if (!leases.isLeased(key)) available.add(machine);
-        }
-        return available;
+        return MachineDispatchPlanner.filterUnleased(machines, leases, logicalType);
     }
 
     enum MachineLeaseAvailability {
@@ -3151,9 +2955,11 @@ public final class AsyncCraftChain {
     }
 
     static MachineLeaseAvailability classifyLeaseAvailability(int boundCount, int availableCount) {
-        if (boundCount <= 0) return MachineLeaseAvailability.NONE_BOUND;
-        if (availableCount <= 0) return MachineLeaseAvailability.ALL_LEASED;
-        return MachineLeaseAvailability.AVAILABLE;
+        return switch (MachineDispatchPlanner.classifyLeaseAvailability(boundCount, availableCount)) {
+            case NONE_BOUND -> MachineLeaseAvailability.NONE_BOUND;
+            case ALL_LEASED -> MachineLeaseAvailability.ALL_LEASED;
+            case AVAILABLE -> MachineLeaseAvailability.AVAILABLE;
+        };
     }
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
@@ -3469,8 +3275,21 @@ public final class AsyncCraftChain {
                     abd.setStorageEndpoint(storageEndpoint);
                     abd.useSharedLedger(ledger);
                 }
+                boolean bufferedStart = startedDelegate.supportsInputBuffer();
+                InputBufferPlan inputBuffer = bufferedStart
+                        ? startedDelegate.inputBufferPlan(machineCount).withResolvedInputs(materials)
+                        : InputBufferPlan.none();
+                if (bufferedStart && !inputBuffer.enabled()) {
+                    RSIntegrationMod.LOGGER.error(ctx.format(
+                            "Input-buffer plan could not bind reserved materials: recipe={} delegate={} operations={} reservedStacks={}"),
+                            step.recipeId(), startedDelegate.getClass().getSimpleName(), machineCount,
+                            materials.size());
+                }
                 if (!flatOperationSession.tryStart(
-                        () -> startedDelegate.tryStartWithMaterials(online, materials, ledger))) {
+                        () -> !bufferedStart ? startedDelegate.tryStartWithMaterials(online, materials, ledger)
+                                : inputBuffer.enabled()
+                                ? startedDelegate.tryStartWithInputBuffer(online, inputBuffer, ledger)
+                                : false)) {
                     List<ItemStack> escaped = disarmOutputCapture();
                     closeFlatOperationScope();
                     if (!escaped.isEmpty()) {
@@ -3658,22 +3477,10 @@ public final class AsyncCraftChain {
             List<BoundMachine> machines,
             Predicate<BoundMachine> loaded,
             Predicate<BoundMachine> permitted) {
-        List<BoundMachine> usable = new ArrayList<>();
-        boolean unloadedRejected = false;
-        boolean protectionRejected = false;
-        for (BoundMachine machine : machines) {
-            if (!loaded.test(machine)) {
-                unloadedRejected = true;
-                continue;
-            }
-            if (!permitted.test(machine)) {
-                protectionRejected = true;
-                continue;
-            }
-            usable.add(machine);
-        }
+        MachineDispatchPlanner.CandidateSelection result =
+                MachineDispatchPlanner.filterCandidates(machines, loaded, permitted);
         return new MachineCandidateSelection(
-                List.copyOf(usable), unloadedRejected, protectionRejected);
+                result.usable(), result.unloadedRejected(), result.protectionRejected());
     }
 
     //  parallel (load-balanced) step
@@ -4016,18 +3823,9 @@ public final class AsyncCraftChain {
     static FlatMaterialBatch reserveFlatMaterialBatch(
             int preparedBatch, java.util.function.IntUnaryOperator prepare,
             java.util.function.IntFunction<List<ItemStack>> reserve) {
-        if (preparedBatch <= 0) throw new IllegalArgumentException("prepared batch must be positive");
-        int batch = preparedBatch;
-        while (true) {
-            List<ItemStack> materials = reserve.apply(batch);
-            if (materials != null) return new FlatMaterialBatch(batch, materials);
-            if (batch == 1) return new FlatMaterialBatch(0, null);
-            int limit = Math.max(1, batch / 2);
-            batch = prepare.applyAsInt(limit);
-            if (batch <= 0 || batch > limit) {
-                throw new IllegalStateException("Invalid reduced flat batch " + batch + " for limit " + limit);
-            }
-        }
+        MaterialReservationPlanner.FlatMaterialBatch result =
+                MaterialReservationPlanner.reserveFlatMaterialBatch(preparedBatch, prepare, reserve);
+        return new FlatMaterialBatch(result.executions(), result.materials());
     }
 
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online) {
@@ -4211,12 +4009,16 @@ public final class AsyncCraftChain {
     }
 
     private boolean hasCapturedExpectedCount(ItemStack expected) {
-        if (expected == null || expected.isEmpty()) return false;
+        return hasCapturedExpectedCount(expected, expected == null ? 0 : expected.getCount());
+    }
+
+    private boolean hasCapturedExpectedCount(ItemStack expected, int expectedCount) {
+        if (expected == null || expected.isEmpty() || expectedCount <= 0) return false;
         int captured = capturedOutputSnapshot().stream()
                 .filter(stack -> ItemStack.isSameItem(stack, expected))
                 .mapToInt(ItemStack::getCount)
                 .sum();
-        return captured >= expected.getCount();
+        return captured >= expectedCount;
     }
 
     private boolean acquireFlatOperationScope(IBatchDelegate delegate, BoundMachine machine,
@@ -4268,6 +4070,78 @@ public final class AsyncCraftChain {
                 insertOrDropAtSpawn(s);
             }
         }
+    }
+
+    private record OutputCollection(List<ItemStack> stacks,
+                                    @Nullable OutputAccounting.Settlement settlement) {
+        private OutputCollection {
+            stacks = List.copyOf(stacks);
+        }
+    }
+
+    private OutputCollection collectOutputsForSettlement(IBatchDelegate delegate,
+                                                          ServerPlayer player,
+                                                          List<ItemStack> capturedWorldOutputs) {
+        OutputContract contract = delegate.outputContract();
+        if (contract == null || contract.ports().isEmpty()) {
+            List<ItemStack> legacy = new ArrayList<>(capturedWorldOutputs);
+            legacy.addAll(delegate.collectAllResults(player));
+            legacy.removeIf(stack -> stack == null || stack.isEmpty());
+            return new OutputCollection(legacy, null);
+        }
+
+        List<OutputAccounting.CollectedOutput> structured = new ArrayList<>(
+                capturedWorldOutputRecords(contract, capturedWorldOutputs));
+        List<OutputAccounting.CollectedOutput> collected = delegate.collectStructuredResults(player);
+        if (collected != null) {
+            for (OutputAccounting.CollectedOutput output : collected) {
+                if (output != null) structured.add(output);
+            }
+        }
+        List<ItemStack> stacks = structured.stream()
+                .map(OutputAccounting.CollectedOutput::stack)
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(ItemStack::copy)
+                .toList();
+        return new OutputCollection(stacks, OutputAccounting.assess(
+                contract, Math.max(1, machineCount), structured));
+    }
+
+    static List<OutputAccounting.CollectedOutput> capturedWorldOutputRecords(
+            OutputContract contract, List<ItemStack> captured) {
+        if (captured == null || captured.isEmpty()) return List.of();
+        OutputContract safeContract = contract == null ? OutputContract.none() : contract;
+        List<OutputAccounting.CollectedOutput> outputs = new ArrayList<>();
+        int unknownIndex = 0;
+        for (ItemStack stack : captured) {
+            if (stack == null || stack.isEmpty()) continue;
+            List<OutputContract.Port> matches = safeContract.ports().stream()
+                    .filter(port -> port.source() == OutputContract.Source.WORLD)
+                    .filter(port -> MaterialMatcher.matchesOutputDeclaration(
+                            MaterialKey.of(port.prototype()), stack))
+                    .toList();
+            String portId = matches.size() == 1
+                    ? matches.get(0).portId() : "unmatched:world:" + unknownIndex++;
+            outputs.add(new OutputAccounting.CollectedOutput(
+                    portId, OutputContract.Source.WORLD, stack));
+        }
+        return List.copyOf(outputs);
+    }
+
+    private static String describeOutputSettlement(OutputAccounting.Settlement settlement) {
+        return settlement.ports().stream()
+                .filter(port -> !port.complete())
+                .map(port -> port.port().portId() + " expected=" + port.expected()
+                        + " actual=" + port.actual())
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static int expectedStructuredOutputCount(OutputAccounting.Settlement settlement) {
+        return settlement.ports().stream().mapToInt(OutputAccounting.PortSettlement::expected).sum();
+    }
+
+    private static int actualStructuredOutputCount(OutputAccounting.Settlement settlement) {
+        return settlement.ports().stream().mapToInt(OutputAccounting.PortSettlement::actual).sum();
     }
 
     static int countMatchingProduction(List<ItemStack> results,
