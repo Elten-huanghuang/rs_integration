@@ -259,6 +259,34 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> VANILLA_FURNACE_FUEL_PRIORITY;
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_FURNACE_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue VANILLA_FURNACE_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BRICK_FURNACE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue BRICK_FURNACE_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue IRON_FURNACE_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_GOETY_INFUSER_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue GOETY_INFUSER_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_APPRENTICE_CODEX_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue APPRENTICE_CODEX_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MALUM_CRUCIBLE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue MALUM_CRUCIBLE_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MALUM_ALTAR_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue MALUM_ALTAR_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_AETHER_FURNACE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue AETHER_FURNACE_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CLIBANO_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue CLIBANO_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_ENCHANTAL_COOLER_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue ENCHANTAL_COOLER_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MOKA_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue MOKA_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA_MANA_POOL_BATCH;
+    public static ForgeConfigSpec.IntValue BOTANIA_MANA_POOL_BATCH_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA_ELVEN_TRADE_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue BOTANIA_ELVEN_TRADE_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_MAX_ATTEMPTS;
     public static ForgeConfigSpec.IntValue EMBERS_INFER_ZERO_BLACK_LIMIT;
     public static ForgeConfigSpec.IntValue EMBERS_LOCK_TIMEOUT_MINUTES;
@@ -755,13 +783,149 @@ public final class RSIntegrationConfig {
         ENABLE_VANILLA_FURNACE_INPUT_BUFFER = s
                 .comment("Allow vanilla furnaces, blast furnaces, and smokers to preload several recipe inputs.",
                         "The machine still consumes one input per cooking cycle; this only reduces RSI dispatch and storage traffic.",
-                        "Compatible modded furnaces remain on the legacy one-item path until explicitly verified.")
+                        "Other furnace mods require their own explicitly verified buffer integration.")
                 .define("enableVanillaFurnaceInputBuffer", true);
         VANILLA_FURNACE_INPUT_BUFFER_LIMIT = s
                 .comment("Maximum logical operations preloaded into one vanilla furnace input slot.",
                         "The actual batch is also limited by input/output stack capacity and craftingOperationsPerDispatch.",
                         "Range: 1-64.")
                 .defineInRange("vanillaFurnaceInputBufferLimit", 64, 1, 64);
+        ENABLE_BRICK_FURNACE_INPUT_BUFFER = s
+                .comment("Allow Brick Furnace smelting, blasting, and smoking machines to preload recipe inputs.",
+                        "Each machine still consumes one input per cooking cycle.",
+                        "Disable this if the installed Brick Furnace version changes its inventory behavior.")
+                .define("enableBrickFurnaceInputBuffer", true);
+        BRICK_FURNACE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Brick Furnace input slot.",
+                        "The actual batch is also limited by input/output stack capacity.",
+                        "Range: 1-64.")
+                .defineInRange("brickFurnaceInputBufferLimit", 64, 1, 64);
+        ENABLE_IRON_FURNACE_INPUT_BUFFER = s
+                .comment("Allow ordinary Iron Furnaces and Iron Furnaces factory lanes to preload recipe inputs.",
+                        "The machine still consumes one input per processing cycle; rainbow furnaces keep their existing multiplier path.",
+                        "Disable this only if a specific Iron Furnaces tier is incompatible with the installed mod version.")
+                .define("enableIronFurnaceInputBuffer", true);
+        IRON_FURNACE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Iron Furnaces lane.",
+                        "The actual batch is also limited by input/output stack capacity and the machine's lane count.",
+                        "Range: 1-64.")
+                .defineInRange("ironFurnaceInputBufferLimit", 64, 1, 64);
+        ENABLE_GOETY_INFUSER_INPUT_BUFFER = s
+                .comment("Allow Goety cursed infusers to preload recipe inputs into their available recipe slots.",
+                        "The infuser still processes one placed item per cycle; world outputs are accumulated before settlement.",
+                        "Disable this only if a specific Goety tier is incompatible with the installed mod version.")
+                .define("enableGoetyInfuserInputBuffer", true);
+        GOETY_INFUSER_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Goety cursed infuser.",
+                        "The actual batch is limited by free recipe slots and the machine tier.",
+                        "Range: 1-64.")
+                .defineInRange("goetyInfuserInputBufferLimit", 64, 1, 64);
+        ENABLE_APPRENTICE_CODEX_INPUT_BUFFER = s
+                .comment("Allow Apprentice Codex Essence Smokers to preload one catalyst and up to eight material slots.",
+                        "The catalyst is reserved once per physical smoker cycle and is not multiplied by material count.",
+                        "Disable this only if the installed Apprentice Codex version is incompatible.")
+                .define("enableApprenticeCodexInputBuffer", true);
+        APPRENTICE_CODEX_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical material operations preloaded into one Essence Smoker.",
+                        "The physical machine currently supports at most eight materials per ignition.",
+                        "Range: 1-8.")
+                .defineInRange("apprenticeCodexInputBufferLimit", 8, 1, 8);
+        ENABLE_MALUM_CRUCIBLE_INPUT_BUFFER = s
+                .comment("Allow Malum Spirit Crucibles to preload stacked spirits while consuming one operation at a time.",
+                        "The catalyst is reserved once when the recipe marks it reusable; it is never multiplied by the operation count.",
+                        "Recipes with durability-consuming or transformed catalysts remain on the legacy path.")
+                .define("enableMalumCrucibleInputBuffer", true);
+        MALUM_CRUCIBLE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Malum Spirit Crucible.",
+                        "The actual batch is limited by every spirit slot's stack capacity and the configured dispatch bound.",
+                        "Range: 1-64.")
+                .defineInRange("malumCrucibleInputBufferLimit", 64, 1, 64);
+        ENABLE_MALUM_ALTAR_INPUT_BUFFER = s
+                .comment("Allow Malum Spirit Altars to preload stacked center, pedestal, and spirit inputs.",
+                        "The altar still completes one recipe at a time and automatically starts the next buffered operation.",
+                        "Disable this only if the installed Malum version changes the native altar consumption semantics.")
+                .define("enableMalumAltarInputBuffer", true);
+        MALUM_ALTAR_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Malum Spirit Altar.",
+                        "The actual batch is limited by every center, pedestal, and spirit stack capacity.",
+                        "Range: 1-64.")
+                .defineInRange("malumAltarInputBufferLimit", 64, 1, 64);
+        ENABLE_AETHER_FURNACE_INPUT_BUFFER = s
+                .comment("Allow Aether Freezers and Altars to preload stacked recipe inputs.",
+                        "The machine still processes one input per cycle; Incubators remain on the single-operation path.",
+                        "Disable this only if the installed Aether version changes its furnace inventory semantics.")
+                .define("enableAetherFurnaceInputBuffer", true);
+        AETHER_FURNACE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Aether Freezer or Altar.",
+                        "The actual batch is also limited by input and output slot capacity.",
+                        "Range: 1-64.")
+                .defineInRange("aetherFurnaceInputBufferLimit", 64, 1, 64);
+        ENABLE_CLIBANO_INPUT_BUFFER = s
+                .comment("Allow one idle Clibano lane to preload a stack of recipe inputs.",
+                        "Each lane still processes one item per cycle; the second lane remains independently available.",
+                        "Disable this only if the installed Forbidden & Arcanus version changes its lane semantics.")
+                .define("enableClibanoInputBuffer", true);
+        CLIBANO_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Clibano lane.",
+                        "The actual batch is limited by that lane's input and paired output slot capacity.",
+                        "Range: 1-64.")
+                .defineInRange("clibanoInputBufferLimit", 64, 1, 64);
+        ENABLE_ENCHANTAL_COOLER_INPUT_BUFFER = s
+                .comment("Allow Enchantal Coolers to preload stacked ingredients and containers.",
+                        "The cooler still consumes one item from each recipe slot per cycle.",
+                        "Non-stackable or dynamic outputs naturally remain limited to one operation.")
+                .define("enableEnchantalCoolerInputBuffer", true);
+        ENCHANTAL_COOLER_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Enchantal Cooler.",
+                        "The actual batch is limited by every input, container, and output slot.",
+                        "Range: 1-64.")
+                .defineInRange("enchantalCoolerInputBufferLimit", 64, 1, 64);
+        ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER = s
+                .comment("Allow Farmer's Delight Cooking Pots to preload stacked ingredients and serving containers.",
+                        "The pot still cooks one recipe per cycle; recipes with ingredient remainders and Arcane Cooking Pots stay on the legacy path.",
+                        "Disable this only if the installed Farmer's Delight version changes its native slot consumption semantics.")
+                .define("enableFarmersDelightCookingPotInputBuffer", true);
+        FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Farmer's Delight Cooking Pot.",
+                        "The actual batch is limited by every ingredient slot, the serving-container slot, and the output slot.",
+                        "Range: 1-64.")
+                .defineInRange("farmersDelightCookingPotInputBufferLimit", 64, 1, 64);
+        ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER = s
+                .comment("Allow Miner's Delight Copper Pots to preload stacked ingredients and copper cups.",
+                        "The pot still cooks one recipe per cycle; recipes with ingredient remainders stay on the legacy path.",
+                        "Copper-cup conversions use the native doubled output count when sizing and settling the batch.")
+                .define("enableMinersDelightCopperPotInputBuffer", true);
+        MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Miner's Delight Copper Pot.",
+                        "The actual batch is limited by all four ingredient slots, the copper-cup slot, and the output slot.",
+                        "Range: 1-64.")
+                .defineInRange("minersDelightCopperPotInputBufferLimit", 64, 1, 64);
+        ENABLE_MOKA_POT_INPUT_BUFFER = s
+                .comment("Allow Youkai's Homecoming Moka Pots to preload stacked ingredients and output containers.",
+                        "The pot still brews one recipe per cycle; recipes with crafting remainders stay on the legacy path.",
+                        "Output containers are reserved by the same RS/BD transaction as the recipe ingredients.")
+                .define("enableMokaPotInputBuffer", true);
+        MOKA_POT_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical operations preloaded into one Youkai's Homecoming Moka Pot.",
+                        "The actual batch is limited by all four input slots, the container slot, and the output slot.",
+                        "Range: 1-64.")
+                .defineInRange("mokaPotInputBufferLimit", 64, 1, 64);
+        ENABLE_BOTANIA_MANA_POOL_BATCH = s
+                .comment("Allow one Botania Mana Pool to infuse a batch of identical input items.",
+                        "Every item still consumes the recipe's normal mana cost; completion waits for the whole batch.")
+                .define("enableBotaniaManaPoolBatch", true);
+        BOTANIA_MANA_POOL_BATCH_LIMIT = s
+                .comment("Maximum logical operations submitted to one Mana Pool in a physical batch.",
+                        "The actual batch is also limited by currently affordable mana. Range: 1-1024.")
+                .defineInRange("botaniaManaPoolBatchLimit", 1024, 1, 1024);
+        ENABLE_BOTANIA_ELVEN_TRADE_INPUT_BUFFER = s
+                .comment("Allow one Botania Alfheim Portal to buffer several identical Elven Trade operations.",
+                        "The portal still resolves one recipe at a time and spends 500 mana per operation.")
+                .define("enableBotaniaElvenTradeInputBuffer", true);
+        BOTANIA_ELVEN_TRADE_INPUT_BUFFER_LIMIT = s
+                .comment("Maximum logical Elven Trade operations admitted to one portal queue.",
+                        "All declared outputs are accumulated before settlement. Range: 1-64.")
+                .defineInRange("botaniaElvenTradeInputBufferLimit", 64, 1, 64);
         EMBERS_INFER_MAX_ATTEMPTS = s
                 .comment("Maximum trial-and-error attempts for Embers Alchemy inference mode.",
                         "Each failed attempt consumes some materials (per Embers' failure mechanics).",

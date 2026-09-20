@@ -28,6 +28,21 @@ public final class ClibanoInventoryLogic {
         return -1;
     }
 
+    public static int pairedOutputSlot(int inputSlot) {
+        return inputSlot == FIRST_INPUT_SLOT ? FIRST_OUTPUT_SLOT
+                : inputSlot == SECOND_INPUT_SLOT ? SECOND_OUTPUT_SLOT : -1;
+    }
+
+    public static int bufferedOperationCapacity(int configuredLimit, int inputPerOperation,
+                                                int inputCapacity, int outputPerOperation,
+                                                int outputCapacity) {
+        if (configuredLimit <= 0 || inputPerOperation <= 0 || inputCapacity <= 0
+                || outputPerOperation <= 0 || outputCapacity <= 0) return 0;
+        return Math.max(0, Math.min(configuredLimit,
+                Math.min(inputCapacity / inputPerOperation,
+                        outputCapacity / outputPerOperation)));
+    }
+
     public static int countMatching(List<ItemStack> stacks, ItemStack expected) {
         if (expected == null || expected.isEmpty()) return 0;
         int count = 0;

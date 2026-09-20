@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -51,11 +53,6 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
     private static final int INPUT = 0;
     private static final int FUEL = 1;
     private static final int OUTPUT = 2;
@@ -96,12 +93,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     @Override
     public int prepareFlatBatch(int remainingOperations) {
         int available = Math.max(0, remainingOperations);
-        int laneCapacity = rainbowMode ? rainbowLaneCapacity() : 1;
-        int physicalBatch = plannedBatchSize(
-                factoryMode, rainbowMode, available, laneCapacity);
+        IronFurnaceBatchProfile profile = batchProfile();
+        int laneCapacity = profile.laneCapacity();
+        int physicalBatch = profile.plannedBatchSize(available);
         plannedOperations = available;
         plannedFactoryLanes = factoryMode
-                ? requiredFactoryLanes(physicalBatch, laneCapacity) : 1;
+                ? requiredFactoryLanes(physicalBatch, laneCapacity, rainbowMode) : 1;
         RSIntegrationMod.debug(
                 "[RSI-IronFurnaces] batch plan factory={} rainbow={} requested={} physicalBatch={} lanes={} laneCapacity={}",
                 factoryMode, rainbowMode, remainingOperations, physicalBatch,
@@ -117,6 +114,58 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean expandsFlatBatchOperationLimit() {
         return true;
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        // A single non-factory lane maps cleanly to one stable input entry.
+        // Factory lanes already use the legacy lane splitter; declaring them as
+        // one-slot structured buffers would cap a six-lane batch at 64 items.
+        return furnace != null && recipe != null && !factoryMode && !rainbowMode
+                && ironInputBufferEnabled();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<Ingredient> ingredients = recipe.getIngredients();
+        if (ingredients.isEmpty() || ingredients.get(0).isEmpty()) {
+            return InputBufferContract.none();
+        }
+        ItemStack prototype = java.util.Arrays.stream(ingredients.get(0).getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        if (prototype.isEmpty()) return InputBufferContract.none();
+        return new InputBufferContract(batchProfile().physicalCapacity(),
+                List.of(new InputBufferContract.InputSlot(
+                        "legacy:material:0", INPUT, prototype, 1, false,
+                        batchProfile().laneCapacity())),
+                List.of());
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 1 || plan.inputs().get(0).slot() != INPUT) {
+            return false;
+        }
+        InputBufferPlan.InputSlot input = plan.inputs().get(0);
+        if (input.stack().isEmpty() || input.perOperation() != 1
+                || input.stack().getCount() != plan.operations()) return false;
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        this.player = player;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        resolveNetwork(player);
+        return startQueuedMaterials(List.of(input.stack()));
     }
 
     static int expandedFlatBatchOperationLimit(int configuredLimit, int physicalCapacity) {
@@ -139,13 +188,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     static int plannedBatchSize(boolean factory, boolean rainbow,
                                 int remainingOperations, int rainbowLaneCapacity) {
-        int available = Math.max(0, remainingOperations);
-        if (factory) {
-            int perLane = rainbow ? Math.max(1, rainbowLaneCapacity) : 1;
-            return Math.min(FACTORY_INPUT.length * perLane, available);
-        }
-        return rainbow ? Math.min(Math.max(1, rainbowLaneCapacity), available)
-                : Math.min(1, available);
+        return IronFurnaceBatchProfile.of(factory, rainbow, rainbowLaneCapacity)
+                .plannedBatchSize(remainingOperations);
     }
 
     static List<Integer> physicalBatchSizes(int operations, int capacity) {
@@ -336,7 +380,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     static int requiredFactoryLanes(int operations, int perLaneLimit) {
+        return requiredFactoryLanes(operations, perLaneLimit, true);
+    }
+
+    static int requiredFactoryLanes(int operations, int perLaneLimit, boolean fillBeforeSpread) {
         if (operations <= 0 || perLaneLimit <= 0) return 0;
+        if (!fillBeforeSpread) return Math.min(FACTORY_INPUT.length, operations);
         return Math.min(FACTORY_INPUT.length,
                 (operations + perLaneLimit - 1) / perLaneLimit);
     }
@@ -373,7 +422,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
         int operations = (int) total;
         int capacity = physicalBatchCapacity();
-        int cycles = physicalCycleCount(operations, capacity);
+        int cycles = batchProfile().processingCycles(operations);
         if (!factoryMode && !ensureFuel(cycles)) {
             if (player != null) {
                 player.sendSystemMessage(Component.translatable("rsi.ironfurnaces.error.no_fuel"));
@@ -386,7 +435,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         queuedOperations = operations;
         plannedOperations = operations;
         plannedFactoryLanes = factoryMode
-                ? requiredFactoryLanes(Math.min(operations, capacity), rainbowMode ? rainbowLaneCapacity() : 1)
+                ? requiredFactoryLanes(Math.min(operations, capacity),
+                        batchProfile().laneCapacity(), rainbowMode)
                 : 1;
         if (startNextPhysicalBatch()) return true;
 
@@ -400,32 +450,42 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (validateMachine(furnace, recipe).state() != PreparationState.READY) return false;
         if (factoryMode && furnace.getEnergy() <= 0) return false;
 
-        int laneCapacity = rainbowMode ? rainbowLaneCapacity() : 1;
+        int laneCapacity = batchProfile().laneCapacity();
         int operations = Math.min(queuedOperations, physicalBatchCapacity());
+        if (!factoryMode && !ensureFuel(batchProfile().processingCycles(operations))) {
+            if (player != null) {
+                player.sendSystemMessage(Component.translatable("rsi.ironfurnaces.error.no_fuel"));
+            }
+            return false;
+        }
         if (factoryMode) {
-            List<ItemStack> laneInputs = splitFactoryMaterials(
-                    List.of(queuedMaterial.copyWithCount(operations)), laneCapacity);
-            if (laneInputs.isEmpty() || !ensureFactoryLeases(laneInputs.size())) return false;
-            for (ItemStack laneInput : laneInputs) {
-                int lane = findOwnedEmptyFactoryLane();
-                if (lane < 0) {
-                    rollbackActiveFactoryPlacement(furnace);
-                    return false;
-                }
-                furnace.setItem(FACTORY_INPUT[lane], laneInput);
-                initialFactoryInputCounts[lane] = laneInput.getCount();
-                expectedFactoryOutputCounts[lane] = expectedOutputCount(laneInput.getCount());
+            int requiredLanes = requiredFactoryLanes(operations, laneCapacity, rainbowMode);
+            if (!ensureFactoryLeases(requiredLanes)) return false;
+            boolean[] available = new boolean[FACTORY_INPUT.length];
+            for (int lane = 0; lane < available.length; lane++) {
+                available[lane] = initialFactoryInputCounts[lane] == 0
+                        && furnace.getItem(FACTORY_INPUT[lane]).isEmpty()
+                        && furnace.getItem(FACTORY_INPUT[lane] + FACTORY_INPUT.length).isEmpty();
+            }
+            IronFactoryLanePlan layout = IronFactoryLanePlan.plan(
+                    queuedMaterial, operations, laneCapacity, !rainbowMode,
+                    ownedFactoryLanes, available);
+            if (layout == null) return false;
+            for (IronFactoryLanePlan.Lane lane : layout.lanes()) {
+                furnace.setItem(lane.inputSlot(), lane.input());
+                initialFactoryInputCounts[lane.index()] = lane.input().getCount();
+                expectedFactoryOutputCounts[lane.index()] = expectedOutputCount(lane.input().getCount());
                 if (!inputPlaced) {
-                    factorySlot = lane;
+                    factorySlot = lane.index();
                     inputPlaced = true;
-                    initialInputCount = laneInput.getCount();
+                    initialInputCount = lane.input().getCount();
                 }
             }
-            plannedFactoryLanes = laneInputs.size();
+            plannedFactoryLanes = layout.lanes().size();
             RSIntegrationMod.debug(
                     "[RSI-IronFurnaces] physical factory batch pos={} rainbow={} operations={} remaining={} laneCounts={}",
                     pos, rainbowMode, operations, queuedOperations - operations,
-                    laneInputs.stream().map(ItemStack::getCount).toList());
+                    layout.lanes().stream().map(lane -> lane.input().getCount()).toList());
         } else {
             if (!evacuateIdleFurnaceSlots()) return false;
             ItemStack placed = queuedMaterial.copyWithCount(operations);
@@ -474,8 +534,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     private int physicalBatchCapacity() {
-        int laneCapacity = rainbowMode ? rainbowLaneCapacity() : 1;
-        return factoryMode ? FACTORY_INPUT.length * laneCapacity : laneCapacity;
+        return batchProfile().physicalCapacity();
+    }
+
+    private IronFurnaceBatchProfile batchProfile() {
+        return IronFurnaceBatchProfile.of(factoryMode, rainbowMode, laneInputCapacity());
     }
 
     static int physicalCycleCount(int operations, int capacity) {
@@ -596,6 +659,20 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         int outSlot = OUTPUT;
         ItemStack output = current.getItem(outSlot);
         ItemStack input = current.getItem(inSlot);
+        if (!factoryMode && !input.isEmpty() && !current.isBurning()) {
+            // Re-check fuel after the machine has started. Some tiers and
+            // augments consume more burn time than the static estimate used at
+            // dispatch, so a running batch must be able to top up in place.
+            if (ensureFuel(Math.max(1, input.getCount()))) {
+                current.setChanged();
+                if (level != null && pos != null) {
+                    level.sendBlockUpdated(pos, level.getBlockState(pos),
+                            level.getBlockState(pos), 3);
+                }
+            } else {
+                warnOnce("fuel-empty", "[RSI-IronFurnaces] Furnace fuel exhausted while inputs remain at {}", pos);
+            }
+        }
         boolean inputConsumed = inputPlaced && initialInputCount > 0 && input.getCount() < initialInputCount;
         if (inputConsumed) inputPlaced = false;
         if (current.isBurning() || inputConsumed) observedWorking = true;
@@ -651,6 +728,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (factoryMode) {
             captureFactoryOutputs(current, destination);
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
+                if (!ownedFactoryLanes[lane] || initialFactoryInputCounts[lane] <= 0) continue;
                 // Lane ownership is the authoritative boundary. Do not gate
                 // collection on expectedFactoryOutputCounts: that counter is
                 // preparation state and may already be cleared after a lane
@@ -691,12 +769,13 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                                        List<ItemStack> destination) {
         boolean changed = false;
         for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
+            if (!ownedFactoryLanes[lane] || expectedFactoryOutputCounts[lane] <= 0) continue;
             int outputSlot = FACTORY_INPUT[lane] + 6;
             ItemStack output = current.getItem(outputSlot);
             if (output.isEmpty()) continue;
             ItemStack captured = output.copy();
             destination.add(captured);
-            if (ownedFactoryLanes[lane]) capturedFactoryOutputCounts[lane] += captured.getCount();
+            capturedFactoryOutputCounts[lane] += captured.getCount();
             RSIntegrationMod.debug("[RSI-IronFurnaces] captured factory output lane={} slot={} count={}",
                     lane, outputSlot, captured.getCount());
             current.setItem(outputSlot, ItemStack.EMPTY);
@@ -871,8 +950,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         return (int) Math.min(Integer.MAX_VALUE, scaled);
     }
 
-    private int rainbowLaneCapacity() {
-        if (!rainbowMode || recipe == null || level == null) return 1;
+    private int laneInputCapacity() {
+        if (recipe == null || level == null || furnace == null) return 1;
         ItemStack result = recipe.getResultItem(level.registryAccess());
         if (result.isEmpty() || result.getCount() <= 0) return 1;
         int outputCapacity = result.getMaxStackSize() / result.getCount();
@@ -881,7 +960,18 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .mapToInt(ItemStack::getMaxStackSize)
                 .min().orElse(64);
-        return Math.max(1, Math.min(64, Math.min(outputCapacity, inputCapacity)));
+        int safeCapacity = Math.max(1, Math.min(64, Math.min(furnace.getMaxStackSize(),
+                Math.min(outputCapacity, inputCapacity))));
+        if (!rainbowMode && !ironInputBufferEnabled()) return 1;
+        if (!rainbowMode) {
+            safeCapacity = Math.min(safeCapacity,
+                    Math.max(1, RSIntegrationConfig.IRON_FURNACE_INPUT_BUFFER_LIMIT.get()));
+        }
+        return safeCapacity;
+    }
+
+    private boolean ironInputBufferEnabled() {
+        return rainbowMode || RSIntegrationConfig.ENABLE_IRON_FURNACE_INPUT_BUFFER.get();
     }
 
     private int ownedFactoryLaneCount() {

@@ -5,6 +5,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraftforge.items.wrapper.RecipeWrapper;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -28,6 +29,21 @@ class CuttingBoardCompatibilityTest extends BootstrapTest {
             "vectorwing/farmersdelight/common/crafting/CuttingBoardRecipe.class";
     private static final String BLOCK_ENTITY =
             "vectorwing/farmersdelight/common/block/entity/CuttingBoardBlockEntity.class";
+
+    @Test
+    void repeatedBatchRequiresTheNewRecipeWrapperContract() {
+        assertFalse(CuttingBoardBatchDelegate.supportsRepeatedRolls(OldRollFixture.class));
+        assertTrue(CuttingBoardBatchDelegate.supportsRepeatedRolls(NewRollFixture.class));
+    }
+
+    public static final class OldRollFixture {
+        public List<ItemStack> rollResults(RandomSource random, int fortune) { return List.of(); }
+    }
+
+    public static final class NewRollFixture {
+        public List<ItemStack> rollResults(RandomSource random, int fortune,
+                                           RecipeWrapper wrapper) { return List.of(); }
+    }
 
     @Test
     void supportsBothFarmersDelightRollResultContracts() throws IOException {

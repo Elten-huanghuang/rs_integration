@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
@@ -122,6 +123,29 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(1, 4));
         assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(5, 0));
         assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(7, 4));
+    }
+
+    @Test
+    void graphNodeUsesDirectBufferOnlyWhenTheWholeNodeFits() {
+        IBatchDelegate delegate = (IBatchDelegate) Proxy.newProxyInstance(
+                IBatchDelegate.class.getClassLoader(), new Class<?>[]{IBatchDelegate.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "supportsInputBuffer" -> true;
+                    case "inputBufferPlan" -> {
+                        int requested = (int) args[0];
+                        int operations = Math.min(8, requested);
+                        yield new InputBufferPlan(operations,
+                                List.of(new InputBufferPlan.InputSlot(
+                                        "legacy:material:0", 0,
+                                        new ItemStack(Items.IRON_ORE, operations), 1, false)),
+                                List.of());
+                    }
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+
+        assertTrue(AsyncCraftChain.canBufferEntireGraphNode(delegate, 8));
+        assertFalse(AsyncCraftChain.canBufferEntireGraphNode(delegate, 9));
+        assertFalse(AsyncCraftChain.canBufferEntireGraphNode(delegate, 1));
     }
 
     @Test

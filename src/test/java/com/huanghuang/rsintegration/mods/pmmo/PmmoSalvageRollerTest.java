@@ -62,6 +62,34 @@ class PmmoSalvageRollerTest {
     }
 
     @Test
+    void chanceAndRequirementsAreEvaluatedOncePerBatch() {
+        PmmoSalvageDefinition definition = new PmmoSalvageDefinition(INPUT, List.of(
+                output(TARGET, 1, 0.25, 0.75, Map.of("mining", 0.1),
+                        Map.of("smithing", 10), Map.of())));
+        java.util.concurrent.atomic.AtomicInteger levelReads =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        PmmoSalvageRoller.Result result = PmmoSalvageRoller.roll(
+                definition, TARGET, 64, skill -> {
+                    levelReads.incrementAndGet();
+                    return "smithing".equals(skill) ? 10 : 2;
+                }, () -> 1.0);
+
+        assertEquals(64, result.attempts());
+        assertEquals(64, result.failedTargetAttempts());
+        assertEquals(2, levelReads.get());
+    }
+
+    @Test
+    void missingEverySelectedTargetStillCompletesTheAttemptOrder() {
+        PmmoSalvageBatchDelegate delegate = new PmmoSalvageBatchDelegate();
+
+        delegate.acceptExecution(new PmmoSalvageRuntime.Execution(List.of(), 32, 32));
+
+        assertTrue(delegate.isMachineCraftFinished(null, null));
+    }
+
+    @Test
     void requirementsAndChanceClampMatchPmmoRules() {
         PmmoSalvageDefinition.Output output = output(
                 TARGET, 1, 0.2, 0.75, Map.of("mining", 0.1),

@@ -95,6 +95,21 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void bufferedRuntimeReportsLogicalOperationsInsteadOfPhysicalWorkerCount() {
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                new NodeId(14), "test:buffered", delegate, null, null);
+        runtime.setLogicalOperations(6);
+        runtime.setChainContext(new ArrayList<>(), player);
+
+        assertEquals(6, runtime.totalOperations());
+        assertEquals(6, runtime.runningOperations());
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertEquals(6, runtime.completedOperations());
+        assertEquals(0, runtime.runningOperations());
+    }
+
+    @Test
     void missingWorldContextFailsBeforeCallingDelegate() {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(

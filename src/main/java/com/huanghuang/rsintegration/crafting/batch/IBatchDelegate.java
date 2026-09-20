@@ -136,6 +136,14 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Opt in only when one physical start accepts one reusable input together
+     * with several operations' consumables and returns the reusable input once.
+     */
+    default boolean supportsReusableBatchAggregation() {
+        return false;
+    }
+
+    /**
      * Explicit opt-in for machines that can preload multiple operations while
      * still consuming one operation per processing cycle. Legacy delegates stay
      * on the existing one-by-one placement path.
@@ -168,10 +176,31 @@ public interface IBatchDelegate {
      * each input by {@link InputBufferPlan.InputSlot#slot()} and keep output
      * accounting by {@link InputBufferPlan.OutputPort#port()}.
      */
+    @Deprecated
     default boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
                                              @Nonnull InputBufferPlan plan,
                                              @Nonnull ExtractionLedger sharedLedger) {
         return false;
+    }
+
+    /**
+     * Unified operation start entry. New delegates may override this method;
+     * legacy delegates are adapted to their existing buffered, ordered-material,
+     * or self-extracting entry point without changing behavior.
+     */
+    default boolean startOperation(@Nonnull OperationStartContext context) {
+        if (context.repeatedOperationPlan() != null) return false;
+        if (context.buffered()) {
+            return tryStartWithInputBuffer(
+                    context.player(), context.inputBufferPlan(), context.ledger());
+        }
+        List<ItemStack> materials = context.legacyMaterials();
+        if (!materials.isEmpty()) {
+            return tryStartWithMaterials(context.player(), materials, context.ledger());
+        }
+        return context.materialOwnership() == OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED
+                ? tryStartSingleCraft(context.player())
+                : tryStartSingleCraft(context.player(), context.ledger());
     }
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
@@ -205,7 +234,10 @@ public interface IBatchDelegate {
      * Check machine is idle, extract materials for one craft, place them, and start.
      * @return true if the craft was successfully started
      */
-    boolean tryStartSingleCraft(@Nonnull ServerPlayer player);
+    @Deprecated
+    default boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+        return false;
+    }
 
     /**
      * Variant that uses a shared ledger. The delegate should reserve from
@@ -213,6 +245,7 @@ public interface IBatchDelegate {
      * (the chain commits once at the end). Default impl falls back to
      * creating a private ledger for backward compat.
      */
+    @Deprecated
     default boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
         return tryStartSingleCraft(player);
     }
@@ -367,6 +400,7 @@ public interface IBatchDelegate {
      * Legacy opt-in retained for source compatibility. It is no longer sufficient
      * by itself to enable cross-node execution.
      */
+    @Deprecated
     default boolean supportsConcurrentNodeExecution() {
         return false;
     }
@@ -383,6 +417,7 @@ public interface IBatchDelegate {
      *                     do NOT commit)
      * @return true if all materials were placed and the craft was started
      */
+    @Deprecated
     default boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
                                           @Nonnull List<ItemStack> materials,
                                           @Nonnull ExtractionLedger sharedLedger) {

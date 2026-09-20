@@ -46,6 +46,7 @@ import java.util.List;
  * deliberately probed instead of linking to either version's recipe class.</p>
  */
 public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
+    private static final int MAX_INSTANT_BATCH = 64;
     private static final String RECIPE_CLASS =
             "vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe";
     private static final String BLOCK_ENTITY_CLASS =
@@ -109,6 +110,52 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void prepareGraphBatch(int executions) {
         this.preparedExecutions = Math.max(1, executions);
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        int limit = supportsRepeatedRolls() ? MAX_INSTANT_BATCH : 1;
+        this.preparedExecutions = Math.min(limit, Math.max(0, remainingOperations));
+        return preparedExecutions;
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsRepeatedRolls()
+                ? Math.max(Math.max(1, configuredLimit), MAX_INSTANT_BATCH)
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsRepeatedRolls();
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        if (!supportsRepeatedRolls()) return 1;
+        return com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_INSTANT_BATCH);
+    }
+
+    @Override
+    public boolean supportsReusableBatchAggregation() {
+        return supportsRepeatedRolls();
+    }
+
+    private boolean supportsRepeatedRolls() {
+        return recipe != null && supportsRepeatedRolls(recipe.getClass());
+    }
+
+    static boolean supportsRepeatedRolls(Class<?> recipeClass) {
+        if (recipeClass == null) return false;
+        try {
+            recipeClass.getMethod("rollResults",
+                    RandomSource.class, int.class, RecipeWrapper.class);
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return false;
+        }
     }
 
     @Nullable

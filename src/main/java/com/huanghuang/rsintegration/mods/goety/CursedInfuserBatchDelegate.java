@@ -1,11 +1,16 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -114,6 +119,85 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         return GoetyInfuserMachineSupport.parallelBatchSize(
                 totalOperations, workerCount, preparedCapacity);
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        return level != null && pos != null && recipe != null && machineKind != null
+                && goetyInputBufferEnabled();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != 1 || specs.get(0).isEmpty()
+                || expected.isEmpty()) return InputBufferContract.none();
+        ItemStack prototype = java.util.Arrays.stream(specs.get(0).ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        if (prototype.isEmpty()) return InputBufferContract.none();
+        return new InputBufferContract(
+                Math.min(preparedCapacity, goetyInputBufferLimit()),
+                List.of(new InputBufferContract.InputSlot(
+                        "legacy:material:0", 0, prototype, 1, false,
+                        Math.min(preparedCapacity, goetyInputBufferLimit()))),
+                List.of(new OutputContract.Port(
+                        "goety:primary", null, expected, expected.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+                                           @Nonnull InputBufferPlan plan,
+                                           @Nonnull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 1 || plan.inputs().get(0).slot() != 0) {
+            return false;
+        }
+        InputBufferPlan.InputSlot input = plan.inputs().get(0);
+        if (input.stack().isEmpty() || input.perOperation() != 1
+                || input.stack().getCount() != plan.operations()) return false;
+        InputBufferPlan expectedPlan = inputBufferPlan(plan.operations());
+        if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
+
+        requestedBatch = plan.operations();
+        queuedInput = input.stack().copy();
+        inputTemplate = input.stack().copyWithCount(1);
+        activeOwnedSlots.clear();
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (blockEntity == null || !fillAvailableSlots(blockEntity)
+                || !queuedInput.isEmpty() || activeOwnedSlots.isEmpty()) {
+            queuedInput = ItemStack.EMPTY;
+            inputTemplate = ItemStack.EMPTY;
+            activeOwnedSlots.clear();
+            requestedBatch = 1;
+            return false;
+        }
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        markCraftStarted();
+        return true;
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer() || expected.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "goety:primary", null, expected, expected.getCount(),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
+            @Nonnull ServerPlayer player) {
+        // Cursed infusers publish entities; the orchestration capture owns this port.
+        return List.of();
     }
 
     @Nullable
@@ -327,5 +411,21 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
                 BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
                 BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 List.of(BlockPos.ZERO.below()));
+    }
+
+    private static boolean goetyInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_GOETY_INFUSER_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return false;
+        }
+    }
+
+    private static int goetyInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.GOETY_INFUSER_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
     }
 }

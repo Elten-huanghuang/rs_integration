@@ -47,6 +47,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private int waitTicks;
     private int drainingTicks;
     private int observedCompletedOperations;
+    /** Logical recipe executions owned by this physical delegate start. */
+    private int logicalOperations = 1;
     private boolean progressObserved;
     private boolean stopRequested;
     private String failureReason;
@@ -150,6 +152,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     void markDispatched() { dispatched = true; }
 
+    void setLogicalOperations(int operations) {
+        logicalOperations = Math.max(1, operations);
+    }
+
     void markStartFailed(String reason) {
         failureReason = reason;
     }
@@ -248,11 +254,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     : TerminationCoordinator.OperationState.PRE_START);
             return;
         }
-        coordinator.classify(switch (terminalClass) {
+        TerminationCoordinator.OperationState state = switch (terminalClass) {
             case PRE_START -> TerminationCoordinator.OperationState.PRE_START;
             case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
             case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
-        });
+        };
+        for (int operation = 0; operation < logicalOperations; operation++) {
+            coordinator.classify(state);
+        }
     }
 
     boolean markResourcesClosed() {
@@ -274,16 +283,18 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     int completedOperations() {
         return delegate instanceof ParallelCraftGroup group
-                ? group.getCompletedOperations() : terminal && failureReason == null ? 1 : 0;
+                ? group.getCompletedOperations()
+                : terminal && failureReason == null ? logicalOperations : 0;
     }
 
     int totalOperations() {
-        return delegate instanceof ParallelCraftGroup group ? group.getTotalOperations() : 1;
+        return delegate instanceof ParallelCraftGroup group
+                ? group.getTotalOperations() : logicalOperations;
     }
 
     int runningOperations() {
         if (delegate instanceof ParallelCraftGroup group) return group.getRunningOperations();
-        return terminal ? 0 : 1;
+        return terminal ? 0 : logicalOperations;
     }
 
     String machineLabel() {

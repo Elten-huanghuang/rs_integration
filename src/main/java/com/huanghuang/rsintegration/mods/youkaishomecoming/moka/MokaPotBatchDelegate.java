@@ -8,7 +8,14 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -46,11 +53,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
     // BasePotBlockEntity layout (INVENTORY_SIZE = 7):
     //   0-3: input ingredients  4: meal display
     //   5: CONTAINER_SLOT       6: OUTPUT_SLOT
@@ -66,6 +68,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Recipe<?> recipe;
     private boolean craftDone;
+    private int plannedOperations = 1;
 
     private static volatile Method inventoryMethod;
     private static volatile Method isHeatedMethod;
@@ -93,6 +96,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.plannedOperations = 1;
         BlockEntity existing = level.getBlockEntity(pos);
         IItemHandler existingInventory = existing != null && isMokaBE(existing)
                 ? getInventory(existing) : null;
@@ -109,7 +113,140 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
+        ItemStack container = getOutputContainer(recipe);
+        if (!container.isEmpty()) {
+            specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)),
+                    container.getCount()));
+        }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = inputBufferPlan(remainingOperations).operations();
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), mokaInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!mokaInputBufferEnabled() || recipe == null || myLevel == null || myPos == null
+                || !myLevel.hasChunkAt(myPos)) return false;
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be == null || !isMokaBE(be)) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        ItemStack container = getOutputContainer(recipe);
+        int ingredientCount = specs == null ? 0 : specs.size() - (container.isEmpty() ? 0 : 1);
+        if (ingredientCount <= 0 || ingredientCount > INPUT_SLOTS) return false;
+        for (int i = 0; i < ingredientCount; i++) {
+            IngredientSpec spec = specs.get(i);
+            if (spec == null || spec.isEmpty() || spec.role() != DemandRole.CONSUMED
+                    || spec.count() <= 0 || ingredientPrototype(spec).isEmpty()
+                    || hasCraftingRemainder(spec)) return false;
+        }
+        return !expectedResult().isEmpty();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : getInventory(be);
+        if (handler == null || handler.getSlots() < INVENTORY_SIZE) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        ItemStack container = getOutputContainer(recipe);
+        int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
+        for (int i = 0; i < ingredientCount; i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    "legacy:material:" + i, i, prototype, spec.count(), false,
+                    slotCapacity(handler, i, prototype)));
+        }
+        if (!container.isEmpty()) {
+            int index = specs.size() - 1;
+            IngredientSpec spec = specs.get(index);
+            ItemStack prototype = ingredientPrototype(spec);
+            inputs.add(new InputBufferContract.InputSlot(
+                    "legacy:material:" + index, CONTAINER_SLOT, prototype,
+                    spec.count(), false, slotCapacity(handler, CONTAINER_SLOT, prototype)));
+        }
+        ItemStack output = expectedResult();
+        int operations = bufferedOperationCapacity(mokaInputBufferLimit(), inputs,
+                output.getCount(), slotCapacity(handler, OUTPUT_SLOT, output));
+        if (operations <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operations, inputs,
+                List.of(new OutputContract.Port("youkaishomecoming:moka:output",
+                        OUTPUT_SLOT, output, output.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        ItemStack container = getOutputContainer(recipe);
+        if (specs == null || plan.inputs().size() != specs.size()) return false;
+        List<ItemStack> ordered = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            InputBufferPlan.InputSlot input = inputById(plan, "legacy:material:" + i);
+            IngredientSpec spec = specs.get(i);
+            int expectedSlot = !container.isEmpty() && i == specs.size() - 1
+                    ? CONTAINER_SLOT : i;
+            long required = (long) spec.count() * plan.operations();
+            if (input == null || input.slot() != expectedSlot || input.reusable()
+                    || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
+                    || input.stack().getCount() != (int) required
+                    || !spec.ingredient().test(input.stack())) return false;
+            ordered.add(input.stack().copy());
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterials(player, ordered, sharedLedger);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack output = expectedResult();
+        return output.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
+                new OutputContract.Port("youkaishomecoming:moka:output", OUTPUT_SLOT,
+                        output, output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -201,41 +338,53 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (evacuated > 0) be.setChanged();
 
-        // Step 1: Place container (cup, bottle, etc.) into CONTAINER_SLOT.
-        // Do NOT use addItem() -- it just calls ItemHandlerHelper.insertItem
-        // which routes to the first empty slot (slot 0, an ingredient slot).
+        List<IngredientSpec> specs = getRequiredMaterials();
         ItemStack container = getOutputContainer(recipe);
-        if (!container.isEmpty() && handler.getStackInSlot(CONTAINER_SLOT).isEmpty()) {
-            ItemStack extracted = extractExactFromStorage(player, container.copyWithCount(1), 1, false);
-            if (!extracted.isEmpty()) {
-                handler.insertItem(CONTAINER_SLOT, extracted, false);
+        int ingredientCount = specs == null ? 0 : specs.size() - (container.isEmpty() ? 0 : 1);
+        if (specs == null || materials.size() != specs.size() || ingredientCount <= 0) return false;
+
+        // The output container is part of the same graph/storage transaction as
+        // the recipe ingredients. This keeps RS and BD accounting identical.
+        if (!container.isEmpty()) {
+            ItemStack supplied = materials.get(materials.size() - 1);
+            IngredientSpec spec = specs.get(specs.size() - 1);
+            long required = (long) spec.count() * plannedOperations;
+            if (required > Integer.MAX_VALUE || supplied.getCount() != (int) required
+                    || !spec.ingredient().test(supplied)
+                    || !handler.getStackInSlot(CONTAINER_SLOT).isEmpty()
+                    || !handler.insertItem(CONTAINER_SLOT, supplied.copy(), true).isEmpty()) {
+                return false;
+            }
+            ItemStack remainder = handler.insertItem(CONTAINER_SLOT, supplied.copy(), false);
+            if (!remainder.isEmpty()) {
+                rollbackPlacedInputs(handler, 0, true);
+                return false;
             }
         }
 
-        // Step 2: Add ingredients via addItem() -> ItemHandlerHelper.insertItem
-        // into the first available input slot (0-3).
-        for (ItemStack mat : materials) {
-            if (mat.isEmpty()) continue;
-            ItemStack single = mat.copyWithCount(1);
-            ItemStack remainder = addItem(be, single);
+        // Use one stable physical slot per recipe entry. This also keeps recipes
+        // containing duplicate item ingredients unambiguous across queued cycles.
+        for (int i = 0; i < ingredientCount; i++) {
+            ItemStack mat = materials.get(i);
+            IngredientSpec spec = specs.get(i);
+            long required = (long) spec.count() * plannedOperations;
+            if (mat.isEmpty() || required > Integer.MAX_VALUE
+                    || mat.getCount() != (int) required || !spec.ingredient().test(mat)) {
+                rollbackPlacedInputs(handler, i, !container.isEmpty());
+                return false;
+            }
+            ItemStack remainder = handler.insertItem(i, mat.copy(), false);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Moka] addItem rejected {} -- remainder={}",
-                        single.getHoverName().getString(), remainder.getHoverName().getString());
-                // Rollback input slots and container slot
-                for (int i = 0; i < INPUT_SLOTS; i++) {
-                    ItemStack refund = handler.extractItem(i, 64, false);
-                    if (!refund.isEmpty() && !usingSharedLedger && storageEndpoint() != null)
-                        insertIntoStorage(player, refund, false);
-                }
-                ItemStack refundC = handler.extractItem(CONTAINER_SLOT, 64, false);
-                if (!refundC.isEmpty() && !usingSharedLedger && storageEndpoint() != null)
-                    insertIntoStorage(player, refundC, false);
+                        mat.getHoverName().getString(), remainder.getHoverName().getString());
+                rollbackPlacedInputs(handler, i + 1, !container.isEmpty());
                 be.setChanged();
                 forceChunkLoad(false);
                 return false;
             }
         }
         be.setChanged();
+        markCraftStarted();
         return true;
     }
 
@@ -246,11 +395,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         IItemHandler handler = getInventory(be);
         if (handler == null) return false;
 
-        boolean inputsEmpty = true;
-        for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            inputsEmpty &= handler.getStackInSlot(slot).isEmpty();
-        }
-        return !handler.getStackInSlot(OUTPUT_SLOT).isEmpty() || inputsEmpty;
+        ItemStack output = handler.getStackInSlot(OUTPUT_SLOT);
+        return matchesExpectedOutput(output) && output.getCount() >= expectedOutputCount();
     }
 
     @Override
@@ -269,9 +415,10 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearAndRefund();
+        recordFailureRecoveredInputs(clearAndRefund());
         forceChunkLoad(false);
         craftDone = false;
+        plannedOperations = 1;
         network = null;
     }
 
@@ -280,6 +427,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         clearAndRefund();
         craftDone = false;
+        plannedOperations = 1;
         network = null;
     }
 
@@ -289,10 +437,88 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public ExpectedProduction getExpectedProduction() {
-        ItemStack result = recipe == null || myLevel == null ? ItemStack.EMPTY
-                : ModRecipeHandlers.tryGetResultItem(
-                        recipe, myLevel.registryAccess());
-        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+        ItemStack result = expectedResult();
+        return result.isEmpty() ? null : new ExpectedProduction(result, expectedOutputCount());
+    }
+
+    static int bufferedOperationCapacity(int configuredLimit,
+                                         List<InputBufferContract.InputSlot> inputs,
+                                         int outputPerOperation, int outputCapacity) {
+        if (configuredLimit <= 0 || inputs == null || inputs.isEmpty()
+                || outputPerOperation <= 0 || outputCapacity <= 0) return 0;
+        int operations = Math.min(configuredLimit, outputCapacity / outputPerOperation);
+        for (InputBufferContract.InputSlot input : inputs) {
+            if (input == null || input.perOperation() <= 0 || input.capacity() <= 0) return 0;
+            operations = Math.min(operations, input.capacity() / input.perOperation());
+        }
+        return Math.max(0, operations);
+    }
+
+    private ItemStack expectedResult() {
+        return recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+    }
+
+    private int expectedOutputCount() {
+        ItemStack result = expectedResult();
+        if (result.isEmpty()) return 0;
+        long count = (long) result.getCount() * Math.max(1, plannedOperations);
+        return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
+    }
+
+    private boolean matchesExpectedOutput(ItemStack stack) {
+        ItemStack expected = expectedResult();
+        return !stack.isEmpty() && !expected.isEmpty()
+                && ItemStack.isSameItemSameTags(stack, expected);
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    private static boolean hasCraftingRemainder(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return true;
+        ItemStack[] candidates = spec.ingredient().getItems();
+        if (candidates.length == 0) return true;
+        for (ItemStack candidate : candidates) {
+            if (candidate == null || candidate.isEmpty() || candidate.hasCraftingRemainingItem()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int slotCapacity(IItemHandler handler, int slot, ItemStack prototype) {
+        return Math.max(1, Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize()));
+    }
+
+    @Nullable
+    private static InputBufferPlan.InputSlot inputById(InputBufferPlan plan, String id) {
+        return plan.inputs().stream().filter(input -> id.equals(input.entryId()))
+                .findFirst().orElse(null);
+    }
+
+    private static void rollbackPlacedInputs(IItemHandler handler, int insertedInputs,
+                                             boolean containerPlaced) {
+        for (int slot = 0; slot < insertedInputs; slot++) {
+            ItemStack stack = handler.getStackInSlot(slot);
+            if (!stack.isEmpty()) handler.extractItem(slot, stack.getCount(), false);
+        }
+        if (containerPlaced) {
+            ItemStack stack = handler.getStackInSlot(CONTAINER_SLOT);
+            if (!stack.isEmpty()) handler.extractItem(CONTAINER_SLOT, stack.getCount(), false);
+        }
+    }
+
+    private static boolean mokaInputBufferEnabled() {
+        return RSIntegrationConfig.ENABLE_MOKA_POT_INPUT_BUFFER.get();
+    }
+
+    private static int mokaInputBufferLimit() {
+        return Math.max(1, RSIntegrationConfig.MOKA_POT_INPUT_BUFFER_LIMIT.get());
     }
 
     // -- plan helpers --
@@ -522,22 +748,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStack getOutputContainer(Recipe<?> recipe) {
-        try {
-            Method m = recipe.getClass().getMethod("getOutputContainer");
-            Object result = m.invoke(recipe);
-            if (result instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer method failed", e);
-        }
-        try {
-            Field f = recipe.getClass().getDeclaredField("container");
-            f.setAccessible(true);
-            Object v = f.get(recipe);
-            if (v instanceof ItemStack s && !s.isEmpty()) return s;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] getOutputContainer field failed", e);
-        }
-        return ItemStack.EMPTY;
+        return YoukaisHomecomingRecipeHandler.getMokaOutputContainer(recipe);
     }
 
     static int evacuateIdleInventory(IItemHandler handler, int cookTime,
@@ -554,24 +765,31 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     // -- cleanup --
 
-    private void clearAndRefund() {
-        if (!myLevel.hasChunkAt(myPos)) return;
+    private List<ItemStack> clearAndRefund() {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (!myLevel.hasChunkAt(myPos)) return recoveredInputs;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !isMokaBE(be)) return;
+        if (be == null || !isMokaBE(be)) return recoveredInputs;
 
         IItemHandler handler = getInventory(be);
-        if (handler == null || handler.getSlots() < INVENTORY_SIZE) return;
+        if (handler == null || handler.getSlots() < INVENTORY_SIZE) return recoveredInputs;
 
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
             ItemStack s = handler.extractItem(slot, 64, false);
+            if (!s.isEmpty()) recoveredInputs.add(s.copy());
             if (!s.isEmpty() && !usingSharedLedger) refund(s);
         }
-        // Container is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack container = handler.extractItem(CONTAINER_SLOT, 64, false);
-        if (!container.isEmpty()) refund(container);
+        if (!container.isEmpty()) recoveredInputs.add(container.copy());
+        if (!container.isEmpty() && !usingSharedLedger) refund(container);
+        ItemStack meal = handler.extractItem(MEAL_DISPLAY_SLOT, 64, false);
+        if (!meal.isEmpty()) refund(meal);
         ItemStack out = handler.extractItem(OUTPUT_SLOT, 64, false);
-        if (!out.isEmpty() && !usingSharedLedger) refund(out);
+        // Produced output is never part of the input ledger. Preserve it even
+        // when a shared graph operation fails after completing some cycles.
+        if (!out.isEmpty()) refund(out);
         be.setChanged();
+        return recoveredInputs;
     }
 
     private void refund(ItemStack stack) {

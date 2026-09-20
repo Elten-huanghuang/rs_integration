@@ -6,6 +6,10 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccessor;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
@@ -60,6 +64,8 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     private boolean resultsCollected;
     private boolean cleanupDone;
     private int outputGraceTicks;
+    private int plannedOperations = 1;
+    private int activeOperations = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -135,6 +141,99 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = inputBufferPlan(remainingOperations).operations();
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), clibanoInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        return clibanoInputBufferEnabled() && recipe != null && level != null && pos != null
+                && !expectedOutput.isEmpty();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity raw = level.getBlockEntity(pos);
+        IItemHandler inventory = raw == null ? null : fullInventory(raw);
+        int inputSlot = availableInputSlot();
+        if (inventory == null || inputSlot < 0) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != 1) return InputBufferContract.none();
+        IngredientSpec spec = specs.get(0);
+        ItemStack prototype = java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+        if (prototype.isEmpty()) return InputBufferContract.none();
+        int outputSlot = ClibanoInventoryLogic.pairedOutputSlot(inputSlot);
+        int inputCapacity = Math.min(inventory.getSlotLimit(inputSlot), prototype.getMaxStackSize());
+        int outputCapacity = Math.min(inventory.getSlotLimit(outputSlot), expectedOutput.getMaxStackSize());
+        int operations = ClibanoInventoryLogic.bufferedOperationCapacity(
+                clibanoInputBufferLimit(), spec.count(),
+                inputCapacity, expectedOutput.getCount(), outputCapacity);
+        if (operations <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operations,
+                List.of(new InputBufferContract.InputSlot(
+                        "legacy:material:0", inputSlot, prototype,
+                        spec.count(), false, inputCapacity)),
+                List.of(new OutputContract.Port(
+                        "forbidden_arcanus:clibano:output", outputSlot, expectedOutput,
+                        expectedOutput.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+                                           @Nonnull InputBufferPlan plan,
+                                           @Nonnull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 1) return false;
+        InputBufferPlan.InputSlot input = plan.inputs().get(0);
+        IngredientSpec spec = getRequiredMaterials().get(0);
+        long required = (long) spec.count() * plan.operations();
+        if (!"legacy:material:0".equals(input.entryId())
+                || input.slot() != availableInputSlot() || input.reusable()
+                || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
+                || input.stack().getCount() != (int) required) return false;
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterials(player, List.of(input.stack().copy()), sharedLedger);
+    }
+
+    @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         return false;
     }
@@ -149,6 +248,9 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
 
         ItemStack material = materials.get(0);
         if (material.isEmpty() || !recipe.getIngredients().get(0).test(material)) return false;
+        int operations = supportsInputBuffer() ? Math.max(1, plannedOperations) : 1;
+        if (material.getCount() != operations) return false;
+        activeOperations = operations;
 
         if (!level.hasChunkAt(pos)) return false;
         BlockEntity raw = level.getBlockEntity(pos);
@@ -181,7 +283,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
             cleanupRuntimeResources(be, inventory);
             return false;
         }
-        placedInput = material.copyWithCount(1);
+        placedInput = material.copy();
         ItemStack remainder = top.insertItem(assignedInputSlot, placedInput.copy(), false);
         ItemStack inserted = InsertedStackDelta.between(placedInput, remainder);
         if (inserted.getCount() != placedInput.getCount()) {
@@ -213,14 +315,13 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         ItemStack currentInput = inventory.getStackInSlot(assignedInputSlot);
         boolean matchingInput = !currentInput.isEmpty()
                 && ItemStack.isSameItemSameTags(currentInput, placedInput);
-        if ((!currentInput.isEmpty() && !matchingInput)
-                || currentInput.isEmpty()
-                || currentInput.getCount() < placedInput.getCount()) {
+        if ((!currentInput.isEmpty() && !matchingInput) || currentInput.isEmpty()) {
             inputConsumed = true;
         }
         int outputCount = matchingOutputCount(inventory);
+        int expectedCount = expectedProductionCount();
 
-        if (inputConsumed && outputCount >= expectedOutput.getCount()) return doneObservation();
+        if (inputConsumed && outputCount >= expectedCount) return doneObservation();
         if (inputConsumed) {
             if (++outputGraceTicks > OUTPUT_GRACE_TICKS) {
                 // Let chain production audit terminate without refunding consumed input.
@@ -242,7 +343,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         IItemHandler output = be.getCapability(ForgeCapabilities.ITEM_HANDLER, Direction.DOWN).orElse(null);
         if (output == null) return List.of();
 
-        int remaining = expectedOutput.getCount();
+        int remaining = expectedProductionCount();
         List<ItemStack> results = new ArrayList<>(2);
         for (int slot : new int[]{ClibanoInventoryLogic.FIRST_OUTPUT_SLOT,
                 ClibanoInventoryLogic.SECOND_OUTPUT_SLOT}) {
@@ -275,7 +376,18 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ExpectedProduction getExpectedProduction() {
         return expectedOutput.isEmpty() ? null
-                : new ExpectedProduction(expectedOutput, expectedOutput.getCount());
+                : new ExpectedProduction(expectedOutput, expectedProductionCount());
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        int inputSlot = assignedInputSlot >= 0 ? assignedInputSlot : availableInputSlot();
+        return inputSlot < 0 ? OutputContract.none() : new OutputContract(List.of(
+                new OutputContract.Port("forbidden_arcanus:clibano:output",
+                        ClibanoInventoryLogic.pairedOutputSlot(inputSlot), expectedOutput,
+                        expectedOutput.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -285,13 +397,16 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         if (raw instanceof ClibanoMainBlockEntity be) {
             IItemHandler inventory = fullInventory(be);
             if (inventory != null) {
-                if (!inputConsumed && assignedInputSlot >= 0 && !placedInput.isEmpty()) {
+                List<ItemStack> recovered = new ArrayList<>();
+                if (assignedInputSlot >= 0 && !placedInput.isEmpty()) {
                     ItemStack current = inventory.getStackInSlot(assignedInputSlot);
                     if (ItemStack.isSameItemSameTags(current, placedInput)) {
-                        inventory.extractItem(assignedInputSlot,
+                        ItemStack removed = inventory.extractItem(assignedInputSlot,
                                 Math.min(placedInput.getCount(), current.getCount()), false);
+                        if (!removed.isEmpty()) recovered.add(removed.copy());
                     }
                 }
+                recordFailureRecoveredInputs(recovered);
                 cleanupRuntimeResources(be, inventory);
                 be.setChanged();
             }
@@ -428,8 +543,10 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
 
     private boolean ensureFuel(ClibanoMainBlockEntity be, IItemHandler inventory, int bankedBurnTime) {
         ItemStack current = inventory.getStackInSlot(ClibanoInventoryLogic.FUEL_SLOT);
-        int neededTicks = Math.max(0,
-                recipe.getCookingTime(recipe.getRequiredFireType()) - Math.max(0, bankedBurnTime));
+        long totalTicks = (long) recipe.getCookingTime(recipe.getRequiredFireType())
+                * Math.max(1, activeOperations);
+        int neededTicks = (int) Math.min(Integer.MAX_VALUE,
+                Math.max(0L, totalTicks - Math.max(0, bankedBurnTime)));
         if (neededTicks == 0) return true;
 
         ItemStack fuelType;
@@ -590,6 +707,41 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         resultsCollected = false;
         cleanupDone = false;
         outputGraceTicks = 0;
+        plannedOperations = 1;
+        activeOperations = 1;
+    }
+
+    private int availableInputSlot() {
+        if (level == null || pos == null || !level.hasChunkAt(pos)) return -1;
+        BlockEntity raw = level.getBlockEntity(pos);
+        IItemHandler inventory = raw == null ? null : fullInventory(raw);
+        if (inventory == null || inventory.getSlots() < 7) return -1;
+        MachineData data = readData(raw);
+        return ClibanoInventoryLogic.chooseInputSlot(
+                inventory.getStackInSlot(ClibanoInventoryLogic.FIRST_INPUT_SLOT),
+                inventory.getStackInSlot(ClibanoInventoryLogic.SECOND_INPUT_SLOT),
+                data.firstProgress(), data.secondProgress());
+    }
+
+    private int expectedProductionCount() {
+        long count = (long) expectedOutput.getCount() * Math.max(1, activeOperations);
+        return (int) Math.min(Integer.MAX_VALUE, count);
+    }
+
+    private static boolean clibanoInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_CLIBANO_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int clibanoInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.CLIBANO_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
     }
 
     private static boolean sameStackAndCount(ItemStack expected, ItemStack actual) {

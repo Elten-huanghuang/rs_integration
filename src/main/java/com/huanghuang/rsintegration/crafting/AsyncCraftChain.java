@@ -40,6 +40,7 @@ import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.ModType;
@@ -1472,15 +1473,19 @@ public final class AsyncCraftChain {
         int desiredOperations = Math.max(1, step.executions());
         int availableOperations = Math.min(craftOperationBudget.availableCapacity(),
                 globalOperationBudget.availableCapacity());
-        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations);
+        boolean bufferedNode = canBufferEntireGraphNode(delegate, desiredOperations);
+        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations)
+                && !bufferedNode;
         boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
         MaterialPlan delegateMaterials = materialPlanFor(delegate);
         List<IBatchDelegate.MaterialReservationScope> graphScopes =
                 materialReservationScopes(delegateMaterials);
         boolean workerReusable = graphScopes.contains(
                 IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
-        int operationCost = graphOperationWorkerCount(desiredOperations, availableOperations,
-                eligible.size(), concurrencySafe, workerReusable);
+        int operationCost = operationGroup
+                ? graphOperationWorkerCount(desiredOperations, availableOperations,
+                        eligible.size(), concurrencySafe, workerReusable)
+                : 1;
         if (operationGroup && workerReusable) {
             operationCost = Math.min(operationCost, Math.max(1,
                     reusableWorkerCapacity(delegateMaterials.legacyGraphSpecs(),
@@ -1504,6 +1509,12 @@ public final class AsyncCraftChain {
 
     static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
         return executions >= 2 && availableOperations >= 1;
+    }
+
+    static boolean canBufferEntireGraphNode(IBatchDelegate delegate, int executions) {
+        if (delegate == null || executions <= 1 || !delegate.supportsInputBuffer()) return false;
+        InputBufferPlan plan = delegate.inputBufferPlan(executions);
+        return plan != null && plan.enabled() && plan.operations() == executions;
     }
 
     static int graphOperationWorkerCount(int executions, int availableOperations,
@@ -1617,11 +1628,11 @@ public final class AsyncCraftChain {
                             "operation group could not prepare a worker for serial dispatch");
                 }
             }
-            boolean legacyParallelGroup = delegate instanceof ParallelCraftGroup;
-            MaterialPlan materialPlan = legacyParallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
-            List<IngredientSpec> graphSpecs = legacyParallelGroup
+            boolean parallelGroup = delegate instanceof ParallelCraftGroup;
+            MaterialPlan materialPlan = parallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
+            List<IngredientSpec> graphSpecs = parallelGroup
                     ? delegate.getGraphSpecs() : materialPlan.legacyGraphSpecs();
-            List<IBatchDelegate.MaterialReservationScope> graphScopes = legacyParallelGroup
+            List<IBatchDelegate.MaterialReservationScope> graphScopes = parallelGroup
                     ? delegate.getMaterialReservationScopes() : materialReservationScopes(materialPlan);
             GraphNodeMaterials reserved;
             if (delegate instanceof CrockPotBatchDelegate crockPot
@@ -1645,7 +1656,7 @@ public final class AsyncCraftChain {
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
             List<ItemStack> materials = reserved.materials();
 
-            List<IngredientSpec> supplementalSpecs = legacyParallelGroup
+            List<IngredientSpec> supplementalSpecs = parallelGroup
                     ? delegate.getSupplementalSpecs() : materialPlan.legacySupplementalSpecs();
             if (supplementalSpecs != null && !supplementalSpecs.isEmpty()) {
                 List<ItemStack> supplementalMaterials = reserveSupplementalMaterials(
@@ -1653,9 +1664,34 @@ public final class AsyncCraftChain {
                 if (supplementalMaterials == null) {
                     return GraphDispatchResult.retry("supplemental materials unavailable");
                 }
-                materials = legacyParallelGroup
+                materials = parallelGroup
                         ? delegate.mergeSupplementalMaterials(materials, supplementalMaterials)
                         : materialPlan.mergeLegacyReservations(materials, supplementalMaterials);
+            }
+            InputBufferPlan graphInputBuffer = canBufferEntireGraphNode(
+                    delegate, prepared.step().executions())
+                    ? delegate.inputBufferPlan(prepared.step().executions())
+                    : InputBufferPlan.none();
+            OperationStartContext startContext;
+            if (delegate instanceof ParallelCraftGroup group) {
+                List<IngredientSpec> operationSpecs = group.getFlatOperationMaterials();
+                if (operationSpecs == null || operationSpecs.isEmpty()) {
+                    return GraphDispatchResult.fatal(
+                            "parallel group has no per-operation material layout");
+                }
+                startContext = OperationStartContext.repeatedChainReserved(
+                        online, nodeLedger, group.operationMaterialPlan(),
+                        prepared.step().executions(), operationSpecs.size(), materials);
+            } else {
+                startContext = OperationStartContext.chainReserved(
+                        online, nodeLedger, materialPlan, materials, graphInputBuffer);
+            }
+            if (startContext.buffered()) {
+                RSIntegrationMod.LOGGER.info(ctx.format(
+                        "[RSI-Craft] graph buffered dispatch node={} recipe={} delegate={} operations={} inputs={} outputs={}"),
+                        nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
+                        graphInputBuffer.operations(), graphInputBuffer.inputs().size(),
+                        graphInputBuffer.outputs().size());
             }
             if (!delegate.validateExecutionContext(online)) {
                 return GraphDispatchResult.fatal(
@@ -1717,6 +1753,9 @@ public final class AsyncCraftChain {
             CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
                     prepared.step().recipeId().toString(), delegate, nodeLedger,
                     admission, operationSession);
+            if (graphInputBuffer.enabled()) {
+                runtime.setLogicalOperations(graphInputBuffer.operations());
+            }
             runtime.setReusableReservationTokens(reserved.reusableTokens());
             CraftNode graphNode = graphNodes.get(nodeId);
             if (graphNode != null) runtime.attachOutputs(new NodeOutputAccumulator(graphNode.outputs()));
@@ -1733,9 +1772,8 @@ public final class AsyncCraftChain {
                     nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
                     prepared.machine().pos(), startMaterials.size());
             boolean accepted = operationSession != null
-                    ? operationSession.tryStart(
-                    () -> startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger))
-                    : startDelegate.tryStartWithMaterials(online, startMaterials, nodeLedger);
+                    ? operationSession.tryStart(() -> startDelegate.startOperation(startContext))
+                    : startDelegate.startOperation(startContext);
             if (!accepted) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
                         "Graph node delegate rejected start: node={} recipe={} delegate={} machine={}"),
@@ -1851,7 +1889,8 @@ public final class AsyncCraftChain {
         nodeRuntimes.put(nodeId, runtime);
         materializePrivateLedgerGraphInputs(admission, online);
 
-        boolean accepted = operationSession.tryStart(() -> delegate.tryStartSingleCraft(online));
+        boolean accepted = operationSession.tryStart(() -> delegate.startOperation(
+                OperationStartContext.delegateExtracted(online, nodeLedger)));
         if (!accepted) runtime.markStartFailed("delegate rejected private-ledger graph dispatch");
         return GraphDispatchResult.started(runtime);
     }
@@ -3277,19 +3316,18 @@ public final class AsyncCraftChain {
                 }
                 boolean bufferedStart = startedDelegate.supportsInputBuffer();
                 InputBufferPlan inputBuffer = bufferedStart
-                        ? startedDelegate.inputBufferPlan(machineCount).withResolvedInputs(materials)
+                        ? startedDelegate.inputBufferPlan(machineCount)
                         : InputBufferPlan.none();
-                if (bufferedStart && !inputBuffer.enabled()) {
+                OperationStartContext startContext = OperationStartContext.chainReserved(
+                        online, ledger, materialPlanFor(startedDelegate), materials, inputBuffer);
+                if (bufferedStart && !startContext.buffered()) {
                     RSIntegrationMod.LOGGER.error(ctx.format(
                             "Input-buffer plan could not bind reserved materials: recipe={} delegate={} operations={} reservedStacks={}"),
                             step.recipeId(), startedDelegate.getClass().getSimpleName(), machineCount,
                             materials.size());
                 }
                 if (!flatOperationSession.tryStart(
-                        () -> !bufferedStart ? startedDelegate.tryStartWithMaterials(online, materials, ledger)
-                                : inputBuffer.enabled()
-                                ? startedDelegate.tryStartWithInputBuffer(online, inputBuffer, ledger)
-                                : false)) {
+                        () -> startedDelegate.startOperation(startContext))) {
                     List<ItemStack> escaped = disarmOutputCapture();
                     closeFlatOperationScope();
                     if (!escaped.isEmpty()) {
@@ -3353,7 +3391,8 @@ public final class AsyncCraftChain {
                     return null;
                 }
                 if (!flatOperationSession.tryStart(
-                        () -> startedDelegate.tryStartSingleCraft(online, ledger))) {
+                        () -> startedDelegate.startOperation(
+                                OperationStartContext.delegateExtracted(online, ledger)))) {
                     List<ItemStack> escaped = disarmOutputCapture();
                     closeFlatOperationScope();
                     if (!escaped.isEmpty()) {
@@ -3403,6 +3442,7 @@ public final class AsyncCraftChain {
                                             ServerPlayer online) {
         try {
             List<IngredientSpec> specs = delegate.getRequiredMaterials();
+            OperationStartContext startContext;
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
                 if (materials == null) {
@@ -3436,25 +3476,22 @@ public final class AsyncCraftChain {
                     abd.setStorageEndpoint(storageEndpoint);
                     abd.useSharedLedger(ledger);
                 }
-                if (!delegate.tryStartWithMaterials(online, materials, ledger)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("tryStartWithMaterials failed for generic step {}"),
-                            step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", step.recipeId()));
-                    try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
-                    }
-                    return null;
-                }
+                startContext = OperationStartContext.chainReserved(
+                        online, ledger, materialPlanFor(delegate), materials, InputBufferPlan.none());
             } else {
-                if (!delegate.tryStartSingleCraft(online, ledger)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("tryStartSingleCraft failed for generic step {}"),
-                            step.recipeId());
-                    try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during cleanup"), fe);
-                    }
-                    return null;
+                startContext = OperationStartContext.delegateExtracted(online, ledger);
+            }
+            if (!delegate.startOperation(startContext)) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                        "Unified operation start failed for generic step {}"), step.recipeId());
+                online.sendSystemMessage(Component.translatable(
+                        "rsi.generic.error.craft_failed", step.recipeId()));
+                try { delegate.onBatchFailed(online, "unified operation start failed"); }
+                catch (Exception fe) {
+                    RSIntegrationMod.LOGGER.error(ctx.format(
+                            "onBatchFailed threw during unified start cleanup"), fe);
                 }
+                return null;
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error(ctx.format("Error in generic step"), e);
@@ -3686,12 +3723,27 @@ public final class AsyncCraftChain {
                     }
                     return null;
                 }
-                if (!group.tryStartWithMaterials(online, materials, ledger)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartWithMaterials failed for {}"),
+                OperationStartContext startContext;
+                if (group instanceof ParallelCraftGroup parallel) {
+                    List<IngredientSpec> perOperation = parallel.getFlatOperationMaterials();
+                    if (perOperation == null || perOperation.isEmpty()) {
+                        throw new IllegalStateException(
+                                "parallel group lost its per-operation material layout");
+                    }
+                    startContext = OperationStartContext.repeatedChainReserved(
+                            online, ledger, parallel.operationMaterialPlan(),
+                            parallel.getTotalOperations(), perOperation.size(), materials);
+                } else {
+                    startContext = OperationStartContext.chainReserved(
+                            online, ledger, materialPlanFor(group), materials,
+                            InputBufferPlan.none());
+                }
+                if (!group.startOperation(startContext)) {
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group unified start failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", step.recipeId()));
-                    try { group.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
+                    try { group.onBatchFailed(online, "unified start failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
                     // abort() refunds the ledger, so we must NOT refund here
@@ -3699,7 +3751,8 @@ public final class AsyncCraftChain {
                 }
             } else {
                 // Fallback: each child self-extracts (no virtualInventory visibility)
-                if (!group.tryStartSingleCraft(online, ledger)) {
+                if (!group.startOperation(
+                        OperationStartContext.delegateExtracted(online, ledger))) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartSingleCraft failed for {}"),
                             step.recipeId());
                     online.sendSystemMessage(Component.translatable(

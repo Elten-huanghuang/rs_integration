@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
@@ -54,5 +55,31 @@ public final class MinersDelightCopperPotBatchDelegate extends CookingPotBatchDe
     @Override
     protected ItemStack getExpectedRecipeResult(Recipe<?> recipe, @Nullable RegistryAccess access) {
         return MinersDelightCopperPotSupport.recipeResult(recipe, access);
+    }
+
+    @Override
+    protected boolean inputBufferEnabled() {
+        return RSIntegrationConfig.ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER.get();
+    }
+
+    @Override
+    protected int inputBufferLimit() {
+        return Math.max(1, RSIntegrationConfig.MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT.get());
+    }
+
+    @Override
+    protected boolean supportsBufferedMachine(BlockEntity machine) {
+        return MinersDelightCopperPotSupport.isCopperPot(machine);
+    }
+
+    @Override
+    protected boolean supportsBufferedContainer(ItemStack required, ItemStack declared) {
+        // Native cup conversion intentionally replaces the recipe's declared bowl.
+        return required.isEmpty() || !declared.isEmpty();
+    }
+
+    @Override
+    protected String outputPortId() {
+        return "miners_delight:copper_pot:output";
     }
 }

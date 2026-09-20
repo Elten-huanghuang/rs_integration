@@ -37,7 +37,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         GraphConcurrencyPolicy.Decision unknown = GraphConcurrencyPolicy.decide(
                 "test", new FakeDelegate(null), List.of(), List.of());
         assertTrue(unknown.exclusive());
-        assertEquals("legacy boolean lacks capability contract", unknown.reason());
+        assertEquals("delegate has no concurrency capability", unknown.reason());
     }
 
     @Test
@@ -144,7 +144,6 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         }
 
         @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return capabilities; }
-        @Override public boolean supportsConcurrentNodeExecution() { return true; }
         @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
         @Override public boolean tryStartSingleCraft(ServerPlayer p) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }

@@ -57,11 +57,6 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    @Override
-    public boolean supportsConcurrentNodeExecution() {
-        return true;
-    }
-
     private ServerPlayer player;
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;

@@ -1,11 +1,16 @@
 package com.huanghuang.rsintegration.mods.apprenticecodex;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
@@ -30,6 +35,9 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
             "jp.aquafactory.apprenticecodex.block.essencesmoker.EssenceSmokerBlockEntity";
     private static final int MAX_MATERIAL_COUNT =
             ApprenticeCodexRecipeHandler.ESSENCE_SMOKER_MATERIAL_SLOTS;
+    /** IDs must match MaterialPlan.fromLegacy's stable compatibility IDs. */
+    static final String CATALYST_ENTRY_ID = "legacy:material:0";
+    static final String MATERIAL_ENTRY_ID = "legacy:material:1";
 
     private ServerLevel level;
     private ResourceKey<Level> dimension;
@@ -86,6 +94,86 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, MAX_MATERIAL_COUNT);
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        return level != null && pos != null && recipe != null
+                && apprenticeInputBufferEnabled();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != 2 || expected.isEmpty()) {
+            return InputBufferContract.none();
+        }
+        ItemStack catalyst = ingredientPrototype(specs.get(0));
+        ItemStack material = ingredientPrototype(specs.get(1));
+        if (catalyst.isEmpty() || material.isEmpty()) return InputBufferContract.none();
+        return new InputBufferContract(
+                apprenticeInputBufferLimit(),
+                List.of(
+                        new InputBufferContract.InputSlot(
+                                CATALYST_ENTRY_ID, 0, catalyst, 1, true, 1),
+                        new InputBufferContract.InputSlot(
+                                MATERIAL_ENTRY_ID, 1, material, 1, false,
+                                apprenticeInputBufferLimit())),
+                List.of(new OutputContract.Port(
+                        "apprenticecodex:primary", null, expected, expected.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+                                           @Nonnull InputBufferPlan plan,
+                                           @Nonnull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 2) return false;
+        InputBufferPlan.InputSlot catalyst = plan.inputs().stream()
+                .filter(input -> CATALYST_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
+        InputBufferPlan.InputSlot material = plan.inputs().stream()
+                .filter(input -> MATERIAL_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
+        if (catalyst == null || material == null || catalyst.stack().isEmpty()
+                || material.stack().isEmpty() || catalyst.stack().getCount() != 1
+                || catalyst.reusable() != true || material.perOperation() != 1
+                || material.stack().getCount() != plan.operations()) return false;
+        InputBufferPlan expectedPlan = inputBufferPlan(plan.operations());
+        if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
+
+        this.ledger = sharedLedger;
+        this.sharedLedger = sharedLedger;
+        this.usingSharedLedger = true;
+        return start(List.of(catalyst.stack(), material.stack()));
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer() || expected.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "apprenticecodex:primary", null, expected, expected.getCount(),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
+            @Nonnull ServerPlayer player) {
+        OutputContract contract = outputContract();
+        if (contract.ports().size() != 1) return List.of();
+        List<ItemStack> collected = collectAllResults(player);
+        if (collected.isEmpty()) return List.of();
+        String portId = contract.ports().get(0).portId();
+        return collected.stream()
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(stack -> new OutputAccounting.CollectedOutput(
+                        portId, OutputContract.Source.VIRTUAL, stack))
+                .toList();
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
@@ -160,6 +248,30 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
                 && !invokeBoolean(be, "hasMaterials", new Class<?>[0])
                 && !invokeBoolean(be, "isProcessing", new Class<?>[0])
                 && !invokeBoolean(be, "isCompleted", new Class<?>[0]);
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.isEmpty()) return ItemStack.EMPTY;
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    private static boolean apprenticeInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_APPRENTICE_CODEX_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return false;
+        }
+    }
+
+    private static int apprenticeInputBufferLimit() {
+        try {
+            return Math.min(MAX_MATERIAL_COUNT,
+                    RSIntegrationConfig.APPRENTICE_CODEX_INPUT_BUFFER_LIMIT.get());
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return MAX_MATERIAL_COUNT;
+        }
     }
 
     @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {

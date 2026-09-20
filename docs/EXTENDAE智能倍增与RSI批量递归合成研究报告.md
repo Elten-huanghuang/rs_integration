@@ -338,7 +338,9 @@ Iron Furnaces 不能按整个模组统一归类，必须在 delegate 完成机�
 | 彩虹 Iron 炉 | 1 | 最多 64 | 本周期最多整组 | 类型 A：单周期倍率处理 |
 | 彩虹 Iron 工厂 | 最多 6 | 每道最多 64 | 每道本周期最多整组 | 6 路并行 + 每路类型 A，理论物理窗口最高 384 |
 
-现有 `IronFurnacesBatchDelegate` 已通过 `isRainbowFurnace()` 区分单周期宽度：彩虹单炉道按安全容量最多 64，非彩虹单炉道按 1；工厂再乘最多 6 条炉道。因此现有执行的产量计算没有把普通炉误当成彩虹炉。尚未完成的优化是：普通炉和普通工厂虽然可以预装堆叠输入，当前仍以一次一个的方式循环放料，尚未利用类型 B 的“预装 64、机器自行连续消费”。
+现已抽出 `IronFurnaceBatchProfile` 作为四种模式共用的物理批次策略：它统一计算炉道数量、单道安全容量和物理批次大小，但保留普通模式与彩虹模式的周期语义。普通炉开启输入缓冲后会一次预装最多 64 个并连续消耗；彩虹炉仍按整批倍率处理；普通/彩虹工厂仍按最多 6 条独立炉道分配材料。熔炉、高炉、烟熏炉三类配方不再各写一套逻辑，而是由同一个 delegate 根据 `RecipeType` 校验实际机器类型。
+
+普通 Iron 炉输入缓冲默认由 `enableIronFurnaceInputBuffer=true` 开启；如果具体 tier 与安装版本不兼容，可以关闭；上限由 `ironFurnaceInputBufferLimit` 控制（1-64）。彩虹模式不受此开关影响，继续使用原有的倍率路径。普通工厂的 6 道材料分配已经使用统一批次容量，但结构化 `InputBufferContract` 暂只对单炉道开放，避免把六个物理输入槽错误表达成一个槽位。
 
 这里需要把三个量彻底分开：
 
@@ -1075,7 +1077,7 @@ OutputPort
 
 ## 24. 本轮已实施的第一步
 
-本轮先完成低风险合同迁移，随后仅对显式声明输出合同的 Vanilla 机器启用了普通异步链的结构化结算；魔法机器和图执行路径尚未接入：
+本轮先完成低风险合同迁移，并清理了并发能力的旧布尔入口；输入缓冲已接入 Vanilla、Iron Furnaces、Goety、Apprentice Codex 以及后续章节列出的魔法机器。统一启动入口已经覆盖平铺执行、普通图节点、private-ledger 图节点、并行组外层及其子 worker。并行组外层使用 `RepeatedOperationPlan` 承载逐份材料矩阵；旧材料入口只保留给外部旧调用方作兼容转发：
 
 | 项目 | 实施结果 | 兼容性 |
 |---|---|---|
@@ -1086,7 +1088,8 @@ OutputPort
 | `OutputContract` | 已新增 | 每个输出声明固定 `portId / physicalPort / prototype / perOperation / kind / source`；支持槽位、世界掉落和虚拟输出 |
 | `OutputAccounting` | 已新增，并接入普通异步链完成分支 | 按 port、来源、物品声明和批量期望数逐一结算；副产物、短缺和未知端口不会被主产物总数掩盖 |
 | `MaterialPlan` | 已扩展 | 统一描述图内/补充材料、稳定 entry id、复用范围和可选输入槽位；新增保留旧摆放顺序的 graph/supplemental 双向兼容投影 |
-| `OperationStartContext` | 已新增，尚未接入 | 为未来 `start(context)` 提供 chain 预留材料的结构化交接；拒绝未知或重复 entry id |
+| `OperationStartContext` | 已新增并接入主要执行路径 | `startOperation(context)` 统一表达 chain 预留、自取材料、输入缓冲和并行组重复矩阵；拒绝未知或重复 entry id；旧 delegate 由默认适配器保持原行为 |
+| `supportsConcurrentNodeExecution()` | 生产 delegate 覆盖已移除 | `GraphConcurrencyPolicy` 只读取 `concurrencyCapabilities()`；接口默认方法暂保留给外部旧实现编译兼容 |
 
 本轮新增回归测试覆盖：
 
@@ -1103,9 +1106,11 @@ OutputPort
 - 普通旧 delegate 的 `getRequiredMaterials()` 自动投影为全部图内材料，行为与旧路径一致；
 - 仍在实现旧 `getGraphSpecs()` / `getSupplementalSpecs()` 的 delegate，会按稳定 entry 恢复图内、补充材料以及原始摆放顺序，Embers 的交错方面/输入不再依赖 delegate 自己拼接；
 - 复用材料的 worker 容量计算改为从图内 entry 的 `reusable` 读取，补充材料不会错位影响图内索引；
-- `ParallelCraftGroup`、CrockPot 的计划 checkout 和私有账本 delegate 暂时保留原分支，避免并行批次材料数或私有提取语义在本阶段变化。
+- `CrockPot` 的计划 checkout 仍保留专用分支。private-ledger delegate 已通过 `DELEGATE_EXTRACTED` 上下文调用原一参数自取材料方法；`ParallelCraftGroup` 外层和子 worker 均走 `startOperation`，外层以 `RepeatedOperationPlan` 延迟投影每个 worker 的旧有序材料。只有 delegate 实现与外部调用方仍通过默认适配器使用旧入口。
 
-这不是机器接入：最终仍将 `List<ItemStack>` 交给旧的 `tryStartWithMaterials(...)`，所以当前机器摆放、启动、回收的实际行为没有改变。
+这仍不是旧接口的最终删除阶段：未声明输入缓冲合同的 delegate 会由 `startOperation(...)` 默认适配器把结构化上下文投影回 `tryStartWithMaterials(...)`；已声明输入缓冲合同的机器则按稳定 entry id 调用结构化缓冲入口。旧机器摆放与回收实现继续保留，但执行器不再直接选择大多数旧启动重载。
+
+重复矩阵在进入并行组前校验每一份的 entry、槽位、物品匹配和确切数量；并行组同时比对完整的 entry 语义（配方、分配来源、复用和物理槽位），不只比对 id。复用催化剂只按 worker 预留一次，因此含 `PER_WORKER_REUSABLE` 的 worker 暂不将多份材料相加预装，同一组仍可用多个 worker 并行。取消这项限制需要独立的“单份催化剂 + N 份消耗材料”物理合同，不应把重复矩阵里同一份催化剂引用当作 N 份库存。
 
 ### 24.2 输出接入的阻塞条件
 
@@ -1159,6 +1164,230 @@ Iron Furnaces 仍不能按此方式自动迁移，原因有两层：其旧 `Expe
 - RSI 一次预留并放入整个批次，但原版炉子仍每个烹饪周期消耗 1 个。它减少的是预留、网络提取、入槽和重启次数，不会把炉子的处理时间压成一个周期；
 - 燃料需求改为按整批烹饪周期计算并在启动前验证；无法提供足够燃料时，不启动该批并保持账本退款语义；
 - 完成观测不再在第一个正确产物出现时结束，而是等待本批期望产量；运行中的 `activeFurnaceOperations` 与下一批规划值分离，后续的批次探测不能把一个已启动的 64 件炉子改回 1 件结算；输入已耗尽但产量不足时，结构化输出结算会保留真实产物并无退款失败，防止复制；
-- 仅平铺单机调度会调用 `tryStartWithInputBuffer(...)`。递归图执行、并行组、砖炉和所有非原版命名空间兼容炉仍通过旧 `tryStartWithMaterials(...)` 一次一件启动，避免未验证路径隐式改变行为。
+- 第一阶段当时仅平铺单机调度会调用 `tryStartWithInputBuffer(...)`；24.6 之后递归图和并行组子 worker 已通过统一入口接入。砖炉和未显式验证的非原版炉仍保持旧单次行为。
 
 首轮游戏内验证应使用 2、8、64 等不同数量，并分别覆盖熔炉与高炉：确认输入槽会先显示整批数量后逐次减少，最终产物只入库一次，燃料按整批消耗；还应测试把 `enableVanillaFurnaceInputBuffer` 关闭后恢复逐件行为。通过后再考虑烟熏炉，并在单机缓冲稳定后评估多台炉子的并行缓冲和递归图执行接入。
+
+### 24.6 Vanilla 炉类递归图输入缓冲接入
+
+原版炉平铺订单已经完成实机验证：一次预装 6 个绿宝石原料时，第一个产物不会提前结束，收齐 6 个后才完成。因此进入文档既定的下一阶段，将相同合同接入递归图执行。
+
+本轮实现边界如下：
+
+- `IBatchDelegate.startOperation(OperationStartContext)` 成为统一启动入口；未迁移 delegate 仍由默认适配器转发到 `tryStartSingleCraft(...)` 或 `tryStartWithMaterials(...)`，不改变物理行为；
+- `OperationStartContext` 将 chain 已预留材料绑定到稳定 `MaterialPlan.Entry.id`，同时保留旧有序列表投影；旧配方列表包含空槽占位时，使用兼容槽位索引恢复，避免材料错位；
+- `InputBufferPlan` 改为按 entry id 绑定真实预留栈，而不是依赖列表下标；原版炉输入声明使用 `legacy:material:0`，与旧材料计划投影一致；
+- 平铺单机、非并行递归图节点和并行组子 worker 统一调用 `startOperation(context)`；并行组外层暂时保留现有重复 operation 材料切片协议；
+- 只有 `inputBufferPlan(executions)` 能完整容纳整个图节点时，节点才绕过逐件 `ParallelCraftGroup`，直接进行一次物理缓冲启动；超过容量的节点继续走原分组路径，不会向机器超量放置；
+- `CraftNodeRuntime` 分离物理 worker 数与逻辑操作数。例如一次物理启动预装 6 个时，进度与终止审计仍按 6 次逻辑操作显示和统计；
+- 图节点仍由 `NodeOutputAccumulator` 按图声明校验最终数量。原版炉在 delegate 内等待整批 `ExpectedProduction`，随后一次收取本批输出，因此不会因首件产物提前发布节点结果；
+- 取消和失败继续复用现有物理回收握手：delegate 报告实际从输入槽取回的剩余材料，账本和图材料 broker 只退回这些真实回收量，不按原始整批数量盲目退款。
+
+这一阶段没有自动开启普通 Iron Furnaces 输入缓冲、砖炉或魔法机器的输入缓冲，也没有删除旧启动方法。原版递归图缓冲已完成后，下一步实机验证应选择“原版熔炉是递归中间步骤”的订单，并确认日志出现：
+
+```text
+[RSI-Craft] graph buffered dispatch ... operations=6 ...
+[RSI-Vanilla] buffered furnace start ... operations=6 ... expectedOutput=6
+```
+
+验证通过后，才能继续迁移多输入/多输出机器和 Iron Furnaces 类型 B 预装。
+
+### 24.7 Iron Furnaces 公共批次策略与接入顺序
+
+本阶段的代码接入顺序如下：
+
+1. `IronFurnaceBatchProfile` 统一四种组合的批次计算：普通单炉、普通工厂、彩虹单炉和彩虹工厂；`operationsPerCycle` 与 `bufferCapacity` 分开，普通炉不会因为预装 64 个而被当成一次完成 64 个。
+2. `IronFurnacesBatchDelegate` 的安全容量同时受输入栈、输出栈、机器栈上限和配置上限约束。普通单炉开启后最多预装 64 个；输出槽满时按物理批次边界收集并启动下一批，避免卡槽或提前完成。
+3. 普通工厂继续按 6 条真实炉道分片；开启普通 Iron 缓冲后每道可预装一整组，但每道的输入、输出和回收边界仍独立。后续若迁移为结构化多槽合同，必须为 6 个输入槽和 6 个输出端口分别声明稳定 `slotId/portId`，不能复用单炉道的一个 `entryId`。
+4. 三种配方类型（熔炼、烧炼、烟熏）共享同一实现，只通过 `RecipeType` 与机器增强件校验路由；不复制三份 delegate。
+
+建议的游戏内验证顺序是：
+
+```text
+普通单炉：2、8、64 个输入，确认输入槽先显示整批并逐个减少，收齐后才完成
+普通工厂：6、64、384 个输入，确认六道分配和逐道累计输出
+高炉/烟熏炉：复用同样数量，确认 recipeType 校验和燃料/能源语义一致
+递归图：用原版炉产物作为中间材料，确认节点不会在第一件产物时结束
+```
+
+只有普通工厂的六槽结构完成实机验证后，才把它迁移到完整的 `InputBufferContract` 多输入/多输出协议；在此之前保留现有 lane splitter 兼容路径。
+
+### 24.8 其他已明确批量机器的接入
+
+在 Iron Furnaces 之后，本轮又把两个已有明确物理批量语义的 delegate 接入统一输入/输出合同；三个开关现在默认开启，如遇到具体整合包版本不兼容，可以单独关闭。
+
+| 机器 | 物理语义 | 新合同 | 默认开关 |
+|---|---|---|---|
+| Goety Cursed/Grim Infuser、Goety Awaken Dark Mender | 多个配方输入槽；每个槽仍按一个物品周期处理；结果以世界实体产生 | 一个稳定输入 entry，`WORLD` 主输出端口；按实际占用槽追踪和累计世界掉落 | `enableGoetyInfuserInputBuffer=true` |
+| Apprentice Codex Essence Smoker | 一个催化剂对应一个物理点火周期；最多 8 个材料槽；多个材料在同一次点火中统一完成 | `catalyst` 为可复用输入，`material` 按操作数消耗；主输出声明为 `VIRTUAL`，收集列表后统一结算 | `enableApprenticeCodexInputBuffer=true` |
+
+Goety 的缓冲上限同时受机器 tier、空闲配方槽和 `goetyInfuserInputBufferLimit` 限制。世界掉落必须等整个缓冲批次的期望数量到齐后才结算，不能拿第一件实体作为完成信号。Essence Smoker 不能把催化剂乘以材料数；跨越 8 个材料时仍应拆成多个物理周期，催化剂数量由既有 `requiredCatalystCount` 规则决定。
+
+本轮没有把以下机器强行迁移：Iron Furnaces 六道工厂仍保留 lane splitter；Apprentice Codex Spellcaster Workbench、带多副产物/动态 NBT 的机器仍需先声明稳定 slot/port ID 和回收语义。下一步是分别用 1、2、8、64（Goety）以及 1、8、9（Essence Smoker）做实机验证，再考虑扩大到更复杂的递归图批次。
+
+### 24.9 Malum Spirit Crucible 与 Spirit Altar
+
+Malum 两类逐次加工机器已经接入结构化输入缓冲，默认均开启：
+
+| 机器 | 输入语义 | 批量语义 | 配置 |
+|---|---|---|---|
+| Spirit Crucible | 中心催化剂 + 多个 Spirit 槽 | 可复用催化剂只预留一份，Spirit 按操作数倍增；损坏或转化型催化剂保留旧单次路径 | `enableMalumCrucibleInputBuffer=true`，上限 `malumCrucibleInputBufferLimit=64` |
+| Spirit Altar | 中心材料 + 基座材料 + Spirit | 三类消耗材料均按操作数预装；祭坛仍每轮只完成一份配方 | `enableMalumAltarInputBuffer=true`，上限 `malumAltarInputBufferLimit=64` |
+
+两者的世界产物按累计 `ExpectedProduction` 结算。并行组必须收到当前 worker 的全部预期掉落才进入收集阶段；捕获第一件产物不再代表整批完成。Spirit Altar 已确认原生中心槽、基座库存和 Spirit 库支持堆叠，并且每次原生 `craft()` 后重新选择下一轮配方。
+
+Spirit Altar 的建议测试是单台 `2 / 8 / 64`，再用多台祭坛测试不能整除的订单，例如四台机器合成 21 个。日志中的每台 worker 期望值必须分别对应 `6 / 6 / 6 / 3`，不能显示为 1。Malum Runic Workbench 当前是 RSI 自己模拟的即时加工和单槽结果覆盖，不是原生持续消费槽，因此暂不迁移为预装缓冲。
+
+### 24.10 Aether、Clibano 与 Enchantal Cooler
+
+本轮继续迁移三类已能确认原生逐次消费语义的机器，开关均默认开启：
+
+| 机器 | 已接入范围 | 容量约束 | 配置 |
+|---|---|---|---|
+| Aether Freezer / Altar | 单输入槽预装，机器逐次加工，槽位累计输出 | 输入槽容量、输出槽容量、每次输入/输出数量三者最小值 | `enableAetherFurnaceInputBuffer=true`，上限 `aetherFurnaceInputBufferLimit=64` |
+| Forbidden & Arcanus Clibano | 选择一个空闲 lane，向该 lane 预装整批；燃料按整批加工时间准备，Soul 材料仍为机器级资源 | 选中 lane 的输入槽与配对输出槽容量 | `enableClibanoInputBuffer=true`，上限 `clibanoInputBufferLimit=64` |
+| Enchantal Cooler | 最多四个输入槽和可选容器槽分别预装；每轮各消费一份并累计到输出槽 | 所有输入槽、容器槽和输出槽中的最小容量 | `enableEnchantalCoolerInputBuffer=true`，上限 `enchantalCoolerInputBufferLimit=64` |
+
+### 24.11 Farmer's Delight Cooking Pot 多输入缓冲
+
+反编译核对 Farmer's Delight `1.2.8` 与 `1.3.3` 后确认，原版烹饪锅每轮会从 0-5 号所有已匹配输入槽各消费一份，再继续匹配下一轮；容器槽可堆叠，成品经展示槽累计到输出槽。因此它属于“多个输入槽形成 AND 条件、机器逐轮消费”的类型 B，而不是一次把整批材料瞬间结算。
+
+当前接入使用稳定的 `legacy:material:N` 映射每个配方材料，并把容器放到独立物理槽。安全批次取以下容量的最小值：
+
+- 每个输入槽容量 / 该材料每轮用量；
+- 容器槽容量 / 每轮容器用量；
+- 输出槽容量 / 每轮产量；
+- `farmersDelightCookingPotInputBufferLimit`，默认 64。
+
+`enableFarmersDelightCookingPotInputBuffer=true` 默认开启。完成判定等待输出数量达到“单轮产量 x 本批操作数”，第一份成品不会提前结束订单。为避免把世界副产物或特殊容器语义误当成主输出，以下情况自动保留旧单次路径：Arcane Cooking Pot、任一 Ingredient 变体带 crafting remainder、Farmer's Delight 的特殊 remainder override、动态推断容器与配方声明不一致。
+
+游戏内测试建议使用普通 Farmer's Delight Cooking Pot：分别下单 `2 / 8 / 64`，至少覆盖一个无容器配方和一个碗/瓶容器配方；确认各输入槽先显示整批堆叠、每轮各减一、输出累计到完整订单数后才统一入库。再故意选带桶/瓶返还的输入配方，确认其回退为逐份放置。
+
+### 24.12 Youkai's Homecoming Moka Pot 输入与容器统一迁移
+
+Moka Pot 的 `BasePotBlockEntity` 同样会在每轮完成时按 `BasePotRecipe.getConsumption(...)` 从最多四个输入槽扣除材料，并把成品经展示槽移入输出槽。当前实现为每个配方 entry 固定分配一个输入槽，避免相同物品的两个配方 entry 在预装时合并后丢失槽位身份；容器使用独立的 `CONTAINER_SLOT`。
+
+旧实现只在启动机器时临时从存储中额外抽取杯/瓶，递归合成树和缺口列表不知道这项需求。现在 `YoukaisHomecomingRecipeHandler` 会把 Moka 输出容器附加为正式 `IngredientSpec`，与其他材料一起进入 DAG、缺口计算和同一份 RS/BD 事务账本，不再发生计划成功后才发现缺杯子的情况。
+
+输入缓冲由 `enableMokaPotInputBuffer=true` 默认开启，上限 `mokaPotInputBufferLimit=64`。实际批次仍取全部输入槽、容器槽、输出槽和配置上限的最小值；完成条件是完整批次产量。带 crafting remainder 的输入配方自动回退旧单次路径，因为 Moka 会把这些剩余物抛到世界中，尚未声明稳定副产物端口。
+
+游戏内测试建议分别下单 `2 / 8 / 64` 份 Moka 配方，确认原料和杯/瓶都一次预装、逐轮减少，第一份饮品不会提前完成；然后移除存储中的杯/瓶，确认递归预览直接显示容器缺口，而不是启动后静默失败。
+
+### 24.13 Miner's Delight Copper Pot 独立迁移
+
+反编译核对 Miner's Delight `1.20.1-1.2.3` 后确认，铜锅的 `processCooking(...)` 每轮只从 0-3 号输入槽各扣 1 件；完成一轮后，tick 会再次按剩余堆叠匹配配方。5 号容器槽和 6 号输出槽会继续批量装杯，因此它与 Farmer's Delight 烹饪锅一样属于可预装、逐轮消费的类型 B，而不是瞬时批量机器。
+
+铜锅现在复用烹饪锅的结构化输入和累计输出结算，但保留独立机器策略：
+
+- `enableMinersDelightCopperPotInputBuffer=true` 默认开启，上限 `minersDelightCopperPotInputBufferLimit=64`；
+- 输入槽布局固定为 0-3，展示槽为 4，铜杯槽为 5，输出槽为 6；
+- 原生碗到铜杯转换会把单轮结果数量翻倍，因此每轮容器需求和输出产量都按转换后的真实数量计算。例如单轮产出 2 杯时，64 格输出槽最多承载 32 个逻辑操作，不会按 64 个操作错误预留；
+- 输出端口使用独立的 `miners_delight:copper_pot:output`，不会与普通烹饪锅的端口身份混用；
+- 带 crafting remainder 或 Farmer's Delight remainder override 的输入仍自动回退旧单次路径，避免遗漏世界副产物。
+
+游戏内建议先测一个普通碗配方和一个会转换为铜杯且产量翻倍的配方，各下单 `2 / 8 / 32`。确认输入与铜杯一次预装、第一轮产物不会提前结束、最终入库数量与递归计划完全一致。输出单轮为 2 时不要期待一次预装 64 轮，因为 64 格输出槽只能容纳 32 轮产物。
+
+Aether Incubator 没有物品输出槽并产生实体，当前无法证明每个实体都能被同一物品产量合同审计，因此继续单次执行。Clibano 暂未让一个订单同时租用同一方块的两条 lane；当前优化是“一个 lane 一次预装多份”，第二条 lane 仍可由机器原生逻辑使用。要开放 RSI 双 lane 并行，需先把机器租约细分为 lane 租约，并分别追踪两个输入槽、进度值、输出槽和失败回收。
+
+Enchantal Cooler 的原生字节码已确认每个周期从每个匹配输入槽取 1，并在配方要求容器时从容器槽取 1。动态 NBT 或不可堆叠产物的输出槽容量只允许一个操作，会自动退回单次，不会被错误放大。
+
+游戏内验证顺序：
+
+```text
+Aether Freezer：2、8、64，确认逐次消耗且收齐整批输出后完成
+Aether Altar：2、8、64，确认专用燃料补充与剩余燃料回收
+Clibano：2、8、64，分别让第一和第二 lane 被选中；确认燃料足够整批且不会首件完成
+Enchantal Cooler：2、8，覆盖有容器和无容器配方；确认每个输入槽与容器槽同步递减
+递归图：分别把上述机器的产物作为中间材料，确认图节点的逻辑操作数等于订单数量
+```
+
+### 24.14 Botania 原生并行与连续队列审计
+
+本轮按 Botania `1.20.1-448-FORGE` 的实际字节码重新核对，而不是把所有世界物品机器统一视为“可堆 64”。结论分为三类：
+
+| 机器 | 当前策略 | 原因 |
+|---|---|---|
+| Mana Pool | 单池原生批量 + 多池并行 | 每个物品独立触发 Mana Infusion，可按当前魔力限制整批投入；使用 `manaInfusionSpawned` 标记和池中心局部捕获区区分相邻池 |
+| Pure Daisy | 单花最多 8 个相邻方块并行 + 多花并行 | 八个邻位是互相独立的物理转换目标，按实际空位规划和回收 |
+| Alfheim Portal / Elven Trade | 单门连续队列 + 多门并行 | 原生 `addItem(...)` 会把输入堆拆成单件，`resolveRecipes()` 每隔数 tick 只结算一份，然后继续处理内部剩余队列 |
+| Runic Altar | 仅多祭坛并行 | 一个祭坛共享当前配方、魔力进度、试剂触发和魔杖完成状态；完成一次后才可开始下一次 |
+| Petal Apothecary | 仅多花瓣台并行 | 一次配方完成会消耗当前液体，额外材料不能自动形成下一次有水的独立操作 |
+| Botanical Brewery | 仅多酿造台并行 | 内部物品集合和容器共同描述一个活动配方，没有已验证的多份队列边界 |
+| Terra Plate | 仅多凝聚板并行 | 原生会展开场上堆叠并以整个物品集合匹配当前配方；重复多份材料可能使集合不再匹配，不等同于连续队列 |
+| Runic Altar / Terra Plate 等世界仪式 | 不因物品实体可堆叠而放大 | “实体 count 可为 64”不证明机器会逐份重新匹配、触发和结算 |
+
+Mana Pool 原有批量实现继续保留，并补充服务器配置：
+
+- `enableBotaniaManaPoolBatch=true` 默认开启；关闭后平铺和并行 worker 每次只分配一份；
+- `botaniaManaPoolBatchLimit=1024` 为单池硬上限，实际数量还受当前可负担魔力限制；
+- 多池并行仍按 worker 均分，每个 worker 原有 128 份的安全窗口继续生效；
+- 当当前魔力连一份都不足时仍允许投入一份并等待供魔，不把暂时缺魔误判成永久失败；
+- 完成条件使用整批 `ExpectedProduction`，第一件转化结果不会提前完成订单。
+
+Elven Trade 本轮从旧单次结果模型迁移为原生连续队列：
+
+- `enableBotaniaElvenTradeInputBuffer=true` 默认开启，上限 `botaniaElvenTradeInputBufferLimit=64`；
+- 每个配方 entry 按相同 operation 数聚合，启动前再还原一份材料视图计算动态输出，避免把“8 份输入堆”误传给只接受单份匹配的动态配方；
+- 所有主输出和副输出按 `单次输出数量 x operation 数` 分别累计，相同物品与 NBT 的输出先合并，再等待完整数量；
+- 只接收 Botania 标记为 `elvenPortalSpawned` 的新实体，普通玩家丢在附近的同名物品不会计入；
+- 捕获区域从旧的半径 3 格球形范围收紧为传送门中心物品柱，相邻传送门不再因捕获区相交而被迫串行；
+- 每一份交易仍原生消耗 500 mana；优化减少的是 RS/BD 预留、提取、投放和调度次数，不改变 Botania 的交易速度和魔力成本；
+- 失败清理只退回仍作为本次输入实体存在的材料。已经进入传送门内部队列的材料不会被账本凭空退款，避免材料仍会产出而网络又收到退款的复制问题。
+
+建议游戏内验证：
+
+```text
+Mana Pool：单池下单 2 / 64 / 256；确认魔力逐件扣除，收齐整批后完成
+Mana Pool：两座相邻池各承担订单；确认结果不会被另一池收走
+Elven Trade：单输出配方下单 2 / 8 / 64；确认门内逐份交易且首件不完成
+Elven Trade：多输出配方下单 2 / 8；确认每一种输出均为完整倍数
+Elven Trade：两座门并行，并在门旁丢一个同名物品；确认外来物品不计入订单
+Pure Daisy：单花 8 个空位和两朵花的不整除订单；确认按实际空位分片
+Runic Altar：绑定两座祭坛下单多份；确认是两台并行、每台仍逐份触发
+```
+
+### 24.15 Brick Furnace 三类炉输入缓冲
+
+Brick Furnace `1.20.1-2.1.2.0` 的熔炉、高炉、烟熏炉分别继承原版对应的方块类，共用 `AbstractBrickFurnaceBlockEntity`。原生 `tick` 每次完成周期调用一次 `smeltItem`，只从输入槽缩减 1 件，并把结果累计到输出槽；因此属于类型 B，不是单周期倍率炉。
+
+- 三类配方继续由 `CookingMachineFamily` 区分，砖炉专用配方与配置允许的原版配方都经过 `BrickFurnaceCompat.canExecute(...)` 校验；不绕过黑名单或配方缓存校验。
+- 仅实际继承 Brick Furnace 方块实体且方块属于 `brickfurnace` 命名空间时开启缓冲；其他第三方炉即使继承原版炉，仍不自动启用。
+- 新配置 `enableBrickFurnaceInputBuffer=true` 默认开启，`brickFurnaceInputBufferLimit=64`；两者独立于原版炉配置。实际批次取输入槽、输出槽、每次产量和上限的最小值。
+- 投料后清除砖炉按输入栈身份缓存的旧配方；燃料按照砖炉烹饪时间和燃烧时间准备，并在运行中耗尽时补充。完整产量到账前不完成；输出不足时仅结算真实产物，不虚退已经消耗的原料。
+- 天境 Incubator 不在本次范围内，仍按单次执行。
+
+需要游戏内分别用砖熔炉、砖高炉、砖烟熏炉下单 `2 / 8 / 64`，确认输入一次预装、产物逐个增长、首件不提前完成、燃料补充和最终入库数量；再各用一种砖炉专用配方和允许/禁用的原版配方验证准入。把 `enableBrickFurnaceInputBuffer` 关掉后，应回到逐件调度，而原版炉配置不受影响。
+
+### 24.16 当前接入清单与实测边界
+
+这里的“接入”指**代码具备批量预装或原生多份执行能力**，不是承诺所有版本、所有配方均已实机验证。批量能力由实际机器、配方和输入/输出槽容量在启动时再次判定；不符合条件的配方回退单份。
+
+| 状态 | 机器 / 路径 | 边界 |
+|---|---|---|
+| 已接入 | 原版熔炉/高炉/烟熏炉；Brick Furnace 熔炉/高炉/烟熏炉；普通 Iron Furnaces / 工厂炉道；Aether Freezer / Altar | 输入缓冲，逐次加工；砖炉本轮新接入，须实机验证 |
+| 已接入 | Iron Furnaces 彩虹模式；Botania Mana Pool；Botania Elven Trade；Pure Daisy | 彩虹为原生倍率；Mana Pool 为原生多份；Elven Trade 为原生连续队列；Pure Daisy 按最多八个独立邻位分片 |
+| 已接入 | Goety Cursed/Grim Infuser、Awaken Dark Mender；Apprentice Codex Essence Smoker；Malum Spirit Crucible / Spirit Altar | 各自受槽位、催化剂、魔力或世界输出容量限制 |
+| 已接入 | Forbidden & Arcanus Clibano；Enchantal Cooler；Farmer's Delight Cooking Pot；Miner's Delight Copper Pot；Youkai Moka Pot | 按真实输入/容器/输出槽分别规划；有 remainder 风险或不稳定产量的配方回退单次 |
+| 明确不做单机预装 | Aether Incubator；Botania Runic Altar、Petal Apothecary、Brewery、Terra Plate；Malum Runic Workbench | 实体输出、需要每次人工/额外交互、或无法确认连续多份结算；多机器并行不等于单机预装 |
+| 尚未迁入结构化批量合同 | Clibano 同一订单同时占两条 lane、Iron 工厂的完整六槽多端口合同、Apprentice Codex Spellcaster Workbench，以及未逐机审计的 Embers/TACZ/Wizards Reborn 等旧 delegate | 仍可通过各自旧路径执行已支持的配方；不能据此认为整模组不兼容递归合成 |
+
+### 24.17 用户实机排除项与下一轮迁移边界
+
+用户确认以下机器**不支持本项目所需的单机批量预装**。这里是用户实测边界，不等同于对所有模组版本/配方的源码证明；保留现有单份递归合成及多台机器并行，不为它们添加批量配置或继续扫描预装能力。
+
+| 类别 | 机器 |
+|---|---|
+| 厨具/处理设备 | Crock Pot 炖锅；Farmer's Respite 水壶；妖怪归乡发酵罐、蒸笼、水壶、矮锅、短锅、汤锅；原版酿造台；Ars Nouveau 灌注室；Mythic Botany 魔力灌注器；Eidolon 坩埚；Wizard's Reborn 结晶器、奥术工作台、奥术迭代器、晶体仪式；Crabber's Delight 捕蟹笼 |
+| 仪式/世界交互 | Ars Nouveau 附魔装置、抄写台；Goety 黑暗祭坛、死灵火盆；Forbidden & Arcanus 赫菲斯托斯锻炉仪式；Distant Worlds Lithum Altar；Touhou Little Maid 祭坛；Wishing Fountain 许愿池；Aetherworks 以太锭铁砧、工具站；Farmer's Delight 煎锅/营火；Crock Pot 鸟笼；Botania / MythicBotany Mana Infuser |
+
+注意：此处排除的是这些机器的**新增批量预装方案**，不是删除已经存在的 delegate、普通配方兼容、原生多份或跨机器并行。上一节“已接入”的代码状态与此处用户当前环境的实测判断有重叠时，应按具体机器、版本及配方分别验证，不能从表格推断全部配方均有批量收益。
+
+工作台/即时执行类的旧 delegate 已由 `IBatchDelegate.startOperation` 兼容到统一的 `OperationStartContext`，但实际菜单每次仍须插入配方输入、取出成品并执行 `onTake`，因此暂不宣称一次预装 N 份。TACZ 的通用 delegate、Apprentice Codex / IssCsw 反射菜单、Apotheosis 菜单、Avaritia 工作台等继续单次物理执行。后续逐个迁移的重点是声明稳定材料身份、实际副产物和失败回收合同，而非把菜单堆叠容量当成原生批量能力。
+
+Iron Furnaces 工厂现在以一个逻辑材料预留为源，在每个物理窗口映射到最多六组**真实租约**的输入槽 `7..12` 与输出槽 `13..18`；即使租约不连续，也在写入任何槽之前验证窗口能完整容纳，避免六份物理槽被当作六份独立预留。普通工厂把队列尽量均分到六道以缩短逐件处理时间，彩虹工厂则先填满一条炉道再使用下一条，保留整批倍率语义。捕获和清空仅访问本 worker 已投料的炉道，其他 worker 的输出不能被拿走。原有跨窗口队列、完整产量等待继续保留。这个 `IronFactoryLanePlan` 是工厂专用物理布局；尚未把六炉道伪装成通用 `InputBufferContract` 的六个独立 entry，也没有启用按固定单窗口端口分账，因为大订单会跨多个窗口且该模组出炉槽的时序并不稳定。通用合同要支持“一逻辑 entry -> 多物理槽”的投影，才适合进一步统一。
+
+复用材料的并行聚合现在是**显式 opt-in**：Malum Spirit Crucible 仅在可缓冲且催化剂确实可复用时启用。Farmer's Delight Cutting Board 还必须探测到新版三参数 `rollResults(RandomSource, int, RecipeWrapper)` 合同，普通平铺路径与递归图 worker 才可在一次内存事务中逐次滚动结果、损耗同一工具（最多 64 次）；旧版两参数合同强制一次只切一份。调度对每 worker 只保留一次催化剂/工具，其余消耗材料按操作数聚合，并对每行做物品/NBT 与催化剂计数校验；未 opt-in 的旧 delegate 仍限定单份。失败、工具耐久、世界掉落和退款仍需实机分别验证，不把这一合同自动推广到任何其他仪式或工作台。
+
+即时逻辑复核后，Market、通用即时配方、TACZ、反射菜单工作台、Apotheosis 和 Avaritia 继续保留现有同步事务；它们没有机器轮询等待，当前也没有必要为“形式统一”增加一层批量循环。PMMO Salvage 单独处理：界面中的数量语义是“回收尝试次数”，随机未命中所选目标属于合法结果，不能再让整条订单进入失败；每次尝试产生的所有其他回收物和 XP 仍按实际结果保留。PMMO 每批仍同时受 `craftingOperationsPerDispatch`（默认 32）与内部 256 次硬上限约束。等级门槛和等级加成概率改为每批预计算一次，实际随机数调用次数和输出顺序不变，避免在大批次的每次尝试中重复遍历等级 Map。
+
+另据 `2026-09-20 18:58` 的失败报告：`youkaishomecoming:sweet_ormosia_mochi_mixed_boiled` 在普通 Cooking Pot 下单六份时，结构化输出结算报告 `expected=6 actual=0`。根因是该 delegate 声明了 `SLOT` 输出合同却未实现 `collectStructuredResults()`，导致此结算路径即使取到物理产物也只收到空列表；继承它的铜锅亦受影响。现已将原 `collectResult()` 的真实产物映射到对应输出端口，并覆盖两种锅的回归测试。报告不能单独证明机器当时是否真的产出了六份；更新后仍须在同一配方上重测输出数量与实际物理槽状态。

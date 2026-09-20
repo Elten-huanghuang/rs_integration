@@ -8,7 +8,13 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -68,6 +74,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     private int suppliedInputCount;
     private ItemStack suppliedFuel = ItemStack.EMPTY;
     private int suppliedFuelCount;
+    private int plannedOperations = 1;
+    private int activeOperations = 1;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -88,6 +96,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         this.recipe = found;
+        this.plannedOperations = 1;
+        this.activeOperations = 1;
         resetInventoryOwnership();
         BlockEntity be = level.getBlockEntity(pos);
         this.isIncubator = be != null && be.getClass().getName().endsWith(".IncubatorBlockEntity");
@@ -127,6 +137,98 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             return handler.getIngredients(recipe);
         }
         return CraftPacketUtils.extractIngredientSpecs(recipe);
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = inputBufferPlan(remainingOperations).operations();
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int capacity = supportsInputBuffer()
+                ? inputBufferPlan(Math.max(1, totalOperations)).operations() : 1;
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount,
+                Math.max(1, capacity));
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), aetherInputBufferLimit())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        if (!aetherInputBufferEnabled() || isIncubator || recipe == null || myLevel == null
+                || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.size() != 1) return false;
+        IngredientSpec input = specs.get(0);
+        if (input == null || input.isEmpty() || input.role() != DemandRole.CONSUMED
+                || input.count() <= 0) return false;
+        return !resultItem().isEmpty() && !ingredientPrototype(input).isEmpty();
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : getInventory(be);
+        if (handler == null || handler.getSlots() < 3) return InputBufferContract.none();
+        IngredientSpec input = getRequiredMaterials().get(0);
+        ItemStack prototype = ingredientPrototype(input);
+        ItemStack output = resultItem();
+        int inputCapacity = Math.min(handler.getSlotLimit(0), prototype.getMaxStackSize());
+        int outputCapacity = Math.min(handler.getSlotLimit(2), output.getMaxStackSize());
+        int operations = bufferedOperationCapacity(aetherInputBufferLimit(),
+                input.count(), inputCapacity, output.getCount(), outputCapacity);
+        if (operations <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operations,
+                List.of(new InputBufferContract.InputSlot(
+                        "legacy:material:0", 0, prototype, input.count(), false,
+                        inputCapacity)),
+                List.of(new OutputContract.Port(
+                        "aether:furnace:output", 2, output, output.getCount(),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()
+                || plan.inputs().size() != 1) return false;
+        InputBufferPlan.InputSlot input = plan.inputs().get(0);
+        IngredientSpec spec = getRequiredMaterials().get(0);
+        long required = (long) spec.count() * plan.operations();
+        if (!"legacy:material:0".equals(input.entryId()) || input.slot() != 0
+                || input.reusable() || input.perOperation() != spec.count()
+                || required > Integer.MAX_VALUE || input.stack().getCount() != (int) required) {
+            return false;
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterialsImpl(player, List.of(input.stack().copy()), true);
     }
 
     @Override
@@ -201,7 +303,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
         // ── Phase 1: Insert into input slot (slot 0 for all three machines) ──
         if (!materials.isEmpty() && !materials.get(0).isEmpty()) {
-            ItemStack toInsert = materials.get(0).copyWithCount(1);
+            ItemStack toInsert = materials.get(0).copy();
             if (!handler.insertItem(0, toInsert, true).isEmpty()) {
                 resetInventoryOwnership();
                 forceChunkLoad(false);
@@ -231,6 +333,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
 
         be.setChanged();
+        activeOperations = supportsInputBuffer() ? Math.max(1, plannedOperations) : 1;
         markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Materials inserted at {}, waiting for cooking", myPos);
         return true;
@@ -253,7 +356,11 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             // Output may already have been extracted after the input was consumed.
-            return matchesExpectedOutput(furnace.getItem(2)) || furnace.getItem(0).isEmpty();
+            ExpectedProduction expected = getExpectedProduction();
+            ItemStack output = furnace.getItem(2);
+            if (expected != null && matchesExpectedOutput(output)
+                    && output.getCount() >= expected.count()) return true;
+            return furnace.getItem(0).isEmpty();
         }
 
         // Incubator: no output slot; completion is detected by cooking progress
@@ -352,8 +459,20 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ExpectedProduction getExpectedProduction() {
         if (isIncubator || recipe == null || myLevel == null) return null;
-        ItemStack result = ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
-        return result.isEmpty() ? null : new ExpectedProduction(result, result.getCount());
+        ItemStack result = resultItem();
+        if (result.isEmpty()) return null;
+        long count = (long) result.getCount() * Math.max(1, activeOperations);
+        return count > Integer.MAX_VALUE ? null : new ExpectedProduction(result, (int) count);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack result = resultItem();
+        return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
+                new OutputContract.Port("aether:furnace:output", 2, result,
+                        result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        OutputContract.Source.SLOT)));
     }
 
     // ── plan warnings ──
@@ -513,6 +632,43 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return expected != null && IBatchDelegate.matchesProducedItem(output, expected.item());
     }
 
+    private ItemStack resultItem() {
+        return recipe == null || myLevel == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        return java.util.Arrays.stream(spec.ingredient().getItems())
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+    }
+
+    static int bufferedOperationCapacity(int configuredLimit, int inputPerOperation,
+                                         int inputCapacity, int outputPerOperation,
+                                         int outputCapacity) {
+        if (configuredLimit <= 0 || inputPerOperation <= 0 || inputCapacity <= 0
+                || outputPerOperation <= 0 || outputCapacity <= 0) return 0;
+        return Math.max(0, Math.min(configuredLimit,
+                Math.min(inputCapacity / inputPerOperation,
+                        outputCapacity / outputPerOperation)));
+    }
+
+    private static boolean aetherInputBufferEnabled() {
+        try {
+            return RSIntegrationConfig.ENABLE_AETHER_FURNACE_INPUT_BUFFER.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return true;
+        }
+    }
+
+    private static int aetherInputBufferLimit() {
+        try {
+            return RSIntegrationConfig.AETHER_FURNACE_INPUT_BUFFER_LIMIT.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return 64;
+        }
+    }
+
     private void resetInventoryOwnership() {
         inventoryLease = false;
         baselineFuel = ItemStack.EMPTY;
@@ -520,6 +676,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         suppliedInputCount = 0;
         suppliedFuel = ItemStack.EMPTY;
         suppliedFuelCount = 0;
+        plannedOperations = 1;
+        activeOperations = 1;
     }
 
     /** Refund any unconsumed fuel left in slot 1 back to RS (or the player). */

@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CookingMachineFamilyTest {
@@ -43,6 +45,23 @@ class CookingMachineFamilyTest {
 
         assertEquals(BatchConcurrencyCapabilities.machineSlot(),
                 delegate.concurrencyCapabilities());
-        assertTrue(delegate.supportsConcurrentNodeExecution());
+    }
+
+    @Test
+    void brickBufferIsExplicitlyScopedAndDefaultsToEnabled() {
+        for (String path : new String[]{"brick_furnace", "brick_blast_furnace", "brick_smoker"}) {
+            assertTrue(VanillaMachineBatchDelegate.supportsFurnaceBufferTarget(
+                    new ResourceLocation("brickfurnace", path), true));
+        }
+        assertTrue(VanillaMachineBatchDelegate.supportsFurnaceBufferTarget(
+                new ResourceLocation("minecraft", "furnace"), false));
+        assertFalse(VanillaMachineBatchDelegate.supportsFurnaceBufferTarget(
+                new ResourceLocation("other", "furnace"), false));
+        assertFalse(VanillaMachineBatchDelegate.supportsFurnaceBufferTarget(
+                new ResourceLocation("minecraft", "furnace"), true));
+        assertFalse(VanillaMachineBatchDelegate.supportsFurnaceBufferTarget(
+                new ResourceLocation("brickfurnace", "brick_furnace"), false));
+        assertTrue(RSIntegrationConfig.ENABLE_BRICK_FURNACE_INPUT_BUFFER.getDefault());
+        assertEquals(64, RSIntegrationConfig.BRICK_FURNACE_INPUT_BUFFER_LIMIT.getDefault());
     }
 }

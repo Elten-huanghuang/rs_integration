@@ -65,9 +65,7 @@ public final class GraphConcurrencyPolicy {
         BatchConcurrencyCapabilities capabilities = recipeCapabilities != null
                 ? recipeCapabilities : delegate.concurrencyCapabilities();
         if (capabilities == null) {
-            return Decision.deny(delegate.supportsConcurrentNodeExecution()
-                    ? "legacy boolean lacks capability contract"
-                    : "delegate has no concurrency capability", null);
+            return Decision.deny("delegate has no concurrency capability", null);
         }
         if (capabilities.materials()
                 != BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED) {
