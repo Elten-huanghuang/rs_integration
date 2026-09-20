@@ -97,6 +97,8 @@ public final class PlanRequestService implements AutoCloseable {
     public void submitMaxCraftable(PlanningSnapshot snapshot, int limit, Executor serverExecutor,
                                    int maxSteps, Consumer<MaxCraftableResult> commit,
                                    Consumer<Throwable> rollback) {
+        PlanningProgressServer.queued(snapshot.playerId(), snapshot.requestGeneration(),
+                PlanningProgressSnapshot.Phase.SEARCH);
         maxCraftablePlanning.submit(snapshot, limit, serverExecutor, maxSteps,
                 maxSearchStates, maxMemoizedFailures, pureTimeoutMs,
                 result -> commit.accept(new MaxCraftableResult(result.determined(), result.maximum(),

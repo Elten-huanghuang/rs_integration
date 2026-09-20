@@ -43,6 +43,8 @@ public final class AsyncPurePlanningService {
                        int timeoutMs,
                        Consumer<CompletedPlan> commit, Consumer<Throwable> rollback) {
         if (snapshot.mainThreadOnly()) {
+            PlanningProgressServer.running(snapshot.playerId(), snapshot.requestGeneration(),
+                    PlanningProgressSnapshot.Phase.SPECIAL_RECIPE);
             serverExecutor.execute(() -> rollback.accept(
                     new PlanningThreadContext.MainThreadPlanningFallbackException("special recipe planning")));
             return;
@@ -52,6 +54,8 @@ public final class AsyncPurePlanningService {
                 snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
+        PlanningProgressServer.queued(snapshot.playerId(), snapshot.requestGeneration(),
+                PlanningProgressSnapshot.Phase.SEARCH);
         coordinator.submitShared(key, snapshot, ignored -> compute(snapshot, repeatCount, maxSteps,
                         maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
@@ -76,6 +80,8 @@ public final class AsyncPurePlanningService {
                 snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
+        PlanningProgressServer.queued(snapshot.playerId(), snapshot.requestGeneration(),
+                PlanningProgressSnapshot.Phase.DEPENDENCIES);
         coordinator.submitShared(new RoutedKey(planning, routing,
                         List.copyOf(routing.available().entrySet())), snapshot,
                 ignored -> computeRouted(snapshot, routing, repeatCount, maxSteps,
@@ -92,12 +98,12 @@ public final class AsyncPurePlanningService {
             PlanningThreadContext.throwIfCancelled();
             PlanningSession session = new PlanningSession(snapshot.requestGeneration(), timeoutMs);
             long started = session.startedNanos();
-            session.phase(PlanningSession.Phase.DEPENDENCY_PROJECTION);
+            setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
             ImmutableRecipeGraph scopedGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
                     snapshot.recipeGraph(), snapshot.recipeId());
             PureDemandTreeInspector.Result inspection;
             try {
-                session.phase(PlanningSession.Phase.DEMAND_TREE);
+                setPhase(session, snapshot, PlanningSession.Phase.DEMAND_TREE);
                 inspection = PureDemandTreeInspector.inspectWithDeadline(scopedGraph,
                         routing.available(), snapshot.recipeId(), repeatCount, routing.maxNodes(),
                         routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
@@ -129,10 +135,10 @@ public final class AsyncPurePlanningService {
                                                             PlanningSession session,
                                                             ImmutableRecipeGraph routedGraph) {
         PlanningThreadContext.throwIfCancelled();
-        session.phase(PlanningSession.Phase.PREPARATION);
+        setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
-        session.phase(PlanningSession.Phase.DEPENDENCY_PROJECTION);
+        setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
         ImmutableRecipeGraph scopedGraph = routedGraph != null ? routedGraph
                 : ImmutableRecipeGraphProjector.restrictToDependencies(
                         snapshot.recipeGraph(), snapshot.recipeId());
@@ -146,7 +152,7 @@ public final class AsyncPurePlanningService {
         }
         List<IngredientRef> roots = SelfAmplifyingRecipePolicy.scaleTargetInputs(
                 target, repeatCount);
-        session.phase(PlanningSession.Phase.RECURSIVE_SEARCH);
+        setPhase(session, snapshot, PlanningSession.Phase.RECURSIVE_SEARCH);
         long searchStarted = System.nanoTime();
         long deadlineNanos = session.deadlineNanos();
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
@@ -165,6 +171,21 @@ public final class AsyncPurePlanningService {
                     lookupStats.outputIndexBuilds(), lookupStats.outputScans());
         }
         return result;
+    }
+
+    private static void setPhase(PlanningSession session, PlanningSnapshot snapshot,
+                                 PlanningSession.Phase phase) {
+        session.phase(phase);
+        PlanningProgressSnapshot.Phase visible = switch (phase) {
+            case PREPARATION -> PlanningProgressSnapshot.Phase.PREPARING;
+            case DEPENDENCY_PROJECTION -> PlanningProgressSnapshot.Phase.DEPENDENCIES;
+            case DEMAND_TREE -> PlanningProgressSnapshot.Phase.DEMAND_TREE;
+            case INVENTORY_BINDING, SMITHING_STATE_BINDING -> PlanningProgressSnapshot.Phase.INVENTORY;
+            case RECURSIVE_SEARCH -> PlanningProgressSnapshot.Phase.SEARCH;
+            case RESULT_HANDOFF -> PlanningProgressSnapshot.Phase.FINALIZING;
+            case QUEUED, UNKNOWN -> PlanningProgressSnapshot.Phase.PREPARING;
+        };
+        PlanningProgressServer.running(snapshot.playerId(), snapshot.requestGeneration(), visible);
     }
 
     static long deadlineAfterMillis(long startedNanos, int timeoutMs) {

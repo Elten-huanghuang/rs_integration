@@ -82,10 +82,13 @@ public final class PlanPreviewClient {
 
         // Send preview request to server via the batch-craft channel.
         // preview=true → server computes and returns a PlanResponse without executing.
+        long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                requestId, recipeId);
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(recipeId, true,
                         pendingForcedSlots != null ? pendingForcedSlots : Map.of(),
-                        null, null, pendingRepeatCount));
+                        null, null, pendingRepeatCount, false, null, null, requestId));
     }
 
     /** Cancel any pending debounce (e.g. when the screen is closed). */

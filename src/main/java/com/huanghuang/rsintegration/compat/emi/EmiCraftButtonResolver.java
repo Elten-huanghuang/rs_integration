@@ -336,16 +336,28 @@ final class EmiCraftButtonResolver {
                                                BlockPos machinePos, String filter, ItemStack base,
                                                ItemStack targetOutput) {
         if ("generic".equals(filter)) {
-            return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(recipeId, true));
+            return () -> {
+                long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+                com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                        requestId, recipeId);
+                BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
+                        recipeId, true, java.util.Map.of(), null, null, 1, false,
+                        null, null, requestId));
+            };
         }
         if ("block.minecraft.anvil".equals(filter)) {
             return () -> openMachine(dimension, machinePos, recipeId, null);
         }
         ItemStack capturedBase = base.isEmpty() ? null : base.copy();
         ItemStack capturedOutput = targetOutput.isEmpty() ? null : targetOutput.copy();
-        return () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
-                new GenericCraftPacket(recipeId, true, dimension, machinePos, 1, false,
-                        capturedBase, capturedOutput));
+        return () -> {
+            long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                    requestId, recipeId);
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
+                    recipeId, true, java.util.Map.of(), dimension, machinePos, 1, false,
+                    capturedBase, capturedOutput, requestId));
+        };
     }
 
     private static void openMachine(ResourceLocation dimension, BlockPos position,
