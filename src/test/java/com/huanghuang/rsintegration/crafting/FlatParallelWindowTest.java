@@ -48,6 +48,25 @@ class FlatParallelWindowTest extends BootstrapTest {
                 .anyMatch(call -> call.contains("IBatchDelegate#flatBatchOperationLimit")));
     }
 
+    @Test
+    void parallelDispatchAddsIndependentPhysicalBufferCapacities() {
+        assertEquals(32, AsyncCraftChain.combinedParallelDispatchLimit(32, List.of()));
+        assertEquals(64, AsyncCraftChain.combinedParallelDispatchLimit(32, List.of(64)));
+        assertEquals(256, AsyncCraftChain.combinedParallelDispatchLimit(
+                32, List.of(64, 64, 64, 64)));
+        assertEquals(128, AsyncCraftChain.flatDispatchWindow(128,
+                AsyncCraftChain.combinedParallelDispatchLimit(
+                        32, List.of(64, 64, 64, 64))));
+    }
+
+    @Test
+    void invalidPhysicalCapacitiesCannotLowerTheConfiguredSafetyBaseline() {
+        assertEquals(32, AsyncCraftChain.combinedParallelDispatchLimit(
+                32, java.util.Arrays.asList(null, 0, -1)));
+        assertEquals(Integer.MAX_VALUE, AsyncCraftChain.combinedParallelDispatchLimit(
+                32, List.of(Integer.MAX_VALUE, Integer.MAX_VALUE)));
+    }
+
     private static int indexOfCall(List<String> calls, String fragment) {
         for (int index = 0; index < calls.size(); index++) {
             if (calls.get(index).contains(fragment)) return index;
