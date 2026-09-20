@@ -16,6 +16,20 @@ import static org.mockito.Mockito.when;
 class StorageQuestScanServiceTest extends BootstrapTest {
 
     @Test
+    void automaticScanOnlyKeepsNewlyUnlockedTasks() {
+        assertEquals(List.of(3L, 4L),
+                QuestTaskAvailability.newlyAvailableTaskIds(
+                        List.of(1L, 2L), List.of(1L, 3L, 2L, 4L)));
+    }
+
+    @Test
+    void resetTaskIsNotTreatedAsNewlyUnlocked() {
+        assertEquals(List.of(),
+                QuestTaskAvailability.newlyAvailableTaskIds(
+                        List.of(10L), List.of(10L)));
+    }
+
+    @Test
     void inventorySnapshotIncludesEveryVanillaAndProvidedCuriosSlot() {
         ServerPlayer player = mock(ServerPlayer.class);
         Inventory inventory = new Inventory(player);

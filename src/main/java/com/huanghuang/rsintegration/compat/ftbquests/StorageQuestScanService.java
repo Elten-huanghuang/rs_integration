@@ -23,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Performs explicit, one-shot FTB item-task detection against storage or player items. */
@@ -36,10 +38,11 @@ public final class StorageQuestScanService {
     private static final int TASKS_PER_SERVER_PER_TICK = 32;
     private static final long AUTOMATIC_SCAN_DELAY_TICKS = 2L;
     private static final long AUTOMATIC_SCAN_RETRY_TICKS = 20L;
+    private static final long AUTOMATIC_SCAN_TIMEOUT_TICKS = 200L;
     private static final int AUTOMATIC_SCANS_PER_TICK = 2;
     private static final Map<UUID, Long> LAST_TEAM_REQUEST = new HashMap<>();
     private static final Map<UUID, ScanJob> ACTIVE_JOBS = new HashMap<>();
-    private static final Map<UUID, Long> PENDING_AUTOMATIC_SCANS = new HashMap<>();
+    private static final Map<UUID, PendingAutomaticScan> PENDING_AUTOMATIC_SCANS = new HashMap<>();
 
     private StorageQuestScanService() {
     }
@@ -78,19 +81,45 @@ public final class StorageQuestScanService {
         startScan(player, request, ScanKind.STORAGE, items);
     }
 
-    /** Queues a silent current-state scan after a completion may unlock more tasks. */
-    public static void scheduleRetrospectiveScan(TeamData data) {
-        if (!ExternalItemProgressBridge.isEnabled() || data == null) return;
-        Collection<ServerPlayer> members = data.getOnlineMembers();
-        if (members == null) return;
-        for (ServerPlayer member : members) scheduleRetrospectiveScan(member);
+    /** Captures the item tasks which can accept progress at this exact point in time. */
+    public static Set<Long> snapshotAvailableTaskIds(TeamData data) {
+        if (!ExternalItemProgressBridge.isEnabled() || data == null) return Set.of();
+        ServerQuestFile file = ServerQuestFile.INSTANCE;
+        if (file == null || file.isLoading() || data.isLocked()) return Set.of();
+
+        Set<Long> taskIds = new LinkedHashSet<>();
+        for (Task task : file.getSubmitTasks()) {
+            if (task instanceof ItemTask itemTask && isAvailable(data, itemTask)) {
+                taskIds.add(FtbQuestObjectId.getId(itemTask));
+            }
+        }
+        return taskIds;
     }
 
-    /** Also catches tasks which were already unlocked before the player joined. */
-    public static void scheduleRetrospectiveScan(ServerPlayer player) {
-        if (!ExternalItemProgressBridge.isEnabled() || player == null) return;
-        long dueTick = (long) player.server.getTickCount() + AUTOMATIC_SCAN_DELAY_TICKS;
-        PENDING_AUTOMATIC_SCANS.merge(player.getUUID(), dueTick, Math::min);
+    /** Queues only item tasks made available by the completion which just occurred. */
+    public static void scheduleNewlyAvailableScan(TeamData data, Collection<Long> availableBefore) {
+        if (!ExternalItemProgressBridge.isEnabled() || data == null) return;
+        List<Long> taskIds = QuestTaskAvailability.newlyAvailableTaskIds(
+                availableBefore, snapshotAvailableTaskIds(data));
+        if (taskIds.isEmpty()) return;
+
+        Collection<ServerPlayer> members = data.getOnlineMembers();
+        if (members == null) return;
+        for (ServerPlayer member : members) {
+            if (member == null) continue;
+            long now = member.server.getTickCount();
+            long dueTick = now + AUTOMATIC_SCAN_DELAY_TICKS;
+            long deadlineTick = now + AUTOMATIC_SCAN_TIMEOUT_TICKS;
+            PENDING_AUTOMATIC_SCANS.compute(member.getUUID(), (playerId, pending) -> {
+                if (pending == null) {
+                    return new PendingAutomaticScan(dueTick, deadlineTick, taskIds);
+                }
+                pending.taskIds.addAll(taskIds);
+                pending.dueTick = Math.min(pending.dueTick, dueTick);
+                pending.deadlineTick = Math.max(pending.deadlineTick, deadlineTick);
+                return pending;
+            });
+        }
     }
 
     private static ScanRequest beginRequest(ServerPlayer player) {
@@ -120,6 +149,12 @@ public final class StorageQuestScanService {
                 taskIds.add(FtbQuestObjectId.getId(itemTask));
             }
         }
+        startScan(player, request, kind, items, taskIds);
+    }
+
+    private static void startScan(ServerPlayer player, ScanRequest request,
+                                  ScanKind kind, List<QuestScanItems.Entry> items,
+                                  Collection<Long> taskIds) {
         if (taskIds.isEmpty()) {
             if (kind.noneKey != null) {
                 player.sendSystemMessage(Component.translatable(kind.noneKey));
@@ -189,10 +224,16 @@ public final class StorageQuestScanService {
         }
         long now = server.getTickCount();
         int started = 0;
-        Iterator<Map.Entry<UUID, Long>> iterator = PENDING_AUTOMATIC_SCANS.entrySet().iterator();
+        Iterator<Map.Entry<UUID, PendingAutomaticScan>> iterator =
+                PENDING_AUTOMATIC_SCANS.entrySet().iterator();
         while (iterator.hasNext() && started < AUTOMATIC_SCANS_PER_TICK) {
-            Map.Entry<UUID, Long> entry = iterator.next();
-            if (entry.getValue() > now) continue;
+            Map.Entry<UUID, PendingAutomaticScan> entry = iterator.next();
+            PendingAutomaticScan pending = entry.getValue();
+            if (now > pending.deadlineTick) {
+                iterator.remove();
+                continue;
+            }
+            if (pending.dueTick > now) continue;
 
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null) {
@@ -202,21 +243,22 @@ public final class StorageQuestScanService {
             ServerQuestFile file = ServerQuestFile.INSTANCE;
             TeamData data = TeamData.get(player);
             if (file == null || file.isLoading() || data == null || data.isLocked()) {
-                entry.setValue(now + AUTOMATIC_SCAN_RETRY_TICKS);
+                pending.retryAt(now);
                 continue;
             }
             if (ACTIVE_JOBS.containsKey(data.getTeamId())) {
-                entry.setValue(now + AUTOMATIC_SCAN_RETRY_TICKS);
+                pending.retryAt(now);
                 continue;
             }
 
             iterator.remove();
-            startAutomaticScan(player, new ScanRequest(file, data.getTeamId()));
+            startAutomaticScan(player, new ScanRequest(file, data.getTeamId()), pending.taskIds);
             started++;
         }
     }
 
-    private static void startAutomaticScan(ServerPlayer player, ScanRequest request) {
+    private static void startAutomaticScan(ServerPlayer player, ScanRequest request,
+                                           Collection<Long> taskIds) {
         List<QuestScanItems.Entry> items = new ArrayList<>();
         List<ItemStack> curios = CuriosAccess.isPresent()
                 ? CuriosAccess.stacks(player) : List.of();
@@ -236,7 +278,7 @@ public final class StorageQuestScanService {
                     player.getGameProfile().getName(), exception);
         }
 
-        startScan(player, request, ScanKind.AUTOMATIC, items);
+        startScan(player, request, ScanKind.AUTOMATIC, items, taskIds);
     }
 
     private static int processBatch(ServerPlayer player, UUID expectedTeamId,
@@ -368,6 +410,22 @@ public final class StorageQuestScanService {
         private void cancel() {
             cancelled = true;
             cursor = taskIds.size();
+        }
+    }
+
+    private static final class PendingAutomaticScan {
+        private long dueTick;
+        private long deadlineTick;
+        private final Set<Long> taskIds;
+
+        private PendingAutomaticScan(long dueTick, long deadlineTick, Collection<Long> taskIds) {
+            this.dueTick = dueTick;
+            this.deadlineTick = deadlineTick;
+            this.taskIds = new LinkedHashSet<>(taskIds);
+        }
+
+        private void retryAt(long now) {
+            dueTick = Math.min(deadlineTick, now + AUTOMATIC_SCAN_RETRY_TICKS);
         }
     }
 }

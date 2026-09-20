@@ -669,10 +669,6 @@ public final class RSIntegrationMod {
                 if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
                     RSOptionalBootstrap.onPlayerLoggedIn(sp);
                 }
-                if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
-                    com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService
-                            .scheduleRetrospectiveScan(sp);
-                }
                 sp.server.execute(() -> com.huanghuang.rsintegration.crafting.RecipeIndex
                         .refreshDynamicRuntimeIfNeeded(sp.server.overworld()));
             }
