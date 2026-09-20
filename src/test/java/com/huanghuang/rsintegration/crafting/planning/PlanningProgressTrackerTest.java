@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class PlanningProgressTrackerTest {
     private static final ResourceLocation RECIPE = new ResourceLocation("minecraft", "stick");
@@ -41,6 +42,26 @@ class PlanningProgressTrackerTest {
         assertNotNull(current);
         assertEquals(5L, current.requestGeneration());
         assertEquals(PlanningProgressSnapshot.Phase.SEARCH, current.phase());
+    }
+
+    @Test
+    void matchingPlanResponseClearsOnlyItsOwnCard() {
+        PlanningProgressTracker.start(10L, RECIPE);
+        PlanningProgressTracker.responseReceived(9L);
+        assertNotNull(PlanningProgressTracker.current());
+
+        PlanningProgressTracker.responseReceived(10L);
+        assertNull(PlanningProgressTracker.current());
+    }
+
+    @Test
+    void successFallbackIsBriefButFailuresRemainReadable() {
+        assertEquals(400L, PlanningProgressTracker.terminalVisibleMillis(
+                PlanningProgressSnapshot.State.SUCCEEDED));
+        assertEquals(3_000L, PlanningProgressTracker.terminalVisibleMillis(
+                PlanningProgressSnapshot.State.FAILED));
+        assertEquals(3_000L, PlanningProgressTracker.terminalVisibleMillis(
+                PlanningProgressSnapshot.State.TIMED_OUT));
     }
 
     @Test
