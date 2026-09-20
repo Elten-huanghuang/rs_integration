@@ -48,31 +48,34 @@ public final class StorageQuestScanService {
         ScanRequest request = beginRequest(player);
         if (request == null) return;
 
-        Optional<CraftStorageEndpoint> endpoint = StorageRestockSupport.resolve(player);
-        if (endpoint.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.storage_scan.no_network"));
-            return;
-        }
-
-        StorageSnapshotResult snapshotResult = endpoint.orElseThrow().snapshot(player);
-        Optional<StorageSnapshot> snapshot = snapshotResult.snapshot();
-        if (!snapshotResult.successful() || snapshot.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.storage_scan.failed"));
-            return;
-        }
-
-        startScan(player, request, ScanKind.STORAGE, snapshotItems(snapshot.orElseThrow()));
-    }
-
-    /** Scans the complete player inventory and, when installed, every Curios slot. */
-    public static void requestInventoryScan(ServerPlayer player) {
-        ScanRequest request = beginRequest(player);
-        if (request == null) return;
-
+        List<QuestScanItems.Entry> items = new ArrayList<>();
         List<ItemStack> curios = CuriosAccess.isPresent()
                 ? CuriosAccess.stacks(player) : List.of();
-        startScan(player, request, ScanKind.INVENTORY,
-                QuestScanItems.fromPlayer(player, curios));
+        items.addAll(QuestScanItems.fromPlayer(player, curios));
+
+        try {
+            Optional<CraftStorageEndpoint> endpoint = StorageRestockSupport.resolve(player);
+            if (endpoint.isEmpty()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.ftb_quest.storage_scan.no_network"));
+            } else {
+                StorageSnapshotResult result = endpoint.orElseThrow().snapshot(player);
+                Optional<StorageSnapshot> snapshot = result.snapshot();
+                if (result.successful() && snapshot.isPresent()) {
+                    items.addAll(snapshotItems(snapshot.orElseThrow()));
+                } else {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.ftb_quest.storage_scan.failed"));
+                }
+            }
+        } catch (RuntimeException | LinkageError exception) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-FTBQuests] Full item-task storage snapshot unavailable for {}",
+                    player.getGameProfile().getName(), exception);
+            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.storage_scan.failed"));
+        }
+
+        startScan(player, request, ScanKind.STORAGE, items);
     }
 
     /** Queues a silent current-state scan after a completion may unlock more tasks. */
@@ -319,9 +322,6 @@ public final class StorageQuestScanService {
         STORAGE("storage", "rsi.ftb_quest.storage_scan.started",
                 "rsi.ftb_quest.storage_scan.failed", "rsi.ftb_quest.storage_scan.completed",
                 "rsi.ftb_quest.storage_scan.none"),
-        INVENTORY("inventory", "rsi.ftb_quest.inventory_scan.started",
-                "rsi.ftb_quest.inventory_scan.failed", "rsi.ftb_quest.inventory_scan.completed",
-                "rsi.ftb_quest.inventory_scan.none"),
         AUTOMATIC("automatic", null, null, null, null);
 
         private final String logName;

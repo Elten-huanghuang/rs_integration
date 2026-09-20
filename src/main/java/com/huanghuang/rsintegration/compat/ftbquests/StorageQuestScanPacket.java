@@ -5,7 +5,7 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/** Requests one server-authoritative scan of the selected storage network. */
+/** Requests one server-authoritative scan of storage, inventory, equipment and Curios. */
 public final class StorageQuestScanPacket {
 
     public static void encode(StorageQuestScanPacket packet, FriendlyByteBuf buffer) {

@@ -10,7 +10,7 @@ import dev.ftb.mods.ftbquests.client.gui.quests.TabButton;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 
-/** Runs one explicit storage-network scan from FTB Quests' upper sidebar. */
+/** Runs one explicit storage, inventory, equipment and Curios task scan. */
 public final class ScanStorageTasksButton extends TabButton {
 
     public ScanStorageTasksButton(Panel parent) {
@@ -24,6 +24,10 @@ public final class ScanStorageTasksButton extends TabButton {
                 .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
         tooltip.add(Component.translatable("rsi.ftb_quest.storage_scan.scope")
                 .withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("rsi.ftb_quest.storage_scan.inventory_scope")
+                .withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("rsi.ftb_quest.scan.safety")
+                .withStyle(ChatFormatting.DARK_GREEN));
         tooltip.add(Component.translatable("rsi.ftb_quest.reopen_required")
                 .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
     }
