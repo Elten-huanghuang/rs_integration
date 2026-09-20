@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.mixin.ftbquests.ItemTaskSequenceAccessor;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
 import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
@@ -29,7 +30,9 @@ final class FtbQuestCraftedItemDetector {
                         || !itemTask.isOnlyFromCrafting()
                         || itemTask.isTaskScreenOnly()
                         || teamData.isCompleted(itemTask)
-                        || !teamData.canStartTasks(itemTask.getQuest())) {
+                        || !teamData.canStartTasks(itemTask.getQuest())
+                        || !((ItemTaskSequenceAccessor) (Object) itemTask)
+                        .rsi$checkTaskSequence(teamData)) {
                     continue;
                 }
                 for (Map.Entry<MaterialKey, Long> entry : crafted.entrySet()) {

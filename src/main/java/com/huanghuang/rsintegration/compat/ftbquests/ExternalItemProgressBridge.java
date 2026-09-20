@@ -143,6 +143,10 @@ public final class ExternalItemProgressBridge {
         }
     }
 
+    static boolean isEnabled() {
+        return enabled;
+    }
+
     private static void clearPending() {
         PENDING_EXTERNAL.clear();
         PENDING_CRAFTED.clear();

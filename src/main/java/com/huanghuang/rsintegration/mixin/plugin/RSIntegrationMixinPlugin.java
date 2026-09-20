@@ -183,7 +183,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains("ftbquests.TeamDataAutoCompletionMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.quest.TeamData")
-                    && hasMethod(targetClassName, "checkAutoCompletion");
+                    && hasMethod(targetClassName, "checkAutoCompletion")
+                    && hasMethod(targetClassName, "setCompleted");
         }
         if (mixinClassName.contains("ftbquests.ClaimAllRewardsMessageMixin")) {
             return isClassPresent("dev.ftb.mods.ftbquests.net.ClaimAllRewardsMessage")
