@@ -17,5 +17,6 @@ public final class CraftProgressClientEvents {
 
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         CraftProgressTracker.clear();
+        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.clear();
     }
 }

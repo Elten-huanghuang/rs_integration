@@ -101,7 +101,6 @@ public final class CraftingPlanScreen extends Screen {
     private PlanResponse plan;
     private int currentRepeat = 1;
     private long activeRequestId;
-    private long nextRequestId = 1L;
     private int scrollOffset;
     private int maxScroll;
     private boolean dragging;
@@ -815,8 +814,7 @@ public final class CraftingPlanScreen extends Screen {
             execPos = selected == null ? null
                     : new net.minecraft.core.BlockPos(selected.x(), selected.y(), selected.z());
         }
-        long requestId = nextRequestId++;
-        if (nextRequestId <= 0 || nextRequestId > 0x7FFF_FFFF_FFFF_FFFFL) nextRequestId = 1L;
+        long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
         if (preview) activeRequestId = requestId;
         GenericCraftPacket packet = new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
@@ -824,6 +822,10 @@ public final class CraftingPlanScreen extends Screen {
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
                 .withMaterialLocks(materialLocks)
                 .withStorageReference(storageReference);
+        if (preview) {
+            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                    requestId, rid);
+        }
         if (!preview && partialPreparation) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-Preparation] sending dedicated request recipe={} repeat={} storage={}",

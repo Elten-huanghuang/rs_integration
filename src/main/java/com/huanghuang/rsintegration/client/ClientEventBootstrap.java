@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.CraftProgressKeybind;
 import com.huanghuang.rsintegration.crafting.CraftProgressOverlay;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -24,6 +25,7 @@ public final class ClientEventBootstrap {
         CraftProgressKeybind.register();
 
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
+        MinecraftForge.EVENT_BUS.register(PlanningProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.class);
         MinecraftForge.EVENT_BUS.register(
                 com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class);

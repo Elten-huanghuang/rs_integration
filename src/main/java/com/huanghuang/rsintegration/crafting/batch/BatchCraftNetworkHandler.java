@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanPacket;
 import com.huanghuang.rsintegration.util.ModIds;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import net.minecraftforge.network.simple.SimpleChannel;
@@ -41,6 +42,10 @@ public final class BatchCraftNetworkHandler {
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_PROGRESS, CraftProgressPacket.class,
                 CraftProgressPacket::encode, CraftProgressPacket::decode, CraftProgressPacket::handle,
+                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PLANNING_PROGRESS, PlanningProgressPacket.class,
+                PlanningProgressPacket::encode, PlanningProgressPacket::decode,
+                PlanningProgressPacket::handle,
                 java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_PROGRESS_DELTA, CraftProgressDeltaPacket.class,
                 CraftProgressDeltaPacket::encode, CraftProgressDeltaPacket::decode,

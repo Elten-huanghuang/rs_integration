@@ -92,6 +92,8 @@ import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressServer;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageReferenceCodec;
@@ -678,12 +680,19 @@ public final class GenericCraftPacket {
         if (packet.preview && PreviewRateLimiter.isRateLimited(player.getUUID())) {
             RSIntegrationMod.debug("[RSI-Generic] handle() DROP: rate-limited, recipeId={} player={}",
                     packet.recipeId, player.getGameProfile().getName());
-            player.sendSystemMessage(Component.translatable("rsi.plan.failure.request_pending"));
+            Component message = Component.translatable("rsi.plan.failure.request_pending");
+            player.sendSystemMessage(message);
+            context.enqueueWork(() -> PlanningProgressServer.failDirect(
+                    player, packet.requestId, packet.recipeId, message));
             context.setPacketHandled(true);
             return;
         }
         final long previewGeneration = packet.preview
                 ? PLAN_REQUESTS.begin(player.getUUID()) : 0L;
+        if (packet.preview) {
+            PlanningProgressServer.begin(player.getUUID(), packet.requestId,
+                    previewGeneration, packet.recipeId);
+        }
         RSIntegrationMod.debug("[RSI-Generic] handle() enqueueWork: recipeId={} preview={}",
                 packet.recipeId, packet.preview);
         context.enqueueWork(() -> {
@@ -694,15 +703,21 @@ public final class GenericCraftPacket {
                 return;
             }
             if (RecipeIndex.generationBuildFailed()) {
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.plan.failure.catalog_unavailable"));
+                Component message = Component.translatable("rsi.plan.failure.catalog_unavailable");
+                player.sendSystemMessage(message);
+                PlanningProgressServer.fail(player, previewGeneration, message);
                 return;
             }
             boolean queued = WARM_UP_REQUESTS.offer(new DeferredCraftRequestQueue.Entry<>(
                     player.getUUID(), packet.preview, previewGeneration, action));
             if (!queued) {
-                player.sendSystemMessage(Component.translatable("rsi.plan.failure.planner_busy"));
+                Component message = Component.translatable("rsi.plan.failure.planner_busy");
+                player.sendSystemMessage(message);
+                PlanningProgressServer.fail(player, previewGeneration, message);
                 return;
+            }
+            if (packet.preview) {
+                PlanningProgressServer.warmingUp(player.getUUID(), previewGeneration);
             }
             RSIntegrationMod.debug(
                     "[RSI-Generic] deferred until recipe warm-up: recipeId={} preview={} queued={}",
@@ -720,6 +735,8 @@ public final class GenericCraftPacket {
         try {
             if (packet.preview) {
                 if (!PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) return;
+                PlanningProgressServer.running(player.getUUID(), previewGeneration,
+                        PlanningProgressSnapshot.Phase.PREPARING);
                 RSIntegrationMod.debug(
                         "[RSI-Generic] handle() -> tryBuildPlan: recipeId={}", packet.recipeId);
                 if (packet.maximize) {
@@ -739,7 +756,9 @@ public final class GenericCraftPacket {
         } catch (Throwable e) {
             RSIntegrationMod.LOGGER.error("[RSI-Generic] Failed for {}:", packet.recipeId, e);
             try {
-                player.sendSystemMessage(buildFailureMessage(e, packet.recipeId));
+                Component message = buildFailureMessage(e, packet.recipeId);
+                player.sendSystemMessage(message);
+                if (packet.preview) PlanningProgressServer.fail(player, previewGeneration, message);
             } catch (Exception ex) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-Generic] Failed to send error message to player", ex);
@@ -1355,6 +1374,7 @@ public final class GenericCraftPacket {
 
     /** Runs at most one valid deferred request after a complete generation is ready. */
     public static void tickWarmUpRequests(MinecraftServer server) {
+        PlanningProgressServer.tick(server);
         // Runtime recipe drift is handled from the server tick, never from the
         // packet handler, so the first craft request cannot synchronously rebuild
         // the complete recipe catalog on its network task.
@@ -1368,8 +1388,13 @@ public final class GenericCraftPacket {
             DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request = WARM_UP_REQUESTS.poll();
             if (request != null) {
                 ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
-                if (player != null) player.sendSystemMessage(Component.translatable(
-                        "rsi.plan.failure.catalog_unavailable"));
+                if (player != null) {
+                    Component message = Component.translatable("rsi.plan.failure.catalog_unavailable");
+                    player.sendSystemMessage(message);
+                    if (request.preview()) {
+                        PlanningProgressServer.fail(player, request.generation(), message);
+                    }
+                }
             }
             return;
         }
@@ -3367,6 +3392,7 @@ public final class GenericCraftPacket {
             public void success(PlanResponse plan, PlanningSnapshot snapshot) {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 PLAN_RESULT_GATES.remove(key, gate);
+                PlanningProgressServer.succeed(player, previewGeneration);
                 PlanResponsePublisher.send(player, plan, requestId);
             }
 
@@ -3374,6 +3400,7 @@ public final class GenericCraftPacket {
             public void error(Component message) {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 PLAN_RESULT_GATES.remove(key, gate);
+                PlanningProgressServer.fail(player, previewGeneration, message);
                 PlanResponsePublisher.sendError(player, message, requestId);
             }
 
@@ -4275,6 +4302,8 @@ public final class GenericCraftPacket {
         }
         if (needsTypedResolver
                 && !TYPED_PREVIEW_REQUESTS.isAdmitted(player.getUUID(), previewGeneration)) {
+            PlanningProgressServer.queued(player.getUUID(), previewGeneration,
+                    PlanningProgressSnapshot.Phase.SPECIAL_RECIPE);
             PlanningSnapshot queuedSnapshot = planningSnapshot;
             TypedPreviewAdmissionQueue queue = TYPED_PREVIEW_REQUESTS;
             TypedPreviewAdmissionQueue.OfferResult queued = queue.offer(
@@ -4303,6 +4332,10 @@ public final class GenericCraftPacket {
             PerformanceMonitor.recordTypedPreviewQueued(
                     queued == TypedPreviewAdmissionQueue.OfferResult.REPLACED, queue.size());
             return;
+        }
+        if (needsTypedResolver) {
+            PlanningProgressServer.running(player.getUUID(), previewGeneration,
+                    PlanningProgressSnapshot.Phase.SPECIAL_RECIPE);
         }
 
         // Arcane Iterator plans should start from the highest matching enchanted
@@ -5370,6 +5403,7 @@ public final class GenericCraftPacket {
         int responseGraphNodes = planGraphView != null ? planGraphView.nodes().size() : 0;
         boolean responseFeasible = feasible;
         CraftPlanGraph resolvedGraphForCache = planGraph;
+        PlanningProgressServer.finalizing(player.getUUID(), previewGeneration);
         PLAN_REQUESTS.submitResponse(planningSnapshot, responseDraft, player.getServer()::execute,
                 current -> PlanningStateValidator.revalidatePreview(player, current, responseDraft,
                         planDimKey, planLookupPos, PLAN_REQUESTS, planStorageReference),
@@ -6083,6 +6117,7 @@ public final class GenericCraftPacket {
         TYPED_PREVIEW_REQUESTS.remove(playerId);
         PLAN_REQUESTS.forget(playerId);
         PLAN_CACHE.removePlayer(playerId);
+        PlanningProgressServer.remove(playerId);
     }
 
     /** Cancels preview workers during server shutdown before world objects are torn down. */
@@ -6094,6 +6129,7 @@ public final class GenericCraftPacket {
         WARM_UP_REQUESTS.clear();
         EXECUTION_REQUESTS.clear();
         TYPED_PREVIEW_REQUESTS.clear();
+        PlanningProgressServer.clear();
         ImmutableRecipeGraphProjector.clearCache();
     }
 
@@ -6109,6 +6145,7 @@ public final class GenericCraftPacket {
         TYPED_PREVIEW_REQUESTS = new TypedPreviewAdmissionQueue(
                 RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY.get());
         previousTyped.clear();
+        PlanningProgressServer.clear();
     }
 
 }

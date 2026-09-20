@@ -1454,14 +1454,16 @@ public class RecipeGuiLayoutsMixin {
         if (filter.equals("generic")) {
             return () -> {
                 GenericCraftPacket pkt;
+                long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
                 try {
-                    pkt = new GenericCraftPacket(recipeId, true);
+                    pkt = new GenericCraftPacket(recipeId, true, java.util.Map.of(),
+                            null, null, 1, false, null, null, requestId);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
                     return;
                 }
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
-                rsi$showPlanRequestStarted();
+                rsi$showPlanRequestStarted(requestId, recipeId);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
@@ -1504,8 +1506,10 @@ public class RecipeGuiLayoutsMixin {
         final ItemStack finalTargetOutput = targetOutput;
         return () -> {
             GenericCraftPacket pkt;
+            long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
             try {
-                pkt = new GenericCraftPacket(recipeId, true, dim, machinePos, 1, false, finalCapturedBase, finalTargetOutput);
+                pkt = new GenericCraftPacket(recipeId, true, java.util.Map.of(), dim,
+                        machinePos, 1, false, finalCapturedBase, finalTargetOutput, requestId);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
@@ -1515,19 +1519,15 @@ public class RecipeGuiLayoutsMixin {
                     recipeId, dim, machinePos,
                     finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null",
                     finalTargetOutput != null ? finalTargetOutput.getHoverName().getString() : "null");
-            rsi$showPlanRequestStarted();
+            rsi$showPlanRequestStarted(requestId, recipeId);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
     }
 
     @Unique
-    private static void rsi$showPlanRequestStarted() {
-        var player = Minecraft.getInstance().player;
-        if (player != null) {
-            player.displayClientMessage(
-                    net.minecraft.network.chat.Component.translatable(
-                            "rsi.plan.info.background_started"), true);
-        }
+    private static void rsi$showPlanRequestStarted(long requestId, ResourceLocation recipeId) {
+        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                requestId, recipeId);
     }
 
     /**
