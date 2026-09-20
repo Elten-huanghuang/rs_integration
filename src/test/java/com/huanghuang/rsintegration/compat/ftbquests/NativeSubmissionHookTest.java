@@ -167,6 +167,7 @@ class NativeSubmissionHookTest {
     private static void assertCompletionTimestampContract(Path jar) throws IOException {
         AtomicBoolean foundGet = new AtomicBoolean();
         AtomicBoolean foundSet = new AtomicBoolean();
+        AtomicBoolean foundOnlineMembers = new AtomicBoolean();
         try (ZipFile zip = new ZipFile(jar.toFile())) {
             var entry = zip.getEntry(TEAM_DATA_CLASS);
             assertTrue(entry != null, () -> jar + " is missing " + TEAM_DATA_CLASS);
@@ -179,6 +180,10 @@ class NativeSubmissionHookTest {
                                 && descriptor.equals("(J)Ljava/util/Optional;")) foundGet.set(true);
                         if (name.equals("setCompleted")
                                 && descriptor.equals("(JLjava/util/Date;)Z")) foundSet.set(true);
+                        if (name.equals("getOnlineMembers")
+                                && descriptor.equals("()Ljava/util/Collection;")) {
+                            foundOnlineMembers.set(true);
+                        }
                         return null;
                     }
                 }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
@@ -186,6 +191,8 @@ class NativeSubmissionHookTest {
         }
         assertTrue(foundGet.get(), () -> jar + " changed completion timestamp reads");
         assertTrue(foundSet.get(), () -> jar + " changed completion timestamp writes");
+        assertTrue(foundOnlineMembers.get(),
+                () -> jar + " changed the online-team-member contract");
     }
 
     private static void assertRepeatableContract(Path jar) throws IOException {

@@ -82,6 +82,7 @@ public final class NetworkPacketIds {
     public static final int FTB_QUEST_MISSING_BOOKMARK = 91;
     public static final int FTB_QUEST_CONFIRM_CHECKMARKS = 92;
     public static final int FTB_QUEST_STORAGE_SCAN = 93;
+    public static final int FTB_QUEST_INVENTORY_SCAN = 94;
 
     // ── Apotheosis library (100-109) ─────────────────────────────────
     public static final int APOTHEOSIS_LIBRARY_LEVEL = 100;

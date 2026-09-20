@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
 
 import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestRewardDropContext;
+import com.huanghuang.rsintegration.compat.ftbquests.ClaimAllChainService;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ftb.mods.ftbquests.net.ClaimAllRewardsMessage;
@@ -26,5 +27,6 @@ public abstract class ClaimAllRewardsMessageMixin {
         try (FtbQuestRewardDropContext.Scope ignored = FtbQuestRewardDropContext.activate()) {
             original.call(data, player, reward, notify);
         }
+        ClaimAllChainService.schedule(player);
     }
 }

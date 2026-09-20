@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
 
+import com.huanghuang.rsintegration.compat.ftbquests.client.ScanInventoryTasksButton;
 import com.huanghuang.rsintegration.compat.ftbquests.client.ScanStorageTasksButton;
 import dev.ftb.mods.ftbquests.client.gui.quests.OtherButtonsPanelTop;
 import org.spongepowered.asm.mixin.Mixin;
@@ -15,5 +16,6 @@ public abstract class OtherButtonsPanelTopMixin {
     private void rsi$addStorageTaskScanButton(CallbackInfo callback) {
         OtherButtonsPanelTop panel = (OtherButtonsPanelTop) (Object) this;
         panel.add(new ScanStorageTasksButton(panel));
+        panel.add(new ScanInventoryTasksButton(panel));
     }
 }
