@@ -29,6 +29,8 @@ class NativeSubmissionHookTest {
             "dev/ftb/mods/ftbquests/net/ClaimAllRewardsMessage.class";
     private static final String QUEST_CLASS =
             "dev/ftb/mods/ftbquests/quest/Quest.class";
+    private static final String CHAPTER_CLASS =
+            "dev/ftb/mods/ftbquests/quest/Chapter.class";
     private static final String TEAM_DATA_CLASS =
             "dev/ftb/mods/ftbquests/quest/TeamData.class";
     private static final String SUBMIT_HANDLE_DESCRIPTOR =
@@ -41,6 +43,8 @@ class NativeSubmissionHookTest {
             "rsintegration", "compat", "ftbquests", "FtbQuestSubmissionService.java");
     private static final Path QUEST_ESCROW = Path.of("src", "main", "java", "com", "huanghuang",
             "rsintegration", "compat", "ftbquests", "QuestSubmissionEscrow.java");
+    private static final Path CHECKMARK_SERVICE = Path.of("src", "main", "java", "com", "huanghuang",
+            "rsintegration", "compat", "ftbquests", "CheckmarkConfirmService.java");
 
     @Test
     void rsFallbackIsScopedToExplicitSubmitPackets() throws IOException {
@@ -99,6 +103,13 @@ class NativeSubmissionHookTest {
                 "network reservation must only run when a network exists");
         assertTrue(escrow.contains("ledger.reserveFromInventory"),
                 "inventory reservation must remain the no-network fallback");
+    }
+
+    @Test
+    void bulkCheckmarksRequireTheContainingChapterToBeVisible() throws IOException {
+        String service = Files.readString(CHECKMARK_SERVICE, StandardCharsets.UTF_8);
+        assertTrue(service.contains("quest.getChapter().isVisible(data)"),
+                "hidden chapters must not be completed by bulk checkmark confirmation");
     }
 
     @Test
@@ -161,7 +172,50 @@ class NativeSubmissionHookTest {
             assertClaimAllRewardsContract(jar);
             assertCompletionTimestampContract(jar);
             assertRepeatableContract(jar);
+            assertChapterVisibilityContract(jar);
         }
+    }
+
+    private static void assertChapterVisibilityContract(Path jar) throws IOException {
+        AtomicBoolean foundGetChapter = new AtomicBoolean();
+        AtomicBoolean foundChapterVisibility = new AtomicBoolean();
+        try (ZipFile zip = new ZipFile(jar.toFile())) {
+            var questEntry = zip.getEntry(QUEST_CLASS);
+            assertTrue(questEntry != null, () -> jar + " is missing " + QUEST_CLASS);
+            try (var input = zip.getInputStream(questEntry)) {
+                new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        if (name.equals("getChapter")
+                                && descriptor.equals(
+                                "()Ldev/ftb/mods/ftbquests/quest/Chapter;")) {
+                            foundGetChapter.set(true);
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
+
+            var chapterEntry = zip.getEntry(CHAPTER_CLASS);
+            assertTrue(chapterEntry != null, () -> jar + " is missing " + CHAPTER_CLASS);
+            try (var input = zip.getInputStream(chapterEntry)) {
+                new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        if (name.equals("isVisible") && descriptor.equals(
+                                "(Ldev/ftb/mods/ftbquests/quest/TeamData;)Z")) {
+                            foundChapterVisibility.set(true);
+                        }
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
+        }
+        assertTrue(foundGetChapter.get(), () -> jar + " changed the quest chapter contract");
+        assertTrue(foundChapterVisibility.get(),
+                () -> jar + " changed the chapter visibility contract");
     }
 
     private static void assertCompletionTimestampContract(Path jar) throws IOException {
