@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -398,6 +399,13 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
         // Incubator: no item output
         return ItemStack.EMPTY;
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
+        ItemStack result = collectResult(player);
+        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
+                "aether:furnace:output", OutputContract.Source.SLOT, result));
     }
 
     @Override
