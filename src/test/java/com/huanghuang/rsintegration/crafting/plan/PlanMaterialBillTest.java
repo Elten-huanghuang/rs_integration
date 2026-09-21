@@ -353,6 +353,25 @@ class PlanMaterialBillTest extends BootstrapTest {
         assertEquals(1, result.materials().get(IngredientKey.of(infinity)).missingCount());
     }
 
+    @Test
+    void legacyPlanHandlesTaggedInputWithoutIngredientSource() {
+        ItemStack looting = taggedBook("looting");
+        ItemStack mending = taggedBook("mending");
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1, List.of(looting));
+
+        PlanMaterialBill.Result result = PlanMaterialBill.summarize(
+                Map.of(Items.ENCHANTED_BOOK, 1), Map.of(),
+                Map.of(Items.ENCHANTED_BOOK, 2),
+                Map.of(
+                        new StackKey(Items.ENCHANTED_BOOK, looting.getTag().toString()), 1,
+                        new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1),
+                target, List.of(terminal), 1, null, false);
+
+        assertEquals(new PlanResponse.Availability(1, 1),
+                result.materials().get(IngredientKey.of(looting)));
+    }
+
     private static ItemStack taggedBook(String name) {
         ItemStack book = new ItemStack(Items.ENCHANTED_BOOK);
         CompoundTag tag = book.getOrCreateTag();

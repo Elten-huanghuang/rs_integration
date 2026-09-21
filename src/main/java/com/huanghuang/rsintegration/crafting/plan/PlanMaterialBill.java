@@ -109,8 +109,10 @@ public final class PlanMaterialBill {
         Map<IngredientKey, Integer> gross = buildGrossDemand(targetOutput, steps, repeatCount, null);
         Set<Item> nbtItems = new HashSet<>();
         for (IngredientKey key : gross.keySet()) {
+            Ingredient source = itemSources.get(key.item());
             if (key.stack(1).hasTag()
-                    && IngredientMatcher.requiresNbt(itemSources.get(key.item()))) {
+                    && source != null
+                    && IngredientMatcher.requiresNbt(source)) {
                 nbtItems.add(key.item());
             }
         }
