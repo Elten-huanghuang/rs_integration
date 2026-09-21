@@ -418,6 +418,45 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void timedOutPartialTraceOpensPreviewWhenDemandTreeWasComplete() {
+        var missingMaterial = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "missing_material"), "");
+        var diagnostic = new ImmutableRecipeGraph.IngredientRef(
+                List.of(missingMaterial), 3);
+        var partialStep = new PureRecipePlanner.PlannedStep(
+                new ResourceLocation("test", "partial_step"), 1);
+        var completeTree = new PureDemandTreeInspector.Result(
+                PureDemandTreeInspector.Status.COMPLETE, 4, null, false);
+        PureRecipePlanner.Result timedOut = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(partialStep),
+                List.of(diagnostic), Map.of(), PureRecipePlanner.Status.TIME_LIMIT,
+                10, 2, 0);
+
+        assertTrue(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut, completeTree));
+    }
+
+    @Test
+    void timedOutPreviewRequiresBothPartialStepsAndMissingMaterials() {
+        var missingMaterial = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("test", "missing_material"), "");
+        var diagnostic = new ImmutableRecipeGraph.IngredientRef(
+                List.of(missingMaterial), 3);
+        var partialStep = new PureRecipePlanner.PlannedStep(
+                new ResourceLocation("test", "partial_step"), 1);
+        var completeTree = new PureDemandTreeInspector.Result(
+                PureDemandTreeInspector.Status.COMPLETE, 4, null, false);
+        PureRecipePlanner.Result noSteps = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(diagnostic), Map.of(),
+                PureRecipePlanner.Status.TIME_LIMIT, 10, 2, 0);
+        PureRecipePlanner.Result noMissing = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.UNKNOWN, List.of(partialStep), List.of(), Map.of(),
+                PureRecipePlanner.Status.TIME_LIMIT, 10, 2, 0);
+
+        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(noSteps, completeTree));
+        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(noMissing, completeTree));
+    }
+
+    @Test
     void typedTimeoutKeepsAConfirmedMissingTreeOpenForInspection() {
         var missingMaterial = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("minecraft", "prismarine_shard"), "");

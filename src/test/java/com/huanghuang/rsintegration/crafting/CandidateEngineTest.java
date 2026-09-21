@@ -89,6 +89,20 @@ class CandidateEngineTest extends BootstrapTest {
     }
 
     @Test
+    void equalScoreAndCoveragePreferFewerIndependentInputGroups() {
+        ResourceLocation complex = new ResourceLocation("example", "a_complex");
+        ResourceLocation simple = new ResourceLocation("example", "z_simple");
+        Map<ResourceLocation, Integer> scores = Map.of(complex, 20, simple, 20);
+        Map<ResourceLocation, Integer> availability = Map.of(complex, 0, simple, 0);
+        Map<ResourceLocation, Integer> inputGroups = Map.of(complex, 9, simple, 2);
+
+        int comparison = CandidateEngine.compareCandidateMetrics(
+                simple, complex, scores, availability, inputGroups);
+
+        assertTrue(comparison < 0);
+    }
+
+    @Test
     void repeatedCraftingSlotsRequireTheirFullQuantity() {
         ShapedRecipe recipe = new ShapedRecipe(
                 new ResourceLocation("test", "four_iron"), "", CraftingBookCategory.MISC,

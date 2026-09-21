@@ -347,6 +347,42 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void equalCoveragePrefersRecipeWithFewerIndependentInputGroups() {
+        MaterialRef target = material("simple_route_target");
+        MaterialRef simpleInput = material("simple_route_input");
+        MaterialRef simpleSeed = material("simple_route_seed");
+        MaterialRef blockedA = material("complex_route_a");
+        MaterialRef blockedB = material("complex_route_b");
+        MaterialRef complexSeedA = material("complex_route_seed_a");
+        MaterialRef complexSeedB = material("complex_route_seed_b");
+        RecipeNode complex = recipe("a_complex_route", target, 1,
+                ingredient(blockedA, 4), ingredient(blockedB, 4));
+        RecipeNode simple = recipe("z_simple_route", target, 1,
+                ingredient(simpleInput, 8));
+        RecipeNode makeSimple = recipe("make_simple_input", simpleInput, 8,
+                ingredient(simpleSeed, 1));
+        RecipeNode makeComplexA = recipe("make_complex_a", blockedA, 4,
+                ingredient(complexSeedA, 1));
+        RecipeNode makeComplexB = recipe("make_complex_b", blockedB, 4,
+                ingredient(complexSeedB, 1));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(
+                        target, List.of(complex, simple),
+                        simpleInput, List.of(makeSimple),
+                        blockedA, List.of(makeComplexA),
+                        blockedB, List.of(makeComplexB))),
+                Map.of(simpleSeed, 1, complexSeedA, 1, complexSeedB, 1),
+                List.of(ingredient(target, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("make_simple_input"), 1),
+                new PureRecipePlanner.PlannedStep(id("z_simple_route"), 1)), result.steps());
+        assertEquals(0, result.backtracks());
+    }
+
+    @Test
     void backtracksAcrossStockedIngredientAlternatives() {
         MaterialRef copper = material("copper");
         MaterialRef tin = material("tin");

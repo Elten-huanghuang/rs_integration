@@ -176,22 +176,21 @@ final class CandidateEngine {
         Map<Ingredient, Integer> matchCache = new HashMap<>();
         Map<CandidateKey, Integer> scoreCache = new HashMap<>();
         Map<CandidateKey, Integer> availCache = new HashMap<>();
+        Map<CandidateKey, Integer> inputGroupCache = new HashMap<>();
         for (RecipeIndex.Entry entry : result) {
             if (ctx.timedOut()) break; // don't burn remaining budget on scoring
             CandidateKey key = CandidateKey.of(entry);
             scoreCache.put(key, scoreEntry(entry, ctx, nbtStrict, matchCache));
             availCache.put(key, countAvailableIngredients(entry, ctx, matchCache));
+            inputGroupCache.put(key, distinctInputGroups(entry, ctx));
         }
 
         long sortStart = System.nanoTime();
         result.sort((a, b) -> {
             CandidateKey keyA = CandidateKey.of(a);
             CandidateKey keyB = CandidateKey.of(b);
-            int cmp = Integer.compare(scoreCache.getOrDefault(keyB, 0),
-                    scoreCache.getOrDefault(keyA, 0));
-            if (cmp != 0) return cmp;
-            cmp = Integer.compare(availCache.getOrDefault(keyB, 0),
-                    availCache.getOrDefault(keyA, 0));
+            int cmp = compareCandidateMetrics(keyA, keyB,
+                    scoreCache, availCache, inputGroupCache);
             if (cmp != 0) return cmp;
             cmp = a.recipe().getId().compareTo(b.recipe().getId());
             return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
@@ -231,6 +230,28 @@ final class CandidateEngine {
         }
 
         return result;
+    }
+
+    static <K> int compareCandidateMetrics(K keyA, K keyB,
+                                            Map<K, Integer> scoreCache,
+                                            Map<K, Integer> availCache,
+                                            Map<K, Integer> inputGroupCache) {
+        int cmp = Integer.compare(scoreCache.getOrDefault(keyB, 0),
+                scoreCache.getOrDefault(keyA, 0));
+        if (cmp != 0) return cmp;
+        cmp = Integer.compare(availCache.getOrDefault(keyB, 0),
+                availCache.getOrDefault(keyA, 0));
+        if (cmp != 0) return cmp;
+        return Integer.compare(inputGroupCache.getOrDefault(keyA, Integer.MAX_VALUE),
+                inputGroupCache.getOrDefault(keyB, Integer.MAX_VALUE));
+    }
+
+    private static int distinctInputGroups(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        if (entry.recipe() instanceof CraftingRecipe cr) {
+            return craftingDemands(cr).size();
+        }
+        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
+        return specs == null ? Integer.MAX_VALUE : specDemands(specs).size();
     }
 
     /** Resolves shared runtime recipes against the exact NBT-bearing item being requested. */
