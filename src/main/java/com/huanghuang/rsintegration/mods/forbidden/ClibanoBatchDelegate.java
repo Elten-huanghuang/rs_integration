@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccessor;
@@ -365,6 +366,18 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     public ItemStack collectResult(@Nonnull ServerPlayer player) {
         List<ItemStack> results = collectAllResults(player);
         return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    }
+
+    @Nonnull
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
+            @Nonnull ServerPlayer player) {
+        return collectAllResults(player).stream()
+                .filter(stack -> !stack.isEmpty())
+                .map(stack -> new OutputAccounting.CollectedOutput(
+                        "forbidden_arcanus:clibano:output",
+                        OutputContract.Source.SLOT, stack))
+                .toList();
     }
 
     @Override

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
@@ -502,6 +503,13 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         be.setChanged();
         craftDone = true;
         return result;
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
+        ItemStack result = collectResult(player);
+        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
+                "immortalers_delight:cooler:output", OutputContract.Source.SLOT, result));
     }
 
     @Override

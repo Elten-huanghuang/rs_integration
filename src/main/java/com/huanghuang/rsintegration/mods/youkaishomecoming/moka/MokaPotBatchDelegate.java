@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -411,6 +412,13 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         be.setChanged();
         craftDone = true;
         return result;
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
+        ItemStack result = collectResult(player);
+        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
+                "youkaishomecoming:moka:output", OutputContract.Source.SLOT, result));
     }
 
     @Override
