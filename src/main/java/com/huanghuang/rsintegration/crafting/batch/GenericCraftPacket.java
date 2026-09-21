@@ -4828,7 +4828,7 @@ public final class GenericCraftPacket {
         // ── Add the target recipe itself as the last step so its grid is visible ──
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
-        if (timedOutMissingRoute && precomputedPlan.missing().isEmpty()) {
+        if (timedOutMissingRoute) {
             modWarnings.add(Component.translatable("rsi.plan.failure.complexity_limit"));
         }
         boolean blockingPrerequisiteFailure = false;
@@ -5915,8 +5915,11 @@ public final class GenericCraftPacket {
             PureDemandTreeInspector.Result demandTree) {
         return plan != null
                 && plan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
-                && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS
-                && demandTree.unresolved() != null;
+                && ((demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS
+                        && demandTree.unresolved() != null)
+                    || (plan.status() == PureRecipePlanner.Status.TIME_LIMIT
+                        && !plan.steps().isEmpty()
+                        && !plan.missing().isEmpty()));
     }
 
     static boolean canFallbackToBoundedPlanAfterTypedTimeout(

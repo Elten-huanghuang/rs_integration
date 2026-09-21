@@ -595,12 +595,26 @@ public final class PureRecipePlanner {
             if (ordered.size() < 2) return ordered;
             Comparator<RecipeNode> coverage = Comparator
                     .comparingDouble(this::inputStockCoverage).reversed();
+            Comparator<RecipeNode> structuralCost = Comparator
+                    .comparingInt(this::distinctInputGroups)
+                    .thenComparingInt(this::inputAlternativeCount);
             // Avoid making the sort itself perform a reachability walk for every recipe of a
             // broad tag. Those candidates are checked lazily after the family-gain guard.
             ordered.sort(useReachability
                     ? coverage.thenComparingInt(reachability()::depth)
-                    : coverage);
+                            .thenComparing(structuralCost)
+                    : coverage.thenComparing(structuralCost));
             return ordered;
+        }
+
+        private int distinctInputGroups(RecipeNode candidate) {
+            return PureDemandNormalizer.mergeEquivalent(candidate.inputs()).size();
+        }
+
+        private int inputAlternativeCount(RecipeNode candidate) {
+            return PureDemandNormalizer.mergeEquivalent(candidate.inputs()).stream()
+                    .mapToInt(input -> input.alternatives().size())
+                    .sum();
         }
 
         private boolean hasAllInputsInStock(RecipeNode candidate) {
