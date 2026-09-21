@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Performs explicit, one-shot FTB item-task detection against storage or player items. */
 public final class StorageQuestScanService {
@@ -42,7 +43,11 @@ public final class StorageQuestScanService {
     private static final int AUTOMATIC_SCANS_PER_TICK = 2;
     private static final Map<UUID, Long> LAST_TEAM_REQUEST = new HashMap<>();
     private static final Map<UUID, ScanJob> ACTIVE_JOBS = new HashMap<>();
-    private static final Map<UUID, PendingAutomaticScan> PENDING_AUTOMATIC_SCANS = new HashMap<>();
+    // Quest completion callbacks can enqueue a follow-up while the server tick
+    // dispatcher is still draining this table. A plain HashMap can fail inside
+    // compute() when those callbacks interleave with dispatch.
+    private static final Map<UUID, PendingAutomaticScan> PENDING_AUTOMATIC_SCANS =
+            new ConcurrentHashMap<>();
 
     private StorageQuestScanService() {
     }
@@ -114,9 +119,11 @@ public final class StorageQuestScanService {
                 if (pending == null) {
                     return new PendingAutomaticScan(dueTick, deadlineTick, taskIds);
                 }
-                pending.taskIds.addAll(taskIds);
-                pending.dueTick = Math.min(pending.dueTick, dueTick);
-                pending.deadlineTick = Math.max(pending.deadlineTick, deadlineTick);
+                synchronized (pending) {
+                    pending.taskIds.addAll(taskIds);
+                    pending.dueTick = Math.min(pending.dueTick, dueTick);
+                    pending.deadlineTick = Math.max(pending.deadlineTick, deadlineTick);
+                }
                 return pending;
             });
         }
