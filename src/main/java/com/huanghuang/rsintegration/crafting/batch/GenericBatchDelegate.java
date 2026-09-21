@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
@@ -26,7 +27,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -569,7 +569,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             if (craftDone && !pendingResult.isEmpty() && network != null) {
                 var leftover = ledgerStorageInsert(pendingResult.copy());
                 if (!leftover.isEmpty() && player != null && !player.hasDisconnected() && !player.isRemoved()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                    PlayerUtils.safeGiveToPlayer(player, leftover, null);
                 }
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",
                         pendingResult.getCount(), com.huanghuang.rsintegration.util.ItemStackUtils.registryId(pendingResult));

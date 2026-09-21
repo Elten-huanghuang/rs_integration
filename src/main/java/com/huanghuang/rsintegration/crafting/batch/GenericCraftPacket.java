@@ -5884,7 +5884,11 @@ public final class GenericCraftPacket {
      *  when a player disconnects mid-batch and the item is voided. */
     private static void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
         if (player != null && !player.hasDisconnected() && !player.isRemoved()) {
-            ItemHandlerHelper.giveItemToPlayer(player, stack);
+            // Route every fallback delivery through PlayerUtils.  The direct
+            // ItemHandlerHelper path mutates the server inventory but does not
+            // broadcast the changed slots when a custom container is open,
+            // leaving a client-side ghost stack until the inventory is reopened.
+            PlayerUtils.safeGiveToPlayer(player, stack, null);
         }
     }
 
