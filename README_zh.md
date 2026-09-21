@@ -10,9 +10,9 @@
 
 RS Integration 让 Refined Storage 可以自动使用其他模组的机器。你只需在 JEI 中选择想做的物品，它就会检查材料、处理前置配方、调用已绑定的机器，并把成品送回 RS 网络。
 
-**当前版本：1.4.1 | Minecraft 1.20.1**
+**当前版本：1.4.5 | Minecraft 1.20.1**
 
-[1.4.1 更新公告](docs/RELEASE_NOTES_1.4.1.md) | [MC 百科完整介绍](https://www.mcmod.cn/class/29199.html)
+[1.4.5 更新公告](docs/RELEASE_NOTES_1.4.5.md) | [MC 百科完整介绍](https://www.mcmod.cn/class/29199.html)
 
 ## 运行要求
 
