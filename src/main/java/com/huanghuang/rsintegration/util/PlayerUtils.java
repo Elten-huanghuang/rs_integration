@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.util;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,6 +12,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -34,10 +37,11 @@ public final class PlayerUtils {
      * stack into an empty slot verbatim instead of enforcing its item limit.
      */
     public static ItemStack insertIntoPlayerInventory(ServerPlayer player, ItemStack stack) {
+        List<ItemStack> before = snapshotInventory(player);
         ItemStack remainder = insertMaxSizedChunks(stack, player.getInventory()::add);
         player.getInventory().setChanged();
         MaterialSources.invalidateFor(player);
-        broadcastInventoryChanges(player);
+        broadcastInventoryChanges(player, before);
         return remainder;
     }
 
@@ -78,6 +82,7 @@ public final class PlayerUtils {
     public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
         if (stack.isEmpty()) return;
         if (player.level().hasChunkAt(player.blockPosition())) {
+            List<ItemStack> before = snapshotInventory(player);
             // Split large stacks into max-size chunks to avoid spawning an
             // excessive number of item entities when the player's inventory
             // is full (e.g. batch crafting 1000 planks → 16 entities, not 1000).
@@ -92,7 +97,7 @@ public final class PlayerUtils {
             // container is not guaranteed to observe that mutation until its next
             // scheduled sync. Broadcast now so chained crafts can use the result
             // immediately and the client does not render a stale stack.
-            broadcastInventoryChanges(player);
+            broadcastInventoryChanges(player, before);
             return;
         }
         if (network != null) {
@@ -131,5 +136,34 @@ public final class PlayerUtils {
         if (player.containerMenu != player.inventoryMenu) {
             player.containerMenu.broadcastChanges();
         }
+    }
+
+    private static void broadcastInventoryChanges(ServerPlayer player, List<ItemStack> before) {
+        broadcastInventoryChanges(player);
+        if (player.connection == null
+                || player instanceof net.minecraftforge.common.util.FakePlayer) return;
+
+        int size = Math.min(before.size(), player.getInventory().getContainerSize());
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack current = player.getInventory().getItem(slot);
+            if (ItemStack.matches(before.get(slot), current)) continue;
+
+            // PLAYER_INVENTORY bypasses the currently open custom menu. This is
+            // necessary for virtual crafts whose output arrives while a screen
+            // owns a different container id; a normal menu diff can otherwise
+            // leave the client rendering a ghost stack until that screen reopens.
+            player.connection.send(new ClientboundContainerSetSlotPacket(
+                    ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+                    0, slot, current.copy()));
+        }
+    }
+
+    private static List<ItemStack> snapshotInventory(ServerPlayer player) {
+        int size = player.getInventory().getContainerSize();
+        List<ItemStack> snapshot = new ArrayList<>(size);
+        for (int slot = 0; slot < size; slot++) {
+            snapshot.add(player.getInventory().getItem(slot).copy());
+        }
+        return snapshot;
     }
 }
