@@ -41,6 +41,26 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void prefersDirectMetalIngotDecompositionOverEquivalentProcessingChain() {
+        MaterialRef ingot = material("metal_ingot");
+        MaterialRef nugget = material("metal_nugget");
+        MaterialRef tool = material("metal_tool");
+
+        RecipeNode direct = recipe("decompose_ingot", nugget, 9, ingredient(ingot, 1));
+        RecipeNode makeTool = recipe("make_tool", tool, 1, ingredient(ingot, 1));
+        RecipeNode processTool = recipe("process_tool", nugget, 1, ingredient(tool, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                nugget, List.of(processTool, direct), tool, List.of(makeTool)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(ingot, 1), List.of(ingredient(nugget, 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("decompose_ingot"), 1)),
+                result.steps());
+    }
+
+    @Test
     void valueOnlyDemandCanUseTaggedOutputVariant() {
         MaterialRef sword = material("awakened_sword");
         MaterialRef raw = material("sword_raw");

@@ -202,6 +202,14 @@ public final class PureRecipePlanner {
         private SeededReachability reachability;
         private final Map<List<MaterialRef>, BroadFamilyAnalysis> broadFamilyAnalyses =
                 new HashMap<>();
+        /**
+         * Cached lower-bound dependency depth used only to make equivalent producers
+         * deterministic.  A direct decomposition (one input -> many particles)
+         * should beat a longer tool/processing chain, while feasibility remains
+         * decided by the normal recursive search below.
+         */
+        private final Map<MaterialRef, Integer> producerDepthCache = new HashMap<>();
+        private final Set<MaterialRef> producerDepthVisiting = new HashSet<>();
         private static final long FAMILY_COST_UNKNOWN = Long.MAX_VALUE / 4L;
         private int expandedStates;
         private int backtracks;
@@ -595,6 +603,10 @@ public final class PureRecipePlanner {
             if (ordered.size() < 2) return ordered;
             Comparator<RecipeNode> coverage = Comparator
                     .comparingDouble(this::inputStockCoverage).reversed();
+            Comparator<RecipeNode> dependencyCost = Comparator
+                    .comparingInt((RecipeNode candidate) -> dependencyDepth(candidate,
+                            new HashSet<>()))
+                    .thenComparing(Comparator.comparingInt(RecipeNode::outputCount).reversed());
             Comparator<RecipeNode> structuralCost = Comparator
                     .comparingInt(this::distinctInputGroups)
                     .thenComparingInt(this::inputAlternativeCount);
@@ -602,9 +614,55 @@ public final class PureRecipePlanner {
             // broad tag. Those candidates are checked lazily after the family-gain guard.
             ordered.sort(useReachability
                     ? coverage.thenComparingInt(reachability()::depth)
+                            .thenComparing(dependencyCost)
                             .thenComparing(structuralCost)
-                    : coverage.thenComparing(structuralCost));
+                    : coverage.thenComparing(dependencyCost)
+                            .thenComparing(structuralCost));
             return ordered;
+        }
+
+        /**
+         * Returns a conservative lower bound for the number of recipe layers needed
+         * to seed this candidate from the current inventory.  Cycles, runtime-NBT
+         * outputs and unknown branches are treated as a large finite cost so this
+         * method can never reject a recipe or change feasibility.
+         */
+        private int dependencyDepth(RecipeNode candidate, Set<MaterialRef> visiting) {
+            int best = Integer.MAX_VALUE / 4;
+            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+                if (input.role() == DemandRole.CATALYST) continue;
+                int inputDepth = Integer.MAX_VALUE / 4;
+                for (MaterialRef alternative : input.alternatives()) {
+                    inputDepth = Math.min(inputDepth, materialProducerDepth(alternative, visiting));
+                }
+                if (inputDepth >= Integer.MAX_VALUE / 4) return inputDepth;
+                best = Math.max(best == Integer.MAX_VALUE / 4 ? 0 : best, inputDepth);
+            }
+            return best == Integer.MAX_VALUE / 4 ? 0 : best + 1;
+        }
+
+        private int materialProducerDepth(MaterialRef material, Set<MaterialRef> visiting) {
+            Integer cached = producerDepthCache.get(material);
+            if (cached != null) return cached;
+            if (stockAcross(new IngredientRef(List.of(material), 1, NbtMatchMode.ANY,
+                    DemandRole.CONSUMED)) > 0) return 0;
+            if (material.runtimeNbt() || !visiting.add(material)
+                    || !producerDepthVisiting.add(material)) {
+                return Integer.MAX_VALUE / 4;
+            }
+            int best = Integer.MAX_VALUE / 4;
+            try {
+                for (RecipeNode producer : ImmutableRecipeGraphProjector.candidates(
+                        graph, material, NbtMatchMode.ANY)) {
+                    best = Math.min(best, dependencyDepth(producer, visiting));
+                }
+            } finally {
+                visiting.remove(material);
+                producerDepthVisiting.remove(material);
+            }
+            if (best < Integer.MAX_VALUE / 4) best++;
+            producerDepthCache.put(material, best);
+            return best;
         }
 
         private int distinctInputGroups(RecipeNode candidate) {
