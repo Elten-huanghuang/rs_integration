@@ -382,12 +382,16 @@ public final class RSIntegrationMod {
 
         // --- Confluence Workshop 閳?binding target registered by the module;
         //     this fallback ensures it works even when the full module is disabled ---
-        if (ModList.get().isLoaded("confluence")) {
+        if (ModList.get().isLoaded(ModIds.CONFLUENCE)
+                || ModList.get().isLoaded(ModIds.TERRA_CURIO)) {
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
-                            "confluence", ModType.byId("confluence"),
+                            ModIds.CONFLUENCE, ModType.byId("confluence"),
                             RSIntegrationConfig.ENABLE_CONFLUENCE,
-                            List.of("org.confluence.mod.block.WorkshopBlock"),
+                            List.of(
+                                    "org.confluence.mod.block.WorkshopBlock",
+                                    "org.confluence.terra_curio.block.WorkshopBlock"
+                            ),
                             "confluence", true
                     ));
         }

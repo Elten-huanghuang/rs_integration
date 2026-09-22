@@ -178,12 +178,13 @@ public final class MaterialSources {
             int exact = 0;
             for (var entry : available.entrySet()) {
                 var id = ForgeRegistries.ITEMS.getKey(entry.getKey().item());
-                if (id != null && id.toString().equals("confluence:demon_heart")) {
+                if (id != null && (id.toString().equals("confluence:demon_heart")
+                        || id.toString().equals("terra_curio:demon_heart"))) {
                     exact += entry.getValue();
                 }
             }
             RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Materials] snapshot status={} storedItems={} availableKeys={} confluence:demon_heart={}",
+                    "[RSI-Materials] snapshot status={} storedItems={} availableKeys={} demon_heart={}",
                     snapshotResult.status(),
                     snapshotResult.snapshot().map(s -> s.items().size()).orElse(0),
                     available.size(), exact);

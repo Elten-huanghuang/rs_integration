@@ -24,7 +24,7 @@ public final class WorkshopRecipeHandler implements ModRecipeHandler {
 
     @Override
     public boolean canHandle(Recipe<?> recipe) {
-        return recipe.getClass().getName().startsWith("org.confluence.mod.recipe.");
+        return isSupportedRecipeClassName(recipe.getClass().getName());
     }
 
     @Override
@@ -51,7 +51,7 @@ public final class WorkshopRecipeHandler implements ModRecipeHandler {
     private static int extractCount(Ingredient ing) {
         try {
             Class<?> clazz = ing.getClass();
-            if (clazz.getName().equals("org.confluence.mod.recipe.AmountIngredient")) {
+            if (isAmountIngredientClassName(clazz.getName())) {
                 java.lang.reflect.Method m = clazz.getMethod("getCount");
                 Object val = m.invoke(ing);
                 if (val instanceof Integer count && count > 0) return count;
@@ -60,5 +60,15 @@ public final class WorkshopRecipeHandler implements ModRecipeHandler {
             RSIntegrationMod.LOGGER.debug("[RSI-Confluence] AmountIngredient.getCount() failed", e);
         }
         return 1;
+    }
+
+    static boolean isSupportedRecipeClassName(String className) {
+        return className.startsWith("org.confluence.mod.recipe.")
+                || className.startsWith("org.confluence.terra_curio.recipe.");
+    }
+
+    static boolean isAmountIngredientClassName(String className) {
+        return className.equals("org.confluence.mod.recipe.AmountIngredient")
+                || className.equals("org.confluence.terra_curio.recipe.AmountIngredient");
     }
 }
