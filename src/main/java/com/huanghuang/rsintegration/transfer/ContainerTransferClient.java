@@ -448,6 +448,9 @@ public final class ContainerTransferClient {
         String simpleName = separator >= 0 ? className.substring(separator + 1) : className;
         return simpleName.equals("gridscreen")
                 || simpleName.equals("craftingscreen")
+                // Confluence's workshop screen kept the same role but uses a
+                // dedicated name in both the legacy and Terra Curio releases.
+                || simpleName.equals("workshopscreen")
                 || simpleName.contains("craftingaccessor")
                 || simpleName.contains("crafting_accessor")
                 || simpleName.contains("craftinggrid")
