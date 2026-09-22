@@ -13,10 +13,12 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 
 /** Thread-safe request-level progress registry. Worker threads only mutate snapshots. */
 public final class PlanningProgressServer {
     private static final long PUBLISH_INTERVAL_NANOS = 100_000_000L;
+    static final long FINALIZING_TIMEOUT_MS = 5_000L;
     private static final Map<UUID, Active> ACTIVE = new ConcurrentHashMap<>();
 
     private PlanningProgressServer() {}
@@ -70,12 +72,28 @@ public final class PlanningProgressServer {
     }
 
     public static void tick(MinecraftServer server) {
+        tick(server, null);
+    }
+
+    public static void tick(MinecraftServer server,
+                            BiConsumer<UUID, Long> finalizingTimeoutHandler) {
         long now = System.nanoTime();
         for (Map.Entry<UUID, Active> entry : ACTIVE.entrySet()) {
             Active active = entry.getValue();
-            if (!active.dirty() || now - active.lastSentNanos < PUBLISH_INTERVAL_NANOS) continue;
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null || player.hasDisconnected() || player.isRemoved()) continue;
+            if (active.finalizingTimedOut(now)) {
+                active.update(PlanningProgressSnapshot.State.TIMED_OUT,
+                        PlanningProgressSnapshot.Phase.FINALIZING,
+                        Component.translatable("rsi.plan.failure.finalizing_timeout"));
+                send(player, active.snapshot());
+                ACTIVE.remove(entry.getKey(), active);
+                if (finalizingTimeoutHandler != null) {
+                    finalizingTimeoutHandler.accept(entry.getKey(), active.generation);
+                }
+                continue;
+            }
+            if (!active.dirty() || now - active.lastSentNanos < PUBLISH_INTERVAL_NANOS) continue;
             long sendingVersion = active.version();
             send(player, active.snapshot());
             active.markSent(now, sendingVersion);
@@ -137,6 +155,7 @@ public final class PlanningProgressServer {
         private final long startedNanos = System.nanoTime();
         private final AtomicReference<PlanningProgressSnapshot> value;
         private final AtomicLong version = new AtomicLong(1L);
+        private volatile long stateStartedNanos = startedNanos;
         private volatile long sentVersion;
         private volatile long lastSentNanos;
 
@@ -150,8 +169,18 @@ public final class PlanningProgressServer {
 
         private void update(PlanningProgressSnapshot.State state,
                             PlanningProgressSnapshot.Phase phase, Component detail) {
+            PlanningProgressSnapshot previous = value.get();
+            long now = System.nanoTime();
+            if (previous.state() != state || previous.phase() != phase) {
+                stateStartedNanos = now;
+            }
             value.set(snapshot(state, phase, detail));
             version.incrementAndGet();
+        }
+
+        private boolean finalizingTimedOut(long nowNanos) {
+            PlanningProgressSnapshot current = value.get();
+            return isFinalizingTimedOut(current.state(), stateStartedNanos, nowNanos);
         }
 
         private PlanningProgressSnapshot snapshot(PlanningProgressSnapshot.State state,
@@ -178,5 +207,11 @@ public final class PlanningProgressServer {
             sentVersion = sendingVersion;
             lastSentNanos = now;
         }
+    }
+
+    static boolean isFinalizingTimedOut(PlanningProgressSnapshot.State state,
+                                        long stateStartedNanos, long nowNanos) {
+        return state == PlanningProgressSnapshot.State.FINALIZING
+                && nowNanos - stateStartedNanos >= FINALIZING_TIMEOUT_MS * 1_000_000L;
     }
 }

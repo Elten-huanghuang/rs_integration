@@ -88,6 +88,7 @@ import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
+import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
@@ -1384,7 +1385,7 @@ public final class GenericCraftPacket {
 
     /** Runs at most one valid deferred request after a complete generation is ready. */
     public static void tickWarmUpRequests(MinecraftServer server) {
-        PlanningProgressServer.tick(server);
+        PlanningProgressServer.tick(server, GenericCraftPacket::cancelTimedOutPlanning);
         // Runtime recipe drift is handled from the server tick, never from the
         // packet handler, so the first craft request cannot synchronously rebuild
         // the complete recipe catalog on its network task.
@@ -1420,6 +1421,13 @@ public final class GenericCraftPacket {
                     && !PLAN_REQUESTS.isCurrent(request.playerId(), request.generation())) continue;
             request.payload().accept(player);
             return;
+        }
+    }
+
+    private static void cancelTimedOutPlanning(UUID playerId, long generation) {
+        PlanRequestService requests = PLAN_REQUESTS;
+        if (requests.isCurrent(playerId, generation)) {
+            requests.forget(playerId);
         }
     }
 
@@ -3381,6 +3389,7 @@ public final class GenericCraftPacket {
     private interface PlanResultSink {
         void success(PlanResponse plan, PlanningSnapshot snapshot);
         void error(Component message);
+        default void cancelled(Component message) {}
         default void notice(Component message) {}
     }
 
@@ -3412,6 +3421,13 @@ public final class GenericCraftPacket {
                 PLAN_RESULT_GATES.remove(key, gate);
                 PlanningProgressServer.fail(player, previewGeneration, message);
                 PlanResponsePublisher.sendError(player, message, requestId);
+            }
+
+            @Override
+            public void cancelled(Component message) {
+                if (!gate.tryEnterTerminal(previewGeneration)) return;
+                PLAN_RESULT_GATES.remove(key, gate);
+                PlanningProgressServer.fail(player, previewGeneration, message);
             }
 
             @Override
@@ -5422,6 +5438,8 @@ public final class GenericCraftPacket {
                             && !PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) {
                         RSIntegrationMod.debug("[RSI-tryBuildPlan] Discarding stale finalized response: recipeId={}",
                                 recipeId);
+                        sink.cancelled(Component.translatable(
+                                "rsi.plan.failure.planning_cancelled"));
                         return;
                     }
                     PLAN_CACHE.put(cacheKey, plan, planningSnapshot,
@@ -5437,9 +5455,11 @@ public final class GenericCraftPacket {
                 }, failure -> {
                     if (failure instanceof RejectedExecutionException) {
                         sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
-                    } else if (!(failure instanceof CancellationException)
-                            && !(failure instanceof com.huanghuang.rsintegration.crafting.planning
-                            .AsyncPlanningCoordinator.StalePlanningResultException)) {
+                    } else if (failure instanceof CancellationException
+                            || failure instanceof AsyncPlanningCoordinator.StalePlanningResultException) {
+                        sink.cancelled(Component.translatable(
+                                "rsi.plan.failure.planning_cancelled"));
+                    } else {
                         RSIntegrationMod.LOGGER.error("[RSI-plan] Response finalization failed for {}",
                                 recipeId, failure);
                         sink.error(buildFailureMessage(failure, recipeId));
