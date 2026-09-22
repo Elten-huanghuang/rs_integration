@@ -806,8 +806,7 @@ public final class GenericCraftPacket {
     private static void executeQueuedRequest(ServerPlayer player, GenericCraftPacket packet,
                                              boolean preparationRequest) {
         try {
-            if (packet.outputDestination == OutputDestination.RS_NETWORK
-                    && (packet.storageReference == null
+            if ((packet.storageReference == null
                     || "refinedstorage".equals(packet.storageReference.backendId().value()))) {
                 INetwork currentNetwork = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
                 if (!RSGridMatrixNormalizer.returnToNetwork(player, currentNetwork)) {
