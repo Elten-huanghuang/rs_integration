@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QuestSubmissionRequestPacketTest {
 
@@ -18,6 +19,17 @@ class QuestSubmissionRequestPacketTest {
         assertEquals(42L, buffer.readLong());
         assertFalse(buffer.readBoolean());
         assertEquals(6, buffer.readVarInt());
+    }
+
+    @Test
+    void previewRepeatCountSurvivesWireEncoding() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        QuestSubmissionRequestPacket.encode(
+                new QuestSubmissionRequestPacket(42L, true, 12), buffer);
+
+        assertEquals(42L, buffer.readLong());
+        assertTrue(buffer.readBoolean());
+        assertEquals(12, buffer.readVarInt());
     }
 
     @Test
