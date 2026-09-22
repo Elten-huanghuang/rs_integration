@@ -212,6 +212,7 @@
   "rsi.generic.error.no_bound_machine": "§cNo bound %s machine. Shift+right-click the machine block from a terminal to bind it",
   "rsi.generic.error.craft_failed": "§cRecursive crafting failed: %s",
   "rsi.generic.error.network_unavailable": "§cNo usable storage network was found. Select or bind an accessible network before starting recursive crafting.",
+  "rsi.generic.error.matrix_return_failed": "§cThe RS crafting matrix could not be returned to the network completely. Recursive crafting was cancelled; check network capacity and try again.",
   "rsi.generic.error.multiblock_auto_craft_disabled": "§cThis recipe requires the special-recipe planner, but multiblock recursive crafting is disabled on the server.",
   "rsi.progress.reason.network_unavailable": "Storage network unavailable",
   "rsi.progress.reason.no_bound_machine": "required machine is not bound",

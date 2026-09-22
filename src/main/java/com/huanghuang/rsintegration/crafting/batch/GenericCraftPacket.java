@@ -22,6 +22,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.RSGridMatrixNormalizer;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
@@ -805,6 +806,16 @@ public final class GenericCraftPacket {
     private static void executeQueuedRequest(ServerPlayer player, GenericCraftPacket packet,
                                              boolean preparationRequest) {
         try {
+            if (packet.outputDestination == OutputDestination.RS_NETWORK
+                    && (packet.storageReference == null
+                    || "refinedstorage".equals(packet.storageReference.backendId().value()))) {
+                INetwork currentNetwork = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
+                if (!RSGridMatrixNormalizer.returnToNetwork(player, currentNetwork)) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.matrix_return_failed"));
+                    return;
+                }
+            }
             RSIntegrationMod.debug(
                     "[RSI-Generic] queued execution -> tryResolve: recipeId={} forced={} destination={}",
                     packet.recipeId, packet.forcedRecipes.size(), packet.outputDestination);
