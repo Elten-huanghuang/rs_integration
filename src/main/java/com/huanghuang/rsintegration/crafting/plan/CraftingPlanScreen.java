@@ -801,6 +801,18 @@ public final class CraftingPlanScreen extends Screen {
     private void sendCraftPacket(ResourceLocation rid, boolean preview,
                                  Map<String, String> forced, int repeatCount, boolean inferMode) {
         if (rid == null) return;
+        if (preview && QuestSubmissionTargetIds.isQuestSubmission(rid)) {
+            // Quest previews use their own planner and return an uncorrelated
+            // PlanResponsePacket. Starting the ordinary planning HUD here would
+            // leave it waiting forever because GenericCraftPacket never handles
+            // synthetic quest target IDs.
+            activeRequestId = 0L;
+            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.clear();
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                    new QuestSubmissionRequestPacket(
+                            QuestSubmissionTargetIds.questId(rid), true, repeatCount));
+            return;
+        }
         ResourceLocation execDim = null;
         net.minecraft.core.BlockPos execPos = null;
         if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
