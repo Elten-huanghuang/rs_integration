@@ -353,10 +353,20 @@ public final class BindingEventHandler {
         String className = block.getClass().getName();
         for (MachineBindingTarget target : TARGETS) {
             if (!target.configFlag.get()) continue;
-            if (!target.modId.equals("minecraft") && !ModList.get().isLoaded(target.modId)) continue;
+            if (!isTargetModLoaded(target.modId)) continue;
             if (target.matches(block, className)) return target;
         }
         return null;
+    }
+
+    /**
+     * Some integrations keep a stable internal id while the upstream mod
+     * changes its runtime id between releases (Confluence -> Terra Curio).
+     */
+    private static boolean isTargetModLoaded(String modId) {
+        if ("minecraft".equals(modId) || ModList.get().isLoaded(modId)) return true;
+        return ModIds.CONFLUENCE.equals(modId)
+                && ModList.get().isLoaded(ModIds.TERRA_CURIO);
     }
 
     private static ItemStack createDisplayStack(Level level, BlockPos pos, BlockState state,
