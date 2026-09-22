@@ -82,7 +82,7 @@ public final class RSGridMatrixNormalizer {
         if (changed) {
             grid.onCraftingMatrixChanged();
             gridMenu.broadcastChanges();
-            RSIntegrationMod.LOGGER.debug("[RSI-Matrix] Returned crafting matrix to RS before recursive craft");
+            RSIntegrationMod.LOGGER.info("[RSI-Matrix] Returned crafting matrix to RS before recursive craft");
         }
         return true;
     }
