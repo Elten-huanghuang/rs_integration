@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -56,9 +55,6 @@ public final class RSGridMatrixNormalizer {
             if (stack.isEmpty()) continue;
             ItemStack remainder = target.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE);
             if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RSI-Matrix] Cannot return crafting-matrix slot {} to RS; recursive craft cancelled",
-                        slot);
                 return false;
             }
         }
@@ -72,9 +68,6 @@ public final class RSGridMatrixNormalizer {
             matrix.setItem(slot, remainder);
             changed = true;
             if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI-Matrix] RS accepted only part of crafting-matrix slot {} during normalization",
-                        slot);
                 return false;
             }
         }
@@ -82,7 +75,6 @@ public final class RSGridMatrixNormalizer {
         if (changed) {
             grid.onCraftingMatrixChanged();
             gridMenu.broadcastChanges();
-            RSIntegrationMod.LOGGER.info("[RSI-Matrix] Returned crafting matrix to RS before recursive craft");
         }
         return true;
     }
