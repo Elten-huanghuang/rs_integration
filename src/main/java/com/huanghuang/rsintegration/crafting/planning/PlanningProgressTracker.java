@@ -12,9 +12,11 @@ import javax.annotation.Nullable;
 public final class PlanningProgressTracker {
     static final long SUCCESS_VISIBLE_MS = 400L;
     static final long TERMINAL_VISIBLE_MS = 3_000L;
+    static final long FINALIZING_VISIBLE_MS = 8_000L;
     private static final long LOCAL_TIMEOUT_MS = 60_000L;
     private static PlanningProgressSnapshot current;
     private static long localStartedAt;
+    private static long stateStartedAt;
     private static long terminalSince;
 
     private PlanningProgressTracker() {}
@@ -25,6 +27,7 @@ public final class PlanningProgressTracker {
                 PlanningProgressSnapshot.State.ACCEPTED,
                 PlanningProgressSnapshot.Phase.ACCEPTING, 0L, Component.empty());
         localStartedAt = System.currentTimeMillis();
+        stateStartedAt = localStartedAt;
         terminalSince = 0L;
     }
 
@@ -36,8 +39,12 @@ public final class PlanningProgressTracker {
         if (current != null && current.requestGeneration() > 0L
                 && snapshot.requestGeneration() > 0L
                 && snapshot.requestGeneration() < current.requestGeneration()) return;
+        long now = System.currentTimeMillis();
+        if (current.state() != snapshot.state() || current.phase() != snapshot.phase()) {
+            stateStartedAt = now;
+        }
         current = snapshot;
-        if (snapshot.terminal()) terminalSince = System.currentTimeMillis();
+        if (snapshot.terminal()) terminalSince = now;
     }
 
     @Nullable
@@ -57,6 +64,7 @@ public final class PlanningProgressTracker {
     public static void clear() {
         current = null;
         localStartedAt = 0L;
+        stateStartedAt = 0L;
         terminalSince = 0L;
     }
 
@@ -73,6 +81,15 @@ public final class PlanningProgressTracker {
         if (current.terminal() && terminalSince > 0L
                 && now - terminalSince >= terminalVisibleMillis(current.state())) {
             clear();
+        } else if (finalizingTimedOut(current.state(), stateStartedAt, now)) {
+            long elapsed = Math.max(current.elapsedMillis(),
+                    Math.max(0L, now - localStartedAt));
+            current = new PlanningProgressSnapshot(current.requestId(),
+                    current.requestGeneration(), current.recipeId(),
+                    PlanningProgressSnapshot.State.TIMED_OUT, current.phase(),
+                    elapsed,
+                    Component.translatable("rsi.plan.failure.finalizing_timeout"));
+            terminalSince = now;
         } else if (!current.terminal() && localStartedAt > 0L
                 && now - localStartedAt >= LOCAL_TIMEOUT_MS) {
             current = new PlanningProgressSnapshot(current.requestId(),
@@ -87,5 +104,11 @@ public final class PlanningProgressTracker {
     static long terminalVisibleMillis(PlanningProgressSnapshot.State state) {
         return state == PlanningProgressSnapshot.State.SUCCEEDED
                 ? SUCCESS_VISIBLE_MS : TERMINAL_VISIBLE_MS;
+    }
+
+    static boolean finalizingTimedOut(PlanningProgressSnapshot.State state,
+                                      long startedAt, long now) {
+        return state == PlanningProgressSnapshot.State.FINALIZING && startedAt > 0L
+                && now - startedAt >= FINALIZING_VISIBLE_MS;
     }
 }

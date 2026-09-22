@@ -512,6 +512,8 @@
   "rsi.plan.failure.max_craftable_unknown": "The recipe is too complex to determine the maximum craftable amount.",
   "rsi.plan.failure.complexity_limit": "The recipe exceeds the safe branch or step limit. Lock a concrete material or recipe.",
   "rsi.plan.failure.planning_timeout": "Planning is still exploring this recipe; the preview timed out without a safe result. Try again after selecting a concrete material.",
+  "rsi.plan.failure.finalizing_timeout": "Plan validation timed out and this request was stopped. Please try again.",
+  "rsi.plan.failure.planning_cancelled": "The planning request was cancelled; no plan was generated.",
   "rsi.plan.failure.dynamic_plan_unavailable": "This recipe uses dynamic, transformed, or material-locked inputs and a complete plan cannot currently be generated safely.",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",

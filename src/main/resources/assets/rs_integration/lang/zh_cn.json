@@ -518,6 +518,8 @@
   "rsi.plan.failure.max_craftable_unknown": "配方过于复杂，无法确定最大可合成数量。",
   "rsi.plan.failure.complexity_limit": "配方分支或步骤超过安全规划上限，请锁定具体材料或配方。",
   "rsi.plan.failure.planning_timeout": "后台规划在安全时间内未完成，未生成不完整计划；请稍后重试或锁定具体材料。",
+  "rsi.plan.failure.finalizing_timeout": "计划结果校验超时，已停止本次规划；请稍后重试。",
+  "rsi.plan.failure.planning_cancelled": "规划请求已取消，未生成计划。",
   "rsi.plan.failure.dynamic_plan_unavailable": "此配方包含动态、变换或材料锁定输入，当前无法安全生成完整计划。",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.missing_more": "... (+%s 更多)",
