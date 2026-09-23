@@ -1246,5 +1246,7 @@
   "screen.rs_integration.void_upgrade.equipment.head": "Helmets",
   "screen.rs_integration.void_upgrade.equipment.chest": "Chestplates",
   "screen.rs_integration.void_upgrade.equipment.legs": "Leggings",
-  "screen.rs_integration.void_upgrade.equipment.feet": "Boots"
+  "screen.rs_integration.void_upgrade.equipment.feet": "Boots",
+  "gui.rs_integration.tetra_sort.mode.default": "Default",
+  "gui.rs_integration.tetra_sort.mode.category": "Category"
 }

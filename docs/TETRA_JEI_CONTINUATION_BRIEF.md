@@ -1,5 +1,11 @@
 # Tetra + JEI 继续开发说明
 
+> 2026-09-23 实现更新：用户明确要求不加按钮，打开 Tetra 加工台后直接在右侧 JEI 显示当前槽位可用材料。实现由 Tetra `MaterialData.material.getApplicableItemStacks()` 取得真实物品栈，再用当前可用方案的 `acceptsMaterial(target, slot, materialSlot, stack)` 校验；用 JEI 运行时物品管理器仅补入 JEI 原本未注册的物品，并从右侧列表中筛出候选项。离开加工台或清空目标时恢复 JEI 原列表。没有 JEI Tetra 依赖，也不要求打开全息球。
+>
+> 当前客户端实现位于 `mods/tetra/client/TetraWorkbenchMaterialState`，JEI 物品桥接位于 `mods/jei/TetraJeiItemBridge`，过滤入口为 `IngredientFilterTetraMixin`。通过 JEI 自身 `IIngredientManager` 添加/删除动态物品，保留普通物品栈的物品 ID 和 NBT，因此 RSI 现有物品键可映射至库存数量叠层。筛选在 JEI 现有物品列表上进行，与搜索条件取交集；只移除桥接自身注入的物品，不移除 JEI/其他模组原有物品。当前修改还需编译和游戏内验收。
+>
+> `compileJava`、NBT 库存映射测试、JEI Mixin 合同测试和 JAR 构建均已通过；尚未进行游戏内验收。显示候选物品不代表其当前在玩家背包或 RS 网络库存中实际拥有；RSI 的既有数量叠层仅在物品 ID 与 NBT 精确匹配库存时显示数量。下文保留原研究记录，其中按钮流程仅为历史方案，不适用于当前实现。
+
 > 交接对象：下一位负责实现的 AI/开发者  
 > 项目：`D:\sd\rs-integration`  
 > 目标环境：Minecraft 1.20.1 Forge、Tetra 6.9.0、JEI 15.20.0.129、JEI Tetra 6.9.0-1.2.0-fix
@@ -258,7 +264,7 @@ Tetra 和 JEI Tetra 都是可选模组。建议：
 - JEI Tetra 不存在时，不能因为按钮或 JEI 插件导致客户端崩溃。
 - 不要为了可选模组把 Tetra 开发依赖加入主工程硬链接。
 
-## 10. 验收标准
+## 10. 历史验收标准（按钮流程已被当前实现取代）
 
 ### 必须通过
 
@@ -287,14 +293,14 @@ Tetra 和 JEI Tetra 都是可选模组。建议：
 9. 第三方材料有 NBT 或自定义属性。
 10. JEI 当前已经打开其他页面时再次触发。
 
-## 11. 本次失败实现已经撤销
+## 11. 当前实现状态
 
-本次失败的 Tetra 侧栏、网络包、材料扫描和 JEI 入口代码已经移除。
+本节以下旧记录描述的是 2026-09-23 本轮实现之前的探索与清理状态；若与文档顶部实现更新冲突，以顶部为准。当前代码通过 Tetra 原生材料物品栈和合法性判断筛选 JEI，不绘制 Tetra 材料侧栏、不添加额外按钮，也不调用 JEI Tetra API。
 
-当前工作区保留的非本任务状态：
+交付前验证：
 
-- 之前已有的 5 个 `docs/` 删除未恢复。
-- 用户提供的 `AGENTS.md` 未删除。
-- 没有提交新的 Tetra 实现。
-
-下一位 AI 应从干净的 Tetra 集成状态开始，不要继续修补旧的 RS 材料侧栏方案。
+- `compileJava` 通过。
+- `JeiNetworkItemCacheTest` 通过，覆盖无 NBT 空标签归一化及带 NBT 变体精确库存映射。
+- `TetraJeiMixinContractTest` 通过，确认 JEI 过滤器结果替换使用可取消回调。
+- 尚未在游戏内验证工作台槽位变化、搜索交集和右侧库存数量显示。
+- JAR 只生成在项目 `build/libs` 下，没有替换游戏实例中的文件。
