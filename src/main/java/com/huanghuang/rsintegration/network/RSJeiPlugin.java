@@ -8,8 +8,8 @@ import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
 import com.huanghuang.rsintegration.mods.jei.TetraJeiItemBridge;
+import com.huanghuang.rsintegration.mods.jei.TetraJeiSortExclusion;
 import com.huanghuang.rsintegration.mods.jei.TetraWorkbenchJeiFilterRefreshRegistry;
-import com.huanghuang.rsintegration.mixin.jei.IngredientListOverlayTetraSortMixin;
 import com.huanghuang.rsintegration.mods.jei.client.JeiCheatShortcuts;
 import com.huanghuang.rsintegration.mods.tetra.client.TetraWorkbenchMaterialState;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
@@ -257,8 +257,7 @@ public final class RSJeiPlugin implements IModPlugin {
                         @Override
                         public List<Rect2i> getGuiExtraAreas(
                                 AbstractContainerScreen<?> screen) {
-                            return IngredientListOverlayTetraSortMixin
-                                    .rsi$getMenuExclusionAreas(screen);
+                            return TetraJeiSortExclusion.getGuiExtraAreas(screen);
                         }
                     });
             RSIntegrationMod.LOGGER.debug("[RSI-Tetra] Registered JEI sort menu exclusion handler");
