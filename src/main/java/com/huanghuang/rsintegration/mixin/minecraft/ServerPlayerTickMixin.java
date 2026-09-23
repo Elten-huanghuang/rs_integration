@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.minecraft;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.server.level.ServerPlayer;
@@ -14,6 +15,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ServerPlayer.class)
 public abstract class ServerPlayerTickMixin {
+
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void rsi$flushDeferredInventorySync(CallbackInfo ci) {
+        PlayerUtils.flushDeferredInventorySync((ServerPlayer) (Object) this);
+    }
 
     @Inject(method = "tick", at = @At("HEAD"))
     public void rsi$tickHead(CallbackInfo ci) {

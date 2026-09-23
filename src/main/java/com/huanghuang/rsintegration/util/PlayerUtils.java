@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
@@ -9,15 +10,22 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class PlayerUtils {
+
+    private static final Map<UUID, Set<Integer>> DEFERRED_INVENTORY_SYNC =
+            new ConcurrentHashMap<>();
 
     private PlayerUtils() {}
 
@@ -103,8 +111,7 @@ public final class PlayerUtils {
         if (network != null) {
             // insertItem returns whatever the network could not store; if we
             // discard it (RS full / no matching storage) those items are voided.
-            ItemStack remainder = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
-                .insertLegacy(network, player, stack, false);
+            ItemStack remainder = CraftStorageEndpoints.insertLegacy(network, player, stack, false);
             int stored = stack.getCount() - remainder.getCount();
             if (stored > 0) {
                 RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to RS network (player chunk unloaded): {} x{}",
@@ -140,8 +147,7 @@ public final class PlayerUtils {
 
     private static void broadcastInventoryChanges(ServerPlayer player, List<ItemStack> before) {
         broadcastInventoryChanges(player);
-        if (player.connection == null
-                || player instanceof net.minecraftforge.common.util.FakePlayer) return;
+        if (player.connection == null || player instanceof FakePlayer) return;
 
         int size = Math.min(before.size(), player.getInventory().getContainerSize());
         for (int slot = 0; slot < size; slot++) {
@@ -155,6 +161,39 @@ public final class PlayerUtils {
             player.connection.send(new ClientboundContainerSetSlotPacket(
                     ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
                     0, slot, current.copy()));
+            DEFERRED_INVENTORY_SYNC.computeIfAbsent(player.getUUID(), ignored ->
+                    ConcurrentHashMap.newKeySet()).add(slot);
+        }
+
+        // A virtual craft can finish while the client is using an item from
+        // the selected hotbar slot to keep a remote GUI open. That GUI may
+        // leave the client holding a stale copy even when the server selected
+        // slot itself did not change, so always correct the active hand slot.
+        int selected = player.getInventory().selected;
+        if (selected >= 0 && selected < player.getInventory().getContainerSize()) {
+            player.connection.send(new ClientboundContainerSetSlotPacket(
+                    ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+                    0, selected, player.getInventory().getItem(selected).copy()));
+            DEFERRED_INVENTORY_SYNC.computeIfAbsent(player.getUUID(), ignored ->
+                    ConcurrentHashMap.newKeySet()).add(selected);
+        }
+    }
+
+    /**
+     * Re-send inventory slots after the current server tick's menu broadcast.
+     * Remote machine menus can broadcast an older slot snapshot after a craft
+     * finishes, so an immediate packet alone is not always the final update the
+     * client receives.
+     */
+    public static void flushDeferredInventorySync(ServerPlayer player) {
+        if (player == null || player.connection == null || player instanceof FakePlayer) return;
+        Set<Integer> slots = DEFERRED_INVENTORY_SYNC.remove(player.getUUID());
+        if (slots == null || slots.isEmpty()) return;
+        for (int slot : slots) {
+            if (slot < 0 || slot >= player.getInventory().getContainerSize()) continue;
+            player.connection.send(new ClientboundContainerSetSlotPacket(
+                    ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+                    0, slot, player.getInventory().getItem(slot).copy()));
         }
     }
 
