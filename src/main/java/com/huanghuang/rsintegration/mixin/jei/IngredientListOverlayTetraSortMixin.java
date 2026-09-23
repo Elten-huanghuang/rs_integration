@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
+import com.huanghuang.rsintegration.mods.jei.TetraJeiSortExclusion;
 import com.huanghuang.rsintegration.mods.tetra.client.TetraMaterialSortMode;
 import com.huanghuang.rsintegration.mods.tetra.client.TetraWorkbenchMaterialState;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -13,7 +14,6 @@ import mezz.jei.gui.overlay.IngredientListOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -22,7 +22,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.List;
 import java.util.Optional;
 
 @Mixin(value = IngredientListOverlay.class, remap = false)
@@ -53,6 +52,7 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
         } else {
             rsi$sortArea = ImmutableRect2i.EMPTY;
             rsi$menuOpen = false;
+            TetraJeiSortExclusion.clear();
         }
     }
 
@@ -60,6 +60,7 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
     private void rsi$applySortBounds(GuiTextFieldFilter search, ImmutableRect2i searchArea) {
         rsi$sortArea = new ImmutableRect2i(
                 searchArea.getX(), searchArea.getY(), RSI_BUTTON_SIZE, searchArea.getHeight());
+        TetraJeiSortExclusion.updateSortArea(searchArea.getX(), searchArea.getY());
         search.updateBounds(searchArea.cropLeft(RSI_BUTTON_SIZE));
     }
 
@@ -73,17 +74,6 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
     }
 
     @Unique
-    public static List<Rect2i> rsi$getMenuExclusionAreas(Screen screen) {
-        if (!rsi$menuOpen || !TetraWorkbenchMaterialState.isActive()
-                || screen == null
-                || !screen.getClass().getName().equals(
-                        "se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen")) {
-            return List.of();
-        }
-        return List.of(rsi$getPanelArea().toMutable());
-    }
-
-    @Unique
     private void rsi$ensureSortBounds() {
         IngredientListOverlayAccessor overlay = (IngredientListOverlayAccessor) this;
         GuiTextFieldFilter search = overlay.rsi$getSearchField();
@@ -94,6 +84,7 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
             }
             rsi$sortArea = ImmutableRect2i.EMPTY;
             rsi$menuOpen = false;
+            TetraJeiSortExclusion.clear();
             return;
         }
         if (rsi$sortArea.isEmpty() && currentArea != null && !currentArea.isEmpty()) {
@@ -183,16 +174,19 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
                 if (index >= 0 && index < TetraMaterialSortMode.values().length) {
                     TetraWorkbenchMaterialState.setSortMode(TetraMaterialSortMode.values()[index]);
                     rsi$menuOpen = false;
+                    TetraJeiSortExclusion.setMenuOpen(false);
                     return Optional.of(this);
                 }
             }
         }
         if (inSortButton) {
             rsi$menuOpen = !rsi$menuOpen;
+            TetraJeiSortExclusion.setMenuOpen(rsi$menuOpen);
             return Optional.of(this);
         }
         if (rsi$menuOpen) {
             rsi$menuOpen = false;
+            TetraJeiSortExclusion.setMenuOpen(false);
         }
         return Optional.empty();
     }
