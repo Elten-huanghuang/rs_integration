@@ -306,6 +306,30 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return hasField(targetClassName, "ingredientListCached")
                     && hasMethod(targetClassName, "notifyListenersOfChange");
         }
+        if (mixinClassName.contains("jei.IngredientFilterTetraMixin")) {
+            // The Tetra filter uses the refresh interface supplied by the
+            // companion mixin, so both must agree on the JEI target contract.
+            return hasField(targetClassName, "ingredientListCached")
+                    && hasMethod(targetClassName, "notifyListenersOfChange");
+        }
+        if (mixinClassName.contains("jei.GuiTextFieldFilterAccessor")) {
+            return isClassPresent("mezz.jei.gui.input.GuiTextFieldFilter")
+                    && hasField(targetClassName, "area");
+        }
+        if (mixinClassName.contains("jei.IngredientListOverlayAccessor")) {
+            return isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
+                    && hasField(targetClassName, "searchField")
+                    && hasField(targetClassName, "configButton");
+        }
+        if (mixinClassName.contains("jei.IngredientListOverlayTetraSortMixin")) {
+            return isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
+                    && hasMethod(targetClassName, "drawScreen")
+                    && hasMethod(targetClassName, "createInputHandler");
+        }
+        if (mixinClassName.contains("tetra.WorkbenchScreenJeiPreviewMixin")) {
+            return isClassPresent("se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen")
+                    && hasMethod(targetClassName, "m_88315_");
+        }
         if (mixinClassName.contains("jei.ElementSearchSolCarrotMixin")) {
             return hasField(targetClassName, "allElements")
                     && hasMethod(targetClassName, "getSearchResults");

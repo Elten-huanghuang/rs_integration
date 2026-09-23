@@ -7,7 +7,11 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
+import com.huanghuang.rsintegration.mods.jei.TetraJeiItemBridge;
+import com.huanghuang.rsintegration.mods.jei.TetraWorkbenchJeiFilterRefreshRegistry;
+import com.huanghuang.rsintegration.mixin.jei.IngredientListOverlayTetraSortMixin;
 import com.huanghuang.rsintegration.mods.jei.client.JeiCheatShortcuts;
+import com.huanghuang.rsintegration.mods.tetra.client.TetraWorkbenchMaterialState;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageJeiBridge;
@@ -30,11 +34,13 @@ import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraftforge.fml.ModList;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
+import java.util.List;
 
 @JeiPlugin
 public final class RSJeiPlugin implements IModPlugin {
@@ -57,6 +63,8 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
+        TetraWorkbenchMaterialState.refreshForJei();
+        TetraWorkbenchJeiFilterRefreshRegistry.refresh();
         com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
                 .onRuntimeAvailable();
         // RSGridSearchCache contains RS Grid types and is only registered in
@@ -81,6 +89,8 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeUnavailable() {
+        TetraJeiItemBridge.clear();
+        TetraWorkbenchJeiFilterRefreshRegistry.clear();
         com.huanghuang.rsintegration.client.RecipeAvailabilityClient.clear();
         JeiMarqueeSelector.unregister();
         JeiCheatShortcuts.unregister();
@@ -203,6 +213,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+        registerOptionalTetraGuiHandler(registration);
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             registration.addGuiScreenHandler(
                     com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen.class,
@@ -231,6 +242,29 @@ public final class RSJeiPlugin implements IModPlugin {
         } catch (ReflectiveOperationException exception) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-JEI] Failed to register Apotheosis library exclusion area", exception);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void registerOptionalTetraGuiHandler(IGuiHandlerRegistration registration) {
+        if (!ModList.get().isLoaded(ModIds.TETRA)) return;
+        try {
+            Class<?> raw = Class.forName(
+                    "se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen");
+            if (!AbstractContainerScreen.class.isAssignableFrom(raw)) return;
+            registration.addGuiContainerHandler((Class) raw,
+                    new IGuiContainerHandler<AbstractContainerScreen<?>>() {
+                        @Override
+                        public List<Rect2i> getGuiExtraAreas(
+                                AbstractContainerScreen<?> screen) {
+                            return IngredientListOverlayTetraSortMixin
+                                    .rsi$getMenuExclusionAreas(screen);
+                        }
+                    });
+            RSIntegrationMod.LOGGER.debug("[RSI-Tetra] Registered JEI sort menu exclusion handler");
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Tetra] Tetra workbench JEI exclusion handler unavailable", exception);
         }
     }
 

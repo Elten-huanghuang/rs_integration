@@ -365,6 +365,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue AUTO_EAT_MENU_EXPANDED;
     public static ForgeConfigSpec.IntValue SIDE_PANEL_NAVIGATION_TIMEOUT_MS;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS_HUD;
+    public static ForgeConfigSpec.BooleanValue TETRA_JEI_PREVIEW_CACHE;
 
 
     static {
@@ -1372,6 +1373,12 @@ public final class RSIntegrationConfig {
                 .comment("Maximum scale of the red crafting shortage in the JEI item slot top-left.",
                         "Long values still shrink automatically to fit. Range: 0.4-1.0.")
                 .defineInRange("craftingShortageScale", 0.75D, 0.40D, 1.00D);
+        cl.pop();
+        cl.push("tetra");
+        TETRA_JEI_PREVIEW_CACHE = cl
+                .comment("Keep the last JEI material hover preview visible after the cursor leaves the JEI ingredient.",
+                        "The preview is cleared when the target, slot, schematic, or workbench changes.")
+                .define("keepJeiMaterialPreview", true);
         cl.pop();
         cl.push("gridSearch");
         GRID_SEARCH_IDLE_BUDGET_MICROS = cl
