@@ -33,8 +33,6 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Comparator;
-import java.util.function.ToDoubleFunction;
 
 /** Mirrors Tetra's current workbench material candidates into JEI as item stacks. */
 @Mod.EventBusSubscriber(value = Dist.CLIENT)
@@ -48,7 +46,10 @@ public final class TetraWorkbenchMaterialState {
     private static boolean active;
     private static Map<String, ItemStack> candidates = Map.of();
     private static Map<String, TetraMaterialSortData> candidateSortData = Map.of();
-    private static TetraMaterialSortMode sortMode = TetraMaterialSortMode.DEFAULT;
+    private static TetraMaterialSortMode primarySortMode = TetraMaterialSortMode.DEFAULT;
+    private static TetraMaterialSortMode secondarySortMode = TetraMaterialSortMode.DEFAULT;
+    private static Boolean primaryAscendingOverride;
+    private static Boolean secondaryAscendingOverride;
     private static String lastContext;
     private static String lastFailure;
     private static String lastPreviewFailure;
@@ -289,7 +290,12 @@ public final class TetraWorkbenchMaterialState {
                 indexed.putIfAbsent(JeiNetworkInventoryPacket.key(normalized), normalized);
             }
         }
-        boolean changed = active != nextActive || !indexed.keySet().equals(candidates.keySet());
+        Map<String, TetraMaterialSortData> indexedSortData = new LinkedHashMap<>();
+        for (String key : indexed.keySet()) {
+            indexedSortData.put(key, nextSortData.getOrDefault(key, TetraMaterialSortData.empty()));
+        }
+        boolean changed = active != nextActive || !indexed.keySet().equals(candidates.keySet())
+                || !indexedSortData.equals(candidateSortData);
         if (changed) {
             candidateVersion++;
             RSIntegrationMod.LOGGER.info("[RSI-Tetra] JEI material filter changed: active={}, candidates={}",
@@ -297,10 +303,6 @@ public final class TetraWorkbenchMaterialState {
         }
         active = nextActive;
         candidates = Map.copyOf(indexed);
-        Map<String, TetraMaterialSortData> indexedSortData = new LinkedHashMap<>();
-        for (String key : indexed.keySet()) {
-            indexedSortData.put(key, nextSortData.getOrDefault(key, TetraMaterialSortData.empty()));
-        }
         candidateSortData = Map.copyOf(indexedSortData);
         if (changed) {
             TetraJeiItemBridge.sync(active ? candidates.values() : List.of());
@@ -321,16 +323,91 @@ public final class TetraWorkbenchMaterialState {
     }
 
     public static TetraMaterialSortMode getSortMode() {
-        return sortMode;
+        return primarySortMode;
     }
 
     public static void cycleSortMode() {
-        setSortMode(TetraMaterialSortMode.next(sortMode));
+        setSortMode(TetraMaterialSortMode.next(primarySortMode));
     }
 
     public static void setSortMode(TetraMaterialSortMode nextMode) {
-        if (nextMode == null || nextMode == sortMode) return;
-        sortMode = nextMode;
+        if (nextMode == null || nextMode == primarySortMode) return;
+        primarySortMode = nextMode;
+        primaryAscendingOverride = null;
+        if (secondarySortMode == nextMode) {
+            secondarySortMode = TetraMaterialSortMode.DEFAULT;
+            secondaryAscendingOverride = null;
+        }
+        candidateVersion++;
+        TetraWorkbenchJeiFilterRefreshRegistry.refresh();
+    }
+
+    public static TetraMaterialSortMode getPrimarySortMode() {
+        return primarySortMode;
+    }
+
+    public static TetraMaterialSortMode getSecondarySortMode() {
+        return secondarySortMode;
+    }
+
+    public static boolean isPrimaryAscendingSelected() {
+        return primaryAscendingOverride != null && primaryAscendingOverride;
+    }
+
+    public static boolean isPrimaryDescendingSelected() {
+        return primaryAscendingOverride != null && !primaryAscendingOverride;
+    }
+
+    public static boolean isSecondaryAscendingSelected() {
+        return secondaryAscendingOverride != null && secondaryAscendingOverride;
+    }
+
+    public static boolean isSecondaryDescendingSelected() {
+        return secondaryAscendingOverride != null && !secondaryAscendingOverride;
+    }
+
+    public static boolean isSortFieldSelected(TetraMaterialSortMode mode) {
+        return mode != null && mode != TetraMaterialSortMode.DEFAULT
+                && (mode == primarySortMode || mode == secondarySortMode);
+    }
+
+    public static void toggleSortField(TetraMaterialSortMode mode) {
+        if (mode == null || mode == TetraMaterialSortMode.DEFAULT) return;
+        if (mode == primarySortMode) {
+            if (secondarySortMode != TetraMaterialSortMode.DEFAULT) {
+                primarySortMode = secondarySortMode;
+                primaryAscendingOverride = secondaryAscendingOverride;
+                secondarySortMode = TetraMaterialSortMode.DEFAULT;
+                secondaryAscendingOverride = null;
+            } else {
+                primarySortMode = TetraMaterialSortMode.DEFAULT;
+                primaryAscendingOverride = null;
+            }
+        } else if (mode == secondarySortMode) {
+            secondarySortMode = TetraMaterialSortMode.DEFAULT;
+            secondaryAscendingOverride = null;
+        } else if (primarySortMode == TetraMaterialSortMode.DEFAULT) {
+            primarySortMode = mode;
+            primaryAscendingOverride = null;
+        } else if (secondarySortMode == TetraMaterialSortMode.DEFAULT) {
+            secondarySortMode = mode;
+            secondaryAscendingOverride = null;
+        } else {
+            return;
+        }
+        candidateVersion++;
+        TetraWorkbenchJeiFilterRefreshRegistry.refresh();
+    }
+
+    public static void toggleSortDirection(TetraMaterialSortMode mode, boolean ascending) {
+        if (!isSortFieldSelected(mode)) return;
+        if (mode == primarySortMode) {
+            primaryAscendingOverride = primaryAscendingOverride != null
+                    && primaryAscendingOverride == ascending ? null : ascending;
+        } else {
+            secondaryAscendingOverride = secondaryAscendingOverride != null
+                    && secondaryAscendingOverride == ascending ? null : ascending;
+        }
         candidateVersion++;
         TetraWorkbenchJeiFilterRefreshRegistry.refresh();
     }
@@ -340,39 +417,59 @@ public final class TetraWorkbenchMaterialState {
                 JeiNetworkInventoryPacket.key(left), TetraMaterialSortData.empty());
         TetraMaterialSortData rightData = candidateSortData.getOrDefault(
                 JeiNetworkInventoryPacket.key(right), TetraMaterialSortData.empty());
-        Comparator<TetraMaterialSortData> comparator = switch (sortMode) {
-            case DEFAULT -> null;
-            case CATEGORY -> Comparator.comparing(TetraMaterialSortData::categoryLabel,
-                    String.CASE_INSENSITIVE_ORDER);
-            case HARDNESS -> descending(TetraMaterialSortData::hardness);
-            case DENSITY -> descending(TetraMaterialSortData::density);
-            case FLEXIBILITY -> descending(TetraMaterialSortData::flexibility);
-            case DURABILITY -> descending(TetraMaterialSortData::durability);
-            case TOOL_LEVEL -> Comparator.comparingInt(TetraMaterialSortData::toolLevel)
-                    .reversed();
-            case TOOL_EFFICIENCY -> descending(TetraMaterialSortData::toolEfficiency);
-            case INTEGRITY_GAIN -> descending(TetraMaterialSortData::integrityGain);
-            case INTEGRITY_COST -> ascending(TetraMaterialSortData::integrityCost);
-            case MAGIC_CAPACITY -> Comparator.comparingInt(TetraMaterialSortData::magicCapacity)
-                    .reversed();
-        };
-        return comparator == null ? 0 : comparator.compare(leftData, rightData);
+        int primary = compareMode(primarySortMode, leftData, rightData,
+                primaryAscendingOverride == null
+                        ? defaultAscending(primarySortMode) : primaryAscendingOverride);
+        if (primary != 0 || secondarySortMode == TetraMaterialSortMode.DEFAULT
+                || secondarySortMode == primarySortMode) {
+            return primary;
+        }
+        return compareMode(secondarySortMode, leftData, rightData,
+                secondaryAscendingOverride == null
+                        ? defaultAscending(secondarySortMode) : secondaryAscendingOverride);
     }
 
-    private static Comparator<TetraMaterialSortData> descending(
-            ToDoubleFunction<TetraMaterialSortData> getter) {
-        return Comparator.comparingDouble((TetraMaterialSortData value) -> {
-            double number = getter.applyAsDouble(value);
-            return Double.isNaN(number) ? Double.NEGATIVE_INFINITY : number;
-        }).reversed();
+    private static int compareMode(TetraMaterialSortMode mode,
+                                   TetraMaterialSortData left,
+                                   TetraMaterialSortData right,
+                                   boolean ascending) {
+        if (mode == TetraMaterialSortMode.DEFAULT) return 0;
+        if (mode == TetraMaterialSortMode.CATEGORY) {
+            int result = left.categoryLabel().compareToIgnoreCase(right.categoryLabel());
+            return ascending ? result : -result;
+        }
+        double leftValue;
+        double rightValue;
+        switch (mode) {
+            case HARDNESS -> { leftValue = left.hardness(); rightValue = right.hardness(); }
+            case DENSITY -> { leftValue = left.density(); rightValue = right.density(); }
+            case FLEXIBILITY -> { leftValue = left.flexibility(); rightValue = right.flexibility(); }
+            case DURABILITY -> { leftValue = left.durability(); rightValue = right.durability(); }
+            case TOOL_LEVEL -> { leftValue = left.toolLevel(); rightValue = right.toolLevel(); }
+            case TOOL_EFFICIENCY -> { leftValue = left.toolEfficiency(); rightValue = right.toolEfficiency(); }
+            case INTEGRITY_GAIN -> { leftValue = left.integrityGain(); rightValue = right.integrityGain(); }
+            case INTEGRITY_COST -> { leftValue = left.integrityCost(); rightValue = right.integrityCost(); }
+            case MAGIC_CAPACITY -> { leftValue = left.magicCapacity(); rightValue = right.magicCapacity(); }
+            default -> { return 0; }
+        }
+        return compareNumber(leftValue, rightValue, ascending);
     }
 
-    private static Comparator<TetraMaterialSortData> ascending(
-            ToDoubleFunction<TetraMaterialSortData> getter) {
-        return Comparator.comparingDouble((TetraMaterialSortData value) -> {
-            double number = getter.applyAsDouble(value);
-            return Double.isNaN(number) ? Double.POSITIVE_INFINITY : number;
-        });
+    private static int compareNumber(double left, double right, boolean ascending) {
+        boolean leftMissing = Double.isNaN(left);
+        boolean rightMissing = Double.isNaN(right);
+        if (leftMissing || rightMissing) {
+            if (leftMissing == rightMissing) return 0;
+            return leftMissing ? 1 : -1;
+        }
+        int result = Double.compare(left, right);
+        return ascending ? result : -result;
+    }
+
+    private static boolean defaultAscending(TetraMaterialSortMode mode) {
+        return mode == TetraMaterialSortMode.CATEGORY
+                || mode == TetraMaterialSortMode.INTEGRITY_COST
+                || mode == TetraMaterialSortMode.DEFAULT;
     }
 
     public static void refreshForJei() {

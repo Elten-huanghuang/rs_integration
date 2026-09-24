@@ -10,7 +10,8 @@ import java.util.List;
 
 /** Supplies the dynamic JEI exclusion area for the Tetra sort menu. */
 public final class TetraJeiSortExclusion {
-    private static final int PANEL_WIDTH = 132;
+    private static final int PANEL_WIDTH = 190;
+    private static final int ROW_HEIGHT = 18;
 
     private static volatile boolean menuOpen;
     private static volatile int sortX;
@@ -38,7 +39,7 @@ public final class TetraJeiSortExclusion {
                         "se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen")) {
             return List.of();
         }
-        int panelHeight = TetraMaterialSortMode.values().length * 15 + 4;
+        int panelHeight = TetraMaterialSortMode.values().length * ROW_HEIGHT + 4;
         int screenWidth = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int panelX = Math.max(0, Math.min(sortX, screenWidth - PANEL_WIDTH));
         int panelY = Math.max(0, sortY - panelHeight);

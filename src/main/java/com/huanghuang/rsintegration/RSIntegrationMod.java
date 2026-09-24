@@ -65,6 +65,7 @@ import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineNetworkHandle
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate;
 import com.huanghuang.rsintegration.mods.jei.JeiCheatDropPacket;
+import com.huanghuang.rsintegration.mods.jei.JeiStoragePullPacket;
 import com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient;
 import com.huanghuang.rsintegration.network.packet.ConfigSyncPacket;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket;
@@ -701,6 +702,7 @@ public final class RSIntegrationMod {
                 () -> AnvilMemoryClient::init);
         ConfigSyncPacket.register();
         JeiCheatDropPacket.register();
+        JeiStoragePullPacket.register();
         StorageSearchTextPacket.register();
         NetworkHandler.CHANNEL.registerMessage(NetworkPacketIds.JEI_NETWORK_INVENTORY,
                 JeiNetworkInventoryPacket.class,

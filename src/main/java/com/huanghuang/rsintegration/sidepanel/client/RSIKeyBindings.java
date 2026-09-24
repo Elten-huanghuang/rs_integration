@@ -35,6 +35,8 @@ public final class RSIKeyBindings {
     public static KeyMapping KEY_JEI_GIVE_ONE;
     public static KeyMapping KEY_JEI_GIVE_STACK;
     public static KeyMapping KEY_JEI_DROP;
+    /** Middle-click a JEI ingredient to pull one stack from the active storage network. */
+    public static KeyMapping KEY_JEI_PULL_STORAGE;
     /** Fills the active RS/BD storage terminal search field from JEI or EMI. */
     public static KeyMapping KEY_FILL_STORAGE_SEARCH;
 
@@ -101,6 +103,10 @@ public final class RSIKeyBindings {
         KEY_JEI_DROP = new KeyMapping(
                 "key.rsi.jei_drop", KeyConflictContext.GUI, KeyModifier.CONTROL,
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_Q, "key.categories.rsi");
+        KEY_JEI_PULL_STORAGE = new KeyMapping(
+                "key.rsi.jei_pull_storage", KeyConflictContext.GUI,
+                InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE,
+                "key.categories.rsi");
         KEY_FILL_STORAGE_SEARCH = new KeyMapping(
                 "key.rsi.fill_storage_search", KeyConflictContext.GUI,
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F, "key.categories.rsi");
@@ -116,6 +122,7 @@ public final class RSIKeyBindings {
                     e.register(KEY_JEI_GIVE_ONE);
                     e.register(KEY_JEI_GIVE_STACK);
                     e.register(KEY_JEI_DROP);
+                    e.register(KEY_JEI_PULL_STORAGE);
                     e.register(KEY_FILL_STORAGE_SEARCH);
                 });
         MinecraftForge.EVENT_BUS.addListener(RSIKeyBindings::onKeyInput);
