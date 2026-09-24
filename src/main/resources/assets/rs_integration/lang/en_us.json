@@ -1254,5 +1254,10 @@
   "screen.rs_integration.void_upgrade.equipment.legs": "Leggings",
   "screen.rs_integration.void_upgrade.equipment.feet": "Boots",
   "gui.rs_integration.tetra_sort.mode.default": "Default",
-  "gui.rs_integration.tetra_sort.mode.category": "Category"
+  "gui.rs_integration.tetra_sort.mode.category": "Category",
+  "gui.rs_integration.tetra_sort.tooltip.title": "Material Sorting",
+  "gui.rs_integration.tetra_sort.tooltip.dual_priority": "Supports two priority levels",
+  "gui.rs_integration.tetra_sort.tooltip.primary": "First checked field: primary priority",
+  "gui.rs_integration.tetra_sort.tooltip.secondary": "Second checked field: secondary priority",
+  "gui.rs_integration.tetra_sort.tooltip.controls": "▲ Ascending  ▼ Descending  ☑ Use field"
 }
