@@ -126,4 +126,5 @@ public final class NetworkPacketIds {
     public static final int STORAGE_SEARCH_TEXT = 140;
     public static final int JEI_NETWORK_INVENTORY = 141;
     public static final int JEI_NETWORK_INVENTORY_RESYNC = 142;
+    public static final int JEI_STORAGE_PULL = 143;
 }

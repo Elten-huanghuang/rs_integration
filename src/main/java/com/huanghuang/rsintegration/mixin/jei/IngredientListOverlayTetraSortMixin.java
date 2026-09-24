@@ -29,7 +29,13 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
     @Unique
     private static final int RSI_BUTTON_SIZE = 20;
     @Unique
-    private static final int RSI_PANEL_WIDTH = 132;
+    private static final int RSI_PANEL_WIDTH = 190;
+    @Unique
+    private static final int RSI_ROW_HEIGHT = 18;
+    @Unique
+    private static final int RSI_CONTROL_START = 112;
+    @Unique
+    private static final int RSI_CONTROL_WIDTH = 18;
     @Unique
     private static ImmutableRect2i rsi$sortArea = ImmutableRect2i.EMPTY;
     @Unique
@@ -66,7 +72,7 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
 
     @Unique
     private static ImmutableRect2i rsi$getPanelArea() {
-        int panelHeight = TetraMaterialSortMode.values().length * 15 + 4;
+        int panelHeight = TetraMaterialSortMode.values().length * RSI_ROW_HEIGHT + 4;
         int screenWidth = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int panelX = Math.max(0, Math.min(rsi$sortArea.getX(), screenWidth - RSI_PANEL_WIDTH));
         int panelY = Math.max(0, rsi$sortArea.getY() - panelHeight);
@@ -120,13 +126,35 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
         graphics.fill(panelX, panelBottom - 1, panelX + RSI_PANEL_WIDTH, panelBottom, 0xFF777777);
         for (int index = 0; index < TetraMaterialSortMode.values().length; index++) {
             TetraMaterialSortMode mode = TetraMaterialSortMode.values()[index];
-            int rowY = panelY + 3 + index * 15;
-            if (mode == TetraWorkbenchMaterialState.getSortMode()) {
+            int rowY = panelY + 3 + index * RSI_ROW_HEIGHT;
+            boolean selected = TetraWorkbenchMaterialState.isSortFieldSelected(mode);
+            if (selected) {
                 graphics.fill(panelX + 1, rowY - 1, panelX + RSI_PANEL_WIDTH - 1,
-                        rowY + 13, 0xFF3A3A3A);
+                        rowY + 15, 0xFF303030);
             }
             graphics.drawString(minecraft.font, mode.label(), panelX + 5, rowY, 0xFFFFFFFF);
+            rsi$drawSortButton(graphics, panelX + RSI_CONTROL_START, rowY,
+                    "▲", selected && ((mode == TetraWorkbenchMaterialState.getPrimarySortMode()
+                            && TetraWorkbenchMaterialState.isPrimaryAscendingSelected())
+                            || (mode == TetraWorkbenchMaterialState.getSecondarySortMode()
+                            && TetraWorkbenchMaterialState.isSecondaryAscendingSelected())));
+            rsi$drawSortButton(graphics, panelX + RSI_CONTROL_START + RSI_CONTROL_WIDTH, rowY,
+                    "▼", selected && ((mode == TetraWorkbenchMaterialState.getPrimarySortMode()
+                            && TetraWorkbenchMaterialState.isPrimaryDescendingSelected())
+                            || (mode == TetraWorkbenchMaterialState.getSecondarySortMode()
+                            && TetraWorkbenchMaterialState.isSecondaryDescendingSelected())));
+            rsi$drawSortButton(graphics, panelX + RSI_CONTROL_START + RSI_CONTROL_WIDTH * 2, rowY,
+                    selected ? "☑" : "☐", selected);
         }
+    }
+
+    @Unique
+    private static void rsi$drawSortButton(GuiGraphics graphics, int x, int y,
+                                           String symbol, boolean selected) {
+        graphics.fill(x, y - 2, x + RSI_CONTROL_WIDTH - 2, y + 14,
+                selected ? 0xFF4A4A4A : 0xFF242424);
+        graphics.fill(x, y - 2, x + RSI_CONTROL_WIDTH - 2, y - 1, 0xFF666666);
+        graphics.drawString(Minecraft.getInstance().font, symbol, x + 4, y, 0xFFFFFFFF);
     }
 
     @Inject(method = "drawTooltips", at = @At("RETURN"))
@@ -170,11 +198,24 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
         }
         if (rsi$menuOpen) {
             if (inMenu) {
-                int index = (int) ((mouseY - panelY - 3) / 15);
+                int index = (int) ((mouseY - panelY - 3) / RSI_ROW_HEIGHT);
                 if (index >= 0 && index < TetraMaterialSortMode.values().length) {
-                    TetraWorkbenchMaterialState.setSortMode(TetraMaterialSortMode.values()[index]);
-                    rsi$menuOpen = false;
-                    TetraJeiSortExclusion.setMenuOpen(false);
+                    TetraMaterialSortMode mode = TetraMaterialSortMode.values()[index];
+                    int rowY = panelY + 3 + index * RSI_ROW_HEIGHT;
+                    double relativeX = mouseX - panelArea.getX();
+                    double relativeY = mouseY - rowY;
+                    if (relativeY >= -2 && relativeY < 14
+                            && relativeX >= RSI_CONTROL_START
+                            && relativeX < RSI_CONTROL_START + RSI_CONTROL_WIDTH * 3) {
+                        int control = (int) ((relativeX - RSI_CONTROL_START) / RSI_CONTROL_WIDTH);
+                        if (control == 0) {
+                            TetraWorkbenchMaterialState.toggleSortDirection(mode, true);
+                        } else if (control == 1) {
+                            TetraWorkbenchMaterialState.toggleSortDirection(mode, false);
+                        } else {
+                            TetraWorkbenchMaterialState.toggleSortField(mode);
+                        }
+                    }
                     return Optional.of(this);
                 }
             }

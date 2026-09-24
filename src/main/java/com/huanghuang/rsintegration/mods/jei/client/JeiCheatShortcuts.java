@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiCheatDropPacket;
+import com.huanghuang.rsintegration.mods.jei.JeiStoragePullPacket;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
@@ -65,6 +66,8 @@ public final class JeiCheatShortcuts {
         boolean giveOne = matches(RSIKeyBindings.KEY_JEI_GIVE_ONE, input);
         boolean giveStack = matches(RSIKeyBindings.KEY_JEI_GIVE_STACK, input);
         boolean drop = matches(RSIKeyBindings.KEY_JEI_DROP, input);
+        boolean pullStorage = matches(RSIKeyBindings.KEY_JEI_PULL_STORAGE, input);
+        if (pullStorage) return pullFromStorage(screen);
         if (!giveOne && !giveStack && !drop) return false;
         IJeiRuntime runtime = activeRuntime(screen);
         if (runtime == null) return false;
@@ -102,6 +105,20 @@ public final class JeiCheatShortcuts {
         return true;
     }
 
+    private static boolean pullFromStorage(Screen screen) {
+        IJeiRuntime runtime = activeStorageRuntime(screen);
+        if (runtime == null) return false;
+        Optional<ItemStack> ingredient = itemUnderMouse(runtime);
+        if (ingredient.isEmpty()) return false;
+        var connection = Minecraft.getInstance().getConnection();
+        if (connection == null || !NetworkHandler.CHANNEL.isRemotePresent(connection.getConnection())) {
+            return false;
+        }
+        ItemStack request = ingredient.get().copyWithCount(ingredient.get().getMaxStackSize());
+        NetworkHandler.CHANNEL.sendToServer(new JeiStoragePullPacket(request));
+        return true;
+    }
+
     private static IJeiRuntime activeRuntime(Screen screen) {
         if (Minecraft.getInstance().player == null || hasTextFocus(screen)) return null;
         boolean enabled = ClientSyncedConfig.isSynced()
@@ -112,6 +129,21 @@ public final class JeiCheatShortcuts {
         try {
             var state = Internal.getClientToggleState();
             return state.isOverlayEnabled() && state.isCheatItemsEnabled() ? runtime : null;
+        } catch (RuntimeException | LinkageError failure) {
+            warnCompatibility(failure);
+            return null;
+        }
+    }
+
+    private static IJeiRuntime activeStorageRuntime(Screen screen) {
+        if (Minecraft.getInstance().player == null || screen == null || hasTextFocus(screen)) return null;
+        boolean enabled = ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_JEI : RSIntegrationConfig.ENABLE_JEI.get();
+        if (!enabled) return null;
+        IJeiRuntime runtime = RSJeiPlugin.getRuntime();
+        if (runtime == null || runtime.getIngredientListOverlay().hasKeyboardFocus()) return null;
+        try {
+            return Internal.getClientToggleState().isOverlayEnabled() ? runtime : null;
         } catch (RuntimeException | LinkageError failure) {
             warnCompatibility(failure);
             return null;
