@@ -22,6 +22,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.List;
 import java.util.Optional;
 
 @Mixin(value = IngredientListOverlay.class, remap = false)
@@ -163,8 +164,13 @@ public abstract class IngredientListOverlayTetraSortMixin implements IUserInputH
         rsi$ensureSortBounds();
         if (TetraWorkbenchMaterialState.isActive() && !rsi$sortArea.isEmpty()
                 && rsi$sortArea.contains(mouseX, mouseY)) {
-            graphics.renderTooltip(minecraft.font,
-                    TetraWorkbenchMaterialState.getSortMode().label(), mouseX, mouseY);
+            graphics.renderComponentTooltip(minecraft.font, List.of(
+                    Component.translatable("gui.rs_integration.tetra_sort.tooltip.title"),
+                    Component.translatable("gui.rs_integration.tetra_sort.tooltip.dual_priority"),
+                    Component.translatable("gui.rs_integration.tetra_sort.tooltip.primary"),
+                    Component.translatable("gui.rs_integration.tetra_sort.tooltip.secondary"),
+                    Component.translatable("gui.rs_integration.tetra_sort.tooltip.controls")),
+                    mouseX, mouseY);
         }
     }
 

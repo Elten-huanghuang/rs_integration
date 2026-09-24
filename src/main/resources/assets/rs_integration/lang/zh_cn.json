@@ -1255,5 +1255,10 @@
   "screen.rs_integration.void_upgrade.equipment.legs": "护腿",
   "screen.rs_integration.void_upgrade.equipment.feet": "靴子",
   "gui.rs_integration.tetra_sort.mode.default": "默认顺序",
-  "gui.rs_integration.tetra_sort.mode.category": "材料类型"
+  "gui.rs_integration.tetra_sort.mode.category": "材料类型",
+  "gui.rs_integration.tetra_sort.tooltip.title": "材料排序",
+  "gui.rs_integration.tetra_sort.tooltip.dual_priority": "支持双优先级排序",
+  "gui.rs_integration.tetra_sort.tooltip.primary": "先勾选的字段：主要优先级",
+  "gui.rs_integration.tetra_sort.tooltip.secondary": "后勾选的字段：次要优先级",
+  "gui.rs_integration.tetra_sort.tooltip.controls": "▲升序  ▼降序  ☑使用字段"
 }
