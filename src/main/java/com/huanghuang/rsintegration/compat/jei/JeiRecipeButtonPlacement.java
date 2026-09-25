@@ -9,6 +9,34 @@ public final class JeiRecipeButtonPlacement {
 
     private JeiRecipeButtonPlacement() {}
 
+    public static Rect2i resolveTransferArea(Rect2i recipeArea, Rect2i declaredArea,
+                                             Rect2i cachedButtonArea) {
+        if (isUsable(declaredArea)) {
+            int recipeX = recipeArea == null ? 0 : recipeArea.getX();
+            int recipeY = recipeArea == null ? 0 : recipeArea.getY();
+            return new Rect2i(
+                    recipeX + declaredArea.getX(),
+                    recipeY + declaredArea.getY(),
+                    declaredArea.getWidth(),
+                    declaredArea.getHeight());
+        }
+        if (isUsable(cachedButtonArea)) {
+            return new Rect2i(
+                    cachedButtonArea.getX(),
+                    cachedButtonArea.getY(),
+                    cachedButtonArea.getWidth(),
+                    cachedButtonArea.getHeight());
+        }
+        if (isUsable(recipeArea)) {
+            return new Rect2i(
+                    recipeArea.getX() + recipeArea.getWidth() - 1,
+                    recipeArea.getY() + recipeArea.getHeight() - 1,
+                    1,
+                    1);
+        }
+        return null;
+    }
+
     public static int[] place(Rect2i transferArea, int width, int height,
                               int screenWidth, int screenHeight) {
         int maxX = Math.max(SCREEN_MARGIN, screenWidth - SCREEN_MARGIN - width);
@@ -30,5 +58,9 @@ public final class JeiRecipeButtonPlacement {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(value, max));
+    }
+
+    private static boolean isUsable(Rect2i area) {
+        return area != null && area.getWidth() > 0 && area.getHeight() > 0;
     }
 }

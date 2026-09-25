@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.compat.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.mixin.jei.GuiIconToggleButtonAccessor;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 class JeiRecipeButtonCompatibilityTest {
     private static final String WRAPPER = "mezz/jei/gui/recipes/RecipeLayoutWithButtons.class";
+    private static final String DRAWABLE = "mezz/jei/api/gui/IRecipeLayoutDrawable.class";
     private static final String TOGGLE_BUTTON = "mezz/jei/gui/elements/GuiIconToggleButton.class";
 
     @Test
@@ -41,6 +43,13 @@ class JeiRecipeButtonCompatibilityTest {
                                     || method.startsWith("getRecipeLayout()")),
                     () -> jar + " no longer exposes a supported recipe-layout accessor");
 
+            Set<String> drawableMethods = methods(jar, DRAWABLE);
+            assertTrue(drawableMethods.contains("getRect()Lnet/minecraft/client/renderer/Rect2i;"),
+                    () -> jar + " no longer exposes the current recipe rectangle");
+            assertTrue(drawableMethods.contains(
+                            "getRecipeTransferButtonArea()Lnet/minecraft/client/renderer/Rect2i;"),
+                    () -> jar + " no longer exposes the relative transfer-button area");
+
             assertTrue(fields(jar, TOGGLE_BUTTON).contains(
                     "button:Lmezz/jei/gui/elements/GuiIconButton;"),
                     () -> jar + " no longer exposes the button field used by the mixin accessor");
@@ -48,11 +57,11 @@ class JeiRecipeButtonCompatibilityTest {
     }
 
     @Test
-    void mixinKeepsActualButtonAndRelativeAreaFallbackPaths() throws IOException {
+    void mixinPrefersCurrentRecipeAreaAndKeepsCachedButtonFallback() throws IOException {
         Set<String> calls = methodCalls(RecipeGuiLayoutsMixin.class, "rsi$getTransferButtonArea");
 
         assertTrue(calls.contains(owner(GuiIconToggleButtonAccessor.class) + ".getButton"));
-        assertTrue(calls.contains(owner(RecipeGuiLayoutsMixin.class) + ".rsi$absoluteRecipeArea"));
+        assertTrue(calls.contains(owner(JeiRecipeButtonPlacement.class) + ".resolveTransferArea"));
     }
 
     @Test

@@ -547,59 +547,42 @@ public class RecipeGuiLayoutsMixin {
     private static Rect2i rsi$getTransferButtonArea(Object layout, IRecipeLayoutDrawable<?> recipeLayout) {
         if (layout == null || recipeLayout == null) return null;
 
-        // Both JEI 15.20 and 15.49 expose transferButton() on their concrete
-        // layout wrapper. Its GuiIconButton area is the authoritative absolute
-        // screen position after JEI has laid out the recipe. The recipe-layout
-        // API only returns a relative declaration in these versions.
+        Rect2i recipeArea = recipeLayout.getRect();
+        Rect2i declaredArea = recipeLayout.getRecipeTransferButtonArea();
+        if (declaredArea != null && declaredArea.getWidth() > 0 && declaredArea.getHeight() > 0) {
+            return JeiRecipeButtonPlacement.resolveTransferArea(recipeArea, declaredArea, null);
+        }
+
+        Rect2i cachedButtonArea = null;
         try {
             Method method = layout.getClass().getMethod("transferButton");
             Object transferButton = method.invoke(layout);
             if (transferButton instanceof GuiIconToggleButtonAccessor accessor) {
                 ImmutableRect2i area = accessor.getButton().getArea();
                 if (area != null && area.getWidth() > 0 && area.getHeight() > 0) {
-                    return new Rect2i(area.getX(), area.getY(), area.getWidth(), area.getHeight());
+                    cachedButtonArea = new Rect2i(
+                            area.getX(), area.getY(), area.getWidth(), area.getHeight());
                 }
             }
-            // JEI 15.49 returns RecipeTransferButton rather than the old
-            // GuiIconToggleButton. Its public API does not expose an absolute
-            // area, so fall through to the drawable's relative transfer area.
         } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // JEI 15.49 can also provide an errored IRecipeLayoutWithButtons
-            // implementation without transferButton(); use the API fallback.
+            // Errored layouts may not expose transferButton().
         }
 
-        Rect2i declared = rsi$absoluteRecipeArea(recipeLayout,
-                recipeLayout.getRecipeTransferButtonArea());
-        if (declared != null && declared.getWidth() > 0 && declared.getHeight() > 0) {
-            return declared;
-        }
-
-        // Some JEI 15.49 layouts report no transfer area when the transfer
-        // handler is unavailable (which is expected without RS). Keep the
-        // RSI button visible by anchoring it to the recipe card instead of
-        // discarding the layout during position refresh.
-        Rect2i recipeArea = recipeLayout.getRectWithBorder();
-        if (recipeArea == null) return null;
-        int width = Math.max(1, recipeArea.getWidth());
-        int height = Math.max(1, recipeArea.getHeight());
-        return new Rect2i(recipeArea.getX() + width - 1, recipeArea.getY() + height - 1, 1, 1);
-    }
-
-    @Unique
-    private static Rect2i rsi$absoluteRecipeArea(IRecipeLayoutDrawable<?> recipeLayout,
-                                                  Rect2i relativeArea) {
-        if (recipeLayout == null || relativeArea == null) return null;
-        Rect2i recipeArea = recipeLayout.getRect();
-        if (recipeArea == null) return relativeArea;
-        return new Rect2i(
-                recipeArea.getX() + relativeArea.getX(),
-                recipeArea.getY() + relativeArea.getY(),
-                relativeArea.getWidth(), relativeArea.getHeight());
+        // The public JEI area is relative to the current recipe rectangle and
+        // remains correct after layout moves. The internal button area is only
+        // a fallback because it can still contain its pre-layout coordinates.
+        return JeiRecipeButtonPlacement.resolveTransferArea(
+                recipeArea,
+                declaredArea,
+                cachedButtonArea);
     }
 
     @Inject(method = "draw", at = @At("RETURN"))
     private void rsi$drawButtons(GuiGraphics guiGraphics, int mouseX, int mouseY,
                                   CallbackInfoReturnable<Optional<IRecipeLayoutDrawable<?>>> cir) {
+        // Read JEI's current recipe rectangle immediately before rendering so
+        // a resize or category change cannot leave the injected buttons stale.
+        rsi$refreshButtonPositions();
         if (rsi$positions.isEmpty()) return;
         List<net.minecraft.network.chat.Component> tooltip = null;
         for (int i = 0; i < rsi$positions.size(); i++) {
