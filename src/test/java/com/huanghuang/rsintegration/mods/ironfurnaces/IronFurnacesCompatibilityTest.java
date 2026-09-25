@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.ironfurnaces;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
@@ -286,6 +287,19 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
                 "ironfurnaces_smoker||block.ironfurnaces.diamond_furnace"));
         assertFalse(IronFurnaceBindingUpdater.isIronFurnaceBlockKey(
                 "vanilla_furnace||block.minecraft.furnace"));
+    }
+
+    @Test
+    void allIronFurnaceCookingPrefixesRemainGuiVisible() {
+        IronFurnacesRSModule.INSTANCE.registerModType();
+        IronFurnacesRSModule.INSTANCE.registerBindingTargets();
+
+        assertTrue(BindingEventHandler.supportsGuiByBlockKey(
+                "ironfurnaces_furnace||block.ironfurnaces.diamond_furnace"));
+        assertTrue(BindingEventHandler.supportsGuiByBlockKey(
+                "ironfurnaces_blast_furnace||block.ironfurnaces.diamond_furnace"));
+        assertTrue(BindingEventHandler.supportsGuiByBlockKey(
+                "ironfurnaces_smoker||block.ironfurnaces.diamond_furnace"));
     }
 
     @Test

@@ -45,11 +45,18 @@ public final class IronFurnacesRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        List<String> furnaceBlocks = List.of(
+                "ironfurnaces.blocks.furnaces.BlockIronFurnaceBase");
+        registerBindingTarget(TYPE_ID, furnaceBlocks);
+        registerBindingTarget(BLAST_TYPE_ID, furnaceBlocks);
+        registerBindingTarget(SMOKER_TYPE_ID, furnaceBlocks);
+    }
+
+    private static void registerBindingTarget(String typeId, List<String> blockClasses) {
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
-                ModIds.IRON_FURNACES, ModType.byId(TYPE_ID),
+                ModIds.IRON_FURNACES, ModType.byId(typeId),
                 RSIntegrationConfig.ENABLE_IRON_FURNACES,
-                List.of("ironfurnaces.blocks.furnaces.BlockIronFurnaceBase"),
-                TYPE_ID, true));
+                blockClasses, typeId, true));
     }
 
     @Override
