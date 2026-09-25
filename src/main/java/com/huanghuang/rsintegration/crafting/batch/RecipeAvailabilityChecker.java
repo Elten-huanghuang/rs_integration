@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
@@ -47,6 +48,7 @@ public final class RecipeAvailabilityChecker {
     public static MaterialAvailability check(ServerPlayer player, RecipeAvailabilityKey key) {
         Recipe<?> recipe = GenericCraftPacket.resolveRecipe(player.serverLevel(), key.recipeId());
         if (recipe == null) return MaterialAvailability.UNKNOWN;
+        if (HistoryStagesCompat.isRecipeLocked(recipe, player)) return MaterialAvailability.UNKNOWN;
         ModType type = GenericCraftPacket.resolveExecutionModType(player, recipe, key.dimension(), key.machinePos());
         var dimension = ResourceKey.create(Registries.DIMENSION, key.dimension());
         var machineLevel = player.server.getLevel(dimension);
