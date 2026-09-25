@@ -9,6 +9,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JeiRecipeButtonPlacementTest {
     @Test
+    void resolvesDeclaredAreaAgainstCurrentRecipePosition() {
+        Rect2i resolved = JeiRecipeButtonPlacement.resolveTransferArea(
+                new Rect2i(240, 100, 120, 60),
+                new Rect2i(105, 45, 13, 13),
+                new Rect2i(40, 30, 13, 13));
+
+        assertArea(resolved, 345, 145, 13, 13);
+    }
+
+    @Test
+    void usesCachedButtonOnlyWhenDeclaredAreaIsUnavailable() {
+        Rect2i resolved = JeiRecipeButtonPlacement.resolveTransferArea(
+                new Rect2i(240, 100, 120, 60),
+                new Rect2i(0, 0, 0, 0),
+                new Rect2i(345, 145, 13, 13));
+
+        assertArea(resolved, 345, 145, 13, 13);
+    }
+
+    @Test
+    void anchorsToRecipeCornerWhenJeiHasNoTransferButton() {
+        Rect2i resolved = JeiRecipeButtonPlacement.resolveTransferArea(
+                new Rect2i(240, 100, 120, 60), null, null);
+
+        assertArea(resolved, 359, 159, 1, 1);
+    }
+
+    @Test
     void anchorsBelowTheJeiTransferButtonWhenThereIsRoom() {
         assertArrayEquals(new int[]{80, 42},
                 JeiRecipeButtonPlacement.place(
@@ -34,5 +62,10 @@ class JeiRecipeButtonPlacementTest {
                 anchor, 22, 10, 160, 100);
 
         assertArrayEquals(first, second);
+    }
+
+    private static void assertArea(Rect2i area, int x, int y, int width, int height) {
+        assertArrayEquals(new int[]{x, y, width, height},
+                new int[]{area.getX(), area.getY(), area.getWidth(), area.getHeight()});
     }
 }

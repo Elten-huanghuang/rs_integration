@@ -7,25 +7,37 @@ import dev.emi.emi.api.widget.WidgetHolder;
 import java.util.Optional;
 
 public final class EmiCraftButtonDecorator {
-    private static final int BUTTON_SIZE = 10;
-    private static final int BUTTON_GAP = 2;
-
     private EmiCraftButtonDecorator() {}
 
-    public static void decorate(EmiRecipe recipe, WidgetHolder widgets) {
-        if (!RSIntegrationConfig.ENABLE_JEI.get()) return;
+    public static int sideWidth(EmiRecipe recipe, int rows) {
+        Optional<EmiCraftButtonSpec> resolved = resolve(recipe);
+        if (resolved.isEmpty()) return 0;
 
-        Optional<EmiCraftButtonSpec> resolved = EmiCraftButtonResolver.resolve(recipe);
+        int buttonCount = resolved.get().machineAction() == null ? 1 : 2;
+        return EmiCraftButtonPlacement.sideWidth(buttonCount, rows);
+    }
+
+    public static void decorate(EmiRecipe recipe, WidgetHolder widgets,
+                                int columnOffset, int rows) {
+        Optional<EmiCraftButtonSpec> resolved = resolve(recipe);
         if (resolved.isEmpty()) return;
 
         EmiCraftButtonSpec spec = resolved.get();
-        int y = Math.max(0, widgets.getHeight() - BUTTON_SIZE);
-        int craftX = Math.max(0, widgets.getWidth() - BUTTON_SIZE);
-        widgets.add(new EmiCraftButtonWidget(craftX, y, spec, false));
+        int buttonCount = spec.machineAction() == null ? 1 : 2;
+        int[] craftPosition = EmiCraftButtonPlacement.position(
+                0, buttonCount, rows, widgets.getWidth(), widgets.getHeight(), columnOffset);
+        widgets.add(new EmiCraftButtonWidget(
+                craftPosition[0], craftPosition[1], spec, false));
 
-        if (spec.machineAction() != null) {
-            int machineX = Math.max(0, craftX - BUTTON_GAP - BUTTON_SIZE);
-            widgets.add(new EmiCraftButtonWidget(machineX, y, spec, true));
-        }
+        if (spec.machineAction() == null) return;
+        int[] machinePosition = EmiCraftButtonPlacement.position(
+                1, buttonCount, rows, widgets.getWidth(), widgets.getHeight(), columnOffset);
+        widgets.add(new EmiCraftButtonWidget(
+                machinePosition[0], machinePosition[1], spec, true));
+    }
+
+    private static Optional<EmiCraftButtonSpec> resolve(EmiRecipe recipe) {
+        if (!RSIntegrationConfig.ENABLE_JEI.get()) return Optional.empty();
+        return EmiCraftButtonResolver.resolve(recipe);
     }
 }
