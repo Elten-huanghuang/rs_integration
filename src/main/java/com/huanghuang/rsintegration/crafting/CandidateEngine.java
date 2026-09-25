@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
@@ -82,6 +83,11 @@ final class CandidateEngine {
                 ResourceLocation rid = entry.recipe().getId();
                 CandidateKey candidateKey = CandidateKey.of(entry);
                 if (byId.containsKey(candidateKey)) continue;
+                if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {
+                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
+                            "History Stages recipe lock");
+                    continue;
+                }
                 if (entry.modType() != ModType.GENERIC) {
                     var handler = ModRecipeHandlers.handlerFor(entry.recipe());
                     if (handler != null

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
@@ -62,6 +63,11 @@ final class FlatCraftExecutor {
             if (recipe == null) {
                 RSIntegrationMod.LOGGER.debug(log.format("  step {} not found in recipe manager"), stepId);
                 continue;
+            }
+            if (HistoryStagesCompat.isRecipeLocked(recipe, online)) {
+                online.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
+                RSIntegrationMod.LOGGER.debug(log.format("  step {} blocked by History Stages"), stepId);
+                return false;
             }
             RSIntegrationMod.LOGGER.debug(log.format("  processing step: {} x{}"), stepId, executions);
 

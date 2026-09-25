@@ -51,6 +51,7 @@ public final class ModIds {
     public static final String PMMO = "pmmo";
     public static final String WISHING_FOUNTAIN = "wishing_fountain";
     public static final String TETRA = "tetra";
+    public static final String HISTORY_STAGES = "historystages";
 
     // Composite ModType IDs (one mod ->multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";

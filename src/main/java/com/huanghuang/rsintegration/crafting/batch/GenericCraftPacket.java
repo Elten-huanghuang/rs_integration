@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -2266,6 +2267,10 @@ public final class GenericCraftPacket {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return;
         }
+        if (HistoryStagesCompat.isRecipeLocked(recipe, player)) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
+            return;
+        }
         if (recipe instanceof CraftingRecipe craftingRecipe
                 && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, player)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
@@ -3688,6 +3693,10 @@ public final class GenericCraftPacket {
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
             sink.error(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
+            return;
+        }
+        if (HistoryStagesCompat.isRecipeLocked(recipe, player)) {
+            sink.error(Component.translatable("rsi.generic.error.recipe_stage_missing"));
             return;
         }
         if (recipe instanceof CraftingRecipe craftingRecipe

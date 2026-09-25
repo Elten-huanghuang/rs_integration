@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -61,6 +62,10 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (found == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
+            return false;
+        }
+        if (HistoryStagesCompat.isRecipeLocked(found, player)) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
             return false;
         }
         this.recipe = found;
