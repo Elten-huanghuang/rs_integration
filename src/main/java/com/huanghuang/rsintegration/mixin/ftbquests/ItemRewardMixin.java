@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestRewardDropContext;
+import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ftb.mods.ftbquests.quest.reward.ItemReward;
@@ -26,6 +25,7 @@ public abstract class ItemRewardMixin {
                                        Operation<Void> original) {
         if (!FtbQuestRewardDropContext.isActive() || stack.isEmpty()) {
             original.call(player, stack);
+            StorageQuestScanService.schedulePlayerItemScan(player);
             return;
         }
 
