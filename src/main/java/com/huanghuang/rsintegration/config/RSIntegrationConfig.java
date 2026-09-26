@@ -214,6 +214,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_VANILLA_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_SOPHISTICATED_BACKPACKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_CHECKMARK_BUTTON;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_NETWORK_OVERLAY;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY;
@@ -593,6 +595,12 @@ public final class RSIntegrationConfig {
                 .comment("Count items actually inserted into RS by backpack upgrades and crafting toward",
                         "eligible FTB Quests item tasks. Simulated, voided, refunded, and recovery items are excluded.")
                 .define("enableFtbQuestExternalItemProgress", true);
+        ENABLE_FTB_QUEST_CHECKMARK_BUTTON = c
+                .comment("Show the FTB Quests sidebar button for bulk checkmark confirmation.")
+                .define("enableFtbQuestCheckmarkButton", true);
+        ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON = c
+                .comment("Show the FTB Quests sidebar button for one-shot storage and inventory scans.")
+                .define("enableFtbQuestStorageScanButton", true);
         ENABLE_JEI = c
                 .comment("Show '+' buttons in JEI recipe views for remote crafting.",
                         "Client-side; the server value is synced to the client.")

@@ -31,6 +31,8 @@ public class ConfigSyncPacket {
     public final boolean enableApotheosis;
     public final boolean enableDistantWorlds;
     public final boolean enableEmbersAlchemyCalc;
+    public final boolean enableFtbQuestCheckmarkButton;
+    public final boolean enableFtbQuestStorageScanButton;
     public final int recipeTreeMaxCandidates;
     public final int repeatCountMax;
 
@@ -39,7 +41,8 @@ public class ConfigSyncPacket {
                             boolean enableJeiCraftingShortageOverlay, boolean enableJeiMarquee,
                             boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
                             boolean enableApotheosis, boolean enableDistantWorlds,
-                            boolean enableEmbersAlchemyCalc, int recipeTreeMaxCandidates,
+                            boolean enableEmbersAlchemyCalc, boolean enableFtbQuestCheckmarkButton,
+                            boolean enableFtbQuestStorageScanButton, int recipeTreeMaxCandidates,
                             int repeatCountMax) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.machineTabThreshold = machineTabThreshold;
@@ -53,6 +56,8 @@ public class ConfigSyncPacket {
         this.enableApotheosis = enableApotheosis;
         this.enableDistantWorlds = enableDistantWorlds;
         this.enableEmbersAlchemyCalc = enableEmbersAlchemyCalc;
+        this.enableFtbQuestCheckmarkButton = enableFtbQuestCheckmarkButton;
+        this.enableFtbQuestStorageScanButton = enableFtbQuestStorageScanButton;
         this.recipeTreeMaxCandidates = recipeTreeMaxCandidates;
         this.repeatCountMax = repeatCountMax;
     }
@@ -71,6 +76,8 @@ public class ConfigSyncPacket {
                 RSIntegrationConfig.ENABLE_APOTHEOSIS.get(),
                 RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get(),
                 RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
+                RSIntegrationConfig.ENABLE_FTB_QUEST_CHECKMARK_BUTTON.get(),
+                RSIntegrationConfig.ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON.get(),
                 RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
                 RSIntegrationConfig.REPEAT_COUNT_MAX.get());
     }
@@ -88,6 +95,8 @@ public class ConfigSyncPacket {
         buf.writeBoolean(packet.enableApotheosis);
         buf.writeBoolean(packet.enableDistantWorlds);
         buf.writeBoolean(packet.enableEmbersAlchemyCalc);
+        buf.writeBoolean(packet.enableFtbQuestCheckmarkButton);
+        buf.writeBoolean(packet.enableFtbQuestStorageScanButton);
         buf.writeVarInt(packet.recipeTreeMaxCandidates);
         buf.writeVarInt(packet.repeatCountMax);
     }
@@ -95,7 +104,7 @@ public class ConfigSyncPacket {
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
         return new ConfigSyncPacket(buf.readBoolean(), Math.max(0, Math.min(buf.readVarInt(), 4096)), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 // Clamp to the config's own declared range (2-32).
                 Math.max(2, Math.min(buf.readVarInt(), 32)),
                 // Server-authoritative crafting request limit.
