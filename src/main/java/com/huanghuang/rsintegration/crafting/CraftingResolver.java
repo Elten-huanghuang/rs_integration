@@ -1136,7 +1136,7 @@ public final class CraftingResolver {
 
     private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
                                                      @Nullable RegistryAccess access) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs = CraftPacketUtils.extractRecursiveIngredientSpecs(entry.recipe());
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), access);
     }

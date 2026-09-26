@@ -77,4 +77,19 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
         assertFalse(graphSpecs.stream().anyMatch(spec ->
                 spec.ingredient().test(new ItemStack(Items.DIAMOND_PICKAXE))));
     }
+
+    @Test
+    void cuttingBoardBatchSizeNeverCreatesRecursiveToolDemand() {
+        List<IngredientSpec> scaled = List.of(
+                new IngredientSpec(Ingredient.of(Items.STONE), 12, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, DemandRole.CATALYST));
+
+        List<IngredientSpec> graphSpecs =
+                FarmersDelightRecipeHandler.cuttingBoardGraphIngredients(scaled);
+
+        assertEquals(1, graphSpecs.size());
+        assertEquals(12, graphSpecs.get(0).count());
+        assertFalse(graphSpecs.stream().anyMatch(spec ->
+                spec.ingredient().test(new ItemStack(Items.IRON_SWORD))));
+    }
 }

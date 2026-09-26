@@ -133,7 +133,6 @@ import com.huanghuang.rsintegration.storage.StorageResolutionResult;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
@@ -2586,9 +2585,9 @@ public final class GenericCraftPacket {
                 }
                 List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                         recipe, executionSpecs, recipeOutput, repeatCount);
-                if (FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe) != null) {
-                    graphSpecs = FarmersDelightRecipeHandler
-                            .cuttingBoardGraphIngredients(graphSpecs);
+                ModRecipeHandler graphHandler = ModRecipeHandlers.handlerFor(recipe);
+                if (graphHandler != null) {
+                    graphSpecs = graphHandler.getRecursiveIngredients(recipe, graphSpecs);
                 }
                 Map<StackKey, Integer> avail = listAvailable(player, network, storageEndpoint);
                 logExecutionAvailability(recipeId, avail);
@@ -4421,11 +4420,10 @@ public final class GenericCraftPacket {
         // Build plan via CraftingResolver
         List<String> missing = new ArrayList<>();
 
-        List<IngredientSpec> recursiveRecipeSpecs = recipeSpecs;
-        if (FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe) != null) {
-            recursiveRecipeSpecs = FarmersDelightRecipeHandler
-                    .cuttingBoardGraphIngredients(recipeSpecs);
-        }
+        ModRecipeHandler recursiveHandler = ModRecipeHandlers.handlerFor(recipe);
+        List<IngredientSpec> recursiveRecipeSpecs = recursiveHandler == null
+                ? recipeSpecs
+                : recursiveHandler.getRecursiveIngredients(recipe, recipeSpecs);
         boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
                 ? false
                 : DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available).feasible();

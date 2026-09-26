@@ -172,10 +172,19 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
                 new IngredientSpec(tool, 1, DemandRole.CATALYST));
     }
 
+    @Nullable
+    @Override
+    public List<IngredientSpec> getRecursiveIngredients(
+            Recipe<?> recipe, @Nullable List<IngredientSpec> ingredients) {
+        if (recipe == null || !CUTTING_BOARD_CLASS.equals(recipe.getClass().getName())) {
+            return ingredients;
+        }
+        return cuttingBoardGraphIngredients(ingredients);
+    }
+
     /**
-     * Cutting-board tools are runtime resources, not recursive craft demands.
-     * They are selected from resonance storage first and the active storage
-     * backend second by the batch delegate.
+     * 砧板工具只属于运行时资源，不能成为递归合成需求。批处理代理会优先从
+     * 共振存储中选择工具，其次才使用当前存储后端中的工具。
      */
     public static List<IngredientSpec> cuttingBoardGraphIngredients(
             List<IngredientSpec> specs) {
