@@ -149,7 +149,9 @@ public final class CheckmarkConfirmService {
                                          Set<Long> blacklist, List<Long> result) {
         if (blacklist.contains(FtbQuestObjectId.getId(quest))) return;
         if (quest.getRewards().stream().anyMatch(CommandReward.class::isInstance)) return;
-        if (!quest.isVisible(data) || !data.canStartTasks(quest)) return;
+        if (!quest.isVisible(data)
+                || !data.canStartTasks(quest)
+                || !data.areDependenciesComplete(quest)) return;
         for (Task task : quest.getTasksAsList()) {
             if (task instanceof CheckmarkTask checkmark
                     && isAvailable(player, data, checkmark)) {
@@ -179,6 +181,7 @@ public final class CheckmarkConfirmService {
                 && quest.getChapter().isVisible(data)
                 && quest.isVisible(data)
                 && data.canStartTasks(quest)
+                && data.areDependenciesComplete(quest)
                 && ((ItemTaskSequenceAccessor) (Object) checkmark).rsi$checkTaskSequence(data)
                 && checkmark.canSubmit(data, player);
     }

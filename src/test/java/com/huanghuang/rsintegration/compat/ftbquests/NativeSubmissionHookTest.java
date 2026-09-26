@@ -117,6 +117,13 @@ class NativeSubmissionHookTest {
     }
 
     @Test
+    void bulkCheckmarksRequireCompletedQuestDependencies() throws IOException {
+        String service = Files.readString(CHECKMARK_SERVICE, StandardCharsets.UTF_8);
+        assertTrue(service.contains("data.areDependenciesComplete(quest)"),
+                "flexible progression must not let bulk confirmation create premature checkmark progress");
+    }
+
+    @Test
     void rewardAndCuriosChangesSchedulePlayerItemRescan() throws IOException {
         String rewardMixin = Files.readString(REWARD_MIXIN, StandardCharsets.UTF_8);
         String curiosEvents = Files.readString(CURIOS_EVENTS, StandardCharsets.UTF_8);
