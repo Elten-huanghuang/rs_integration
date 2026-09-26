@@ -38,6 +38,7 @@ public final class CheckmarkConfirmService {
     }
 
     public static void confirmAvailable(ServerPlayer player) {
+        if (!RSIntegrationConfig.ENABLE_FTB_QUEST_CHECKMARK_BUTTON.get()) return;
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
         if (file == null || file.isLoading() || data == null || data.isLocked()) return;

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mixin.ftbquests.ItemTaskSequenceAccessor;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -58,6 +59,7 @@ public final class StorageQuestScanService {
     }
 
     public static void requestScan(ServerPlayer player) {
+        if (!RSIntegrationConfig.ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON.get()) return;
         ScanRequest request = beginRequest(player);
         if (request == null) return;
 
