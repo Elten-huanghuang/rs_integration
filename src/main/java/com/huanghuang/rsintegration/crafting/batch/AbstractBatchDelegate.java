@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import java.util.ArrayList;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.item.ItemStack;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -62,7 +66,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** True only when a loaded machine was actually given its failure cleanup hook. */
     private boolean physicalFailureCleanupCompleted;
     @Nullable
-    private List<net.minecraft.world.item.ItemStack> failureRecoveredInputs;
+    private List<ItemStack> failureRecoveredInputs;
 
     /**
      * A forced-chunk ticket is owned by the delegate operation, not by the
@@ -81,7 +85,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Fallback server reference for dimension resolution when player is offline. */
     @Nullable
-    protected net.minecraft.server.MinecraftServer machineServer;
+    protected MinecraftServer machineServer;
 
     /**
      * The concrete output the player asked for, captured from the JEI ghost
@@ -91,7 +95,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * iterator "Curse II" vs "Curse I" both resolve to the same recipe.
      */
     @Nullable
-    protected net.minecraft.world.item.ItemStack targetOutput;
+    protected ItemStack targetOutput;
 
     private final Set<String> seenWarnStates = new HashSet<>();
 
@@ -258,14 +262,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected ServerLevel resolveMachineLevel(@Nullable ServerLevel playerLevel) {
         if (machineDim == null) return playerLevel;
         try {
-            net.minecraft.server.MinecraftServer server;
+            MinecraftServer server;
             if (playerLevel != null) {
                 server = playerLevel.getServer();
             } else {
                 server = this.machineServer;
             }
             if (server == null) return playerLevel;
-            var key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, machineDim);
+            var key = ResourceKey.create(Registries.DIMENSION, machineDim);
             ServerLevel resolved = server.getLevel(key);
             return resolved != null ? resolved : playerLevel;
         } catch (Exception e) {
@@ -303,7 +307,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /** Fallback server for dimension resolution when the player is offline. */
-    public void setMachineServer(@Nonnull net.minecraft.server.MinecraftServer server) {
+    public void setMachineServer(@Nonnull MinecraftServer server) {
         this.machineServer = server;
     }
 
@@ -328,13 +332,13 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * Called by the chain after {@link #validateAndInit} succeeds, mirroring
      * {@link #setMachineDim}. Delegates that don't need it simply ignore it.
      */
-    public void setTargetOutput(@Nullable net.minecraft.world.item.ItemStack target) {
+    public void setTargetOutput(@Nullable ItemStack target) {
         this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
     }
 
     /** The concrete output the player asked for, or null if none was supplied. */
     @Nullable
-    public net.minecraft.world.item.ItemStack getTargetOutput() {
+    public ItemStack getTargetOutput() {
         return targetOutput;
     }
 
@@ -357,9 +361,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Record the exact stacks physically removed by an audited cleanup hook. */
     protected final void recordFailureRecoveredInputs(
-            @Nonnull List<net.minecraft.world.item.ItemStack> recovered) {
-        java.util.ArrayList<net.minecraft.world.item.ItemStack> copy = new java.util.ArrayList<>();
-        for (net.minecraft.world.item.ItemStack stack : recovered) {
+            @Nonnull List<ItemStack> recovered) {
+        ArrayList<ItemStack> copy = new ArrayList<>();
+        for (ItemStack stack : recovered) {
             if (stack != null && !stack.isEmpty()) copy.add(stack.copy());
         }
         failureRecoveredInputs = List.copyOf(copy);
@@ -367,7 +371,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     @Nullable
     @Override
-    public final List<net.minecraft.world.item.ItemStack> failureRecoveredInputs() {
+    public final List<ItemStack> failureRecoveredInputs() {
         return failureRecoveredInputs;
     }
 
@@ -417,29 +421,29 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Insert into the selected storage backend and return any remainder. */
     @Nonnull
-    protected final net.minecraft.world.item.ItemStack insertIntoStorage(
+    protected final ItemStack insertIntoStorage(
             @Nullable ServerPlayer player,
-            @Nonnull net.minecraft.world.item.ItemStack stack,
+            @Nonnull ItemStack stack,
             boolean simulate) {
-        if (stack.isEmpty()) return net.minecraft.world.item.ItemStack.EMPTY;
+        if (stack.isEmpty()) return ItemStack.EMPTY;
         CraftStorageEndpoint endpoint = storageEndpoint();
         if (endpoint == null || player == null) return stack.copy();
-        return endpoint.insert(player, stack, simulate).remainder().orElse(net.minecraft.world.item.ItemStack.EMPTY);
+        return endpoint.insert(player, stack, simulate).remainder().orElse(ItemStack.EMPTY);
     }
 
     /** Extract an exact item count through the selected storage backend. */
     @Nonnull
-    protected final net.minecraft.world.item.ItemStack extractExactFromStorage(
+    protected final ItemStack extractExactFromStorage(
             @Nullable ServerPlayer player,
-            @Nonnull net.minecraft.world.item.ItemStack template,
+            @Nonnull ItemStack template,
             int amount,
             boolean simulate) {
-        if (player == null || amount <= 0) return net.minecraft.world.item.ItemStack.EMPTY;
+        if (player == null || amount <= 0) return ItemStack.EMPTY;
         CraftStorageEndpoint endpoint = storageEndpoint();
-        if (endpoint == null) return net.minecraft.world.item.ItemStack.EMPTY;
+        if (endpoint == null) return ItemStack.EMPTY;
         var result = endpoint.extractExact(player, template, amount, simulate);
-        net.minecraft.world.item.ItemStack combined = net.minecraft.world.item.ItemStack.EMPTY;
-        for (net.minecraft.world.item.ItemStack extracted : result.extractedStacks()) {
+        ItemStack combined = ItemStack.EMPTY;
+        for (ItemStack extracted : result.extractedStacks()) {
             if (extracted == null || extracted.isEmpty()) continue;
             if (combined.isEmpty()) combined = extracted.copy();
             else if (MaterialMatcher.equivalentRuntimeFragment(combined, extracted)) {

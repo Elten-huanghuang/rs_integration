@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -9,6 +10,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraft.server.level.ServerPlayer;
 
 @Mixin(AbstractContainerMenu.class)
 public abstract class ContainerDistanceMixin {
@@ -17,7 +19,7 @@ public abstract class ContainerDistanceMixin {
             at = @At("HEAD"), cancellable = true)
     private static void rsi$bypassDistanceCheck(ContainerLevelAccess access, Player player, Block block,
                                                  CallbackInfoReturnable<Boolean> cir) {
-        if (player instanceof net.minecraft.server.level.ServerPlayer sp
+        if (player instanceof ServerPlayer sp
                 && RemoteGuiAuth.isAuthorizedCurrentMenu(sp)) {
             cir.setReturnValue(true);
             cir.cancel();

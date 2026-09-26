@@ -19,6 +19,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.fml.ModList;
+import net.minecraft.ChatFormatting;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -316,7 +317,7 @@ public final class VoidUpgradeScreen extends Screen {
             graphics.renderTooltip(font, List.of(
                     Component.translatable("screen.rs_integration.void_upgrade.jei_drop"),
                     Component.translatable("screen.rs_integration.void_upgrade.jei_container_warning")
-                            .withStyle(net.minecraft.ChatFormatting.GOLD)
+                            .withStyle(ChatFormatting.GOLD)
             ).stream().map(Component::getVisualOrderText).toList(), mouseX, mouseY);
         }
     }
@@ -464,10 +465,10 @@ public final class VoidUpgradeScreen extends Screen {
     private List<Component> candidateTooltip(Candidate candidate) {
         List<Component> tooltip = new ArrayList<>();
         tooltip.add(candidate.name);
-        tooltip.add(Component.literal(candidate.detail).withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal(candidate.detail).withStyle(ChatFormatting.DARK_GRAY));
         if (candidate.rule.itemNbt() != null) {
             tooltip.add(Component.translatable("screen.rs_integration.void_upgrade.has_nbt")
-                    .withStyle(net.minecraft.ChatFormatting.GOLD));
+                    .withStyle(ChatFormatting.GOLD));
         }
         return tooltip;
     }

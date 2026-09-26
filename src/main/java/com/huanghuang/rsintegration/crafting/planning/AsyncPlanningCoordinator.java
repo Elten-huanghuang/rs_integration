@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
+import java.util.concurrent.CompletionException;
 
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -218,7 +219,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
 
     private static Throwable unwrap(Throwable failure) {
         if (failure == null) return null;
-        return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+        return failure instanceof CompletionException && failure.getCause() != null
                 ? failure.getCause() : failure;
     }
 

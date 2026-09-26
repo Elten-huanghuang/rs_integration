@@ -11,6 +11,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.core.BlockPos;
 
 public final class IronFurnaceBindingUpdater {
 
@@ -35,7 +38,7 @@ public final class IronFurnaceBindingUpdater {
             AltarBindingRegistry.invalidateScanCache();
             for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
                 if (ModList.get().isLoaded("beyonddimensions")) {
-                    com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations
+                    BeyondDimensionsMachineOperations
                             .sendBindingSync(player);
                 } else if (ModList.get().isLoaded("refinedstorage")) {
                     RSSidePanelNetworkHandler.sendBindingSync(player);
@@ -54,7 +57,7 @@ public final class IronFurnaceBindingUpdater {
     }
 
     private static boolean updatePlayerBindings(ServerPlayer player, ResourceLocation dimension,
-                                                net.minecraft.core.BlockPos pos,
+                                                BlockPos pos,
                                                 String replacementPrefix) {
         boolean changed = false;
         for (ItemStack stack : player.getInventory().items) {
@@ -67,7 +70,7 @@ public final class IronFurnaceBindingUpdater {
             changed |= updateStack(stack, dimension, pos, replacementPrefix);
         }
         try {
-            for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            for (ItemStack curio : CuriosAccess.stacks(player)) {
                 changed |= updateStack(curio, dimension, pos, replacementPrefix);
             }
         } catch (Exception exception) {
@@ -77,7 +80,7 @@ public final class IronFurnaceBindingUpdater {
     }
 
     private static boolean updateStack(ItemStack stack, ResourceLocation dimension,
-                                       net.minecraft.core.BlockPos pos, String replacementPrefix) {
+                                       BlockPos pos, String replacementPrefix) {
         if (stack.isEmpty()) return false;
         boolean changed = false;
         for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {

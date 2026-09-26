@@ -13,6 +13,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.ItemStack;
 
 public final class LithumAltarFironRecipeCategory implements IRecipeCategory<LithumAltarRecipeWrapper> {
     public static final RecipeType<LithumAltarRecipeWrapper> TYPE = RecipeType.create(
@@ -24,8 +26,8 @@ public final class LithumAltarFironRecipeCategory implements IRecipeCategory<Lit
     public LithumAltarFironRecipeCategory(IGuiHelper guiHelper) {
         ResourceLocation id = ResourceLocation.fromNamespaceAndPath("distant_worlds", "lithum_core");
         this.icon = guiHelper.createDrawableItemStack(
-                new net.minecraft.world.item.ItemStack(
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id)));
+                new ItemStack(
+                        BuiltInRegistries.ITEM.get(id)));
     }
 
     @Override public RecipeType<LithumAltarRecipeWrapper> getRecipeType() { return TYPE; }

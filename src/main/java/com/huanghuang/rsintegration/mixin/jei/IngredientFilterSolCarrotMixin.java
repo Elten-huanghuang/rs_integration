@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.jei;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.jei.JeiIngredientFilterRefresh;
 import com.huanghuang.rsintegration.mods.jei.SolCarrotJeiSearchRefresh;

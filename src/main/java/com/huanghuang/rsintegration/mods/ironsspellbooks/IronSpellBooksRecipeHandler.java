@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import java.util.ArrayList;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.List;
 
@@ -19,9 +21,9 @@ public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
     @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         IronSpellBooksRecipe ironRecipe = (IronSpellBooksRecipe) recipe;
         List<ItemStack> displays = ironRecipe.inputs();
-        List<net.minecraft.world.item.crafting.Ingredient> ingredients =
+        List<Ingredient> ingredients =
                 ironRecipe.inputIngredients();
-        java.util.ArrayList<IngredientSpec> result = new java.util.ArrayList<>(ingredients.size());
+        ArrayList<IngredientSpec> result = new ArrayList<>(ingredients.size());
         for (int i = 0; i < ingredients.size(); i++) {
             result.add(new IngredientSpec(ingredients.get(i), displays.get(i).getCount()));
         }

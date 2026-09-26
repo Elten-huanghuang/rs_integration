@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.storage.bd.BeyondDimensionsReflection;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -45,7 +47,7 @@ public final class BDResonanceDiskAccess {
         for (ItemStack stack : player.getInventory().items) if (isDisk(stack)) return stack;
         for (ItemStack stack : player.getInventory().offhand) if (isDisk(stack)) return stack;
         for (ItemStack stack : player.getInventory().armor) if (isDisk(stack)) return stack;
-        for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+        for (ItemStack stack : CuriosAccess.stacks(player)) {
             if (isDisk(stack)) return stack;
         }
         return ItemStack.EMPTY;
@@ -151,7 +153,7 @@ public final class BDResonanceDiskAccess {
             bind(stack, existing, networkId);
             return true;
         }
-        player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+        player.sendSystemMessage(Component.translatable(
                 "rsi.resonance.bd.merge_full"));
         return false;
     }

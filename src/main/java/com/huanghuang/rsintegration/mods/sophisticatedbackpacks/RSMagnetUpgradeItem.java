@@ -23,6 +23,11 @@ import net.p3pp3rf1y.sophisticatedcore.upgrades.IUpgradeCountLimitConfig;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.IUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeWrapper;
+import com.huanghuang.rsintegration.network.binding.AltarBinding;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import java.util.Set;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.fml.ModList;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -124,7 +129,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             return super.canSwapUpgradeFor(newStack, slotIndex, wrapper, isClientSide);
         } catch (Exception e) {
             return new UpgradeSlotChangeResult.Fail(Component.literal(e.toString()),
-                    java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
+                    Set.of(), Set.of(), Set.of());
         }
     }
 
@@ -135,7 +140,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             return super.canAddUpgradeTo(wrapper, stack, isFirstLevel, isClientSide);
         } catch (Exception e) {
             return new UpgradeSlotChangeResult.Fail(Component.literal(e.toString()),
-                    java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
+                    Set.of(), Set.of(), Set.of());
         }
     }
 
@@ -161,15 +166,15 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             // BD has no controller block. Hold its bound terminal in the
             // offhand while binding the upgrade in the main hand.
             ItemStack terminal = player.getOffhandItem();
-            var hook = com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.findHook(terminal);
+            var hook = AltarBindingRegistry.findHook(terminal);
             if (hook.isPresent()) {
                 var binding = hook.get().createBinding(terminal).orElse(null);
-                if (binding != null && com.huanghuang.rsintegration.network.binding.AltarBinding.BD_NETWORK.equals(binding.type())) {
+                if (binding != null && AltarBinding.BD_NETWORK.equals(binding.type())) {
                     reference = new StorageReference(new StorageBackendId("beyonddimensions"),
                             Integer.toString(binding.data().getInt("networkId")));
                 }
             }
-            if (reference == null && player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+            if (reference == null && player instanceof ServerPlayer serverPlayer) {
                 reference = RSIntegrationMod.STORAGE_BACKENDS.registry()
                         .resolveDefaultSessionsForPlayer(serverPlayer).stream()
                         .map(StorageSession::reference)
@@ -191,7 +196,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
 
     private static boolean isRsController(BlockEntity blockEntity) {
         return blockEntity != null
-                && net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")
+                && ModList.get().isLoaded("refinedstorage")
                 && "com.refinedmods.refinedstorage.blockentity.ControllerBlockEntity"
                 .equals(blockEntity.getClass().getName());
     }

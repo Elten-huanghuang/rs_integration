@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.availability.MaterialAvailability;
 import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 
 import java.util.function.Supplier;
 
@@ -22,8 +24,8 @@ public record RecipeAvailabilityResultPacket(RecipeAvailabilityKey key, long tic
 
     public static void handle(RecipeAvailabilityResultPacket packet, Supplier<NetworkEvent.Context> supplier) {
         var context = supplier.get();
-        context.enqueueWork(() -> net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(
-                net.minecraftforge.api.distmarker.Dist.CLIENT,
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
+                Dist.CLIENT,
                 () -> () -> RecipeAvailabilityClientPacketHandler.accept(packet)));
         context.setPacketHandled(true);
     }

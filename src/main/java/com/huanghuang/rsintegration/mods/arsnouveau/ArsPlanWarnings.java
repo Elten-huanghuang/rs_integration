@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import net.minecraft.core.BlockPos;
@@ -34,7 +35,7 @@ public final class ArsPlanWarnings {
     private static int readIntField(Object value, String fieldName) {
         for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
             try {
-                java.lang.reflect.Field field = type.getDeclaredField(fieldName);
+                Field field = type.getDeclaredField(fieldName);
                 field.setAccessible(true);
                 Object raw = field.get(value);
                 return raw instanceof Number number ? number.intValue() : -1;

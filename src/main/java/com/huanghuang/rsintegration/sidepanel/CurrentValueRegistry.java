@@ -4,6 +4,7 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
 
 /** Tracks one current value per key and supports identity-guarded removal. */
 final class CurrentValueRegistry<K, V> {
@@ -33,7 +34,7 @@ final class CurrentValueRegistry<K, V> {
     }
 
     Collection<V> snapshotValues() {
-        return java.util.List.copyOf(values.values());
+        return List.copyOf(values.values());
     }
 
     void clear() {

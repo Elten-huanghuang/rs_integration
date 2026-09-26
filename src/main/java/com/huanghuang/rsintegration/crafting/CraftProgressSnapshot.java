@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import net.minecraft.world.item.ItemStack;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -81,7 +82,7 @@ public record CraftProgressSnapshot(
         }
 
         public String translationKey() {
-            return "rsi.progress.reason." + name().toLowerCase(java.util.Locale.ROOT);
+            return "rsi.progress.reason." + name().toLowerCase(Locale.ROOT);
         }
     }
 

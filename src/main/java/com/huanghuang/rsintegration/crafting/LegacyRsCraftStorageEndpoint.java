@@ -10,6 +10,21 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.entity.player.Player;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageItemKey;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StoragePermissionResult;
+import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
+import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
+import com.huanghuang.rsintegration.storage.StoredItem;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 import javax.annotation.Nonnull;
 import java.util.Objects;
@@ -38,8 +53,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                         : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
         return StorageOperationResult.inserted(
-                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
                 stack, remainder);
     }
 
@@ -55,14 +70,14 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 var tracker = network.getItemStorageTracker();
                 if (tracker != null) tracker.changed(player, accepted);
                 if (player instanceof ServerPlayer serverPlayer) {
-                    com.huanghuang.rsintegration.crafting.MaterialSources.invalidateFor(serverPlayer, this);
+                    MaterialSources.invalidateFor(serverPlayer, this);
                     serverPlayer.containerMenu.broadcastChanges();
                 }
             }
         }
         return StorageOperationResult.inserted(
-                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
                 stack, remainder);
     }
 
@@ -72,9 +87,9 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
                 Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null, simulate);
         return StorageOperationResult.extracted(
-                simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                        : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
-                amount, result.isEmpty() ? java.util.List.of() : java.util.List.of(result));
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
+                amount, result.isEmpty() ? List.of() : List.of(result));
     }
 
     private static final class LegacyRsStorageSession implements StorageSession {
@@ -82,7 +97,7 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         private StorageSession matchingSession;
         LegacyRsStorageSession(INetwork network) { this.network = network; }
 
-        @Override public com.huanghuang.rsintegration.storage.StorageReference reference() {
+        @Override public StorageReference reference() {
             // Keep the transitional endpoint on the same canonical reference
             // format as RefinedStorageBackend. Older packets used the raw
             // "dimension@BlockPos{...}" form, which the typed resolver cannot
@@ -93,8 +108,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
             if (level == null || position == null) {
                 throw new IllegalStateException("RS network has no location");
             }
-            return new com.huanghuang.rsintegration.storage.StorageReference(
-                    new com.huanghuang.rsintegration.storage.StorageBackendId("refinedstorage"),
+            return new StorageReference(
+                    new StorageBackendId("refinedstorage"),
                     "v1|" + level.dimension().location() + "@"
                             + position.getX() + "," + position.getY() + "," + position.getZ());
         }
@@ -104,12 +119,12 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         }
 
         @Override public StorageSnapshotResult snapshotItems(ServerPlayer player,
-                java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+                Set<Item> itemTypes) {
             var cache = network.getItemStorageCache();
             if (cache == null || cache.getList() == null) {
-                return StorageSnapshotResult.failure(com.huanghuang.rsintegration.storage.StorageSnapshotStatus.UNAVAILABLE);
+                return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
             }
-            java.util.List<com.huanghuang.rsintegration.storage.StoredItem> items = new java.util.ArrayList<>();
+            List<StoredItem> items = new ArrayList<>();
             var list = cache.getList();
             // A native single-item bucket keeps every NBT variant in RS order.
             // Multi-type bucket concatenation would change the global order and
@@ -122,33 +137,33 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 ItemStack stack = entry.getStack();
                 if (!stack.isEmpty() && stack.getCount() > 0
                         && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
-                    items.add(new com.huanghuang.rsintegration.storage.StoredItem(itemKey(stack), stack.getCount()));
+                    items.add(new StoredItem(itemKey(stack), stack.getCount()));
                 }
             }
-            return StorageSnapshotResult.success(new com.huanghuang.rsintegration.storage.StorageSnapshot(
+            return StorageSnapshotResult.success(new StorageSnapshot(
                     reference().backendId(), items));
         }
 
-        @Override public com.huanghuang.rsintegration.storage.StoragePermissionResult checkPermission(
-                ServerPlayer player, com.huanghuang.rsintegration.storage.StoragePermission permission) {
-            return com.huanghuang.rsintegration.storage.StoragePermissionResult.allowed();
+        @Override public StoragePermissionResult checkPermission(
+                ServerPlayer player, StoragePermission permission) {
+            return StoragePermissionResult.allowed();
         }
 
         @Override public StorageOperationResult extractExact(ServerPlayer player,
-                com.huanghuang.rsintegration.storage.StorageItemKey key, long amount, boolean simulate) {
+                StorageItemKey key, long amount, boolean simulate) {
             ItemStack template = key.displayStack();
             ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
                     Math.toIntExact(amount), player, simulate);
             return StorageOperationResult.extracted(
-                    simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                            : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
-                    amount, result.isEmpty() ? java.util.List.of() : java.util.List.of(result));
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
+                    amount, result.isEmpty() ? List.of() : List.of(result));
         }
 
         @Override public StorageOperationResult extractMatching(ServerPlayer player, Ingredient ingredient,
                                                                  long amount, boolean simulate) {
             if (matchingSession == null) {
-                matchingSession = new com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend()
+                matchingSession = new RefinedStorageBackend()
                         .openSession(network);
             }
             return matchingSession.extractMatching(player, ingredient, amount, simulate);
@@ -161,12 +176,12 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
             if (!simulate) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-Storage-RS] insert {} x{} -> remainder x{} at {}",
-                        com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), remainder.getCount(),
+                        ItemStackUtils.registryId(stack), stack.getCount(), remainder.getCount(),
                         network.getPosition());
             }
             return StorageOperationResult.inserted(
-                    simulate ? com.huanghuang.rsintegration.storage.StorageOperationMode.SIMULATE
-                            : com.huanghuang.rsintegration.storage.StorageOperationMode.PERFORM,
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
                     stack, remainder);
         }
     }

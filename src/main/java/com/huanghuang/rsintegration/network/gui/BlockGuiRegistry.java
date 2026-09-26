@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.gui;
 
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import net.minecraft.network.chat.Component;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
@@ -60,7 +61,7 @@ public final class BlockGuiRegistry {
         // must never revive an unloaded target chunk.
         if (!level.hasChunkAt(pos)) {
             RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] openGui denied: chunk not loaded at {} dim={}", pos, dim);
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable("rsi.error.chunk_unloaded"));
+            player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
             return false;
         }
         var blockState = level.getBlockState(pos);

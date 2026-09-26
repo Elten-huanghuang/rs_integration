@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.reflection.probes;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.reflection.contract.ReflectionContract;
@@ -18,7 +19,7 @@ public final class BackpackReflection {
         register("net.p3pp3rf1y.sophisticatedbackpacks.backpack.BackpackBlockEntity", "backpackBEClass");
         // PlayerAttackHelper is from bettercombat, not sophisticatedbackpacks
         try {
-            java.lang.reflect.Field targetField = BackpackReflection.class.getDeclaredField("playerAttackHelperClass");
+            Field targetField = BackpackReflection.class.getDeclaredField("playerAttackHelperClass");
             ContractValidation.register(new ReflectionContract(ModIds.BETTER_COMBAT, "PlayerAttackHelper",
                     "net.bettercombat.logic.PlayerAttackHelper", false));
             ContractValidation.registerTarget("PlayerAttackHelper", targetField);
@@ -30,7 +31,7 @@ public final class BackpackReflection {
     private static void register(String className, String fieldName) {
         String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
-            java.lang.reflect.Field targetField = BackpackReflection.class.getDeclaredField(fieldName);
+            Field targetField = BackpackReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, true));
             ContractValidation.registerTarget(description, targetField);
         } catch (NoSuchFieldException e) {

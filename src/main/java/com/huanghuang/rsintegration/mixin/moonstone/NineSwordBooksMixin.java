@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.moonstone;
+import java.lang.reflect.Method;
 
 import com.google.common.collect.Multimap;
 import com.huanghuang.rsintegration.RSIntegrationMod;

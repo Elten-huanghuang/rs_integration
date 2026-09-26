@@ -1,4 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmingforblockheads;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -61,7 +64,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         if (probed) return;
         probed = true;
         try {
-            java.lang.reflect.Field instField = FarmingForBlockheadsReflection.marketRegistryClass.getField("INSTANCE");
+            Field instField = FarmingForBlockheadsReflection.marketRegistryClass.getField("INSTANCE");
             marketRegistryInstance = instField.get(null);
             available = marketRegistryInstance != null;
         } catch (Exception e) {
@@ -225,14 +228,14 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         try {
             Class<?> registryClass = FarmingForBlockheadsReflection.marketRegistryClass;
             if (registryClass == null) return null;
-            java.lang.reflect.Method getEntryById = Reflect.findMethod(registryClass,
+            Method getEntryById = Reflect.findMethod(registryClass,
                     "getEntryById", new Class<?>[]{UUID.class});
             if (getEntryById == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Market] getEntryById method not found");
                 return null;
             }
             Object entry = getEntryById.invoke(
-                    java.lang.reflect.Modifier.isStatic(getEntryById.getModifiers())
+                    Modifier.isStatic(getEntryById.getModifiers())
                             ? null : marketRegistryInstance, entryId);
             if (entry == null) return null;
             return wrapEntry(entry);
@@ -268,11 +271,11 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public static Recipe<?> wrapEntry(Object entry) {
         if (entry == null) return null;
         try {
-            java.lang.reflect.Method getOutput = Reflect.findMethod(entry.getClass(),
+            Method getOutput = Reflect.findMethod(entry.getClass(),
                     "getOutputItem", new Class<?>[0]);
-            java.lang.reflect.Method getCost = Reflect.findMethod(entry.getClass(),
+            Method getCost = Reflect.findMethod(entry.getClass(),
                     "getCostItem", new Class<?>[0]);
-            java.lang.reflect.Method getEntryId = Reflect.findMethod(entry.getClass(),
+            Method getEntryId = Reflect.findMethod(entry.getClass(),
                     "getEntryId", new Class<?>[0]);
             if (getOutput == null || getCost == null || getEntryId == null) return null;
 

@@ -21,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
+import java.util.Arrays;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -133,7 +134,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 1 || specs.get(0).isEmpty()
                 || expected.isEmpty()) return InputBufferContract.none();
-        ItemStack prototype = java.util.Arrays.stream(specs.get(0).ingredient().getItems())
+        ItemStack prototype = Arrays.stream(specs.get(0).ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         if (prototype.isEmpty()) return InputBufferContract.none();

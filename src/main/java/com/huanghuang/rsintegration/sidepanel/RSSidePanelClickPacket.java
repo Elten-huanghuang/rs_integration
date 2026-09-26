@@ -18,6 +18,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.wrapper.PlayerMainInvWrapper;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -145,7 +149,7 @@ public final class RSSidePanelClickPacket {
             context.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -344,7 +348,7 @@ public final class RSSidePanelClickPacket {
         extractTemplate.setCount(1);
 
         // SIMULATE first — matches RS ItemGridHandler.onExtract
-        ItemStack simulated = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        ItemStack simulated = CraftStorageEndpoints
                 .extractExactLegacy(network, player, extractTemplate, count, true);
         if (simulated.isEmpty()) {
             forceSyncZero(player, targetItem, stackId);
@@ -358,7 +362,7 @@ public final class RSSidePanelClickPacket {
         }
 
         // PERFORM extract
-        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        ItemStack extracted = CraftStorageEndpoints
                 .extractExactLegacy(network, player, extractTemplate, count, false);
         if (extracted.isEmpty()) return ItemStack.EMPTY;
 
@@ -571,13 +575,13 @@ public final class RSSidePanelClickPacket {
             req.setCount(1);
 
             // SIMULATE first — matches RS pattern
-            ItemStack sim = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            ItemStack sim = CraftStorageEndpoints
                     .extractExactLegacy(network, player, req, 1, true);
             if (sim.isEmpty()) continue;
 
             if (tracker != null) tracker.changed(player, req.copy());
 
-            ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            ItemStack extracted = CraftStorageEndpoints
                     .extractExactLegacy(network, player, req, 1, false);
             if (!extracted.isEmpty()) {
                 ItemStack remainder = ItemHandlerHelper.insertItemStacked(
@@ -602,7 +606,7 @@ public final class RSSidePanelClickPacket {
 
     /** Full player inventory including main (36), armor (4), and offhand (1) slots.
      *  Matches RS native {@code ItemGridHandler} behavior for shift-click extraction. */
-    private static net.minecraftforge.items.IItemHandler playerFullInv(ServerPlayer player) {
+    private static IItemHandler playerFullInv(ServerPlayer player) {
         return new PlayerMainInvWrapper(player.getInventory());
     }
 
@@ -616,8 +620,8 @@ public final class RSSidePanelClickPacket {
 
     /** Explicitly update a player-inventory slot even while another menu is open. */
     private static void syncPlayerInventorySlot(ServerPlayer player, int slot) {
-        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
-                net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+        player.connection.send(new ClientboundContainerSetSlotPacket(
+                ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
                 0, slot, player.getInventory().getItem(slot)));
     }
 
@@ -651,7 +655,7 @@ public final class RSSidePanelClickPacket {
 
     private static String itemId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "empty";
-        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return id != null ? id.toString() : "unknown";
     }
 
@@ -663,7 +667,7 @@ public final class RSSidePanelClickPacket {
     }
 
     private static void syncCursorSlot(ServerPlayer player, ItemStack stack) {
-        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+        player.connection.send(new ClientboundContainerSetSlotPacket(
                 -1, player.containerMenu.getStateId(), -1, stack));
     }
 }

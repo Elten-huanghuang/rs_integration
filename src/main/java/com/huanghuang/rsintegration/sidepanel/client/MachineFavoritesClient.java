@@ -23,6 +23,7 @@ import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
 import org.lwjgl.glfw.GLFW;
+import java.util.Optional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -195,7 +196,7 @@ public final class MachineFavoritesClient {
         RSSidePanelClient.isRenderingOurTooltip = true;
         try {
             graphics.renderTooltip(Minecraft.getInstance().font, lines,
-                    java.util.Optional.empty(), mouseX, mouseY);
+                    Optional.empty(), mouseX, mouseY);
         } finally {
             RSSidePanelClient.isRenderingOurTooltip = false;
         }

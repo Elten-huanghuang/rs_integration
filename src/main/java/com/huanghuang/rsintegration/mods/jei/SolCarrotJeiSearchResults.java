@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.mods.jei;
 import com.huanghuang.rsintegration.mods.rs.SolCarrotSearchStatus;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.search.ElementPrefixParser;
+import java.util.EnumMap;
+import net.minecraft.client.Minecraft;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
@@ -16,7 +18,7 @@ public final class SolCarrotJeiSearchResults {
     private static final class CachedResults {
         private long revision = Long.MIN_VALUE;
         private final Map<SolCarrotSearchStatus.Query, Set<IListElement<?>>> results =
-                new java.util.EnumMap<>(SolCarrotSearchStatus.Query.class);
+                new EnumMap<>(SolCarrotSearchStatus.Query.class);
     }
 
     private static final Map<Object, CachedResults> CACHE = new WeakHashMap<>();
@@ -28,7 +30,7 @@ public final class SolCarrotJeiSearchResults {
             ElementPrefixParser.TokenInfo tokenInfo) {
         if (tokenInfo.prefixInfo().getPrefix() != '#') return null;
         SolCarrotSearchStatus.refresh(
-                net.minecraft.client.Minecraft.getInstance().player);
+                Minecraft.getInstance().player);
         SolCarrotSearchStatus.Query query =
                 SolCarrotSearchStatus.classify(tokenInfo.token());
         return query == SolCarrotSearchStatus.Query.NONE ? null : query;

@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -9,6 +11,8 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -137,8 +141,8 @@ public final class ArsTileAccess {
     @Nullable
     public static String recipeTypeId(Recipe<?> recipe) {
         RecipeType<?> type = recipe.getType();
-        net.minecraft.resources.ResourceLocation key =
-                net.minecraftforge.registries.ForgeRegistries.RECIPE_TYPES.getKey(type);
+        ResourceLocation key =
+                ForgeRegistries.RECIPE_TYPES.getKey(type);
         return key != null ? key.toString() : null;
     }
 

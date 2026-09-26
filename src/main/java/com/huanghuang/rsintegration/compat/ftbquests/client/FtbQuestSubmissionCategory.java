@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests.client;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
+import java.util.ArrayList;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestItemRequirement;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
@@ -75,7 +76,7 @@ public final class FtbQuestSubmissionCategory implements IRecipeCategory<QuestSu
                     .setStandardSlotBackground()
                     .addItemStacks(stacks);
         }
-        java.util.List<ItemStack> focusStacks = new java.util.ArrayList<>();
+        List<ItemStack> focusStacks = new ArrayList<>();
         for (QuestItemRequirement requirement : snapshot.requirements()) {
             if (requirement.validDisplayItems().isEmpty()) {
                 focusStacks.add(requirement.displayStack().copyWithCount(1));

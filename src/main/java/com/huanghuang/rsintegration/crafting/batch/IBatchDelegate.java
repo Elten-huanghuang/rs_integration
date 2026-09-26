@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -8,6 +9,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -306,7 +309,7 @@ public interface IBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return List.of();
         return specs.stream()
-                .map(spec -> spec.role() == com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST
+                .map(spec -> spec.role() == DemandRole.CATALYST
                         ? MaterialReservationScope.PER_WORKER_REUSABLE
                         : MaterialReservationScope.PER_OPERATION)
                 .toList();
@@ -573,7 +576,7 @@ public interface IBatchDelegate {
      * output spawns at an offset (e.g. above the block) should override.
      */
     @Nullable
-    default net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    default AABB getOutputCaptureRegion() {
         return null;
     }
 

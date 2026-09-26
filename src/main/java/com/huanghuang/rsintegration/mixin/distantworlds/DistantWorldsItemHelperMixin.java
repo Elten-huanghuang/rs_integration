@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.distantworlds;
+import java.lang.reflect.Method;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;

@@ -1,7 +1,18 @@
 package com.huanghuang.rsintegration.network;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
 import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory;
+import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
+import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
+import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient;
+import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeGhostIngredientHandler;
+import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeJeiScreenHandler;
+import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen;
+import java.util.ArrayList;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
@@ -65,7 +76,7 @@ public final class RSJeiPlugin implements IModPlugin {
         cachedRuntime = jeiRuntime;
         TetraWorkbenchMaterialState.refreshForJei();
         TetraWorkbenchJeiFilterRefreshRegistry.refresh();
-        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
+        VillagerTradeLockClient
                 .onRuntimeAvailable();
         // RSGridSearchCache contains RS Grid types and is only registered in
         // RSOptionalBootstrap.  Keep BD-only JEI startup free of that class.
@@ -91,11 +102,11 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeUnavailable() {
         TetraJeiItemBridge.clear();
         TetraWorkbenchJeiFilterRefreshRegistry.clear();
-        com.huanghuang.rsintegration.client.RecipeAvailabilityClient.clear();
+        RecipeAvailabilityClient.clear();
         JeiMarqueeSelector.unregister();
         JeiCheatShortcuts.unregister();
         cachedRuntime = null;
-        com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient
+        VillagerTradeLockClient
                 .onRuntimeUnavailable();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSGridSearchCache.onJeiRuntimeUnavailable();
@@ -154,7 +165,7 @@ public final class RSJeiPlugin implements IModPlugin {
     public void registerRecipeCatalysts(mezz.jei.api.registration.IRecipeCatalystRegistration registration) {
         if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
                 && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
-            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
+            var item = ForgeRegistries.ITEMS.getValue(
                     ResourceLocation.fromNamespaceAndPath(ModIds.DISTANT_WORLDS, "lithum_core"));
             if (item != null) registration.addRecipeCatalyst(item, LithumAltarFironRecipeCategory.TYPE);
         }
@@ -186,12 +197,12 @@ public final class RSJeiPlugin implements IModPlugin {
         try {
             Class<?> containerClass = Class.forName("elucent.eidolon.gui.WorktableContainer");
             Class<?> regClass = Class.forName("elucent.eidolon.registries.Registry");
-            java.lang.reflect.Field wtField = regClass.getField("WORKTABLE_CONTAINER");
-            var regObj = (net.minecraftforge.registries.RegistryObject<?>) wtField.get(null);
+            Field wtField = regClass.getField("WORKTABLE_CONTAINER");
+            var regObj = (RegistryObject<?>) wtField.get(null);
             MenuType<?> menuType = (MenuType<?>) regObj.get();
 
             Class<?> jeiRegClass = Class.forName("elucent.eidolon.gui.jei.JEIRegistry");
-            java.lang.reflect.Field catField = jeiRegClass.getField("WORKTABLE_CATEGORY");
+            Field catField = jeiRegClass.getField("WORKTABLE_CATEGORY");
             var recipeType = (mezz.jei.api.recipe.RecipeType<?>) catField.get(null);
 
             // WorktableContainer slots: 0=result, 1-9=core(3x3), 10-13=extras(4)
@@ -216,11 +227,11 @@ public final class RSJeiPlugin implements IModPlugin {
         registerOptionalTetraGuiHandler(registration);
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             registration.addGuiScreenHandler(
-                    com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen.class,
-                    new com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeJeiScreenHandler());
+                    VoidUpgradeScreen.class,
+                    new VoidUpgradeJeiScreenHandler());
             registration.addGhostIngredientHandler(
-                    com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeScreen.class,
-                    new com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeGhostIngredientHandler());
+                    VoidUpgradeScreen.class,
+                    new VoidUpgradeGhostIngredientHandler());
         }
         registerOptionalRefinedStorageGuiHandler(registration);
         registerOptionalBeyondDimensionsGuiHandlers(registration);
@@ -234,7 +245,7 @@ public final class RSJeiPlugin implements IModPlugin {
             registration.addGuiContainerHandler((Class) screenClass,
                     new IGuiContainerHandler<AbstractContainerScreen<?>>() {
                         @Override
-                        public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
+                        public List<Rect2i> getGuiExtraAreas(
                                 AbstractContainerScreen<?> screen) {
                             return ApotheosisLibraryClientEvents.getJeiExtraAreas(screen);
                         }
@@ -288,18 +299,18 @@ public final class RSJeiPlugin implements IModPlugin {
         IGuiContainerHandler<AbstractContainerScreen<?>> handler =
                 new IGuiContainerHandler<>() {
                     @Override
-                    public java.util.List<net.minecraft.client.renderer.Rect2i> getGuiExtraAreas(
+                    public List<Rect2i> getGuiExtraAreas(
                             AbstractContainerScreen<?> screen) {
-                        java.util.List<net.minecraft.client.renderer.Rect2i> areas =
-                                new java.util.ArrayList<>();
-                        areas.addAll(com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient
+                        List<Rect2i> areas =
+                                new ArrayList<>();
+                        areas.addAll(BeyondDimensionsMachineHubClient
                                 .getFavoriteExtraAreas(screen));
-                        areas.addAll(com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents
+                        areas.addAll(AutoEatClientEvents
                                 .getGuiExtraAreas(screen));
-                        return java.util.List.copyOf(areas);
+                        return List.copyOf(areas);
                     }
                 };
-        for (String className : java.util.List.of(
+        for (String className : List.of(
                 "com.wintercogs.beyonddimensions.client.gui.DimensionsCraftGUI",
                 "com.wintercogs.beyonddimensions.client.gui.DimensionsTerminalCraftGUI")) {
             try {

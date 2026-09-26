@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.vanilla;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -13,6 +14,11 @@ import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.SimpleContainer;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import java.util.Comparator;
+import java.util.function.Predicate;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -64,13 +70,13 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
     }
 
     public static ItemStack selectAvailableBase(SmithingTransformRecipe recipe,
-                                                java.util.Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Integer> available,
+                                                Map<CraftingResolver.StackKey, Integer> available,
                                                 int needed) {
         return available.entrySet().stream()
                 .filter(entry -> entry.getValue() >= needed)
                 .map(entry -> entry.getKey().toStack())
                 .filter(recipe::isBaseIngredient)
-                .sorted(java.util.Comparator
+                .sorted(Comparator
                         .comparing((ItemStack stack) -> stack.hasTag())
                         .thenComparing(stack -> String.valueOf(stack.getTag())))
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
@@ -80,7 +86,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
                                               List<ItemStack> extracted,
                                               RegistryAccess access) {
         List<ItemStack> pool = extracted.stream().map(ItemStack::copy)
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                .collect(Collectors.toCollection(ArrayList::new));
         ItemStack template = takeMatching(pool, recipe::isTemplateIngredient);
         ItemStack base = takeMatching(pool, recipe::isBaseIngredient);
         ItemStack addition = takeMatching(pool, recipe::isAdditionIngredient);
@@ -144,7 +150,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
     }
 
     private static ItemStack takeMatching(List<ItemStack> pool,
-                                          java.util.function.Predicate<ItemStack> predicate) {
+                                          Predicate<ItemStack> predicate) {
         for (ItemStack stack : pool) {
             if (!stack.isEmpty() && predicate.test(stack)) return stack.split(1);
         }
@@ -164,7 +170,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         List<Ingredient> ingredients = new ArrayList<>();
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
+            for (Field f : clazz.getDeclaredFields()) {
                 if (f.getType() == Ingredient.class) {
                     f.setAccessible(true);
                     try {

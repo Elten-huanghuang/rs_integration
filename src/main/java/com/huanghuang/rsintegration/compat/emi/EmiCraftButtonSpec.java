@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.compat.emi;
 
 import com.huanghuang.rsintegration.ModType;
 import net.minecraft.resources.ResourceLocation;
+import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
 
 import javax.annotation.Nullable;
 
@@ -11,5 +12,5 @@ record EmiCraftButtonSpec(
         String tooltipKey,
         Runnable craftAction,
         @Nullable Runnable machineAction,
-        @Nullable com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey availabilityKey
+        @Nullable RecipeAvailabilityKey availabilityKey
 ) {}

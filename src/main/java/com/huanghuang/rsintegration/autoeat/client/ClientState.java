@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.autoeat.client;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
+import com.huanghuang.rsintegration.autoeat.AutoEatPreferences;
 import com.huanghuang.rsintegration.autoeat.network.UpdateAutoEatPreferencesPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.resources.ResourceLocation;
@@ -29,7 +30,7 @@ public final class ClientState {
 
     public static void toggleSelectedItem(ResourceLocation item) {
         if (!selectedItems.remove(item)
-                && selectedItems.size() < com.huanghuang.rsintegration.autoeat.AutoEatPreferences.MAX_SELECTED_ITEMS) {
+                && selectedItems.size() < AutoEatPreferences.MAX_SELECTED_ITEMS) {
             selectedItems.add(item);
         }
         syncPreferences();
@@ -37,7 +38,7 @@ public final class ClientState {
 
     public static void selectItems(Collection<ResourceLocation> items) {
         for (ResourceLocation item : items) {
-            if (selectedItems.size() >= com.huanghuang.rsintegration.autoeat.AutoEatPreferences.MAX_SELECTED_ITEMS) break;
+            if (selectedItems.size() >= AutoEatPreferences.MAX_SELECTED_ITEMS) break;
             if (item != null) selectedItems.add(item);
         }
         syncPreferences();
@@ -69,7 +70,7 @@ public final class ClientState {
 
     private static void selectWithoutSync(Collection<ResourceLocation> items) {
         for (ResourceLocation item : items) {
-            if (selectedItems.size() >= com.huanghuang.rsintegration.autoeat.AutoEatPreferences.MAX_SELECTED_ITEMS) break;
+            if (selectedItems.size() >= AutoEatPreferences.MAX_SELECTED_ITEMS) break;
             if (item != null) selectedItems.add(item);
         }
     }

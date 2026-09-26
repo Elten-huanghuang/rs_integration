@@ -14,6 +14,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -71,7 +73,7 @@ public final class MaterialSources {
             }
         }
         // Count backpack contents (including backpacks in curio slots)
-        if (player instanceof ServerPlayer sp && net.minecraftforge.fml.ModList.get().isLoaded("sophisticatedbackpacks")) {
+        if (player instanceof ServerPlayer sp && ModList.get().isLoaded("sophisticatedbackpacks")) {
             try {
                 for (var bp : ExtractionLedger
                         .findAllBackpackInventories(sp)) {
@@ -167,8 +169,8 @@ public final class MaterialSources {
         // containers from stored empty buckets + fluid.  Include this derived
         // availability in the immutable planning view; the ledger performs
         // the authoritative two-resource extraction during commit.
-        for (ItemStack filled : List.of(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET),
-                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+        for (ItemStack filled : List.of(new ItemStack(Items.WATER_BUCKET),
+                new ItemStack(Items.LAVA_BUCKET))) {
             long derived = endpoint.session().countDerivedContainer(player, filled);
             if (derived > 0) {
                 mergeAvailable(available, StackKey.of(filled, true), derived, "derived_container");
@@ -218,8 +220,8 @@ public final class MaterialSources {
                         "revalidation_snapshot");
             }
         }));
-        for (ItemStack filled : List.of(new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET),
-                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+        for (ItemStack filled : List.of(new ItemStack(Items.WATER_BUCKET),
+                new ItemStack(Items.LAVA_BUCKET))) {
             if (!itemTypes.contains(filled.getItem())) continue;
             long derived = endpoint.session().countDerivedContainer(player, filled);
             if (derived > 0) {

@@ -8,6 +8,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -33,19 +34,19 @@ public record ApotheosisLibraryImportRequestPacket(ResourceLocation dimension, B
         long snapshotId = buf.readLong();
         int encodedSize = buf.readVarInt();
         if (encodedSize <= 0 || encodedSize > ApotheosisLibraryModels.MAX_IMPORT_IDS) {
-            throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis import id count");
+            throw new DecoderException("Invalid Apotheosis import id count");
         }
         int size = encodedSize;
         Set<Integer> ids = new HashSet<>(size);
         for (int i = 0; i < encodedSize; i++) {
             int id = buf.readVarInt();
             if (id < 0 || id >= ApotheosisLibraryModels.MAX_ENTRIES) {
-                throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis entry id");
+                throw new DecoderException("Invalid Apotheosis entry id");
             }
             ids.add(id);
         }
         if (ids.size() != encodedSize) {
-            throw new io.netty.handler.codec.DecoderException("Duplicate Apotheosis entry id");
+            throw new DecoderException("Duplicate Apotheosis entry id");
         }
         return new ApotheosisLibraryImportRequestPacket(dimension, pos, snapshotId, ids);
     }

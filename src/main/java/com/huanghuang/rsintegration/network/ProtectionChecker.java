@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -231,7 +232,7 @@ public final class ProtectionChecker {
 
         // Try INSTANCE field
         try {
-            Optional<java.lang.reflect.Field> f = Reflect.findField(ccClass, "INSTANCE");
+            Optional<Field> f = Reflect.findField(ccClass, "INSTANCE");
             if (f.isPresent()) return f.get().get(null);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("{} reflection probe failed", TAG, e); }
 

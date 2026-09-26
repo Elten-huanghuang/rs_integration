@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.apotheosis.client;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.EnchantmentInfo;

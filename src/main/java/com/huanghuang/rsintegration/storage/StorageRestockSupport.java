@@ -4,6 +4,11 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -30,7 +35,7 @@ public final class StorageRestockSupport {
         // terminal as an explicit credential too, otherwise resolveDefault()
         // may select an unrelated RS network when both backends are present.
         if (heldNetwork.isEmpty()) {
-            for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+            for (ItemStack stack : CuriosAccess.stacks(player)) {
                 heldNetwork = beyondDimensionsNetworkId(stack);
                 if (heldNetwork.isPresent()) break;
             }
@@ -43,7 +48,7 @@ public final class StorageRestockSupport {
         }
         if (isBeyondDimensionsTerminalMenu(player)) {
             for (StorageNetworkDescriptor descriptor :
-                    com.huanghuang.rsintegration.RSIntegrationMod.STORAGE_BACKENDS.registry()
+                    RSIntegrationMod.STORAGE_BACKENDS.registry()
                             .discoverNetworksForPlayer(player)) {
                 if (!BEYOND_DIMENSIONS.equals(descriptor.reference().backendId())) continue;
                 Optional<CraftStorageEndpoint> endpoint = CraftStorageEndpoints.resolve(
@@ -63,8 +68,8 @@ public final class StorageRestockSupport {
 
     private static OptionalInt beyondDimensionsNetworkId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return OptionalInt.empty();
-        net.minecraft.resources.ResourceLocation id =
-                net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        ResourceLocation id =
+                ForgeRegistries.ITEMS.getKey(stack.getItem());
         if (id == null || !"beyonddimensions".equals(id.getNamespace())
                 || !"net_terminal_item".equals(id.getPath())) {
             return OptionalInt.empty();
@@ -125,16 +130,16 @@ public final class StorageRestockSupport {
             StorageOperationResult result = endpoint.insert(player, stack, false);
             Optional<ItemStack> knownRemainder = result.remainder();
             if (knownRemainder.isEmpty()) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
+                RSIntegrationMod.LOGGER.error(
                         "[RSI-Restock] {} refund became indeterminate for {} x{}",
-                        reason, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount());
+                        reason, ItemStackUtils.registryId(stack), stack.getCount());
                 continue;
             }
             ItemStack remainder = knownRemainder.orElse(ItemStack.EMPTY);
             if (!remainder.isEmpty()) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
+                RSIntegrationMod.LOGGER.error(
                         "[RSI-Restock] {} refund left {} x{}; dropping remainder",
-                        reason, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(remainder), remainder.getCount());
+                        reason, ItemStackUtils.registryId(remainder), remainder.getCount());
                 player.drop(remainder, false);
             }
         }

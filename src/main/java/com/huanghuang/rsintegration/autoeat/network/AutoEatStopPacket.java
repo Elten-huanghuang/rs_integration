@@ -3,6 +3,10 @@ package com.huanghuang.rsintegration.autoeat.network;
 import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
 
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
 
 public class AutoEatStopPacket {
 
@@ -12,10 +16,10 @@ public class AutoEatStopPacket {
         return new AutoEatStopPacket();
     }
 
-    public static void handle(AutoEatStopPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+    public static void handle(AutoEatStopPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
-            if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
+            if (sender != null && !(sender instanceof FakePlayer)) {
                 AutoEatEngine.stop(sender);
             }
         });

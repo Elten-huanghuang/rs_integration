@@ -1,10 +1,15 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import java.time.format.DateTimeFormatter;
+import java.util.EnumMap;
+import java.util.stream.Collectors;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -32,7 +37,7 @@ public final class CraftFailureReport {
         lines.add(Component.translatable("rsi.diagnostic.attach_logs").withStyle(ChatFormatting.YELLOW));
         section(lines, "client_observations");
         lines.add(field("received", context.receivedAt() == null ? unknown()
-                : context.receivedAt().format(java.time.format.DateTimeFormatter.ISO_ZONED_DATE_TIME)));
+                : context.receivedAt().format(DateTimeFormatter.ISO_ZONED_DATE_TIME)));
         for (var version : context.clientVersions().entrySet()) {
             lines.add(field("environment", version.getKey() + "=" + version.getValue()));
         }
@@ -50,8 +55,8 @@ public final class CraftFailureReport {
                 snapshot.totalNodes(), snapshot.runningNodes()));
         addReason(lines, snapshot.reason(), snapshot.technicalDetail());
         section(lines, "section.statistics");
-        var states = new java.util.EnumMap<CraftProgressSnapshot.NodeState, Integer>(CraftProgressSnapshot.NodeState.class);
-        var reasons = new java.util.EnumMap<CraftProgressSnapshot.Reason, Integer>(CraftProgressSnapshot.Reason.class);
+        var states = new EnumMap<CraftProgressSnapshot.NodeState, Integer>(CraftProgressSnapshot.NodeState.class);
+        var reasons = new EnumMap<CraftProgressSnapshot.Reason, Integer>(CraftProgressSnapshot.Reason.class);
         long runningOperations = 0;
         int draining = 0;
         for (var node : snapshot.nodes()) {
@@ -101,7 +106,7 @@ public final class CraftFailureReport {
 
     private static Component item(String key, ItemStack stack) {
         return Component.translatable("rsi.diagnostic." + key,
-                stack.isEmpty() ? unknown() : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                stack.isEmpty() ? unknown() : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
                 stack.isEmpty() ? unknown() : Integer.toString(stack.getCount()),
                 Component.translatable(stack.isEmpty() ? "rsi.diagnostic.unknown"
                         : stack.hasTag() ? "rsi.diagnostic.nbt_present" : "rsi.diagnostic.nbt_absent"));
@@ -125,7 +130,7 @@ public final class CraftFailureReport {
             String label = index == 0 ? "target" : "node=" + (nodes.get(index - 1).nodeId() + 1) + " displayOutput";
             lines.add(Component.empty());
             lines.add(Component.translatable("rsi.diagnostic.nbt_entry", label,
-                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), excerpt)
+                    BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), excerpt)
                     .withStyle(ChatFormatting.GRAY));
         }
         if (entries == 0) lines.add(Component.translatable("rsi.diagnostic.nbt_none").withStyle(ChatFormatting.GRAY));
@@ -155,7 +160,7 @@ public final class CraftFailureReport {
 
     public static String plainText(List<Component> lines) {
         String text = lines.stream().map(line -> ChatFormatting.stripFormatting(line.getString()))
-                .collect(java.util.stream.Collectors.joining("\n"));
+                .collect(Collectors.joining("\n"));
         if (text.length() <= MAX_REPORT_CHARS) return text;
         String suffix = "\n" + Component.translatable("rsi.diagnostic.truncated").getString();
         int end = MAX_REPORT_CHARS - suffix.length();

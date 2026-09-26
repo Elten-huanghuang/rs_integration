@@ -10,6 +10,13 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +51,7 @@ public final class RSSidePanelRequestPacket {
         return new RSSidePanelRequestPacket(forceFullSync, isClosing);
     }
 
-    private static final java.util.Map<UUID, RefreshTask> REFRESH_TASKS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, RefreshTask> REFRESH_TASKS = new ConcurrentHashMap<>();
     private static final int ENTRIES_PER_TICK = 64;
 
     static boolean refreshOnServerThread(ServerPlayer player, boolean forceFullSync) {
@@ -87,7 +94,7 @@ public final class RSSidePanelRequestPacket {
             List<StackListEntry<ItemStack>> snapshot = new ArrayList<>(snapshotLimit);
             Set<UUID> included = new HashSet<>();
             var priorityTimestamps = RSSidePanelNetworkHandler.snapshotPriorities(id);
-            java.util.Map<UUID, Long> acknowledgedPriorities = new java.util.LinkedHashMap<>();
+            Map<UUID, Long> acknowledgedPriorities = new LinkedHashMap<>();
             for (var priority : priorityTimestamps.entrySet()) {
                 if (snapshot.size() >= snapshotLimit) break;
                 UUID preferredId = priority.getKey();
@@ -125,7 +132,7 @@ public final class RSSidePanelRequestPacket {
         }
     }
 
-    static void advanceRefreshTasks(net.minecraft.server.MinecraftServer server) {
+    static void advanceRefreshTasks(MinecraftServer server) {
         for (RefreshTask task : List.copyOf(REFRESH_TASKS.values())) {
             ServerPlayer player = server.getPlayerList().getPlayer(task.playerId);
             if (player == null || REFRESH_TASKS.get(task.playerId) != task) {
@@ -146,29 +153,29 @@ public final class RSSidePanelRequestPacket {
         final UUID playerId;
         final ServerPlayer player;
         final INetwork network;
-        final java.util.Iterator<StackListEntry<ItemStack>> entries;
+        final Iterator<StackListEntry<ItemStack>> entries;
         final List<UUID> ids = new ArrayList<>();
         final List<ItemStack> items = new ArrayList<>();
         final List<Long> timestamps = new ArrayList<>();
         final List<Boolean> craftable = new ArrayList<>();
         int total;
         final Set<String> craftableKeys = new HashSet<>();
-        final java.util.Map<UUID, Long> priorityTimestamps;
+        final Map<UUID, Long> priorityTimestamps;
         final String networkName;
 
         RefreshTask(ServerPlayer player, INetwork network,
-                    java.util.Iterator<StackListEntry<ItemStack>> entries,
-                    int totalSlotCount, java.util.Map<UUID, Long> priorityTimestamps) {
+                    Iterator<StackListEntry<ItemStack>> entries,
+                    int totalSlotCount, Map<UUID, Long> priorityTimestamps) {
             this.player = player; this.playerId = player.getUUID(); this.network = network; this.entries = entries;
             this.total = Math.max(0, totalSlotCount);
-            this.priorityTimestamps = java.util.Map.copyOf(priorityTimestamps);
+            this.priorityTimestamps = Map.copyOf(priorityTimestamps);
             this.networkName = resolveNetworkName(network);
             try {
                 var manager = network.getCraftingManager();
                 if (manager != null) for (var pattern : manager.getPatterns()) {
                     for (ItemStack output : pattern.getOutputs()) {
                         if (!output.isEmpty()) {
-                            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(output.getItem());
+                            var key = ForgeRegistries.ITEMS.getKey(output.getItem());
                             if (key != null) craftableKeys.add(key.toString());
                         }
                     }
@@ -193,7 +200,7 @@ public final class RSSidePanelRequestPacket {
                     timestamps.add(trackedTime > 0L
                             ? trackedTime
                             : priorityTimestamps.getOrDefault(id, 0L));
-                    var itemKey = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stored.getItem());
+                    var itemKey = ForgeRegistries.ITEMS.getKey(stored.getItem());
                     craftable.add(itemKey != null && craftableKeys.contains(itemKey.toString()));
                 } catch (RuntimeException ignored) {
                     RSIntegrationMod.LOGGER.debug("[RSI] Invalid storage entry during refresh");
@@ -227,7 +234,7 @@ public final class RSSidePanelRequestPacket {
             return;
         }
         ServerPlayer player = context.getSender();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }

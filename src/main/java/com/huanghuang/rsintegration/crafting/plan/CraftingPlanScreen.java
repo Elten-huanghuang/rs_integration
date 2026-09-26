@@ -7,6 +7,12 @@ import com.huanghuang.rsintegration.client.JeiCraftingPlanContext;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraftforge.fml.ModList;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
@@ -765,7 +771,7 @@ public final class CraftingPlanScreen extends Screen {
             ResourceLocation dimension = ResourceLocation.tryParse(plan.executionDim());
             if (dimension != null) {
                 NetworkHandler.CHANNEL.sendToServer(new ApothSpawnerExecutePacket(dimension,
-                        new net.minecraft.core.BlockPos(plan.executionPosX(), plan.executionPosY(),
+                        new BlockPos(plan.executionPosX(), plan.executionPosY(),
                                 plan.executionPosZ()), Map.of(), false));
             }
             onClose();
@@ -783,7 +789,7 @@ public final class CraftingPlanScreen extends Screen {
     private Map<String, String> exportForcedSelections() {
         Map<String, String> forced = new LinkedHashMap<>();
         for (Map.Entry<IngredientKey, ResourceLocation> entry : selectedPath.exportSelections().entrySet()) {
-            ResourceLocation preferenceKey = com.huanghuang.rsintegration.crafting.CraftingResolver
+            ResourceLocation preferenceKey = CraftingResolver
                     .preferenceKey(entry.getKey().stack(1));
             if (preferenceKey == null) continue;
             forced.put(preferenceKey.toString(),
@@ -807,26 +813,26 @@ public final class CraftingPlanScreen extends Screen {
             // leave it waiting forever because GenericCraftPacket never handles
             // synthetic quest target IDs.
             activeRequestId = 0L;
-            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.clear();
+            PlanningProgressTracker.clear();
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(
                             QuestSubmissionTargetIds.questId(rid), true, repeatCount));
             return;
         }
         ResourceLocation execDim = null;
-        net.minecraft.core.BlockPos execPos = null;
+        BlockPos execPos = null;
         if (plan.executionDim() != null && !plan.executionDim().isEmpty()) {
             execDim = ResourceLocation.tryParse(plan.executionDim());
-            execPos = new net.minecraft.core.BlockPos(
+            execPos = new BlockPos(
                     plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
         }
         MachineCandidateView selected = selectedMachineCandidate();
         if (machineSelectionMode != MachineSelectionMode.AUTO) {
             execDim = selected == null ? null : ResourceLocation.tryParse(selected.dimension());
             execPos = selected == null ? null
-                    : new net.minecraft.core.BlockPos(selected.x(), selected.y(), selected.z());
+                    : new BlockPos(selected.x(), selected.y(), selected.z());
         }
-        long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+        long requestId = PlanningRequestIds.next();
         if (preview) activeRequestId = requestId;
         GenericCraftPacket packet = new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
@@ -835,7 +841,7 @@ public final class CraftingPlanScreen extends Screen {
                 .withMaterialLocks(materialLocks)
                 .withStorageReference(storageReference);
         if (preview) {
-            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+            PlanningProgressTracker.start(
                     requestId, rid);
         }
         if (!preview && partialPreparation) {
@@ -908,7 +914,7 @@ public final class CraftingPlanScreen extends Screen {
     private void onOpenMachine() {
         ResourceLocation dim = ResourceLocation.tryParse(plan.executionDim());
         if (dim == null) return;
-        net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(
+        BlockPos pos = new BlockPos(
                 plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
         ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
         GuiNavStack.pushCurrent();
@@ -1232,8 +1238,8 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private static boolean hasStorageBackend() {
-        return net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")
-                || net.minecraftforge.fml.ModList.get().isLoaded("beyonddimensions");
+        return ModList.get().isLoaded("refinedstorage")
+                || ModList.get().isLoaded("beyonddimensions");
     }
     /** Card view: JEI recipe preview for the alternative-recipe badge under the mouse. */
     private void renderCardPreview(GuiGraphics gfx, Font font) {
@@ -1636,7 +1642,7 @@ public final class CraftingPlanScreen extends Screen {
         ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
         if (isTarget && selected != 0) {
             rid = choices.get(selected).recipeId;
-            ResourceLocation pk = com.huanghuang.rsintegration.crafting.CraftingResolver
+            ResourceLocation pk = CraftingResolver
                     .preferenceKey(treeKey.stack(1));
             if (pk != null) forced.remove(pk.toString());
         }
@@ -1667,7 +1673,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Nullable
     private static String selectionKey(ItemStack stack) {
-        ResourceLocation key = com.huanghuang.rsintegration.crafting.CraftingResolver
+        ResourceLocation key = CraftingResolver
                 .preferenceKey(stack);
         return key == null ? null : key.toString();
     }
@@ -2348,7 +2354,7 @@ public final class CraftingPlanScreen extends Screen {
         boolean isTarget = node.depth == 0;
         if (isTarget) {
             rootRid = recipeId;
-            ResourceLocation preferenceKey = com.huanghuang.rsintegration.crafting.CraftingResolver
+            ResourceLocation preferenceKey = CraftingResolver
                     .preferenceKey(node.key.stack(1));
             if (preferenceKey != null) forced.remove(preferenceKey.toString());
         }
@@ -3308,12 +3314,12 @@ public final class CraftingPlanScreen extends Screen {
         }
         if (hoveredItemForTooltip.isEmpty()) return;
 
-        List<net.minecraft.network.chat.Component> lines = new ArrayList<>(
+        List<Component> lines = new ArrayList<>(
                 hoveredItemForTooltip.getTooltipLines(
                         minecraft.player,
                         minecraft.options.advancedItemTooltips
-                                ? net.minecraft.world.item.TooltipFlag.Default.ADVANCED
-                                : net.minecraft.world.item.TooltipFlag.Default.NORMAL));
+                                ? TooltipFlag.Default.ADVANCED
+                                : TooltipFlag.Default.NORMAL));
 
         // Append availability info
         String availStr = hoveredTooltipAvail + " / " + hoveredTooltipNeeded;

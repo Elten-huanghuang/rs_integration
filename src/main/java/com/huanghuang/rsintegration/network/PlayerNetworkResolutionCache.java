@@ -4,6 +4,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
 
 /** Per-player cache with short-lived negative entries and tick-scoped positive entries. */
 final class PlayerNetworkResolutionCache<T> {
@@ -51,7 +52,7 @@ final class PlayerNetworkResolutionCache<T> {
                         long currentTick, long negativeTtlTicks) {
             long age = currentTick - tick;
             return server == currentServer
-                    && java.util.Objects.equals(dimension, currentDimension)
+                    && Objects.equals(dimension, currentDimension)
                     && menu == currentMenu
                     && age >= 0
                     && (value == null ? age <= negativeTtlTicks : age == 0);

@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.sidepanel;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -21,6 +23,12 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
+import com.huanghuang.rsintegration.machine.MachineHub;
+import java.nio.file.Path;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.client.event.RenderTooltipEvent;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelInputHandler;
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelJeiBridge;
@@ -110,9 +118,9 @@ public final class RSSidePanelClient {
         networkAvailable = false;
         networkName = "";
         SyncHandler.clearOnLogout();
-        com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().clear();
-        com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache.getInstance().clear();
-        com.huanghuang.rsintegration.config.ClientSyncedConfig.reset();
+        BindingCache.getInstance().clear();
+        MachineStatusCache.getInstance().clear();
+        ClientSyncedConfig.reset();
     }
 
     // ── Mouse/drag state ─────────────────────────────────────────
@@ -224,7 +232,7 @@ public final class RSSidePanelClient {
     // ── Item key helper ──────────────────────────────────────────
 
     public static String keyOf(ItemStack stack) {
-        if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
+        if (stack == null || stack.getItem() == Items.AIR) return "";
         var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
         String key = rl != null ? rl.toString() : "";
         String nbt = PanelStack.stableNbtString(stack.getTag());
@@ -284,7 +292,7 @@ public final class RSSidePanelClient {
     // ═════════════════════════════════════════════════════════════
 
     /** Cancel foreign tooltips that land on the side panel or Machine Hub area. */
-    private static void onRenderTooltipPre(net.minecraftforge.client.event.RenderTooltipEvent.Pre event) {
+    private static void onRenderTooltipPre(RenderTooltipEvent.Pre event) {
         // Side panel guard
         if (panelVisible && !panelHidden && !isRenderingOurTooltip
                 && anyPanelContains(event.getX(), event.getY())) {
@@ -292,9 +300,9 @@ public final class RSSidePanelClient {
             return;
         }
         // Machine Hub guard
-        if (com.huanghuang.rsintegration.machine.MachineHub.isVisible()
-                && !com.huanghuang.rsintegration.machine.MachineHub.isRenderingOurTooltip
-                && com.huanghuang.rsintegration.machine.MachineHub.isWithinBounds(
+        if (MachineHub.isVisible()
+                && !MachineHub.isRenderingOurTooltip
+                && MachineHub.isWithinBounds(
                         event.getX(), event.getY())) {
             event.setCanceled(true);
         }
@@ -371,7 +379,7 @@ public final class RSSidePanelClient {
 
                 String hsKey = keyOf(hs);
                 if (!hsKey.isEmpty()
-                        && com.huanghuang.rsintegration.sidepanel.data.BindingCache.getInstance().hasGui(hsKey)) {
+                        && BindingCache.getInstance().hasGui(hsKey)) {
                     int col = hoveredSlotIndex % COLUMNS;
                     int row = hoveredSlotIndex / COLUMNS - scrollRow;
                     if (row >= 0 && row < visibleRows) {
@@ -448,8 +456,8 @@ public final class RSSidePanelClient {
     }
 
     // ── Preference persistence ───────────────────────────────────
-    private static final java.nio.file.Path PANEL_PREFS_PATH =
-            net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get()
+    private static final Path PANEL_PREFS_PATH =
+            FMLPaths.CONFIGDIR.get()
                     .resolve("rs_integration").resolve("side_panel.json");
 
     static void loadPanelPreferences() {

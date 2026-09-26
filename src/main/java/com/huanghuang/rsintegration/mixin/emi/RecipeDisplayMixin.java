@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.emi;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.compat.emi.EmiCraftButtonDecorator;
 import com.huanghuang.rsintegration.compat.emi.EmiCraftButtonPlacement;

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.network.binding.RSBindingHook;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
 import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
 import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
@@ -13,12 +14,16 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
+import com.huanghuang.rsintegration.voidupgrade.RSVoidUpgradeItem;
+import com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler;
+import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.common.MinecraftForge;
 
 /** All code in this class is linked only after Forge confirms RS is present. */
 public final class RSOptionalBootstrap {
@@ -26,9 +31,9 @@ public final class RSOptionalBootstrap {
 
     public static void registerItems(IEventBus modBus) {
         ModItems.registerOptionalResonance(modBus,
-                () -> com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem.INSTANCE);
+                () -> ResonanceDiskItem.INSTANCE);
         ModItems.registerOptionalVoidUpgrade(modBus,
-                com.huanghuang.rsintegration.voidupgrade.RSVoidUpgradeItem::new);
+                RSVoidUpgradeItem::new);
     }
 
     public static void registerBindings() {
@@ -36,11 +41,11 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerCommon() {
-        com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler.register();
+        VoidUpgradeNetworkHandler.register();
         ResonanceStorageResolvers.register(RSInventoryBridge::resolveResonanceView);
         API.instance().getStorageDiskRegistry().add(
                 ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
+        MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
     }
 
     public static void registerClientKeyMappings() {
@@ -49,8 +54,8 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerClientEventSubscribers() {
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.mods.rs.RSGridSearchCache.class);
+        MinecraftForge.EVENT_BUS.register(
+                RSGridSearchCache.class);
     }
 
     public static void registerSidePanelCommon() {
@@ -75,7 +80,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void clearServerState() {
-        com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler.clearServerState();
+        VoidUpgradeNetworkHandler.clearServerState();
         RSSidePanelNetworkHandler.clearServerState();
     }
 

@@ -35,6 +35,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.IItemHandlerModifiable;
 
 /** Batch delegate for Embers Alchemy Tablet (deterministic mode). */
 public final class EreAlchemyBatchDelegate
@@ -479,8 +483,8 @@ extends AbstractBatchDelegate {
 
     static void recycleBlockingItems(ServerLevel level, BlockPos tabletPos, List<PedestalInfo> pedestals,
                                      ServerPlayer player,
-                                     @Nullable com.huanghuang.rsintegration.crafting.CraftStorageEndpoint endpoint) {
-        INetwork network = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints.legacyNetwork(endpoint);
+                                     @Nullable CraftStorageEndpoint endpoint) {
+        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (endpoint == null && network == null) {
             network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
         }
@@ -539,7 +543,7 @@ extends AbstractBatchDelegate {
                     }
                     leftover = endpoint != null
                             ? endpoint.insert(player, s, false).remainder().orElse(ItemStack.EMPTY)
-                            : com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            : CraftStorageEndpoints
                             .insertLegacy(network, player, s, false);
                     if (!leftover.isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Embers] Recycle partial: {} x{} \u2192 leftover {}", (Object)s.getHoverName().getString(), (Object)s.getCount(), (Object)leftover.getCount());
@@ -561,7 +565,7 @@ extends AbstractBatchDelegate {
     }
 
     private static ItemStack readInventoryStack(Object inventory) {
-        if (inventory instanceof net.minecraftforge.items.IItemHandler handler) {
+        if (inventory instanceof IItemHandler handler) {
             return handler.getStackInSlot(0);
         }
         return Reflect.invoke(inventory, "getStackInSlot", 0)
@@ -571,7 +575,7 @@ extends AbstractBatchDelegate {
     }
 
     private static void writeInventoryStack(Object inventory, ItemStack stack) {
-        if (inventory instanceof net.minecraftforge.items.IItemHandlerModifiable handler) {
+        if (inventory instanceof IItemHandlerModifiable handler) {
             handler.setStackInSlot(0, stack);
             return;
         }

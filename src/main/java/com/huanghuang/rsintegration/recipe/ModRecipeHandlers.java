@@ -1,8 +1,10 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Field;
 
 import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -41,7 +43,7 @@ public final class ModRecipeHandlers {
     private static final Map<Class<?>, CraftTweakerOutputAccessor> CT_OUTPUT_ACCESSOR_CACHE = new ConcurrentHashMap<>();
     private static final Set<Class<?>> NO_CT_OUTPUT_ACCESSOR_CACHE = ConcurrentHashMap.newKeySet();
     /** Caches the ItemStack-producing field per recipe class. */
-    private static final Map<Class<?>, java.lang.reflect.Field> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Field> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
     /** Classes that have been scanned and have no suitable output field. */
     private static final Set<Class<?>> NO_OUTPUT_FIELD_CACHE = ConcurrentHashMap.newKeySet();
     /** Global result cache: recipe ID → output ItemStack (or EMPTY sentinel). */
@@ -67,7 +69,7 @@ public final class ModRecipeHandlers {
         HANDLERS.add(new GenericRecipeHandler());
         HANDLERS.add(new VanillaMachineRecipeHandler());
         HANDLERS.add(new SmithingRecipeHandler());
-        HANDLERS.add(new com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler());
+        HANDLERS.add(new VanillaBrewingRecipeHandler());
         HANDLERS.add(new MarketRecipeHandler());
     }
 
@@ -327,7 +329,7 @@ public final class ModRecipeHandlers {
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
         Class<?> clazz = recipe.getClass();
         if (NO_OUTPUT_FIELD_CACHE.contains(clazz)) return ItemStack.EMPTY;
-        java.lang.reflect.Field cachedField = OUTPUT_FIELD_CACHE.get(clazz);
+        Field cachedField = OUTPUT_FIELD_CACHE.get(clazz);
         if (cachedField != null) {
             try {
                 ItemStack s = (ItemStack) cachedField.get(recipe);
@@ -339,7 +341,7 @@ public final class ModRecipeHandlers {
         }
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+            for (Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
                 String name = f.getName().toLowerCase(Locale.ROOT);
                 if (!name.contains("output") && !name.contains("result") && !name.contains("assembled"))

@@ -17,6 +17,12 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.Comparator;
@@ -45,13 +51,13 @@ public final class PlanningStateValidator {
             return false;
         }
         INetwork currentNetwork = selectedReference == null
-                && net.minecraftforge.fml.ModList.get().isLoaded(
-                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+                && ModList.get().isLoaded(
+                ModIds.REFINED_STORAGE)
                 ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
                 : null;
         Map<StackKey, Integer> currentAvailable;
         if (selectedReference != null) {
-            var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            var endpoint = CraftStorageEndpoints
                     .resolve(selectedReference, player);
             currentAvailable = endpoint.isPresent()
                     ? MaterialSources.listAllAvailable(player, endpoint.orElseThrow())
@@ -111,8 +117,8 @@ public final class PlanningStateValidator {
                                                    ResourceKey<Level> dimension, BlockPos lookupPos,
                                                    @Nullable StorageReference selectedReference) {
         INetwork currentNetwork = selectedReference == null
-                && net.minecraftforge.fml.ModList.get().isLoaded(
-                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+                && ModList.get().isLoaded(
+                ModIds.REFINED_STORAGE)
                 ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
                 : null;
         CraftStorageEndpoint endpoint = null;
@@ -161,7 +167,7 @@ public final class PlanningStateValidator {
                     selectedReference);
         }
 
-        Set<net.minecraft.world.item.Item> dependencyTypes = dependencyItemTypes(
+        Set<Item> dependencyTypes = dependencyItemTypes(
                 snapshot.recipeGraph());
         if (dependencyTypes.isEmpty()) {
             return revalidate(player, snapshot, dimension, lookupPos, requests, selectedReference);
@@ -173,8 +179,8 @@ public final class PlanningStateValidator {
             var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
             if (resolved.isEmpty()) return false;
             endpoint = resolved.orElseThrow();
-        } else if (net.minecraftforge.fml.ModList.get().isLoaded(
-                com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)) {
+        } else if (ModList.get().isLoaded(
+                ModIds.REFINED_STORAGE)) {
             INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
             if (network != null) endpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
         }
@@ -250,26 +256,26 @@ public final class PlanningStateValidator {
         return true;
     }
 
-    private static Set<net.minecraft.world.item.Item> itemTypes(
+    private static Set<Item> itemTypes(
             Map<StackKey, Integer> required) {
-        Set<net.minecraft.world.item.Item> result = new HashSet<>();
+        Set<Item> result = new HashSet<>();
         for (StackKey key : required.keySet()) result.add(key.item());
         return Set.copyOf(result);
     }
 
-    private static Set<net.minecraft.world.item.Item> dependencyItemTypes(
+    private static Set<Item> dependencyItemTypes(
             ImmutableRecipeGraph graph) {
         if (graph == null || graph.recipesById().isEmpty()) return Set.of();
-        Set<net.minecraft.world.item.Item> result = new HashSet<>();
+        Set<Item> result = new HashSet<>();
         for (ImmutableRecipeGraph.RecipeNode recipe : graph.recipesById().values()) {
-            net.minecraft.world.item.Item output = net.minecraft.core.registries.BuiltInRegistries.ITEM
+            Item output = BuiltInRegistries.ITEM
                     .get(recipe.output().itemId());
-            if (output != null && output != net.minecraft.world.item.Items.AIR) result.add(output);
+            if (output != null && output != Items.AIR) result.add(output);
             for (ImmutableRecipeGraph.IngredientRef input : recipe.inputs()) {
                 for (ImmutableRecipeGraph.MaterialRef alternative : input.alternatives()) {
-                    net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    Item item = BuiltInRegistries.ITEM
                             .get(alternative.itemId());
-                    if (item != null && item != net.minecraft.world.item.Items.AIR) result.add(item);
+                    if (item != null && item != Items.AIR) result.add(item);
                 }
             }
         }
@@ -278,7 +284,7 @@ public final class PlanningStateValidator {
 
     static boolean sameRelevantInventory(Map<StackKey, Integer> previous,
                                          Map<StackKey, Integer> current,
-                                         Set<net.minecraft.world.item.Item> itemTypes) {
+                                         Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return false;
         Map<StackKey, Integer> expected = new HashMap<>();
         previous.forEach((key, count) -> {
@@ -296,7 +302,7 @@ public final class PlanningStateValidator {
     }
 
     private static void mergeRequirement(Map<StackKey, Integer> required,
-                                         net.minecraft.world.item.ItemStack stack, int quantity) {
+                                         ItemStack stack, int quantity) {
         if (stack == null || stack.isEmpty() || quantity <= 0) return;
         String tag = stack.getTag() == null || stack.getTag().isEmpty()
                 ? null : stack.getTag().toString();

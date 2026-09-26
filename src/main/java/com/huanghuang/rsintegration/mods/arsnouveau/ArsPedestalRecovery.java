@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -33,7 +34,7 @@ final class ArsPedestalRecovery {
 
             ItemStack remainder = stack;
             if (network != null) {
-                remainder = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                remainder = CraftStorageEndpoints
                         .insertLegacy(network, player, stack, false);
             }
             if (!remainder.isEmpty()) {

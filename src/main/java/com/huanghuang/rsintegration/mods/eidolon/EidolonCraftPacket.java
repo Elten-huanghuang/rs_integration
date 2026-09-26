@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.mods.eidolon;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.TagParser;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -14,7 +20,6 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
@@ -51,8 +56,8 @@ public final class EidolonCraftPacket {
     private final BlockPos pos;
 
     // ── Shared class refs (resolved from probe) ─────────────────
-    private static volatile java.lang.reflect.Field boilingField;
-    private static volatile java.lang.reflect.Field stepsField;
+    private static volatile Field boilingField;
+    private static volatile Field stepsField;
 
     static {
         if (EidolonReflection.crucibleTileEntityClass != null) {
@@ -95,7 +100,7 @@ public final class EidolonCraftPacket {
     public static void handle(EidolonCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }        context.enqueueWork(() -> {
@@ -133,7 +138,7 @@ public final class EidolonCraftPacket {
 
         // Verify binding before accessing remote machine at client-supplied coords
         if (dim != null) {
-            ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
             if (!AltarBindingRegistry.isBound(key, pos, player)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
                 return;
@@ -158,7 +163,7 @@ public final class EidolonCraftPacket {
 
         // Validate crucible state
         boolean hasWater;
-        try { java.lang.reflect.Field hwField = be.getClass().getDeclaredField("hasWater"); hwField.setAccessible(true); hasWater = hwField.getBoolean(be); } catch (Exception e) { hasWater = false; }
+        try { Field hwField = be.getClass().getDeclaredField("hasWater"); hwField.setAccessible(true); hasWater = hwField.getBoolean(be); } catch (Exception e) { hasWater = false; }
 
         boolean boiling = false;
         try {
@@ -210,7 +215,7 @@ public final class EidolonCraftPacket {
 
         // Resolve one authoritative backend for this packet.  BD must not be
         // replaced by a later RS lookup merely because an RS API is available.
-        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+        CraftStorageEndpoint endpoint = StorageRestockSupport
                 .resolve(player).orElse(null);
         INetwork network = endpoint == null
                 ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
@@ -226,7 +231,7 @@ public final class EidolonCraftPacket {
                     available.entrySet().stream().map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
+                            try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                         }
                         return s;
                     }).toList(),
@@ -283,7 +288,7 @@ public final class EidolonCraftPacket {
                 crucibleSteps.add(step);
             }
 
-            java.lang.reflect.Method matchesMethod = Reflect.findMethod(
+            Method matchesMethod = Reflect.findMethod(
                     recipe.getClass(), "matches", new Class<?>[]{List.class});
             if (matchesMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".matches");
             boolean matches = (boolean) matchesMethod.invoke(recipe, crucibleSteps);
@@ -306,7 +311,7 @@ public final class EidolonCraftPacket {
 
         // Get result first — validate before consuming resources
         try {
-            java.lang.reflect.Method getResultMethod = Reflect.findMethod(
+            Method getResultMethod = Reflect.findMethod(
                     recipe.getClass(), "getResult", new Class<?>[0]);
             if (getResultMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".getResult");
             ItemStack result = ((ItemStack) getResultMethod.invoke(recipe)).copy();
@@ -336,7 +341,7 @@ public final class EidolonCraftPacket {
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 } else if (network != null) {
-                    ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    ItemStack leftover = CraftStorageEndpoints
                             .insertLegacy(network, player, refundStack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -350,13 +355,13 @@ public final class EidolonCraftPacket {
 
         // Drain water, stop boiling, clear steps (consume resources)
         try {
-            java.lang.reflect.Field tankField = be.getClass().getDeclaredField("tank");
+            Field tankField = be.getClass().getDeclaredField("tank");
             tankField.setAccessible(true);
             Object tank = tankField.get(be);
             tank.getClass()
                     .getMethod("drain", int.class, IFluidHandler.FluidAction.class)
                     .invoke(tank, EidolonBatchDelegate.readWaterAmountStatic(recipe), IFluidHandler.FluidAction.EXECUTE);
-            java.lang.reflect.Field hwField2 = be.getClass().getDeclaredField("hasWater");
+            Field hwField2 = be.getClass().getDeclaredField("hasWater");
             hwField2.setAccessible(true);
             hwField2.set(be, false);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }

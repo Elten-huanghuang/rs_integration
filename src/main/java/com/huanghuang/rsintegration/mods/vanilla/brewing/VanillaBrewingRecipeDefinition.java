@@ -11,6 +11,7 @@ import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import net.minecraft.core.RegistryAccess;
 
 /** Runtime brewing-registry edge exposed to RSI's ordinary recipe planner. */
 public final class VanillaBrewingRecipeDefinition implements Recipe<Container> {
@@ -33,9 +34,9 @@ public final class VanillaBrewingRecipeDefinition implements Recipe<Container> {
     public ItemStack outputUnit() { return output.copyWithCount(1); }
 
     @Override public boolean matches(Container container, Level level) { return false; }
-    @Override public ItemStack assemble(Container container, net.minecraft.core.RegistryAccess access) { return output(); }
+    @Override public ItemStack assemble(Container container, RegistryAccess access) { return output(); }
     @Override public boolean canCraftInDimensions(int width, int height) { return false; }
-    @Override public ItemStack getResultItem(net.minecraft.core.RegistryAccess access) { return output(); }
+    @Override public ItemStack getResultItem(RegistryAccess access) { return output(); }
     @Override public ResourceLocation getId() { return id; }
     @Override public RecipeSerializer<?> getSerializer() { return RecipeSerializer.SHAPELESS_RECIPE; }
     @Override public RecipeType<?> getType() { return RecipeType.CRAFTING; }

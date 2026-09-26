@@ -15,6 +15,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.gui.overlay.ForgeGui;
 import net.minecraftforge.client.gui.overlay.IGuiOverlay;
 import net.minecraft.world.phys.BlockHitResult;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import java.util.List;
 
@@ -28,8 +30,8 @@ public final class LithumAltarHUDOverlay implements IGuiOverlay {
     private LithumAltarHUDOverlay() {}
 
     private static boolean distantWorldsEnabled() {
-        return com.huanghuang.rsintegration.config.ClientSyncedConfig.isSynced()
-                ? com.huanghuang.rsintegration.config.ClientSyncedConfig.ENABLE_DISTANT_WORLDS
+        return ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_DISTANT_WORLDS
                 : RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get();
     }
 
@@ -112,7 +114,7 @@ public final class LithumAltarHUDOverlay implements IGuiOverlay {
     }
 
     private static ItemStack getSlot(BlockEntity be, int slot) {
-        var capability = be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);
+        var capability = be.getCapability(ForgeCapabilities.ITEM_HANDLER, null);
         return capability.resolve().map(handler -> handler.getStackInSlot(slot)).orElse(ItemStack.EMPTY);
     }
 }

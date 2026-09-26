@@ -31,6 +31,7 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import net.minecraft.world.entity.player.Player;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -395,7 +396,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
                 tryAddItemMethod = YHKReflection.rackDataClass.getMethod("tryAddItem", YHKReflection.steamerBEClass, Level.class, ItemStack.class);
                 tryAddItemMethod.setAccessible(true);
                 tryTakeItemMethod = findMethodInHierarchy(YHKReflection.rackDataClass, "tryTakeItem",
-                        YHKReflection.steamerBEClass, Level.class, net.minecraft.world.entity.player.Player.class,
+                        YHKReflection.steamerBEClass, Level.class, Player.class,
                         InteractionHand.class);
                 if (tryTakeItemMethod != null) tryTakeItemMethod.setAccessible(true);
             }
@@ -571,7 +572,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private void setWaterProperty(net.minecraft.world.level.block.state.BlockState state, boolean value) {
+    private void setWaterProperty(BlockState state, boolean value) {
         BlockPos p = potPos();
         if (waterPropertyField != null) {
             try {

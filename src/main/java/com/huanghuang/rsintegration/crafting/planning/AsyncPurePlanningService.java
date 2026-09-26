@@ -7,6 +7,12 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
+import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Set;
+import java.util.UUID;
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -109,7 +115,7 @@ public final class AsyncPurePlanningService {
                         routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
                         session.deadlineNanos());
             } finally {
-                com.huanghuang.rsintegration.command.PerformanceMonitor.recordDemandTreeInspection(
+                PerformanceMonitor.recordDemandTreeInspection(
                         System.nanoTime() - started);
             }
             PlanningThreadContext.throwIfCancelled();
@@ -159,7 +165,7 @@ public final class AsyncPurePlanningService {
                 planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos);
         long elapsedNanos = System.nanoTime() - searchStarted;
-        com.huanghuang.rsintegration.command.PerformanceMonitor.recordPurePlanningSearch(
+        PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT) {
             PlanningLookupCache.Stats lookupStats = PlanningLookupCache.currentStats();
@@ -198,19 +204,19 @@ public final class AsyncPurePlanningService {
     public record CompletedPlan(PlanningSnapshot snapshot, PureRecipePlanner.Result result) {}
 
     public record RouteInputs(Map<ImmutableRecipeGraph.MaterialRef, Integer> available,
-                              int maxNodes, java.util.Set<ResourceLocation> catalystOutputs,
-                              java.util.Set<ResourceLocation> catalystRecipes,
-                              java.util.Set<ResourceLocation> incompatibleOutputs) {
+                              int maxNodes, Set<ResourceLocation> catalystOutputs,
+                              Set<ResourceLocation> catalystRecipes,
+                              Set<ResourceLocation> incompatibleOutputs) {
         public RouteInputs {
-            available = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(available));
-            catalystOutputs = java.util.Set.copyOf(catalystOutputs);
-            catalystRecipes = java.util.Set.copyOf(catalystRecipes);
-            incompatibleOutputs = java.util.Set.copyOf(incompatibleOutputs);
+            available = Collections.unmodifiableMap(new LinkedHashMap<>(available));
+            catalystOutputs = Set.copyOf(catalystOutputs);
+            catalystRecipes = Set.copyOf(catalystRecipes);
+            incompatibleOutputs = Set.copyOf(incompatibleOutputs);
         }
 
-        public boolean matchesPolicy(int nodes, java.util.Set<ResourceLocation> outputs,
-                                      java.util.Set<ResourceLocation> recipes,
-                                      java.util.Set<ResourceLocation> incompatible) {
+        public boolean matchesPolicy(int nodes, Set<ResourceLocation> outputs,
+                                      Set<ResourceLocation> recipes,
+                                      Set<ResourceLocation> incompatible) {
             return maxNodes == nodes && catalystOutputs.equals(outputs)
                     && catalystRecipes.equals(recipes) && incompatibleOutputs.equals(incompatible);
         }
@@ -218,18 +224,18 @@ public final class AsyncPurePlanningService {
 
     public record RoutedPlan(PlanningSnapshot snapshot, RouteInputs routing,
                              PureDemandTreeInspector.Result inspection,
-                             @javax.annotation.Nullable PureRecipePlanner.Result plan) {}
+                             @Nullable PureRecipePlanner.Result plan) {}
 
     private record RoutedKey(PlanningKey planning, RouteInputs routing,
                               List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Integer>> availabilityOrder) {}
 
-    private record PlanningKey(java.util.UUID playerId, long recipeRevision,
+    private record PlanningKey(UUID playerId, long recipeRevision,
                                ResourceLocation recipeId,
                                Map<StackKey, Integer> availableItems,
                                Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                ImmutableRecipeGraph recipeGraph, String networkFingerprint,
                                String bindingFingerprint,
-                               java.util.Set<ResourceLocation> bindingBlockedOutputIds,
+                               Set<ResourceLocation> bindingBlockedOutputIds,
                                boolean mainThreadOnly, int repeatCount, int maxSteps,
                                int maxSearchStates, int maxMemoizedFailures, int timeoutMs) {}
 }

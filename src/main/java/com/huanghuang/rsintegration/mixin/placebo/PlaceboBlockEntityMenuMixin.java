@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.placebo;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.gui.RemotePlaceboMenuSnapshot;
 import net.minecraft.core.BlockPos;

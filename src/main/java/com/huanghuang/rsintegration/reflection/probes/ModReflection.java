@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.reflection.probes;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

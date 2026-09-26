@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.resources.ResourceLocation;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
@@ -309,9 +311,9 @@ public final class PerformanceMonitor {
     }
     private static String synchronousPlanningFallbackSummary() {
         return Arrays.stream(SynchronousFallbackReason.values())
-                .map(reason -> reason.name().toLowerCase(java.util.Locale.ROOT) + ":"
+                .map(reason -> reason.name().toLowerCase(Locale.ROOT) + ":"
                         + getSynchronousPlanningFallbackCount(reason))
-                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+                .collect(Collectors.joining(",", "[", "]"));
     }
     public static void recordDelegateObserve(long nanosElapsed) {
         delegateObserveCalls.incrementAndGet();
@@ -426,7 +428,7 @@ public final class PerformanceMonitor {
              + " delegateTypes=" + delegateStats.entrySet().stream().limit(8)
              .map(e -> e.getKey() + ":" + e.getValue().totalNanos().get() / e.getValue().calls().get() / 1000
                      + "/" + e.getValue().maxNanos().get() / 1000 + "us")
-             .collect(java.util.stream.Collectors.joining(","))
+             .collect(Collectors.joining(","))
              + " legacy=" + LegacyExecutionMetrics.summary()
              + " chains=" + getActiveChainCount();
     }

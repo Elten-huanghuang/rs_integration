@@ -25,6 +25,8 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
+import java.util.ArrayDeque;
+import net.minecraft.core.RegistryAccess;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -155,7 +157,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
             } else {
                 Method feed = CrockPotReflection.birdcageBlockEntityClass.getMethod(
                         "fedByRecipe", ItemStack.class, CrockPotReflection.parrotFeedingRecipeClass,
-                        net.minecraft.core.RegistryAccess.class, Parrot.class);
+                        RegistryAccess.class, Parrot.class);
                 fed = Boolean.TRUE.equals(feed.invoke(be, input, recipe, level.registryAccess(), parrot));
             }
             if (!fed) return false;
@@ -188,7 +190,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
             return (Queue<Pair<ItemStack, Long>>) CrockPotReflection.birdcageBlockEntityClass
                     .getMethod("getOutputBuffer").invoke(be);
         } catch (ReflectiveOperationException e) {
-            return new java.util.ArrayDeque<>();
+            return new ArrayDeque<>();
         }
     }
 

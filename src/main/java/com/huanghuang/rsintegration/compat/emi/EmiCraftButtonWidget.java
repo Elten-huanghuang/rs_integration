@@ -11,6 +11,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.Minecraft;
 
 import java.util.List;
 import java.util.Map;
@@ -87,7 +88,7 @@ final class EmiCraftButtonWidget extends Widget {
         if (previous != null && now - previous < CLICK_DEDUP_MS) {
             RSIntegrationMod.LOGGER.debug("[RSI-EMI] Dedup: skipped {} ({}ms since last request)",
                     spec.recipeId(), now - previous);
-            var mc = net.minecraft.client.Minecraft.getInstance();
+            var mc = Minecraft.getInstance();
             if (mc.player != null) {
                 mc.player.displayClientMessage(
                         Component.translatable("rsi.plan.failure.request_pending"), true);

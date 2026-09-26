@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
@@ -7,6 +8,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
 
 @Mixin(value = com.refinedmods.refinedstorage.screen.grid.GridScreen.class, remap = false)
 public abstract class GridScreenKeyboardMixin {
@@ -24,8 +27,8 @@ public abstract class GridScreenKeyboardMixin {
 
         // Machine Center button: Enter/Space → toggle Hub overlay
         if (MachineTabHandler.isMachineCenterHovered() && (keyCode == 257 || keyCode == 32)) {
-            GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
-            if (!(focused instanceof net.minecraft.client.gui.components.EditBox)) {
+            GuiEventListener focused = ((Screen) (Object) this).getFocused();
+            if (!(focused instanceof EditBox)) {
                 MachineTabHandler.toggleMachineCenter();
                 cir.setReturnValue(true);
             }
@@ -34,8 +37,8 @@ public abstract class GridScreenKeyboardMixin {
 
         // Resonance Backpack button: Enter/Space → open backpack GUI
         if (MachineTabHandler.isResonanceBackpackHovered() && (keyCode == 257 || keyCode == 32)) {
-            GuiEventListener focused = ((net.minecraft.client.gui.screens.Screen) (Object) this).getFocused();
-            if (!(focused instanceof net.minecraft.client.gui.components.EditBox)) {
+            GuiEventListener focused = ((Screen) (Object) this).getFocused();
+            if (!(focused instanceof EditBox)) {
                 MachineTabHandler.toggleResonanceBackpack();
                 cir.setReturnValue(true);
             }

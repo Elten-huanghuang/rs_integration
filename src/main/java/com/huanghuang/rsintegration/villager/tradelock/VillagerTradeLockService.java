@@ -6,6 +6,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.item.trading.MerchantOffers;
+import net.minecraft.world.inventory.MerchantMenu;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,7 +34,7 @@ public final class VillagerTradeLockService {
         if (player == null) return false;
         BookmarkIndex index = BOOKMARKS.get(player.getUUID());
         if (index == null || index.isEmpty()) return false;
-        if (!(player.containerMenu instanceof net.minecraft.world.inventory.MerchantMenu menu)) return false;
+        if (!(player.containerMenu instanceof MerchantMenu menu)) return false;
         return containsBookmarkedResult(index, menu.getOffers());
     }
 

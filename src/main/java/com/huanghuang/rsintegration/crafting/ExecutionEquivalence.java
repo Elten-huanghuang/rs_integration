@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,8 +91,8 @@ public final class ExecutionEquivalence {
 
     public record Mismatch(int index, String detail) {}
 
-    private static boolean sameStack(net.minecraft.world.item.ItemStack left,
-                                     net.minecraft.world.item.ItemStack right) {
+    private static boolean sameStack(ItemStack left,
+                                     ItemStack right) {
         if (left == null || right == null) return left == right;
         return left.getCount() == right.getCount()
                 && MaterialMatcher.equivalentRuntimeFragment(left, right);

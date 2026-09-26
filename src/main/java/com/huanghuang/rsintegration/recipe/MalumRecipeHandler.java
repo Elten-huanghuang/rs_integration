@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -10,6 +11,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -72,7 +74,7 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
         // no-arg and RegistryAccess-arg overloads, including the vanilla
         // getResultItem(m_8043_) override on mod recipes.
         for (String name : new String[]{"getResultItem", "m_8043_", "getResult", "getOutput"}) {
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+            for (Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
                 try {
@@ -97,9 +99,9 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
     private ItemStack findNamedOutputField(Recipe<?> recipe) {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+            for (Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
-                String fn = f.getName().toLowerCase(java.util.Locale.ROOT);
+                String fn = f.getName().toLowerCase(Locale.ROOT);
                 if (!fn.contains("output") && !fn.contains("result") && !fn.contains("assembled")) continue;
                 try {
                     f.setAccessible(true);

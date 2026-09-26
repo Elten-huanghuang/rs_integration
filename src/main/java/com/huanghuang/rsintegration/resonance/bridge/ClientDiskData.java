@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.resonance.bridge;
 
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
+
 /**
  * Client-side cache for resonance disk data synced from the server.
  * Stores the gem count so the Avarice Ring tooltip can include disk gems.
@@ -23,7 +25,7 @@ public final class ClientDiskData {
 
     public static boolean hasPowderSnowBucket() {
         return hasLycheeCatalyst(
-                com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts.POWDER_SNOW_BUCKET);
+                LycheeVirtualCatalysts.POWDER_SNOW_BUCKET);
     }
 
     public static boolean hasLycheeCatalyst(int requiredMask) {
@@ -31,7 +33,7 @@ public final class ClientDiskData {
     }
 
     public static boolean hasCatalyst(int requiredMask) {
-        return com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts
+        return LycheeVirtualCatalysts
                 .hasCatalyst(lycheeCatalystMask, requiredMask);
     }
 

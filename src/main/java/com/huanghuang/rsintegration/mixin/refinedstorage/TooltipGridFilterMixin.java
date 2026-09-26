@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.refinedmods.refinedstorage.screen.grid.filtering.TooltipGridFilter;

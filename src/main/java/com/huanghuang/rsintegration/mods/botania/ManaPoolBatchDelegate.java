@@ -21,6 +21,14 @@ import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.ManaInfusionRecipe;
 import vazkii.botania.common.block.block_entity.mana.ManaPoolBlockEntity;
 import vazkii.botania.xplat.XplatAbstractions;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -40,8 +48,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     private boolean started;
     private int requestedBatch = 1;
     private long startTick;
-    private final java.util.Set<java.util.UUID> inputEntityIds = new java.util.HashSet<>();
-    private java.util.Set<java.util.UUID> entitiesBefore = java.util.Set.of();
+    private final Set<UUID> inputEntityIds = new HashSet<>();
+    private Set<UUID> entitiesBefore = Set.of();
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -69,7 +77,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         this.rsNetwork = null;
 
         ServerLevel resolved = dim == null ? player.serverLevel() : player.getServer().getLevel(
-                net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim));
+                ResourceKey.create(Registries.DIMENSION, dim));
         if (resolved == null) return PreparationResult.retry("Mana Pool dimension is unavailable");
 
         var found = resolved.getRecipeManager().byKey(recipeId).orElse(null);
@@ -292,7 +300,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
                 && level.getGameTime() >= startTick;
     }
 
-    static boolean acceptsPhysicalOutput(BlockPos poolPos, net.minecraft.world.phys.Vec3 position,
+    static boolean acceptsPhysicalOutput(BlockPos poolPos, Vec3 position,
                                          ItemStack candidate, ItemStack expected, boolean infusionSpawned) {
         return infusionSpawned && captureRegion(poolPos).contains(position)
                 && candidate != null && !candidate.isEmpty()
@@ -304,7 +312,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     public String describeExecutionState() {
         if (level == null || poolPos == null) return "mana_pool_state=unavailable";
         int remainingInputs = 0;
-        for (java.util.UUID id : inputEntityIds) {
+        for (UUID id : inputEntityIds) {
             var entity = level.getEntity(id);
             if (entity instanceof ItemEntity item && item.isAlive()) {
                 remainingInputs += item.getItem().getCount();
@@ -322,12 +330,12 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        List<ItemStack> recoveredInputs = new java.util.ArrayList<>();
+        List<ItemStack> recoveredInputs = new ArrayList<>();
         if (level == null || inputEntityIds.isEmpty()) {
             recordFailureRecoveredInputs(recoveredInputs);
             return;
         }
-        for (java.util.UUID id : java.util.List.copyOf(inputEntityIds)) {
+        for (UUID id : List.copyOf(inputEntityIds)) {
             var entity = level.getEntity(id);
             if (entity instanceof ItemEntity item && item.isAlive()) {
                 ItemStack stack = item.getItem().copy();
@@ -342,7 +350,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     private void discardOwnedInputs() {
         if (level == null) return;
-        for (java.util.UUID id : java.util.List.copyOf(inputEntityIds)) {
+        for (UUID id : List.copyOf(inputEntityIds)) {
             var entity = level.getEntity(id);
             if (entity != null && entity.isAlive()) entity.discard();
         }
@@ -372,14 +380,14 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         }
     }
     @Override
-    public com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities concurrencyCapabilities() {
-        return new com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities(
-                com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
-                com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
-                com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
-                com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
-                com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
-                java.util.List.of());
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of());
     }
     @Override public ItemStack getExpectedOutput() {
         return expected.isEmpty() ? null : expected.copyWithCount(expectedOutputCount());

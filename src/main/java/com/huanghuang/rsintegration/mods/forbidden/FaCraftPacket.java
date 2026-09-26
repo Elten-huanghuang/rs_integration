@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.mods.forbidden;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.TagParser;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -14,7 +20,6 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -78,7 +83,7 @@ public final class FaCraftPacket {
     public static void handle(FaCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }        context.enqueueWork(() -> {
@@ -110,7 +115,7 @@ public final class FaCraftPacket {
 
         // Verify binding before accessing remote machine at client-supplied coords
         if (dim != null) {
-            ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
             if (!AltarBindingRegistry.isBound(key, pos, player)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
                 return;
@@ -184,7 +189,7 @@ public final class FaCraftPacket {
             if (requirements != null) {
                 List<?> requiredEnhancers = FaRitualHelper.invokeList(requirements, "enhancers");
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
-                    java.lang.reflect.Field accessorField = Reflect.findField(
+                    Field accessorField = Reflect.findField(
                             FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                     List<?> installedEnhancers = null;
                     if (accessorField != null) {
@@ -226,7 +231,7 @@ public final class FaCraftPacket {
         }
 
         // Count available materials
-        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+        CraftStorageEndpoint endpoint = StorageRestockSupport
                 .resolve(player).orElse(null);
         INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (endpoint == null) network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
@@ -244,7 +249,7 @@ public final class FaCraftPacket {
                     .map(e -> {
                         ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                         if (e.getKey().tag() != null) {
-                            try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
+                            try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                         }
                         return s;
                     })
@@ -431,7 +436,7 @@ public final class FaCraftPacket {
                     player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                     return;
                 }
-            } catch (java.lang.reflect.InvocationTargetException e) {
+            } catch (InvocationTargetException e) {
                 Throwable root = e.getCause() != null ? e.getCause() : e;
                 RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
                 rollbackAll(player, be, filledPedestals, network, endpoint);
@@ -517,7 +522,7 @@ public final class FaCraftPacket {
                             ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
                             if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         } else {
-                        ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        ItemStack leftover = CraftStorageEndpoints
                                 .insertLegacy(network, player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -540,7 +545,7 @@ public final class FaCraftPacket {
                         ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
                         if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     } else {
-                    ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    ItemStack leftover = CraftStorageEndpoints
                             .insertLegacy(network, player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -571,7 +576,7 @@ public final class FaCraftPacket {
 
         BooleanConsumerProxy(ServerPlayer player, Object forge,
                              List<Object> filledPedestals, @Nullable INetwork network,
-                             @javax.annotation.Nullable ItemStack starterStack) {
+                             @Nullable ItemStack starterStack) {
             this.player = player;
             this.forge = forge;
             this.filledPedestals = filledPedestals;

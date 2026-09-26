@@ -36,6 +36,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import java.util.Arrays;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -132,7 +133,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (ingredients.isEmpty() || ingredients.get(0).isEmpty()) {
             return InputBufferContract.none();
         }
-        ItemStack prototype = java.util.Arrays.stream(ingredients.get(0).getItems())
+        ItemStack prototype = Arrays.stream(ingredients.get(0).getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         if (prototype.isEmpty()) return InputBufferContract.none();
@@ -956,7 +957,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (result.isEmpty() || result.getCount() <= 0) return 1;
         int outputCapacity = result.getMaxStackSize() / result.getCount();
         int inputCapacity = recipe.getIngredients().isEmpty() ? 64
-                : java.util.Arrays.stream(recipe.getIngredients().get(0).getItems())
+                : Arrays.stream(recipe.getIngredients().get(0).getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .mapToInt(ItemStack::getMaxStackSize)
                 .min().orElse(64);
@@ -1010,9 +1011,9 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         }
         factoryLeaseKey = null;
         factorySlot = -1;
-        java.util.Arrays.fill(initialFactoryInputCounts, 0);
-        java.util.Arrays.fill(expectedFactoryOutputCounts, 0);
-        java.util.Arrays.fill(capturedFactoryOutputCounts, 0);
+        Arrays.fill(initialFactoryInputCounts, 0);
+        Arrays.fill(expectedFactoryOutputCounts, 0);
+        Arrays.fill(capturedFactoryOutputCounts, 0);
     }
 
     private void rollbackActiveFactoryPlacement(BlockIronFurnaceTileBase f) {
@@ -1030,9 +1031,9 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         activePhysicalOperations = 0;
         observedWorking = false;
         factorySlot = -1;
-        java.util.Arrays.fill(initialFactoryInputCounts, 0);
-        java.util.Arrays.fill(expectedFactoryOutputCounts, 0);
-        java.util.Arrays.fill(capturedFactoryOutputCounts, 0);
+        Arrays.fill(initialFactoryInputCounts, 0);
+        Arrays.fill(expectedFactoryOutputCounts, 0);
+        Arrays.fill(capturedFactoryOutputCounts, 0);
     }
 
     private void clearInternalBatchState() {

@@ -5,6 +5,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.items.IItemHandler;
+import java.util.Map;
+import java.util.Optional;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -45,11 +47,11 @@ public final class CuriosAccess {
             Object lazy = accessor.invoke(null, player);
             if (lazy == null) return List.of();
             Object resolved = lazy.getClass().getMethod("resolve").invoke(lazy);
-            if (!(resolved instanceof java.util.Optional<?> opt) || opt.isEmpty()) return List.of();
+            if (!(resolved instanceof Optional<?> opt) || opt.isEmpty()) return List.of();
 
             Object inventory = opt.get();
             Object curios = inventory.getClass().getMethod("getCurios").invoke(inventory);
-            if (!(curios instanceof java.util.Map<?, ?> map)) return List.of();
+            if (!(curios instanceof Map<?, ?> map)) return List.of();
 
             List<IItemHandler> out = new ArrayList<>();
             for (Object stacksHandler : map.values()) {
@@ -89,7 +91,7 @@ public final class CuriosAccess {
             Object lazy = accessor.invoke(null, player);
             if (lazy == null) return List.of();
             Object resolved = lazy.getClass().getMethod("resolve").invoke(lazy);
-            if (!(resolved instanceof java.util.Optional<?> opt) || opt.isEmpty()) return List.of();
+            if (!(resolved instanceof Optional<?> opt) || opt.isEmpty()) return List.of();
 
             Object inventory = opt.get();
             Object equipped = inventory.getClass().getMethod("getEquippedCurios").invoke(inventory);
@@ -112,7 +114,7 @@ public final class CuriosAccess {
             try {
                 getCuriosInventory = Class.forName("top.theillusivec4.curios.api.CuriosApi")
                         .getMethod("getCuriosInventory",
-                                net.minecraft.world.entity.LivingEntity.class);
+                                LivingEntity.class);
             } catch (ReflectiveOperationException e) {
                 RSIntegrationMod.LOGGER.debug("[RSI-Curios] CuriosApi unavailable", e);
             }

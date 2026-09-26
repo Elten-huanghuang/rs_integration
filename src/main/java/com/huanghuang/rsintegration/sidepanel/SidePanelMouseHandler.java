@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.sidepanel;
 import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import net.minecraft.util.Mth;
 
 import com.huanghuang.rsintegration.sidepanel.client.SidePanelInputHandler;
 import net.minecraft.client.Minecraft;
@@ -225,7 +226,7 @@ final class SidePanelMouseHandler {
         ItemStack clickedItem = clickedPs.getStack();
         byte action;
         int extractCount;
-        if (net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
+        if (Screen.hasShiftDown()) {
             action = RSSidePanelClickPacket.ACTION_EXTRACT_MAX;
             extractCount = Math.min(clickedItem.getMaxStackSize(), clickedPs.getCount());
         } else if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
@@ -236,7 +237,7 @@ final class SidePanelMouseHandler {
             extractCount = Math.max(1, clickedPs.getCount() / 2);
         }
         long operationId = RSSidePanelNetworkHandler.sendClick(clickedItem, action,
-                net.minecraft.client.gui.screens.Screen.hasShiftDown(), clickedPs.getId());
+                Screen.hasShiftDown(), clickedPs.getId());
         RSSidePanelClient.pendingOperationStacks.put(operationId, clickedPs.getId());
 
         if (extractCount > 0) {
@@ -363,9 +364,9 @@ final class SidePanelMouseHandler {
             int sw = mc.getWindow().getGuiScaledWidth();
             int sh = mc.getWindow().getGuiScaledHeight();
             int pw = RSSidePanelClient.panelWidth(), ph = RSSidePanelClient.panelHeight();
-            RSSidePanelClient.panelX = net.minecraft.util.Mth.clamp(
+            RSSidePanelClient.panelX = Mth.clamp(
                     RSSidePanelClient.moveStartPanelX + ((int) mx - RSSidePanelClient.moveStartMouseX), 0, sw - pw);
-            RSSidePanelClient.panelY = net.minecraft.util.Mth.clamp(
+            RSSidePanelClient.panelY = Mth.clamp(
                     RSSidePanelClient.moveStartPanelY + ((int) my - RSSidePanelClient.moveStartMouseY), 0, sh - ph);
             return;
         }

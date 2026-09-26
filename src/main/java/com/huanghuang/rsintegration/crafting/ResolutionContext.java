@@ -21,6 +21,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.nbt.TagParser;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -291,7 +293,7 @@ final class ResolutionContext {
         if (family != null && !family.isEmpty()) activeConversionFamilies.removeLastOccurrence(family);
     }
 
-    boolean shouldSkipActiveConversion(net.minecraft.world.item.crafting.CraftingRecipe recipe,
+    boolean shouldSkipActiveConversion(CraftingRecipe recipe,
                                        ItemStack output) {
         for (Set<Item> family : activeConversionFamilies) {
             if (NonProductiveTagConversionGuard.shouldSkipForFamily(family, recipe, output)) return true;
@@ -732,7 +734,7 @@ final class ResolutionContext {
             this.stack = new ItemStack(key.item());
             if (key.tag() != null) {
                 try {
-                    this.stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
+                    this.stack.setTag(TagParser.parseTag(key.tag()));
                 } catch (Exception e) { /* defensive — invalid NBT falls back to tag-less stack */ }
             }
             this.material = MaterialKey.of(this.stack);

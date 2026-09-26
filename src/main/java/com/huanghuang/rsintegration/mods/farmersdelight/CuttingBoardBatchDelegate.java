@@ -28,6 +28,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.items.wrapper.RecipeWrapper;
 import org.jetbrains.annotations.NotNull;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -134,7 +138,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         if (!supportsRepeatedRolls()) return 1;
-        return com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing.boundedEvenShare(
+        return ParallelBatchSizing.boundedEvenShare(
                 totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
@@ -162,7 +166,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null || !RECIPE_CLASS.equals(recipe.getClass().getName())) return null;
-        var handler = com.huanghuang.rsintegration.recipe.ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.handlerFor(recipe);
         return handler == null ? null : handler.getIngredients(recipe);
     }
 
@@ -400,9 +404,9 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 ? Component.literal(CuttingBoardToolSemantics.remainingDurability(tool)
                         + "/" + tool.getMaxDamage())
                 : Component.translatable("rsi.farmersdelight.cutting_board.unbreakable");
-        int unbreaking = net.minecraft.world.item.enchantment.EnchantmentHelper
+        int unbreaking = EnchantmentHelper
                 .getItemEnchantmentLevel(
-                        net.minecraft.world.item.enchantment.Enchantments.UNBREAKING, tool);
+                        Enchantments.UNBREAKING, tool);
         return new ToolPlanCheck(List.of(
                 Component.translatable("rsi.farmersdelight.cutting_board.tool_selected",
                         tool.getHoverName(), source, durability, unbreaking),
@@ -462,8 +466,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static int fortuneLevel(ItemStack tool) {
-        return net.minecraft.world.item.enchantment.EnchantmentHelper.getItemEnchantmentLevel(
-                net.minecraft.world.item.enchantment.Enchantments.BLOCK_FORTUNE, tool);
+        return EnchantmentHelper.getItemEnchantmentLevel(
+                Enchantments.BLOCK_FORTUNE, tool);
     }
 
     private static Method findRollResultsMethod(Class<?> recipeClass) throws NoSuchMethodException {

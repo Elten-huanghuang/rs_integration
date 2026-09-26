@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.enigmaticlegacy;
+import java.lang.reflect.Method;
 
 import auviotre.enigmatic.addon.handlers.AddonEventHandler;
 import com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler;

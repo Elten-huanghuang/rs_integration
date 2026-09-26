@@ -1,9 +1,12 @@
 package com.huanghuang.rsintegration.mods.crockpot;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -79,7 +82,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
     // Reflection handle for the pot's private item handler — loaded once
     private static volatile boolean itemHandlerProbed;
-    private static volatile java.lang.reflect.Field itemHandlerField;
+    private static volatile Field itemHandlerField;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -651,7 +654,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
-                                       Map<Item, net.minecraft.world.item.crafting.Ingredient> itemSource,
+                                       Map<Item, Ingredient> itemSource,
                                        Map<Item, Integer> neededCounts,
                                        int repeatCount) {
         if (!"crockpot".equals(recipeModTypeId)) return;
@@ -661,7 +664,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         for (String id : RSIntegrationConfig.CROCKPOT_FUEL_PRIORITY.get()) {
             ResourceLocation rl = ResourceLocation.tryParse(id);
             if (rl == null) continue;
-            Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(rl);
+            Item item = ForgeRegistries.ITEMS.getValue(rl);
             if (item != null && item != Items.AIR && itemAvailable.getOrDefault(item, 0) > 0
                     && ForgeHooks.getBurnTime(new ItemStack(item), null) > 0) {
                 preferred = item;
@@ -671,7 +674,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         if (preferred != null) {
             int fuelNeeded = Math.max(1, repeatCount / 4);
             neededCounts.merge(preferred, fuelNeeded, Integer::sum);
-            itemSource.putIfAbsent(preferred, net.minecraft.world.item.crafting.Ingredient.of(preferred));
+            itemSource.putIfAbsent(preferred, Ingredient.of(preferred));
             return;
         }
         CraftPacketUtils.addFuelToMaterials(itemAvailable, itemSource, neededCounts, repeatCount);
@@ -681,7 +684,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
-        net.minecraft.server.level.ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         int blockPotLevel = getBlockPotLevel(level, pos);
         // Fall back to the fixed input-slot count (not the recipe's potLevel,
         // which is only the pot-tier gate) when no specific machine is selected.
@@ -769,7 +772,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 return (IItemHandler) itemHandlerField.get(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CrockPot] field access failed", e); }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
     }
 

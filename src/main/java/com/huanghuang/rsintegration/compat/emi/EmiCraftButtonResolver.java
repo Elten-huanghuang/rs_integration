@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
@@ -36,6 +37,16 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
+import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import java.util.Map;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -123,7 +134,7 @@ final class EmiCraftButtonResolver {
 
         return Optional.of(new EmiCraftButtonSpec(recipeId, modType,
                 tooltipKey(sourceRecipe, filter, modType), craftAction, machineAction,
-                com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey.of(
+                RecipeAvailabilityKey.of(
                         recipeId, dimension, machinePos, baseItem, targetOutput)));
     }
 
@@ -156,7 +167,7 @@ final class EmiCraftButtonResolver {
         if (wishingFountain != null) return wishingFountain;
         ResourceLocation grouped = SophisticatedStorageRecipeIdResolver.resolve(source);
         if (grouped != null) return grouped;
-        if (source instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe salvage) {
+        if (source instanceof PmmoSalvageRecipe salvage) {
             return salvage.recipeId();
         }
         if (backing != null) return backing.getId();
@@ -189,12 +200,12 @@ final class EmiCraftButtonResolver {
     @Nullable
     private static String resolveFilter(Object source, @Nullable Recipe<?> backing,
                                         @Nullable ResourceLocation categoryId) {
-        if (source instanceof com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe) {
+        if (source instanceof ApotheosisGemCuttingRecipe) {
             return "apotheosis_gem_cutting";
         }
-        if (source instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe
+        if (source instanceof PmmoSalvageRecipe
                 && ModList.get().isLoaded(ModIds.PMMO) && RSIntegrationConfig.ENABLE_PMMO.get()) {
-            return com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID;
+            return PmmoRSModule.TYPE_ID;
         }
 
         String className = source.getClass().getName();
@@ -235,8 +246,8 @@ final class EmiCraftButtonResolver {
 
         Recipe<?> nativeRecipe = source instanceof Recipe<?> recipe ? recipe : backing;
         if (nativeRecipe != null
-                && com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier.isGlyph(
-                    com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess.recipeTypeId(nativeRecipe))) {
+                && ArsRecipeClassifier.isGlyph(
+                    ArsTileAccess.recipeTypeId(nativeRecipe))) {
             return ModIds.ID_ARS_SCRIBES_TABLE;
         }
         return null;
@@ -249,8 +260,8 @@ final class EmiCraftButtonResolver {
     }
 
     private static ModType resolveModType(Object source, @Nullable Recipe<?> backing) {
-        if (source instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
-            return ModType.byId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID);
+        if (source instanceof PmmoSalvageRecipe) {
+            return ModType.byId(PmmoRSModule.TYPE_ID);
         }
         String className = source.getClass().getName();
         if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
@@ -302,8 +313,7 @@ final class EmiCraftButtonResolver {
         }
         if (blockKey.contains(filter)) return true;
         if ("pmmo_salvage".equals(filter)) {
-            ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo.client
-                    .PmmoSalvageAccess.salvageBlockId();
+            ResourceLocation configured = PmmoSalvageAccess.salvageBlockId();
             return configured != null && configured.toString().equals(entry.blockRegKey());
         }
         int separator = blockKey.indexOf("||");
@@ -322,12 +332,12 @@ final class EmiCraftButtonResolver {
         if (!ModIds.ID_AVARITIA_CRAFTING.equals(filter) || !(recipe instanceof Recipe<?> nativeRecipe)) {
             return true;
         }
-        int requiredTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
+        int requiredTier = CraftingTableBatchDelegate
                 .recipeTier(nativeRecipe);
         if (requiredTier <= 0) return true;
         String blockId = entry.blockRegKey();
         if (blockId == null || blockId.isBlank()) blockId = entry.blockKey();
-        int machineTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
+        int machineTier = CraftingTableBatchDelegate
                 .machineTier(ResourceLocation.tryParse(blockId));
         return machineTier <= 0 || machineTier == requiredTier;
     }
@@ -337,11 +347,11 @@ final class EmiCraftButtonResolver {
                                                ItemStack targetOutput) {
         if ("generic".equals(filter)) {
             return () -> {
-                long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
-                com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+                long requestId = PlanningRequestIds.next();
+                PlanningProgressTracker.start(
                         requestId, recipeId);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
-                        recipeId, true, java.util.Map.of(), null, null, 1, false,
+                        recipeId, true, Map.of(), null, null, 1, false,
                         null, null, requestId));
             };
         }
@@ -351,11 +361,11 @@ final class EmiCraftButtonResolver {
         ItemStack capturedBase = base.isEmpty() ? null : base.copy();
         ItemStack capturedOutput = targetOutput.isEmpty() ? null : targetOutput.copy();
         return () -> {
-            long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
-            com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+            long requestId = PlanningRequestIds.next();
+            PlanningProgressTracker.start(
                     requestId, recipeId);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
-                    recipeId, true, java.util.Map.of(), dimension, machinePos, 1, false,
+                    recipeId, true, Map.of(), dimension, machinePos, 1, false,
                     capturedBase, capturedOutput, requestId));
         };
     }
@@ -413,7 +423,7 @@ final class EmiCraftButtonResolver {
     }
 
     private static String tooltipKey(Object recipe, String filter, @Nullable ModType modType) {
-        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
+        if (recipe instanceof PmmoSalvageRecipe) {
             return "gui.rs_integration.jei.pmmo_salvage_craft";
         }
         String className = recipe.getClass().getName();

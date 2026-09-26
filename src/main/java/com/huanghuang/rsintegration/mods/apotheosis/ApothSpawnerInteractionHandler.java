@@ -13,6 +13,7 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.registries.ForgeRegistries;
 
 public final class ApothSpawnerInteractionHandler {
     private ApothSpawnerInteractionHandler() {}
@@ -59,7 +60,7 @@ public final class ApothSpawnerInteractionHandler {
     }
 
     private static boolean isBeyondDimensionsTerminal(ItemStack stack) {
-        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return id != null && "beyonddimensions".equals(id.getNamespace())
                 && "net_terminal_item".equals(id.getPath());
     }

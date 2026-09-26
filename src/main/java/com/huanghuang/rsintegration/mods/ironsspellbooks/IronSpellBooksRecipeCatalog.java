@@ -12,6 +12,12 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
+import java.util.Comparator;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraftforge.common.crafting.CompoundIngredient;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
@@ -56,7 +62,7 @@ public final class IronSpellBooksRecipeCatalog {
         if (exact != null) return exact;
         for (IronSpellBooksRecipe recipe : current.byId().values()) {
             if (recipe.machine() == machine
-                    && sameSpellScroll(recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), target)) {
+                    && sameSpellScroll(recipe.getResultItem(RegistryAccess.EMPTY), target)) {
                 return recipe;
             }
         }
@@ -153,7 +159,7 @@ public final class IronSpellBooksRecipeCatalog {
                         failure);
             }
             catalog = null;
-            com.huanghuang.rsintegration.crafting.CraftPlanningRevision.bump();
+            CraftPlanningRevision.bump();
         }
         if (rarityCachesReset) {
             RSIntegrationMod.LOGGER.info(
@@ -187,7 +193,7 @@ public final class IronSpellBooksRecipeCatalog {
         addArcaneAnvilRecipes(result, spells, diagnostics);
         Map<OutputKey, IronSpellBooksRecipe> byOutput = new HashMap<>();
         for (IronSpellBooksRecipe recipe : result.values()) {
-            ItemStack output = recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY);
+            ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
             if (!output.isEmpty()) byOutput.putIfAbsent(OutputKey.of(recipe.machine(), output), recipe);
         }
         long fingerprint = runtimeFingerprint(diagnostics);
@@ -354,11 +360,11 @@ public final class IronSpellBooksRecipeCatalog {
     private static Ingredient exactIngredientOf(List<ItemStack> options) {
         Ingredient[] alternatives = options.stream()
                 .map(stack -> stack.hasTag()
-                        ? (Ingredient) net.minecraftforge.common.crafting.StrictNBTIngredient.of(stack.copy())
+                        ? (Ingredient) StrictNBTIngredient.of(stack.copy())
                         : Ingredient.of(stack.copy()))
                 .toArray(Ingredient[]::new);
         return alternatives.length == 1 ? alternatives[0]
-                : net.minecraftforge.common.crafting.CompoundIngredient.of(alternatives);
+                : CompoundIngredient.of(alternatives);
     }
 
     private static List<InkItem> findInks() {
@@ -400,10 +406,10 @@ public final class IronSpellBooksRecipeCatalog {
 
     private static long runtimeFingerprint(IronSpellCatalogDiagnostics diagnostics) {
         List<AbstractSpell> spells = new ArrayList<>(enabledSpells(diagnostics));
-        spells.sort(java.util.Comparator.comparing(IronSpellBooksRecipeCatalog::spellLabel));
+        spells.sort(Comparator.comparing(IronSpellBooksRecipeCatalog::spellLabel));
         List<InkItem> inks = new ArrayList<>(diagnostics.read("inks", "registry", 0,
                 IronSpellBooksRecipeCatalog::findInks).orElse(List.of()));
-        inks.sort(java.util.Comparator.comparing(ink -> {
+        inks.sort(Comparator.comparing(ink -> {
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(ink);
             return id == null ? "" : id.toString();
         }));
@@ -469,7 +475,7 @@ public final class IronSpellBooksRecipeCatalog {
     private record SpellEntryAccess(Method getSpell, Method getLevel) {}
 
     private record OutputKey(IronSpellBooksRecipe.Machine machine, ResourceLocation itemId,
-                             @Nullable net.minecraft.nbt.CompoundTag tag) {
+                             @Nullable CompoundTag tag) {
         private static OutputKey of(IronSpellBooksRecipe.Machine machine, ItemStack stack) {
             ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
             return new OutputKey(machine, itemId, stack.hasTag() ? stack.getTag().copy() : null);

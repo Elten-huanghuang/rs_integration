@@ -30,6 +30,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -70,8 +84,8 @@ public final class RSSidePanelNetworkHandler {
     private static int machineScanCounter;
     private static long machineStatusSequence;
     private static boolean registered;
-    private static final java.util.concurrent.atomic.AtomicLong CLIENT_OPERATION_IDS =
-            new java.util.concurrent.atomic.AtomicLong(1L);
+    private static final AtomicLong CLIENT_OPERATION_IDS =
+            new AtomicLong(1L);
 
     private RSSidePanelNetworkHandler() {}
 
@@ -80,61 +94,61 @@ public final class RSSidePanelNetworkHandler {
         var ch = NetworkHandler.CHANNEL;
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_REQUEST, RSSidePanelRequestPacket.class,
                 RSSidePanelRequestPacket::encode, RSSidePanelRequestPacket::decode, RSSidePanelRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_SYNC, RSSidePanelSyncPacket.class,
                 RSSidePanelSyncPacket::encode, RSSidePanelSyncPacket::decode, RSSidePanelSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_CLICK, RSSidePanelClickPacket.class,
                 RSSidePanelClickPacket::encode, RSSidePanelClickPacket::decode, RSSidePanelClickPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_DELTA, RSSidePanelDeltaPacket.class,
                 RSSidePanelDeltaPacket::encode, RSSidePanelDeltaPacket::decode, RSSidePanelDeltaPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.INVENTORY_TRANSFER, RSInventoryTransferPacket.class,
                 RSInventoryTransferPacket::encode, RSInventoryTransferPacket::decode, RSInventoryTransferPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.OPEN_BOUND_MACHINE_GUI, OpenBoundMachineGuiPacket.class,
                 OpenBoundMachineGuiPacket::encode, OpenBoundMachineGuiPacket::decode, OpenBoundMachineGuiPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_STATUS_DELTA, MachineStatusDeltaPacket.class,
                 MachineStatusDeltaPacket::encode, MachineStatusDeltaPacket::decode, MachineStatusDeltaPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.MACHINE_COLLECT, MachineCollectPacket.class,
                 MachineCollectPacket::encode, MachineCollectPacket::decode, MachineCollectPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_INSERT, MachineInsertPacket.class,
                 MachineInsertPacket::encode, MachineInsertPacket::decode, MachineInsertPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC, RSBindingSyncPacket.class,
                 RSBindingSyncPacket::encode, RSBindingSyncPacket::decode, RSBindingSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.RETURN_TO_RS, ReturnToRSPacket.class,
                 ReturnToRSPacket::encode, ReturnToRSPacket::decode, ReturnToRSPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.SIDE_PANEL_OPERATION_RESULT, RSSidePanelOperationResultPacket.class,
                 RSSidePanelOperationResultPacket::encode, RSSidePanelOperationResultPacket::decode, RSSidePanelOperationResultPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.UNBIND_MACHINE, UnbindMachinePacket.class,
                 UnbindMachinePacket::encode, UnbindMachinePacket::decode, UnbindMachinePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_FAVORITE_TOGGLE, MachineFavoriteTogglePacket.class,
                 MachineFavoriteTogglePacket::encode, MachineFavoriteTogglePacket::decode,
                 MachineFavoriteTogglePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.MACHINE_FAVORITES_SYNC, MachineFavoritesSyncPacket.class,
                 MachineFavoritesSyncPacket::encode, MachineFavoritesSyncPacket::decode,
                 MachineFavoritesSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.PLACEBO_REMOTE_MENU_SNAPSHOT,
                 PlaceboRemoteMenuSnapshotPacket.class,
                 PlaceboRemoteMenuSnapshotPacket::encode, PlaceboRemoteMenuSnapshotPacket::decode,
                 PlaceboRemoteMenuSnapshotPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.RS_BINDING_SYNC_REQUEST,
                 RSBindingSyncRequestPacket.class,
                 RSBindingSyncRequestPacket::encode, RSBindingSyncRequestPacket::decode,
                 RSBindingSyncRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         registered = true;
 
         MinecraftForge.EVENT_BUS.register(RSSidePanelNetworkHandler.class);
@@ -151,7 +165,7 @@ public final class RSSidePanelNetworkHandler {
         // Periodic cleanup of expired RemoteGuiAuth entries (every 30s)
         if (event.getServer().getTickCount() % 600 == 0) {
             RemoteGuiAuth.cleanExpired();
-            com.huanghuang.rsintegration.mods.embers.EreAlchemyLock.cleanExpired();
+            EreAlchemyLock.cleanExpired();
         }
 
         if (!tickFiringConfirmed) {
@@ -226,7 +240,7 @@ public final class RSSidePanelNetworkHandler {
         }
     }
 
-    private static ServerPlayer findPlayer(net.minecraft.server.MinecraftServer server, UUID playerId) {
+    private static ServerPlayer findPlayer(MinecraftServer server, UUID playerId) {
         if (server == null || server.getPlayerList() == null) return null;
         return server.getPlayerList().getPlayer(playerId);
     }
@@ -243,7 +257,7 @@ public final class RSSidePanelNetworkHandler {
         collectBindingsFromStacks(player.getInventory().offhand, bindings);
         collectBindingsFromStacks(player.getInventory().armor, bindings);
         collectBindingsFromStacks(
-                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
+                CuriosAccess.stacks(player), bindings);
 
         UUID pid = player.getUUID();
         Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
@@ -255,7 +269,7 @@ public final class RSSidePanelNetworkHandler {
         for (BindingInfo info : bindings) {
             // Defensive: skip entries with invalid dims before they reach network encoding
             if (info.dim() == null
-                    || net.minecraft.resources.ResourceLocation.tryParse(info.dim().toString()) == null) {
+                    || ResourceLocation.tryParse(info.dim().toString()) == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Delta] Skipping binding with invalid dim: dim={} blockKey={}",
                         info.dim(), info.blockKey());
                 continue;
@@ -286,16 +300,16 @@ public final class RSSidePanelNetworkHandler {
 
         if (!changed.isEmpty()) {
             CHANNEL.send(
-                net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+                PacketDistributor.PLAYER.with(() -> player),
                 new MachineStatusDeltaPacket(changed, ++machineStatusSequence));
         }
     }
 
-    private static String statusKey(net.minecraft.resources.ResourceLocation dim, net.minecraft.core.BlockPos pos) {
+    private static String statusKey(ResourceLocation dim, BlockPos pos) {
         return dim.toString() + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
-    private record StatusAddress(ResourceLocation dim, net.minecraft.core.BlockPos pos) {}
+    private record StatusAddress(ResourceLocation dim, BlockPos pos) {}
 
     private static StatusAddress parseStatusKey(String key) {
         try {
@@ -308,7 +322,7 @@ public final class RSSidePanelNetworkHandler {
             int x = Integer.parseInt(key.substring(colon + 1, comma1));
             int y = Integer.parseInt(key.substring(comma1 + 1, comma2));
             int z = Integer.parseInt(key.substring(comma2 + 1));
-            return new StatusAddress(dim, new net.minecraft.core.BlockPos(x, y, z));
+            return new StatusAddress(dim, new BlockPos(x, y, z));
         } catch (RuntimeException ignored) {
             return null;
         }
@@ -389,7 +403,7 @@ public final class RSSidePanelNetworkHandler {
             collectBindingsFromStacks(player.getInventory().offhand, bindings);
             collectBindingsFromStacks(player.getInventory().armor, bindings);
             collectBindingsFromStacks(
-                    com.huanghuang.rsintegration.util.CuriosAccess.stacks(player), bindings);
+                    CuriosAccess.stacks(player), bindings);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect player bindings", e);
         }
@@ -405,7 +419,7 @@ public final class RSSidePanelNetworkHandler {
     private static void collectBindingsFromStacks(List<ItemStack> stacks, List<BindingInfo> out) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            var itemKey = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+            var itemKey = BuiltInRegistries.ITEM.getKey(stack.getItem());
             if (itemKey == null) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (!BindingEventHandler.supportsGuiByBlockKey(entry.blockKey())) continue;
@@ -431,7 +445,7 @@ public final class RSSidePanelNetworkHandler {
                 // Only accept it if it differs from the generic fallback below,
                 // otherwise let the normal MULTI_PART_ROOT_MAP path handle it.
                 String mapped = blockRegKey != null
-                        ? com.huanghuang.rsintegration.network.binding.BindingEventHandler.MULTI_PART_ROOT_MAP
+                        ? BindingEventHandler.MULTI_PART_ROOT_MAP
                             .get(blockRegKey)
                         : null;
                 if (!key.equals(mapped)) {
@@ -441,11 +455,11 @@ public final class RSSidePanelNetworkHandler {
         }
 
         if (blockRegKey != null) {
-            String effectiveKey = com.huanghuang.rsintegration.network.binding.BindingEventHandler.MULTI_PART_ROOT_MAP
+            String effectiveKey = BindingEventHandler.MULTI_PART_ROOT_MAP
                     .getOrDefault(blockRegKey, blockRegKey);
-            var rl = net.minecraft.resources.ResourceLocation.tryParse(effectiveKey);
+            var rl = ResourceLocation.tryParse(effectiveKey);
             if (rl != null) {
-                var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
+                var block = ForgeRegistries.BLOCKS.getValue(rl);
                 if (block != null) return block.getDescriptionId();
             }
         }
@@ -558,7 +572,7 @@ public final class RSSidePanelNetworkHandler {
                 // Never resolve a display name on the dedicated server. Some
                 // item implementations (for example Bountiful's bounty item)
                 // load client-only classes from getHoverName().
-                var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+                var itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
                 RSIntegrationMod.LOGGER.debug("[RSI-Delta] Cache onChanged: item={} change={} id={}",
                         itemId != null ? itemId : "unknown", change, entryId);
 
@@ -603,12 +617,12 @@ public final class RSSidePanelNetworkHandler {
                         ts = trackerEntry.getTime();
                     }
                 }
-                var k = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+                var k = ForgeRegistries.ITEMS.getKey(stack.getItem());
                 boolean craftable = k != null && entryHolder[0].craftableKeys.contains(k);
 
                 RSIntegrationMod.LOGGER.debug("[RSI-Delta] Queueing delta: player={} id={} item={} count={} craftable={}",
                         player.getName().getString(), stackId,
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(toSend.getItem()),
+                        BuiltInRegistries.ITEM.getKey(toSend.getItem()),
                         absoluteCount, craftable);
                 queueDelta(player, stackId, toSend, ts, craftable);
             }
@@ -632,13 +646,13 @@ public final class RSSidePanelNetworkHandler {
         // Keep the common RS resolver in sync with the UI listener.  Recursive
         // crafting must work even after the panel is closed and must not depend
         // on the client-side panel state.
-        com.huanghuang.rsintegration.network.RSIntegrationNetwork
+        RSIntegrationNetwork
                 .rememberResolvedNetwork(player, network);
         return isNew;
     }
 
     private static void rebindInvalidatedCache(
-            net.minecraft.server.MinecraftServer server,
+            MinecraftServer server,
             com.refinedmods.refinedstorage.api.network.INetwork network,
             IStorageCache<ItemStack> invalidatedCache) {
         List<UUID> affected = playerListeners.entrySet().stream()
@@ -700,7 +714,7 @@ public final class RSSidePanelNetworkHandler {
         nextPriorityRefreshTick.remove(playerId);
         if (invalidateResolution) {
             lastKnownNetworks.remove(playerId);
-            com.huanghuang.rsintegration.network.RSIntegrationNetwork.invalidateNetworkResolution(playerId);
+            RSIntegrationNetwork.invalidateNetworkResolution(playerId);
         }
     }
 
@@ -729,9 +743,9 @@ public final class RSSidePanelNetworkHandler {
         machineScanCounter = 0;
         machineStatusSequence = 0;
         tickFiringConfirmed = false;
-        com.huanghuang.rsintegration.network.RSIntegrationNetwork.clearNetworkResolutionCache();
-        com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.clearServerState();
-        com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket.clearServerState();
+        RSIntegrationNetwork.clearNetworkResolutionCache();
+        CraftCancelPacket.clearServerState();
+        CraftStatusRequestPacket.clearServerState();
     }
 
     /** @return true if the player has an active storage-cache listener. */
@@ -761,7 +775,7 @@ public final class RSSidePanelNetworkHandler {
                 for (var pattern : cm.getPatterns()) {
                     for (ItemStack out : pattern.getOutputs()) {
                         if (!out.isEmpty()) {
-                            var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(out.getItem());
+                            var key = ForgeRegistries.ITEMS.getKey(out.getItem());
                             if (key != null) target.add(key);
                         }
                     }
@@ -783,7 +797,7 @@ public final class RSSidePanelNetworkHandler {
                 playerId, currentTick + PRIORITY_REFRESH_INTERVAL_TICKS);
     }
 
-    private static void flushPriorityRefreshes(net.minecraft.server.MinecraftServer server) {
+    private static void flushPriorityRefreshes(MinecraftServer server) {
         long currentTick = server.getTickCount();
         for (Map.Entry<UUID, Long> entry : List.copyOf(nextPriorityRefreshTick.entrySet())) {
             if (currentTick < entry.getValue()) continue;
@@ -856,11 +870,11 @@ public final class RSSidePanelNetworkHandler {
             } catch (LinkageError ignored) {
                 // Rate limiting is optional and must not break player logout.
             }
-            com.huanghuang.rsintegration.crafting.PreviewRateLimiter.onPlayerLogout(pid);
+            PreviewRateLimiter.onPlayerLogout(pid);
             SidePanelRequestRateLimiter.onPlayerLogout(pid);
-            com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket.onPlayerLogout(pid);
-            com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket.onPlayerLogout(pid);
-            com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.onPlayerLogout(pid);
+            CraftCancelPacket.onPlayerLogout(pid);
+            CraftStatusRequestPacket.onPlayerLogout(pid);
+            GenericCraftPacket.onPlayerLogout(pid);
         }
     }
 

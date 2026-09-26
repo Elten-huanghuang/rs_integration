@@ -2,11 +2,15 @@ package com.huanghuang.rsintegration.autoeat.network;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatEngine;
 import com.huanghuang.rsintegration.autoeat.AutoEatBlacklistPolicy;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class UpdateBlacklistPacket {
     public final Set<ResourceLocation> added;
@@ -33,10 +37,10 @@ public class UpdateBlacklistPacket {
         return new UpdateBlacklistPacket(readSet(buf), readSet(buf), readSet(buf), readSet(buf));
     }
 
-    public static void handle(UpdateBlacklistPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+    public static void handle(UpdateBlacklistPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
-            if (sender != null && !(sender instanceof net.minecraftforge.common.util.FakePlayer)) {
+            if (sender != null && !(sender instanceof FakePlayer)) {
                 AutoEatEngine.updateBlacklist(sender, packet.added, packet.removed);
                 AutoEatEngine.updateEffectBlacklist(sender, packet.addedEffects, packet.removedEffects);
             }
@@ -54,7 +58,7 @@ public class UpdateBlacklistPacket {
     private static Set<ResourceLocation> readSet(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
         if (size < 0 || size > AutoEatBlacklistPolicy.MAX_SIZE) {
-            throw new io.netty.handler.codec.DecoderException("blacklist size out of range: " + size);
+            throw new DecoderException("blacklist size out of range: " + size);
         }
         Set<ResourceLocation> set = new HashSet<>(Math.min(size, 256));
         for (int i = 0; i < size; i++) {

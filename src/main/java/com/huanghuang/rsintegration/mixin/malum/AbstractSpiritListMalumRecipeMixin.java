@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.malum;
+import java.lang.reflect.Method;
 
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;

@@ -1,8 +1,10 @@
 package com.huanghuang.rsintegration.mods.distantworlds;
+import java.lang.reflect.Method;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.fml.DistExecutor;
 
 import java.util.function.Supplier;
 
@@ -37,7 +39,7 @@ public final class LithumAltarStatusPacket {
      * its implementation class is never linked on the server.
      */
     public static void handle(LithumAltarStatusPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
                 Dist.CLIENT, () -> () -> LithumAltarClientPacketHandler.handle(packet.snapshot)));
         ctx.get().setPacketHandled(true);
     }

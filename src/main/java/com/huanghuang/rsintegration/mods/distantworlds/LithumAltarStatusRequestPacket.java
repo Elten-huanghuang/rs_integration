@@ -10,6 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.Level;
 
 import java.util.Map;
 import java.util.UUID;
@@ -43,8 +45,8 @@ public final class LithumAltarStatusRequestPacket {
             long last = LAST_REQUEST.getOrDefault(player.getUUID(), 0L);
             if (now - last < 200) return;
             LAST_REQUEST.put(player.getUUID(), now);
-            ResourceKey<net.minecraft.world.level.Level> key = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, packet.dimension);
+            ResourceKey<Level> key = ResourceKey.create(
+                    Registries.DIMENSION, packet.dimension);
             ServerLevel level = player.server.getLevel(key);
             if (level == null || player.level() != level || !level.isLoaded(packet.pos)) return;
             if (player.distanceToSqr(packet.pos.getX() + 0.5,

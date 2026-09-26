@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.villager.client.VillagerRestockClient;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;

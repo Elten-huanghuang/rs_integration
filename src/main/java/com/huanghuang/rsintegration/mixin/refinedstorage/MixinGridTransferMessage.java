@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.GridTransferClassifier;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;

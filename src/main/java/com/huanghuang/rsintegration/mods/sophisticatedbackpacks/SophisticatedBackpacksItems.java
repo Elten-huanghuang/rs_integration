@@ -156,7 +156,7 @@ public final class SophisticatedBackpacksItems {
             event.register((stack, tintIndex) -> {
                 if (tintIndex != 0) return 0xFFFFFFFF;
                 var tag = stack.getTag();
-                if (com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils
+                if (StorageBackpackUtils
                         .readReference(tag) == null)
                     return 0xFFFFFFFF;
                 return hslToRgb(((System.currentTimeMillis() % 3000L) / 3000.0f), 0.7f, 0.65f);

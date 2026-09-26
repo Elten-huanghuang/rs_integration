@@ -3,9 +3,17 @@ package com.huanghuang.rsintegration.mods.distantworlds;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
+import com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
+import java.util.function.Supplier;
+import java.util.Optional;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkDirection;
 
 import java.util.List;
 
@@ -41,27 +49,27 @@ public final class DistantWorldsRSModule implements IModIntegration {
     @Override public void registerRecipeHandler() { ModRecipeHandlers.register(new LithumAltarRecipeHandler()); }
     @Override
     public void registerNetworkPackets() {
-        var channel = com.huanghuang.rsintegration.network.packet.NetworkHandler.CHANNEL;
+        var channel = NetworkHandler.CHANNEL;
         channel.registerMessage(
-                com.huanghuang.rsintegration.network.packet.NetworkPacketIds.LITHUM_ALTAR_STATUS_REQUEST,
+                NetworkPacketIds.LITHUM_ALTAR_STATUS_REQUEST,
                 LithumAltarStatusRequestPacket.class, LithumAltarStatusRequestPacket::encode,
                 LithumAltarStatusRequestPacket::decode, LithumAltarStatusRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         channel.registerMessage(
-                com.huanghuang.rsintegration.network.packet.NetworkPacketIds.LITHUM_ALTAR_STATUS_SYNC,
+                NetworkPacketIds.LITHUM_ALTAR_STATUS_SYNC,
                 LithumAltarStatusPacket.class, LithumAltarStatusPacket::encode,
                 LithumAltarStatusPacket::decode, LithumAltarStatusPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
     @Override
     public void initCommon() {
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(LithumCoreInteractionHandler.class);
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+        MinecraftForge.EVENT_BUS.register(LithumCoreInteractionHandler.class);
+        MinecraftForge.EVENT_BUS.addListener(
                 LithumAltarStatusRequestPacket::onPlayerLogout);
     }
 
     @Override
-    public java.util.function.Supplier<net.minecraftforge.fml.DistExecutor.SafeRunnable> clientInitSupplier() {
-        return () -> com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup::initClient;
+    public Supplier<DistExecutor.SafeRunnable> clientInitSupplier() {
+        return () -> DistantWorldsClientSetup::initClient;
     }
 }

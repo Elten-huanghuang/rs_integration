@@ -23,6 +23,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraft.world.Containers;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -179,8 +183,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         try (DistantWorldsResearchBypass.Grant grant = researchGrant()) {
             if (!grant.available()) return false;
             Method execute = DistantWorldsReflection.recipePickerProcedureClass.getMethod(
-                    "execute", net.minecraft.world.level.LevelAccessor.class, double.class, double.class,
-                    double.class, net.minecraft.world.entity.Entity.class);
+                    "execute", LevelAccessor.class, double.class, double.class,
+                    double.class, Entity.class);
             execute.invoke(null, level, (double) pos.getX(), (double) pos.getY(),
                     (double) pos.getZ(), player);
             BlockEntity core = level.getBlockEntity(pos);
@@ -273,7 +277,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         if (player != null) {
             ItemHandlerHelper.giveItemToPlayer(player, stack);
         } else if (level != null && pos != null) {
-            net.minecraft.world.Containers.dropItemStack(level, pos.getX() + 0.5,
+            Containers.dropItemStack(level, pos.getX() + 0.5,
                     pos.getY() + 1, pos.getZ() + 0.5, stack);
         }
     }
@@ -301,7 +305,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         if (DistantWorldsReflection.structureIntegrityProcedureClass == null) return false;
         try {
             Method execute = DistantWorldsReflection.structureIntegrityProcedureClass.getMethod(
-                    "execute", net.minecraft.world.level.LevelAccessor.class,
+                    "execute", LevelAccessor.class,
                     double.class, double.class, double.class);
             Object result = execute.invoke(null, level, (double) pos.getX(), (double) pos.getY(), (double) pos.getZ());
             return "Successful".equals(result);
@@ -323,7 +327,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean isStaff(ItemStack stack) {
-        var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return !stack.isEmpty() && key != null && "distant_worlds:dalite_staff".equals(key.toString());
     }
 

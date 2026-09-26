@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.jei;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.client.JeiNetworkOverlayRenderer;
 import mezz.jei.api.constants.VanillaTypes;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.world.entity.player.Player;
@@ -7,13 +8,14 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraft.server.level.ServerPlayer;
 
 @Mixin(AbstractFurnaceMenu.class)
 public abstract class FurnaceMenuMixin {
 
     @Inject(method = "stillValid", at = @At("HEAD"), cancellable = true)
     private void rsi$bypassDistanceForRemoteGui(Player player, CallbackInfoReturnable<Boolean> cir) {
-        if (player instanceof net.minecraft.server.level.ServerPlayer sp
+        if (player instanceof ServerPlayer sp
                 && RemoteGuiAuth.isAuthorizedCurrentMenu(sp)) {
             cir.setReturnValue(true);
             cir.cancel();

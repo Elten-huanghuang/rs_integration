@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.function.Supplier;
 
@@ -35,7 +36,7 @@ public final class OpenResonanceBackpackPacket {
     public static void handle(OpenResonanceBackpackPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
-            if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) return;
+            if (player == null || player instanceof FakePlayer) return;
 
             if (GuiOpenRateLimiter.isRateLimited(player.getUUID())) return;
 

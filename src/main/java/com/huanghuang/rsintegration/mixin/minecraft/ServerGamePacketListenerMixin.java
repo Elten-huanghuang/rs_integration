@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -8,6 +9,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import net.minecraft.server.level.ServerPlayer;
 
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class ServerGamePacketListenerMixin {
@@ -21,7 +23,7 @@ public abstract class ServerGamePacketListenerMixin {
     )
     public boolean rsi$wrapStillValidClicks(AbstractContainerMenu menu, Player player,
                                              Operation<Boolean> original) {
-        if (player instanceof net.minecraft.server.level.ServerPlayer sp
+        if (player instanceof ServerPlayer sp
                 && RemoteGuiAuth.isAuthorized(sp, menu)) {
             return true;
         }

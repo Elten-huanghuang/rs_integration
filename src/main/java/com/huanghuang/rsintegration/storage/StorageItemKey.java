@@ -4,6 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -81,7 +82,7 @@ public final class StorageItemKey {
 
     public StorageBackendId backendId() { return backendId; }
     public ResourceLocation itemType() { return itemType; }
-    net.minecraft.world.item.Item displayItem() { return displayStack.getItem(); }
+    Item displayItem() { return displayStack.getItem(); }
     public CompoundTag backendPayload() { return backendPayload.copy(); }
     /** @deprecated use backendPayload(); retained while the adapter prototype is being revised. */
     @Deprecated(forRemoval = false)

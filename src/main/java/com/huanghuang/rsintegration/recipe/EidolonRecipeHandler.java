@@ -9,6 +9,8 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import java.util.Locale;
+import java.util.Optional;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -29,12 +31,12 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
         if (blockKey == null) return false;
         String required = requiredMachineKey(recipe);
         return required == null
-                || blockKey.toLowerCase(java.util.Locale.ROOT).contains(required);
+                || blockKey.toLowerCase(Locale.ROOT).contains(required);
     }
 
     @Nullable
     static String requiredMachineKey(Recipe<?> recipe) {
-        String className = recipe.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        String className = recipe.getClass().getName().toLowerCase(Locale.ROOT);
         if (className.contains("worktable")) return "worktable";
         if (className.contains("ritual")) return "brazier";
         if (className.contains("crucible")) return "crucible";
@@ -156,7 +158,7 @@ public final class EidolonRecipeHandler extends AbstractRecipeHandler {
         return specs.isEmpty() ? null : specs;
     }
 
-    private static void addArraySpecs(java.util.Optional<Object> opt, List<IngredientSpec> out) {
+    private static void addArraySpecs(Optional<Object> opt, List<IngredientSpec> out) {
         if (opt.isEmpty()) return;
         if (opt.get() instanceof Ingredient[] arr) {
             for (Ingredient ing : arr) {

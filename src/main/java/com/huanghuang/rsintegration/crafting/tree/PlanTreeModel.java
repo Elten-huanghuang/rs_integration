@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -172,7 +173,7 @@ public final class PlanTreeModel {
         // batch is rendered as one "x4" producer reference, not four "x1" nodes.
         Set<Integer> path = new HashSet<>();
         Set<Integer> expandedProducers = new HashSet<>();
-        List<PlanGraphView.RootEdgeView> rootEdges = new java.util.ArrayList<>();
+        List<PlanGraphView.RootEdgeView> rootEdges = new ArrayList<>();
         Map<IngredientKey, UnresolvedReference> unresolvedRoots = new LinkedHashMap<>();
         for (PlanGraphView.RootView demand : graph.roots()) {
             rootEdges.addAll(demand.allocations());
@@ -345,7 +346,7 @@ public final class PlanTreeModel {
      */
     private static void mergeEquivalentProducedChildren(PlanTreeNode parent) {
         Map<VisualKey, PlanTreeNode> merged = new LinkedHashMap<>();
-        List<PlanTreeNode> result = new java.util.ArrayList<>();
+        List<PlanTreeNode> result = new ArrayList<>();
         for (PlanTreeNode child : parent.children) {
             if (child.cycle) {
                 result.add(child);
@@ -378,7 +379,7 @@ public final class PlanTreeModel {
 
     private sealed interface VisualKey permits VisualRecipeKey, MaterialVisualKey {}
 
-    private record VisualRecipeKey(net.minecraft.resources.ResourceLocation recipeId,
+    private record VisualRecipeKey(ResourceLocation recipeId,
                                    String modType, IngredientKey output,
                                    int outputKindOrdinal,
                                    DemandRole demandRole) implements VisualKey {}

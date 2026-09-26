@@ -20,6 +20,9 @@ import com.huanghuang.rsintegration.storage.StoredItem;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,7 +62,7 @@ final class RefinedStorageSession implements StorageSession {
 
     @Override
     public StorageSnapshotResult snapshotItems(ServerPlayer player,
-            java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+            Set<Item> itemTypes) {
         StorageThreadGuard.requireServerThread(player);
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.VIEW);
         if (!permission.allowedAccess()) {
@@ -135,7 +138,7 @@ final class RefinedStorageSession implements StorageSession {
                 amount, permission, mode(simulate));
         StorageSnapshotResult snapshot;
         try {
-            snapshot = snapshotItems(player, com.huanghuang.rsintegration.crafting.IngredientMatcher
+            snapshot = snapshotItems(player, IngredientMatcher
                     .itemTypesForMatching(ingredient));
         } catch (RuntimeException | LinkageError failure) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,

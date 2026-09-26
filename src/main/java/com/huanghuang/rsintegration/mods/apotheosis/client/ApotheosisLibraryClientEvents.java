@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.apotheosis.client;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -21,6 +22,10 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.config.ClientSyncedConfig;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
 
 import java.util.List;
 
@@ -44,8 +49,8 @@ public final class ApotheosisLibraryClientEvents {
      * shows its button.
      */
     private static boolean apotheosisEnabled() {
-        return com.huanghuang.rsintegration.config.ClientSyncedConfig.isSynced()
-                ? com.huanghuang.rsintegration.config.ClientSyncedConfig.ENABLE_APOTHEOSIS
+        return ClientSyncedConfig.isSynced()
+                ? ClientSyncedConfig.ENABLE_APOTHEOSIS
                 : RSIntegrationConfig.ENABLE_APOTHEOSIS.get();
     }
 
@@ -140,24 +145,24 @@ public final class ApotheosisLibraryClientEvents {
         }
     }
 
-    private static net.minecraft.core.BlockPos menuPos(AbstractContainerScreen<?> screen) {
+    private static BlockPos menuPos(AbstractContainerScreen<?> screen) {
         Class<?> type = screen.getMenu().getClass();
         while (type != null) {
             try {
                 var field = type.getDeclaredField("pos");
                 field.setAccessible(true);
-                return (net.minecraft.core.BlockPos) field.get(screen.getMenu());
+                return (BlockPos) field.get(screen.getMenu());
             } catch (ReflectiveOperationException ignored) {
                 type = type.getSuperclass();
             }
         }
-        return net.minecraft.core.BlockPos.ZERO;
+        return BlockPos.ZERO;
     }
 
     private static boolean isCurrentLibraryBound(AbstractContainerScreen<?> screen) {
         Minecraft minecraft = Minecraft.getInstance();
-        net.minecraft.core.BlockPos pos = menuPos(screen);
-        if (minecraft.level == null || pos.equals(net.minecraft.core.BlockPos.ZERO)) return false;
+        BlockPos pos = menuPos(screen);
+        if (minecraft.level == null || pos.equals(BlockPos.ZERO)) return false;
         ResourceLocation dimension = minecraft.level.dimension().location();
         return BindingCache.getInstance().getAll().stream().anyMatch(binding ->
                 dimension.equals(binding.dim()) && pos.equals(binding.pos())
@@ -174,7 +179,7 @@ public final class ApotheosisLibraryClientEvents {
         return importButtonX(screen.getGuiLeft(), screen.getXSize(), screen.width);
     }
 
-    private static boolean isLibraryScreen(net.minecraft.client.gui.screens.Screen screen) {
+    private static boolean isLibraryScreen(Screen screen) {
         return LIBRARY_SCREEN.equals(screen.getClass().getName());
     }
 
@@ -210,7 +215,7 @@ public final class ApotheosisLibraryClientEvents {
         }
 
         @Override
-        protected void updateWidgetNarration(net.minecraft.client.gui.narration.NarrationElementOutput output) {
+        protected void updateWidgetNarration(NarrationElementOutput output) {
             defaultButtonNarrationText(output);
         }
     }

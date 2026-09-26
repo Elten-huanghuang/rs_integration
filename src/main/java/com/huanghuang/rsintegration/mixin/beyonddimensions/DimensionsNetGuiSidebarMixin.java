@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
 import com.wintercogs.beyonddimensions.client.gui.widget.LeftButtonSidebar;
@@ -10,6 +11,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.minecraft.client.gui.components.Renderable;
 
 /** Uses the 0.7.30 sidebar registration path without changing legacy BD UI. */
 @Pseudo
@@ -27,6 +29,6 @@ public abstract class DimensionsNetGuiSidebarMixin {
     }
 
     @Shadow(remap = true)
-    protected abstract <T extends GuiEventListener & net.minecraft.client.gui.components.Renderable>
+    protected abstract <T extends GuiEventListener & Renderable>
             T addRenderableWidget(T widget);
 }

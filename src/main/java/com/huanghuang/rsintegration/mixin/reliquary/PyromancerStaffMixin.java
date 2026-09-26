@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.reliquary;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;

@@ -32,6 +32,9 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.util.ModIds;
+import java.util.HashSet;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -59,7 +62,7 @@ public final class RecipeAvailabilityChecker {
         }
         List<IngredientSpec> specs = ingredients(recipe, key.baseStack(), key.outputStack());
         if (specs != null && type != null
-                && com.huanghuang.rsintegration.util.ModIds.ID_MD_COPPER_POT.equals(type.id())) {
+                && ModIds.ID_MD_COPPER_POT.equals(type.id())) {
             specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(specs, recipe, player.serverLevel().registryAccess());
         }
         if (specs == null || specs.stream().noneMatch(spec -> spec != null && !spec.isEmpty())) {
@@ -105,14 +108,14 @@ public final class RecipeAvailabilityChecker {
 
     private static void add(Map<StackKey, Integer> items, ItemStack stack, long count) {
         if (stack.isEmpty() || count <= 0) return;
-        var material = com.huanghuang.rsintegration.crafting.graph.MaterialKey.of(stack);
+        var material = MaterialKey.of(stack);
         items.merge(new StackKey(material.item(), material.tag()), (int) Math.min(Integer.MAX_VALUE, count),
                 (a, b) -> (int) Math.min(Integer.MAX_VALUE, (long) a + b));
     }
 
     @Nullable
     private static Set<Item> itemTypes(List<IngredientSpec> specs) {
-        java.util.HashSet<Item> types = new java.util.HashSet<>();
+        HashSet<Item> types = new HashSet<>();
         for (IngredientSpec spec : specs) {
             if (spec == null || spec.isEmpty()) continue;
             Set<Item> candidates = IngredientMatcher.itemTypesForMatching(spec.ingredient());

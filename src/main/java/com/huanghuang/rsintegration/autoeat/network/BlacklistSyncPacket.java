@@ -2,15 +2,18 @@ package com.huanghuang.rsintegration.autoeat.network;
 
 import com.huanghuang.rsintegration.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.autoeat.AutoEatBlacklistPolicy;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkEvent;
 
 import java.util.HashSet;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class BlacklistSyncPacket {
     public final Set<ResourceLocation> blacklist;
@@ -45,7 +48,7 @@ public class BlacklistSyncPacket {
                 AutoEatSelectionCodec.read(buf));
     }
 
-    public static void handle(BlacklistSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+    public static void handle(BlacklistSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> AutoEatClientPacketHandler.onBlacklistSync(packet)));
         ctx.get().setPacketHandled(true);
@@ -59,7 +62,7 @@ public class BlacklistSyncPacket {
     private static Set<ResourceLocation> readSet(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
         if (size < 0 || size > AutoEatBlacklistPolicy.MAX_SIZE) {
-            throw new io.netty.handler.codec.DecoderException("effect blacklist size out of range: " + size);
+            throw new DecoderException("effect blacklist size out of range: " + size);
         }
         Set<ResourceLocation> set = new HashSet<>(Math.min(size, 256));
         for (int i = 0; i < size; i++) set.add(buf.readResourceLocation());

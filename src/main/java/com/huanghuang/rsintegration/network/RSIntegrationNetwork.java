@@ -27,6 +27,13 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.ArrayList;
+import java.util.Map;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.StringTag;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -127,7 +134,7 @@ public final class RSIntegrationNetwork {
         // A live side-panel listener is an active RS UI session.  Do not use
         // getListenerNetwork(), because it also returns the retained,
         // last-known network after the panel has been closed.
-        network = com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+        network = RSSidePanelNetworkHandler
                 .getActiveListenerNetwork(player.getUUID());
         if (network != null) return network;
 
@@ -171,7 +178,7 @@ public final class RSIntegrationNetwork {
         // Reuse the validated side-panel listener after the RS grid screen is
         // closed; the crafting plan is a separate request and may arrive with
         // no RS container or NetworkItem in the active player inventory.
-        net = com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+        net = RSSidePanelNetworkHandler
                 .getListenerNetwork(player.getUUID());
         if (net != null) {
             logResolved("RS side-panel listener", net);
@@ -248,7 +255,7 @@ public final class RSIntegrationNetwork {
             INetwork net = resolveFromNetworkItem(player, stack);
             if (net != null) return net;
         }
-        for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+        for (ItemStack stack : CuriosAccess.stacks(player)) {
             INetwork net = resolveFromNetworkItem(player, stack);
             if (net != null) return net;
         }
@@ -347,7 +354,7 @@ public final class RSIntegrationNetwork {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
         }
         try {
-            java.lang.reflect.Method getNetwork = be.getClass().getMethod("getNetwork");
+            Method getNetwork = be.getClass().getMethod("getNetwork");
             Object result = getNetwork.invoke(be);
             if (result instanceof INetwork net) return net;
         } catch (NoSuchMethodException e) {
@@ -460,7 +467,7 @@ public final class RSIntegrationNetwork {
                 int y = tag.getInt(group[1]);
                 int z = tag.getInt(group[2]);
                 ResourceKey<Level> dim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, dimId);
+                        Registries.DIMENSION, dimId);
                 return resolveNetwork(server, dim, new BlockPos(x, y, z));
             }
         }
@@ -490,7 +497,7 @@ public final class RSIntegrationNetwork {
             String lk = key.toLowerCase();
             if (dimId == null && (lk.contains("dim") || lk.contains("world") || lk.contains("level"))) {
                 var val = tag.get(key);
-                if (val instanceof net.minecraft.nbt.StringTag st) {
+                if (val instanceof StringTag st) {
                     ResourceLocation parsed = ResourceLocation.tryParse(st.getAsString());
                     if (parsed != null && !parsed.getPath().isEmpty()) {
                         dimId = parsed;
@@ -513,14 +520,14 @@ public final class RSIntegrationNetwork {
 
         if (dimId != null && x != null && y != null && z != null) {
             ResourceKey<Level> dim = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, dimId);
+                    Registries.DIMENSION, dimId);
             return resolveNetwork(server, dim, new BlockPos(x, y, z));
         }
         return null;
     }
 
     // Cooldown cache for nearby-node scans — prevents repeated 4096-block sweeps
-    private static final java.util.Map<UUID, Long> lastNearbyScan = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, Long> lastNearbyScan = new ConcurrentHashMap<>();
     private static final long NEARBY_SCAN_COOLDOWN_MS = 10_000;
     private static final int NEARBY_SCAN_RANGE = 8;
 
@@ -601,7 +608,7 @@ public final class RSIntegrationNetwork {
             if (list == null) return ItemStack.EMPTY;
 
             // Snapshot matching entries first, then extract.
-            var snapshot = new java.util.ArrayList<ItemStack>();
+            var snapshot = new ArrayList<ItemStack>();
             for (var entry : list.getStacks()) {
                 ItemStack stored = entry.getStack();
                 if (!stored.isEmpty() && MaterialMatcher.matchesIngredient(ingredient, stored)) {
@@ -722,7 +729,7 @@ public final class RSIntegrationNetwork {
 
     private static String itemId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "empty";
-        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return id != null ? id.toString() : "unknown";
     }
 

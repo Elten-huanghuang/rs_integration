@@ -1,6 +1,17 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import net.minecraft.world.Containers;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.SimpleContainer;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -17,7 +28,6 @@ import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntit
 import com.huanghuang.rsintegration.mixin.wizardsreborn.CrystalBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
@@ -67,10 +77,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private List<?> pedestalRefs;
     // Track exactly what was placed in each slot, so we can detect
     // crystallizer outputs that appear in the same slots as inputs.
-    private java.util.Map<Integer, ItemStack> placedInputs;
+    private Map<Integer, ItemStack> placedInputs;
     // Same for pedestal-based machines (iterator / crystal ritual):
     // key = pedestal BlockEntity, value = the ItemStack we placed on it.
-    private java.util.Map<Object, ItemStack> placedPedestalItems;
+    private Map<Object, ItemStack> placedPedestalItems;
     private int waitTicks;
     private boolean craftStarted;
     // For ARCANE_ITERATOR: tracks whether wissenInCraft was observed > 0,
@@ -294,7 +304,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         String path = recipeId.getPath();
         int slash = path.indexOf('/');
         if (slash <= 0) return MachineType.UNKNOWN;
-        String subType = path.substring(0, slash).toLowerCase(java.util.Locale.ROOT);
+        String subType = path.substring(0, slash).toLowerCase(Locale.ROOT);
         if (subType.contains("crystallizer")) return MachineType.WISSEN_CRYSTALLIZER;
         if (subType.contains("workbench")) return MachineType.ARCANE_WORKBENCH;
         if (subType.contains("iterator")) return MachineType.ARCANE_ITERATOR;
@@ -316,7 +326,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     static MachineType expectedMachineTypeFromClassName(@Nullable String className) {
         if (className == null) return MachineType.UNKNOWN;
-        String name = className.toLowerCase(java.util.Locale.ROOT);
+        String name = className.toLowerCase(Locale.ROOT);
         if (name.endsWith("wissencrystallizerrecipe")) return MachineType.WISSEN_CRYSTALLIZER;
         if (name.endsWith("arcaneworkbenchrecipe")) return MachineType.ARCANE_WORKBENCH;
         if (name.endsWith("arcaneiteratorrecipe")) return MachineType.ARCANE_ITERATOR;
@@ -459,7 +469,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Boolean flags — set during processing
         for (String name : new String[]{"startCraft", "isCrafting", "crafting", "active", "workStarted"}) {
             try {
-                java.lang.reflect.Field f = Reflect.findField(bc, name).orElse(null);
+                Field f = Reflect.findField(bc, name).orElse(null);
                 if (f != null) {
                     f.setAccessible(true);
                     if ((boolean) f.get(be)) return true;
@@ -469,7 +479,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Int timers — >0 means craft in progress
         for (String name : new String[]{"wissenInCraft", "craftTick", "progress", "craftTime", "craftTimer"}) {
             try {
-                java.lang.reflect.Field f = Reflect.findField(bc, name).orElse(null);
+                Field f = Reflect.findField(bc, name).orElse(null);
                 if (f != null) {
                     f.setAccessible(true);
                     if (f.getInt(be) > 0) return true;
@@ -494,7 +504,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
             } else {
-                java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
+                Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
                 if (f != null && f.getBoolean(be)) {
                     player.sendSystemMessage(Component.translatable("rsi.wr.error.ritual_already_running"));
                     return false;
@@ -561,7 +571,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // [Step 5] Runic pedestal must have a runic plate
         try {
-            java.lang.reflect.Method hasPlate = Reflect.findMethod(
+            Method hasPlate = Reflect.findMethod(
                     WRReflection.runicPedestalBEClass, "hasRunicPlate", new Class<?>[0]);
             if (hasPlate != null) {
                 if (!(boolean) hasPlate.invoke(belowBE)) {
@@ -577,7 +587,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // [Step 6] Ritual must be crystal_infusion type
         try {
-            java.lang.reflect.Method getRitual = Reflect.findMethod(
+            Method getRitual = Reflect.findMethod(
                     WRReflection.runicPedestalBEClass, "getCrystalRitual", new Class<?>[0]);
             if (getRitual != null) {
                 Object ritual = getRitual.invoke(belowBE);
@@ -587,7 +597,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] ritual class={}", ritual.getClass().getName());
-                java.lang.reflect.Method getId = Reflect.findMethod(
+                Method getId = Reflect.findMethod(
                         ritual.getClass(), "getId", new Class<?>[0]);
                 if (getId != null) {
                     String id = (String) getId.invoke(ritual);
@@ -718,7 +728,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // Phase 1: reserve all ingredients + validate slots
         List<ItemStack> templates = new ArrayList<>();
-        this.placedInputs = new java.util.HashMap<>();
+        this.placedInputs = new HashMap<>();
         for (int i = 0; i < ingredients.size(); i++) {
             Ingredient ing = ingredients.get(i);
             if (ing.getItems().length == 0) {
@@ -825,7 +835,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                 && ItemStack.isSameItemSameTags(e.getKey().toStack(), candidate));
                 if (present) {
                     effectiveIngredients.set(0,
-                            net.minecraftforge.common.crafting.StrictNBTIngredient.of(candidate));
+                            StrictNBTIngredient.of(candidate));
                     this.iteratorCompletedRuns = lvl;
                     break;
                 }
@@ -858,7 +868,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!ledger.commit(network, player)) return false;
 
         // Phase 4: place center book + first side set on their pedestals.
-        this.placedPedestalItems = new java.util.HashMap<>();
+        this.placedPedestalItems = new HashMap<>();
         this.filledPedestals = new ArrayList<>();
         int placed = 0;
         for (int i = 0; i < templates.size(); i++) {
@@ -971,7 +981,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         Object centerPed = pedestals.get(0);
         List<Object> newFilled = new ArrayList<>();
         newFilled.add(centerPed);
-        this.placedPedestalItems = new java.util.HashMap<>();
+        this.placedPedestalItems = new HashMap<>();
         int placed = 0;
         for (int i = 0; i < sideTemplates.size(); i++) {
             ItemStack taken = sideTemplates.get(i);
@@ -1066,7 +1076,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (be instanceof ArcaneIteratorBlockEntityAccessor accessor) {
             return accessor.rsi$getMainPedestal();
         }
-        java.lang.reflect.Method method = Reflect.findMethod(
+        Method method = Reflect.findMethod(
                 be.getClass(), "getMainPedestal", new Class<?>[0]);
         return method != null ? method.invoke(be) : null;
     }
@@ -1199,7 +1209,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // Phase 3: place items
         this.pedestalRefs = pedestals;
-        this.placedPedestalItems = new java.util.HashMap<>();
+        this.placedPedestalItems = new HashMap<>();
 
         for (int i = 0; i < templates.size(); i++) {
             ItemStack taken = templates.get(i);
@@ -1338,7 +1348,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Place items in slots
-        this.placedInputs = new java.util.HashMap<>();
+        this.placedInputs = new HashMap<>();
         for (int i = 0; i < materials.size(); i++) {
             ItemStack stack = materials.get(i);
             if (stack.isEmpty()) continue;
@@ -1379,7 +1389,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.pedestalRefs = pedestals;
         if (pedestals.size() < materials.size()) return false;
 
-        this.placedPedestalItems = new java.util.HashMap<>();
+        this.placedPedestalItems = new HashMap<>();
         for (int i = 0; i < materials.size(); i++) {
             ItemStack stack = materials.get(i);
             if (stack.isEmpty()) continue;
@@ -1491,7 +1501,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         int pedOffset = pedestals.size() - recipeIngredients.size();
 
         this.pedestalRefs = pedestals;
-        this.placedPedestalItems = new java.util.HashMap<>();
+        this.placedPedestalItems = new HashMap<>();
         int matIdx = 0;
         for (int slot = 0; slot < recipeIngredients.size() && matIdx < materials.size(); slot++) {
             Ingredient ing = recipeIngredients.get(slot);
@@ -1541,7 +1551,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // Crystallizer outputs into the SAME slots as inputs —
                 // check that slot contents changed from what we placed.
                 if (placedInputs != null) {
-                    for (java.util.Map.Entry<Integer, ItemStack> e : placedInputs.entrySet()) {
+                    for (Map.Entry<Integer, ItemStack> e : placedInputs.entrySet()) {
                         int idx = e.getKey();
                         ItemStack current = getContainerItem(be, idx);
                         if (!current.isEmpty() && ItemStack.isSameItemSameTags(current, e.getValue())) {
@@ -1633,7 +1643,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // the same pedestal, the old check "is it empty?" would wait
                 // until timeout; now we detect the item *changed*.
                 if (placedPedestalItems != null) {
-                    for (java.util.Map.Entry<Object, ItemStack> e : placedPedestalItems.entrySet()) {
+                    for (Map.Entry<Object, ItemStack> e : placedPedestalItems.entrySet()) {
                         ItemStack current = getContainerItem(e.getKey(), 0);
                         if (!current.isEmpty() && ItemStack.isSameItemSameTags(current, e.getValue()))
                             return false;
@@ -1664,10 +1674,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return accessor.rsi$isCraftStarted() && accessor.rsi$getWissenInCraft() > 0;
         }
         try {
-            java.lang.reflect.Field sc = be.getClass().getDeclaredField("startCraft");
+            Field sc = be.getClass().getDeclaredField("startCraft");
             sc.setAccessible(true);
             if (!sc.getBoolean(be)) return false;
-            java.lang.reflect.Field wic = be.getClass().getDeclaredField("wissenInCraft");
+            Field wic = be.getClass().getDeclaredField("wissenInCraft");
             wic.setAccessible(true);
             return wic.getInt(be) > 0;
         } catch (Exception e) { /* ignore */ }
@@ -1687,7 +1697,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         try {
             int total = 0;
             for (String name : new String[]{"wissenIsCraft", "experienceIsCraft", "healthIsCraft"}) {
-                java.lang.reflect.Field f = be.getClass().getDeclaredField(name);
+                Field f = be.getClass().getDeclaredField(name);
                 f.setAccessible(true);
                 total += f.getInt(be);
             }
@@ -1702,7 +1712,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return accessor.rsi$isRitualStarted();
         }
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "startRitual").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 return f.getBoolean(be);
@@ -1868,7 +1878,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // 1) Try getItemsResult() — the ritual places output into the
                 //    crystal block's result slots (IItemResultBlockEntity).
                 try {
-                    java.lang.reflect.Method getResults = Reflect.findMethod(
+                    Method getResults = Reflect.findMethod(
                             be.getClass(), "getItemsResult", new Class<?>[0]);
                     if (getResults != null) {
                         @SuppressWarnings("unchecked")
@@ -1903,10 +1913,10 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 //    Some WR rituals spawn the output as a world item entity
                 //    rather than delivering to the player.
                 ServerLevel slevel = resolveMachineLevel(player);
-                var aabb = new net.minecraft.world.phys.AABB(
+                var aabb = new AABB(
                         myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
                 for (var entity : slevel.getEntitiesOfClass(
-                        net.minecraft.world.entity.item.ItemEntity.class, aabb)) {
+                        ItemEntity.class, aabb)) {
                     ItemStack stack = entity.getItem();
                     if (stack.isEmpty()) continue;
                     if (fromMachine.isEmpty()) {
@@ -1934,11 +1944,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         var inv = player.getInventory();
-        java.util.List<ItemStack> all = new java.util.ArrayList<>();
+        List<ItemStack> all = new ArrayList<>();
         all.addAll(inv.items);
         all.addAll(inv.offhand);
         all.addAll(inv.armor);
-        all.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+        all.addAll(CuriosAccess.stacks(player));
 
         for (ItemStack stack : all) {
             if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, expected)) {
@@ -1999,9 +2009,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         if (machineType != MachineType.CRYSTAL_RITUAL || myPos == null) return null;
-        return new net.minecraft.world.phys.AABB(
+        return new AABB(
                 myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
     }
 
@@ -2137,7 +2147,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                     stack.getHoverName().getString(), stack.getCount());
             return;
         }
-        net.minecraft.world.Containers.dropItemStack(level,
+        Containers.dropItemStack(level,
                 myPos.getX() + 0.5, myPos.getY() + 1, myPos.getZ() + 0.5, stack);
     }
 
@@ -2146,7 +2156,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return accessor.rsi$getItemHandler();
         }
         try {
-            java.lang.reflect.Field f = be.getClass().getDeclaredField("itemHandler");
+            Field f = be.getClass().getDeclaredField("itemHandler");
             f.setAccessible(true);
             return (ItemStackHandler) f.get(be);
         } catch (Exception e) {
@@ -2160,7 +2170,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return accessor.rsi$getItemOutputHandler();
         }
         try {
-            java.lang.reflect.Field f = be.getClass().getDeclaredField("itemOutputHandler");
+            Field f = be.getClass().getDeclaredField("itemOutputHandler");
             f.setAccessible(true);
             return (ItemStackHandler) f.get(be);
         } catch (Exception e) {
@@ -2183,11 +2193,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
      * SimpleContainer field. Unlike createItemHandler(), this gives us
      * the live instance that the BE itself uses.
      */
-    private static net.minecraft.world.SimpleContainer getLiveSimpleContainer(Object be) {
+    private static SimpleContainer getLiveSimpleContainer(Object be) {
         return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
-    private static net.minecraft.world.SimpleContainer getSimpleContainer(Object be) {
+    private static SimpleContainer getSimpleContainer(Object be) {
         return WRContainerHelper.getSimpleContainer(be);
     }
 
@@ -2265,7 +2275,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private int readRecipeInt(String methodName) {
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(recipe.getClass(), methodName, new Class<?>[0]);
+            Method m = Reflect.findMethod(recipe.getClass(), methodName, new Class<?>[0]);
             if (m != null) return (int) m.invoke(recipe);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Failed to read recipe {}", methodName, e); }
         return 0;
@@ -2273,7 +2283,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private int readWissenCost() {
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(recipe.getClass(), "getWissen", new Class<?>[0]);
+            Method m = Reflect.findMethod(recipe.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(recipe);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Failed to read wissen cost", e); }
         return 0;
@@ -2290,12 +2300,12 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             return accessor.rsi$getWissen();
         }
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
+            Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] Failed to read current wissen", e); }
         // Fallback: try reading the public `wissen` field directly
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 return f.getInt(be);
@@ -2307,7 +2317,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     private static Object extractRitual(Object recipe) {
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+            for (Field field : clazz.getDeclaredFields()) {
                 if (field.getName().equals("ritual")) {
                     field.setAccessible(true);
                     try {
@@ -2333,7 +2343,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // Read wissen cost from recipe
         int wissenCost = 0;
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(recipe.getClass(), "getWissen", new Class<?>[0]);
+            Method m = Reflect.findMethod(recipe.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) wissenCost = (int) m.invoke(recipe);
         } catch (Exception e) { /* can't read, skip */ }
         if (wissenCost <= 0) return warnings;
@@ -2372,11 +2382,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private static int readCurrentWissenStatic(BlockEntity be) {
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
+            Method m = Reflect.findMethod(be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen method failed", e); }
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "wissen").orElse(null);
             if (f != null) { f.setAccessible(true); return f.getInt(be); }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] readCurrentWissen field failed", e); }
         return -1;

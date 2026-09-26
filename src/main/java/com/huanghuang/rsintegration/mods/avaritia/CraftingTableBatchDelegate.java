@@ -23,6 +23,8 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
+import java.util.Locale;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -265,7 +267,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
 
     private static IItemHandler getHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);
+                ForgeCapabilities.ITEM_HANDLER, null);
         IItemHandler handler = cap.resolve().orElse(null);
         if (handler != null) return handler;
 
@@ -337,7 +339,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         if (blockKey == null || blockKey.isBlank()) return 0;
         int direct = machineTier(ResourceLocation.tryParse(blockKey));
         if (direct > 0) return direct;
-        String lower = blockKey.toLowerCase(java.util.Locale.ROOT);
+        String lower = blockKey.toLowerCase(Locale.ROOT);
         if (lower.contains("sculk_crafting_table")) return 1;
         if (lower.contains("nether_crafting_table")) return 2;
         if (lower.contains("end_crafting_table")) return 3;

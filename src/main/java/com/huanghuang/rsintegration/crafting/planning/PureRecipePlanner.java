@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.planning;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -7,6 +8,10 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Mater
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
+import java.util.ArrayDeque;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -237,7 +242,7 @@ public final class PureRecipePlanner {
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
             this.deadlineNanos = deadlineNanos;
-            this.nanoTime = java.util.Objects.requireNonNull(nanoTime, "nanoTime");
+            this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
             this.variantPreferences = MaterialVariantPreferences.snapshot();
 
         }
@@ -590,7 +595,7 @@ public final class PureRecipePlanner {
                             ? reachability().canReach(candidate)
                             : hasLocalSeedPath(candidate, new HashSet<>(),
                             new int[] { MAX_LOCAL_SEED_PROBE_NODES })))
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                    .collect(Collectors.toCollection(ArrayList::new));
             if (ordered.isEmpty() && useReachability && !candidates.isEmpty()) {
                 // A conservative escape hatch for stale reachability results:
                 // require at least one concrete stock seed before reopening a
@@ -780,7 +785,7 @@ public final class PureRecipePlanner {
         }
 
         /** Restricts NBT matching to inventory variants with a compatible item id. */
-        private java.util.stream.Stream<MaterialRef> matchingStock(IngredientRef ingredient) {
+        private Stream<MaterialRef> matchingStock(IngredientRef ingredient) {
             return ingredient.alternatives().stream()
                     .map(MaterialRef::itemId)
                     .distinct()
@@ -964,7 +969,7 @@ public final class PureRecipePlanner {
                 if (material != null && count != null && count > 0) stock.put(material, count);
             });
             this.maxSteps = Math.max(1, maxSteps);
-            this.budgetCheck = java.util.Objects.requireNonNull(budgetCheck, "budgetCheck");
+            this.budgetCheck = Objects.requireNonNull(budgetCheck, "budgetCheck");
         }
 
         private PartialTrace build(List<IngredientRef> roots) {
@@ -1040,7 +1045,7 @@ public final class PureRecipePlanner {
             int remaining = ingredient.count();
             List<MaterialRef> ordered = stock.keySet().stream()
                     .filter(material -> ImmutableRecipeGraphProjector.matchesIngredient(material, ingredient))
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                    .collect(Collectors.toCollection(ArrayList::new));
             ordered.sort(Comparator
                     .comparingInt((MaterialRef material) -> stock.getOrDefault(material, 0))
                     .reversed());
@@ -1242,7 +1247,7 @@ public final class PureRecipePlanner {
             Set<ResourceLocation> inheritedOutputs = new HashSet<>();
             Map<RecipeNode, int[]> inputSatisfied = new IdentityHashMap<>();
             Map<RecipeNode, int[]> inputDepths = new IdentityHashMap<>();
-            java.util.ArrayDeque<MaterialRef> queue = new java.util.ArrayDeque<>();
+            ArrayDeque<MaterialRef> queue = new ArrayDeque<>();
             for (MaterialRef seed : seeds) {
                 materialResult.put(seed, 0);
                 queue.add(seed);

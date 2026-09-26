@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
+import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
 
 /**
  * Handles mouse and keyboard input for the Terminal Hub overlay.
@@ -61,7 +62,7 @@ public final class MachineHubInputHandler {
             // load that client class on BD-only installations: it has a hard
             // GridScreen reference and would crash with NoClassDefFoundError.
             if (ModList.get().isLoaded("refinedstorage")) {
-                com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient.requestToggle(
+                MachineFavoritesClient.requestToggle(
                         MachineHub.getMachines().get(favoriteIndex));
             } else {
                 MachineHub.toggleLocalFavorite(MachineHub.getMachines().get(favoriteIndex));

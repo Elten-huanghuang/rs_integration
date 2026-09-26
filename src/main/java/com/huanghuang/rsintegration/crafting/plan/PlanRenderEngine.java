@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.client.resources.language.I18n;
+import net.minecraftforge.fml.ModList;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.util.UIRenderer;
@@ -385,18 +388,18 @@ public final class PlanRenderEngine {
      * either from {@code rsi.batch.mod.<id>} translation keys
      * or the mod's own display name from {@code mods.toml}.
      */
-    private static final java.util.Map<String, String> MOD_LABEL_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, String> MOD_LABEL_CACHE = new ConcurrentHashMap<>();
 
     public static String formatModTypeLabel(String modTypeId) {
         // 1. Explicit translation key (optional override)
         String key = "rsi.batch.mod." + modTypeId;
-        if (net.minecraft.client.resources.language.I18n.exists(key)) {
-            return net.minecraft.client.resources.language.I18n.get(key);
+        if (I18n.exists(key)) {
+            return I18n.get(key);
         }
         String cached = MOD_LABEL_CACHE.get(modTypeId);
         if (cached != null) return cached;
         // 2. Forge mod display name
-        String forgeName = net.minecraftforge.fml.ModList.get()
+        String forgeName = ModList.get()
                 .getModContainerById(modTypeId)
                 .map(c -> c.getModInfo().getDisplayName())
                 .orElse("");

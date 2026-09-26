@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.sidepanel;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import java.util.HashSet;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.world.item.Item;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -8,7 +14,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -60,7 +65,7 @@ public final class RSInventoryTransferPacket {
             context.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -159,7 +164,7 @@ public final class RSInventoryTransferPacket {
 
                 ItemStack req = stored.copy();
                 req.setCount(take);
-                ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                ItemStack extracted = CraftStorageEndpoints
                         .extractExactLegacy(network, player, req, take, false);
                 if (!extracted.isEmpty()) {
                     ItemStack remainder = ItemHandlerHelper.insertItemStacked(inv, extracted, false);
@@ -169,7 +174,7 @@ public final class RSInventoryTransferPacket {
                             dropsRemaining--;
                         } else {
                             // Drop throttle exhausted: refund to RS network
-                            com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                            CraftStorageEndpoints
                                     .insertLegacy(network, player, remainder, false);
                         }
                     }
@@ -181,7 +186,7 @@ public final class RSInventoryTransferPacket {
         }
 
         player.containerMenu.broadcastChanges();
-        player.connection.send(new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(
+        player.connection.send(new ClientboundContainerSetSlotPacket(
                 -1, player.containerMenu.getStateId(), -1, player.containerMenu.getCarried()));
 
         int finalTransferred = transferred;
@@ -202,14 +207,14 @@ public final class RSInventoryTransferPacket {
      * transfer boundary.
      */
     private static List<IngredientSpec> filterCrystalSpecs(List<IngredientSpec> specs, Object recipe) {
-        Set<net.minecraft.world.item.Item> crystalItems = new java.util.HashSet<>();
+        Set<Item> crystalItems = new HashSet<>();
 
         // Try to use the ritual's getCrystalType API first.
         // CrystalRitualRecipe has getRitual(); ArcaneIteratorRecipe has getCrystalRitual().
         try {
             Object ritual = null;
             for (String methodName : new String[]{"getRitual", "getCrystalRitual"}) {
-                java.lang.reflect.Method m = Reflect
+                Method m = Reflect
                         .findMethod(recipe.getClass(), methodName, new Class<?>[0]);
                 if (m != null) {
                     Object r = m.invoke(recipe);
@@ -217,12 +222,12 @@ public final class RSInventoryTransferPacket {
                 }
             }
             if (ritual != null) {
-                java.lang.reflect.Method getCrystalType = Reflect
+                Method getCrystalType = Reflect
                         .findMethod(ritual.getClass(), "getCrystalType",
-                                new Class<?>[]{net.minecraft.world.item.ItemStack.class});
+                                new Class<?>[]{ItemStack.class});
                 if (getCrystalType != null) {
                     for (IngredientSpec spec : specs) {
-                        for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
+                        for (ItemStack is : spec.ingredient().getItems()) {
                             try {
                                 if (getCrystalType.invoke(ritual, is) != null) {
                                     crystalItems.add(is.getItem());
@@ -246,8 +251,8 @@ public final class RSInventoryTransferPacket {
                 Class<?> precisionClass = Class.forName(
                         "mod.maxbogomol.wizards_reborn.common.item.PrecisionCrystalItem");
                 for (IngredientSpec spec : specs) {
-                    for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
-                        net.minecraft.world.item.Item item = is.getItem();
+                    for (ItemStack is : spec.ingredient().getItems()) {
+                        Item item = is.getItem();
                         if (crystalItemClass.isInstance(item)
                                 || fracturedClass.isInstance(item)
                                 || precisionClass.isInstance(item)) {
@@ -265,7 +270,7 @@ public final class RSInventoryTransferPacket {
         List<IngredientSpec> filtered = new ArrayList<>();
         for (IngredientSpec spec : specs) {
             boolean isCrystal = false;
-            for (net.minecraft.world.item.ItemStack is : spec.ingredient().getItems()) {
+            for (ItemStack is : spec.ingredient().getItems()) {
                 if (crystalItems.contains(is.getItem())) { isCrystal = true; break; }
             }
             if (!isCrystal) filtered.add(spec);

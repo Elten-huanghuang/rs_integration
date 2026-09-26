@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.reflection.probes;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.reflection.contract.ReflectionContract;
@@ -24,7 +25,7 @@ public final class JEIReflection {
     private static void register(String className, String fieldName) {
         String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
-            java.lang.reflect.Field targetField = JEIReflection.class.getDeclaredField(fieldName);
+            Field targetField = JEIReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, false));
             ContractValidation.registerTarget(description, targetField);
         } catch (NoSuchFieldException e) {

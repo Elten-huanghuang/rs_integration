@@ -1,12 +1,24 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
+import com.huanghuang.rsintegration.storage.StoredItem;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.Optional;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.Items;
 
 import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.LogSampler;
@@ -155,7 +167,7 @@ public final class ExtractionLedger implements AutoCloseable {
             if (state == s) return;
         }
         throw RSICraftException.ledgerStateViolation(
-                java.util.Arrays.toString(allowed), state.name());
+                Arrays.toString(allowed), state.name());
     }
 
     private void transition(State to) {
@@ -167,9 +179,9 @@ public final class ExtractionLedger implements AutoCloseable {
 
     /** Record a per-entry diagnostic before adding it to the list. */
     private void recordEntry(Entry e) {
-        ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
+        ResourceLocation rl = BuiltInRegistries.ITEM.getKey(e.template.getItem());
         String itemId = rl != null ? rl.toString()
-                : com.huanghuang.rsintegration.util.ItemStackUtils.registryId(e.template);
+                : ItemStackUtils.registryId(e.template);
         Diagnostics.record(Diagnostics.Category.LEDGER_RESERVE,
                 "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
         entries.add(e);
@@ -187,13 +199,13 @@ public final class ExtractionLedger implements AutoCloseable {
                 // at execution time; this mirror is descriptive only.
                 source = StorageReservationSource.external("player_inventory");
                 key = StorageItemKey.fromItemStack(
-                        new com.huanghuang.rsintegration.storage.StorageBackendId("local"),
+                        new StorageBackendId("local"),
                         entry.template);
             } else if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
                 source = StorageReservationSource.external(
                         "resonance_disk:" + entry.resonanceView.backendId());
                 key = StorageItemKey.fromItemStack(
-                        new com.huanghuang.rsintegration.storage.StorageBackendId(
+                        new StorageBackendId(
                                 entry.resonanceView.backendId()), entry.template);
             } else if (endpoint != null) {
                 var reference = endpoint.session().reference();
@@ -202,7 +214,7 @@ public final class ExtractionLedger implements AutoCloseable {
             } else {
                 source = StorageReservationSource.external(entry.source.name().toLowerCase(Locale.ROOT));
                 key = StorageItemKey.fromItemStack(
-                        new com.huanghuang.rsintegration.storage.StorageBackendId("unknown"),
+                        new StorageBackendId("unknown"),
                         entry.template);
             }
             settlementEntries.put(entry.id,
@@ -420,11 +432,11 @@ public final class ExtractionLedger implements AutoCloseable {
         if (!resonance.isEmpty()) return resonance;
         var snapshot = reservationSnapshot(endpoint, player);
         if (storageSupportsFluidContainers(endpoint)
-                && (template.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                || template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+                && (template.is(Items.WATER_BUCKET)
+                || template.is(Items.LAVA_BUCKET))) {
             var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
-            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                    new ItemStack(Items.BUCKET), template, count, true);
+            if (converted.status() == StorageOperationStatus.SUCCESS) {
                 Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
                 recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
                         null, null, null, true));
@@ -509,11 +521,11 @@ public final class ExtractionLedger implements AutoCloseable {
         // because generic recipe planning normally reaches this method.
         if (storageSupportsFluidContainers(endpoint)
                 && IngredientMatcher.test(ingredient,
-                        new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))) {
-            ItemStack template = new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET);
+                        new ItemStack(Items.WATER_BUCKET))) {
+            ItemStack template = new ItemStack(Items.WATER_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
-            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                    new ItemStack(Items.BUCKET), template, count, true);
+            if (converted.status() == StorageOperationStatus.SUCCESS) {
                 recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
                         null, null, null, false));
                 return template.copyWithCount(count);
@@ -521,11 +533,11 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         if (storageSupportsFluidContainers(endpoint)
                 && IngredientMatcher.test(ingredient,
-                        new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET))) {
-            ItemStack template = new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET);
+                        new ItemStack(Items.LAVA_BUCKET))) {
+            ItemStack template = new ItemStack(Items.LAVA_BUCKET);
             var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(net.minecraft.world.item.Items.BUCKET), template, count, true);
-            if (converted.status() == com.huanghuang.rsintegration.storage.StorageOperationStatus.SUCCESS) {
+                    new ItemStack(Items.BUCKET), template, count, true);
+            if (converted.status() == StorageOperationStatus.SUCCESS) {
                 recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
                         null, null, null, false));
                 return template.copyWithCount(count);
@@ -547,7 +559,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     static EndpointReservation reserveEndpointMatches(
-            List<com.huanghuang.rsintegration.storage.StoredItem> matches, int count,
+            List<StoredItem> matches, int count,
             Map<CraftingResolver.StackKey, Integer> pending) {
         if (count <= 0) return EndpointReservation.EMPTY;
         ItemStack template = ItemStack.EMPTY;
@@ -981,7 +993,7 @@ public final class ExtractionLedger implements AutoCloseable {
         // accepted the item before reporting an exception.
         if (REFUND_LOGS.allow(reason)) {
             LOGGER.error("[RSI-Ledger] Refund outcome unknown; not retried: entry={} item={} count={} reason={}",
-                    entryId, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack),
+                    entryId, ItemStackUtils.registryId(stack),
                     stack.getCount(), reason);
         }
     }
@@ -1021,9 +1033,9 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private static boolean isContainerFluidIngredient(Ingredient ingredient) {
         return IngredientMatcher.test(ingredient,
-                new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET))
+                new ItemStack(Items.WATER_BUCKET))
                 || IngredientMatcher.test(ingredient,
-                new ItemStack(net.minecraft.world.item.Items.LAVA_BUCKET));
+                new ItemStack(Items.LAVA_BUCKET));
     }
 
     private void resetSettlementMirror() {
@@ -1256,10 +1268,10 @@ public final class ExtractionLedger implements AutoCloseable {
     private StorageOperationResult extractOne(Entry entry, INetwork network, ServerPlayer player) {
         if (entry.source == Source.NETWORK && storageEndpoint != null) {
             if (storageSupportsFluidContainers(storageEndpoint)
-                    && (entry.template.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                    || entry.template.is(net.minecraft.world.item.Items.LAVA_BUCKET))) {
+                    && (entry.template.is(Items.WATER_BUCKET)
+                    || entry.template.is(Items.LAVA_BUCKET))) {
                 return storageEndpoint.session().extractContainerFluid(player,
-                        new ItemStack(net.minecraft.world.item.Items.BUCKET), entry.template,
+                        new ItemStack(Items.BUCKET), entry.template,
                         entry.count, false);
             }
             return entry.exactIdentity && entry.template.getTag() != null
@@ -1316,7 +1328,7 @@ public final class ExtractionLedger implements AutoCloseable {
         };
     }
 
-    private static ItemStack extractFromSlots(Entry entry, net.minecraft.core.NonNullList<ItemStack> slots) {
+    private static ItemStack extractFromSlots(Entry entry, NonNullList<ItemStack> slots) {
         ItemStack extracted = ItemStack.EMPTY;
         int needed = entry.count;
         for (ItemStack stack : slots) {
@@ -1337,7 +1349,7 @@ public final class ExtractionLedger implements AutoCloseable {
         return extracted;
     }
 
-    private static ItemStack extractFromSlots(Entry entry, net.minecraft.core.NonNullList<ItemStack> slots, int limit) {
+    private static ItemStack extractFromSlots(Entry entry, NonNullList<ItemStack> slots, int limit) {
         ItemStack extracted = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
         for (ItemStack stack : slots) {
@@ -1469,17 +1481,17 @@ public final class ExtractionLedger implements AutoCloseable {
         // backend id and falsely reports an NBT/item identity mismatch.
         if (entry.source == Source.PLAYER_INVENTORY) {
             return StorageItemKey.fromItemStack(
-                    new com.huanghuang.rsintegration.storage.StorageBackendId("local"),
+                    new StorageBackendId("local"),
                     entry.template);
         }
         if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
             return StorageItemKey.fromItemStack(
-                    new com.huanghuang.rsintegration.storage.StorageBackendId(
+                    new StorageBackendId(
                             entry.resonanceView.backendId()), entry.template);
         }
         if (endpoint != null) return endpoint.session().itemKey(entry.template);
         return StorageItemKey.fromItemStack(
-                new com.huanghuang.rsintegration.storage.StorageBackendId("unknown"),
+                new StorageBackendId("unknown"),
                 entry.template);
     }
 
@@ -1791,12 +1803,12 @@ public final class ExtractionLedger implements AutoCloseable {
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             Object result = curiosApiClass.getMethod("getCuriosInventory",
-                    net.minecraft.world.entity.LivingEntity.class).invoke(null, player);
+                    LivingEntity.class).invoke(null, player);
             if (result == null) return;
             Object handler;
             try {
                 Object opt = result.getClass().getMethod("resolve").invoke(result);
-                if (opt instanceof java.util.Optional<?> o) {
+                if (opt instanceof Optional<?> o) {
                     handler = o.orElse(null);
                 } else {
                     return;
@@ -1806,7 +1818,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             if (handler == null) return;
             Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
-            java.util.Map<String, ?> curiosMap = (java.util.Map<String, ?>) curios;
+            Map<String, ?> curiosMap = (Map<String, ?>) curios;
             for (var entry : curiosMap.values()) {
                 Object stacks = entry.getClass().getMethod("getStacks").invoke(entry);
                 if (stacks instanceof IItemHandler itemHandler) {
@@ -1848,9 +1860,9 @@ public final class ExtractionLedger implements AutoCloseable {
     public List<String> describeEntries() {
         List<String> out = new ArrayList<>();
         for (Entry e : entries) {
-            ResourceLocation rl = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.template.getItem());
+            ResourceLocation rl = BuiltInRegistries.ITEM.getKey(e.template.getItem());
             String itemName = rl != null ? rl.toString()
-                    : com.huanghuang.rsintegration.util.ItemStackUtils.registryId(e.template);
+                    : ItemStackUtils.registryId(e.template);
             out.add(String.format("#%d %s: %s x%d (source=%s)",
                     e.id, e.source, itemName, e.count,
                     switch (e.source) {
@@ -1904,7 +1916,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ItemStack leftover = refundRemainder(result, e.id, refund);
                     if (!leftover.isEmpty()) {
                         LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
-                                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
+                                ItemStackUtils.registryId(leftover), leftover.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
                     return;
@@ -1916,7 +1928,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ItemStack leftover = net.insertItem(refund, refund.getCount(), Action.PERFORM);
                     if (!leftover.isEmpty()) {
                         LOGGER.warn("[RSI-Ledger] Refund: RS insert had leftover for {} x{}",
-                                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(refund), refund.getCount());
+                                ItemStackUtils.registryId(refund), refund.getCount());
                         refundLeftoverToPlayerOrNetwork(leftover, player, network);
                     }
                 } else {
@@ -1965,35 +1977,35 @@ public final class ExtractionLedger implements AutoCloseable {
         if (network != null) {
             Level level = network.getLevel();
             BlockPos pos = network.getPosition();
-            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && pos != null) {
+            if (level instanceof ServerLevel serverLevel && pos != null) {
                 ItemEntity drop = new ItemEntity(serverLevel,
                         pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, leftover.copy());
                 drop.setDeltaMovement(0, 0.2, 0);
                 serverLevel.addFreshEntity(drop);
                 LOGGER.warn("[RSI-Ledger] Player offline & network full — dropped refund at {} {}: {} x{}",
                         level.dimension().location(), pos,
-                        com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
+                        ItemStackUtils.registryId(leftover), leftover.getCount());
                 return;
             }
         }
 
         LOGGER.error("[RSI-Ledger] CRITICAL: could not refund/drop item (no network level) — LOST: {} x{}",
-                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(leftover), leftover.getCount());
+                ItemStackUtils.registryId(leftover), leftover.getCount());
     }
 
     public String describePending() {
         StringBuilder sb = new StringBuilder();
         for (var e : pendingNet.entrySet()) {
             if (e.getValue() > 0) {
-                net.minecraft.resources.ResourceLocation rl =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.getKey().item());
+                ResourceLocation rl =
+                        BuiltInRegistries.ITEM.getKey(e.getKey().item());
                 if (rl != null) sb.append("net:").append(rl).append("=").append(e.getValue()).append(" ");
             }
         }
         for (var e : pendingInv.entrySet()) {
             if (e.getValue() > 0) {
-                net.minecraft.resources.ResourceLocation rl =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(e.getKey().item());
+                ResourceLocation rl =
+                        BuiltInRegistries.ITEM.getKey(e.getKey().item());
                 if (rl != null) sb.append("inv:").append(rl).append("=").append(e.getValue()).append(" ");
             }
         }

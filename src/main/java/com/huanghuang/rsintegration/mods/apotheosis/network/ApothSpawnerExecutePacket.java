@@ -8,6 +8,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -27,12 +28,12 @@ public record ApothSpawnerExecutePacket(ResourceLocation dimension, BlockPos pos
         BlockPos pos = buf.readBlockPos();
         boolean preview = buf.readBoolean();
         int size = buf.readVarInt();
-        if (size < 0 || size > ApothSpawnerModels.MAX_ENTRIES) throw new io.netty.handler.codec.DecoderException("Invalid selection count");
+        if (size < 0 || size > ApothSpawnerModels.MAX_ENTRIES) throw new DecoderException("Invalid selection count");
         Map<ResourceLocation, Integer> selected = new HashMap<>();
         for (int i = 0; i < size; i++) {
             ResourceLocation id = buf.readResourceLocation();
             int count = buf.readVarInt();
-            if (count < 1 || count > 4096) throw new io.netty.handler.codec.DecoderException("Invalid upgrade amount");
+            if (count < 1 || count > 4096) throw new DecoderException("Invalid upgrade amount");
             selected.put(id, count);
         }
         return new ApothSpawnerExecutePacket(dimension, pos, selected, preview);

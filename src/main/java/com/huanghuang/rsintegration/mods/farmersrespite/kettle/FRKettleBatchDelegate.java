@@ -26,6 +26,9 @@ import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -672,20 +675,20 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     private static IFluidHandler getFluidHandler(BlockEntity be) {
         return be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER)
+                ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
     }
 
     private boolean isWaterInput() {
         return recipeFluidIn != null && !recipeFluidIn.isEmpty()
-                && (recipeFluidIn.getFluid() == net.minecraft.world.level.material.Fluids.WATER
-                || recipeFluidIn.getFluid() == net.minecraft.world.level.material.Fluids.FLOWING_WATER);
+                && (recipeFluidIn.getFluid() == Fluids.WATER
+                || recipeFluidIn.getFluid() == Fluids.FLOWING_WATER);
     }
 
     static boolean requiresNativeBottledInput(FluidStack fluid) {
         return fluid != null && !fluid.isEmpty()
-                && fluid.getFluid() != net.minecraft.world.level.material.Fluids.WATER
-                && fluid.getFluid() != net.minecraft.world.level.material.Fluids.FLOWING_WATER;
+                && fluid.getFluid() != Fluids.WATER
+                && fluid.getFluid() != Fluids.FLOWING_WATER;
     }
 
     private static boolean sameItem(ItemStack first, ItemStack second) {
@@ -715,7 +718,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
             if (stack == null || stack.isEmpty()
-                    || !com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) continue;
+                    || !IngredientMatcher.test(ingredient, stack)) continue;
             int amount = Math.min(remaining, stack.getCount());
             taken.add(stack.copyWithCount(amount));
             stack.shrink(amount);

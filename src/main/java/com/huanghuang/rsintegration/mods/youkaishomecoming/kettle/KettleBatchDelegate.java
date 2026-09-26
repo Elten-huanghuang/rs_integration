@@ -32,6 +32,8 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.fluids.FluidUtil;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -284,7 +286,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             return new ItemStack(bucketItem);
         }
 
-        ItemStack filled = net.minecraftforge.fluids.FluidUtil.getFilledBucket(
+        ItemStack filled = FluidUtil.getFilledBucket(
                 new FluidStack(drained.getFluid(), 1000));
         if (!filled.isEmpty()) return filled;
 
@@ -511,7 +513,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getFluidHandler reflection failed", e);
             }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER)
+        return be.getCapability(ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
     }
 
@@ -525,7 +527,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getItemHandler reflection failed", e);
             }
         }
-        var cap = be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        var cap = be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
         if (cap != null) {
             // Wrap capability as SimpleContainer compat
@@ -588,7 +590,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         }
 
         ItemStack waterBucket = extractExactFromStorage(player,
-                new ItemStack(net.minecraft.world.item.Items.WATER_BUCKET), 1, false);
+                new ItemStack(Items.WATER_BUCKET), 1, false);
         if (waterBucket.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Kettle] No water bucket in RS network");
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.kettle_water_warning"));
@@ -599,7 +601,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 IFluidHandler.FluidAction.EXECUTE);
         if (filled > 0) {
             ItemStack leftover = insertIntoStorage(player,
-                    new ItemStack(net.minecraft.world.item.Items.BUCKET), false);
+                    new ItemStack(Items.BUCKET), false);
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }

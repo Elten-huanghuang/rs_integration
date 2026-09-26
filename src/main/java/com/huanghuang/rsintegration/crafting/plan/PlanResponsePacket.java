@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.plan;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -17,6 +18,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -388,7 +391,7 @@ public final class PlanResponsePacket {
             }
             try {
                 storageNetworks.add(new StorageNetworkDescriptor(
-                        new StorageReference(new com.huanghuang.rsintegration.storage.StorageBackendId(backendId), networkId),
+                        new StorageReference(new StorageBackendId(backendId), networkId),
                         displayName, defaultNetwork, capabilitySet));
             } catch (IllegalArgumentException e) {
                 throw new DecoderException("invalid storage network descriptor", e);
@@ -480,9 +483,9 @@ public final class PlanResponsePacket {
 
     static PlanGraphView readGraph(FriendlyByteBuf buf) {
         int version = buf.readVarInt();
-        if (version != com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph.CURRENT_VERSION) {
+        if (version != CraftPlanGraph.CURRENT_VERSION) {
             throw new DecoderException("Unsupported graph protocol version: " + version
-                    + ", expected: " + com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph.CURRENT_VERSION);
+                    + ", expected: " + CraftPlanGraph.CURRENT_VERSION);
         }
         List<PlanGraphView.NodeView> nodes = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {

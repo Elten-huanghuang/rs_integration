@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import java.util.Arrays;
+
 /** Server-thread permit account for machine-backed craft operations. */
 public final class OperationBudget {
 
@@ -26,7 +28,7 @@ public final class OperationBudget {
         active += cost;
         starts += cost;
         OperationBudget[] owners = new OperationBudget[cost];
-        java.util.Arrays.fill(owners, this);
+        Arrays.fill(owners, this);
         return new Permit(owners);
     }
 

@@ -35,6 +35,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -675,7 +677,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }
@@ -725,7 +727,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private void refundToStorage(ItemStack stack) {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (!leftover.isEmpty() && player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 
@@ -889,7 +891,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 return (IItemHandler) inventoryField.get(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] field access failed", e); }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
     }
 

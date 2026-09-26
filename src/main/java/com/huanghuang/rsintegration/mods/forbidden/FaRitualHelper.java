@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.forbidden;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -19,6 +20,16 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemHandlerHelper;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import net.minecraft.core.Direction;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.Registry;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -52,7 +63,7 @@ public final class FaRitualHelper {
         try {
             Class<?> faRegistries = Class.forName(
                     "com.stal111.forbidden_arcanus.core.registry.FARegistries");
-            java.lang.reflect.Field field = faRegistries.getField("RITUAL");
+            Field field = faRegistries.getField("RITUAL");
             field.setAccessible(true);
             cachedFaRitualKey = (ResourceKey<?>) field.get(null);
         } catch (ClassNotFoundException ex) {
@@ -73,8 +84,8 @@ public final class FaRitualHelper {
         ResourceKey<?> key = getFARegistryKey();
         if (key == null) return null;
         try {
-            net.minecraft.core.Registry<?> registry = level.registryAccess().registryOrThrow(
-                    (ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
+            Registry<?> registry = level.registryAccess().registryOrThrow(
+                    (ResourceKey<? extends Registry<?>>) (Object) key);
 
             // Build the cache once — entrySet() iteration is O(N) and this is
             // on the recipe-resolution hot path.  After the first call every
@@ -105,7 +116,7 @@ public final class FaRitualHelper {
         // 1. Try blockstate property (some FA versions expose tier here)
         try {
             boolean foundTier = false;
-            for (net.minecraft.world.level.block.state.properties.Property<?> prop : state.getProperties()) {
+            for (Property<?> prop : state.getProperties()) {
                 if (prop.getName().equals("tier")) {
                     foundTier = true;
                     Comparable<?> val = state.getValue(prop);
@@ -121,11 +132,11 @@ public final class FaRitualHelper {
             if (!foundTier) {
                 // Diagnostic: dump block identity + all properties
                 StringBuilder props = new StringBuilder();
-                for (net.minecraft.world.level.block.state.properties.Property<?> prop : state.getProperties()) {
+                for (Property<?> prop : state.getProperties()) {
                     if (props.length() > 0) props.append(", ");
                     props.append(prop.getName()).append("=").append(state.getValue(prop));
                 }
-                ResourceLocation blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
+                ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(state.getBlock());
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] getForgeTier blockstate has NO 'tier' property. block={} props=[{}]",
                         blockId, props.toString());
             }
@@ -136,7 +147,7 @@ public final class FaRitualHelper {
         // 2. Try BlockEntity.getTier() / getForgeTier() (older FA versions)
         if (be != null && FAReflection.hephaestusForgeBEClass != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
             try {
-                java.lang.reflect.Method getTier = Reflect.findMethod(
+                Method getTier = Reflect.findMethod(
                         FAReflection.hephaestusForgeBEClass, "getTier", new Class<?>[0]);
                 if (getTier == null) {
                     getTier = Reflect.findMethod(
@@ -155,7 +166,7 @@ public final class FaRitualHelper {
 
             // 3. Try tier / forgeTier field directly (older FA versions)
             try {
-                java.lang.reflect.Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "tier").orElse(null);
+                Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "tier").orElse(null);
                 if (f == null) {
                     f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "forgeTier").orElse(null);
                 }
@@ -171,7 +182,7 @@ public final class FaRitualHelper {
 
             // 4. FA 2.2.x: ValueNotifier<HephaestusForgeLevel> forgeLevel
             try {
-                java.lang.reflect.Field flField = Reflect.findField(FAReflection.hephaestusForgeBEClass, "forgeLevel").orElse(null);
+                Field flField = Reflect.findField(FAReflection.hephaestusForgeBEClass, "forgeLevel").orElse(null);
                 if (flField != null) {
                     flField.setAccessible(true);
                     Object notifier = flField.get(be);
@@ -225,7 +236,7 @@ public final class FaRitualHelper {
     private static int readUpgradeTier(Object upgradeResult, String getterName, String fieldName) {
         if (upgradeResult == null) return -1;
         try {
-            java.lang.reflect.Method getter = Reflect.findMethod(
+            Method getter = Reflect.findMethod(
                     upgradeResult.getClass(), getterName, new Class<?>[0]);
             if (getter == null) {
                 getter = Reflect.findMethod(upgradeResult.getClass(), fieldName, new Class<?>[0]);
@@ -238,7 +249,7 @@ public final class FaRitualHelper {
             RSIntegrationMod.LOGGER.debug("[RSI-FA] Upgrade tier accessor failed: {}", getterName, e);
         }
         try {
-            java.lang.reflect.Field field = Reflect.findField(
+            Field field = Reflect.findField(
                     upgradeResult.getClass(), fieldName).orElse(null);
             if (field != null) {
                 Object value = field.get(upgradeResult);
@@ -273,7 +284,7 @@ public final class FaRitualHelper {
             }
             if (requiredDefs.isEmpty()) return modifiers;
 
-            java.lang.reflect.Field accessorField = Reflect.findField(FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
+            Field accessorField = Reflect.findField(FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
             if (accessorField == null) return modifiers;
             accessorField.setAccessible(true);
             Object enhancerAccessor = accessorField.get(ritualManager);
@@ -389,7 +400,7 @@ public final class FaRitualHelper {
         Integer v = cachedMainSlot;
         if (v != null) return v;
         try {
-            java.lang.reflect.Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "MAIN_SLOT").orElse(null);
+            Field f = Reflect.findField(FAReflection.hephaestusForgeBEClass, "MAIN_SLOT").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 cachedMainSlot = f.getInt(null);
@@ -428,13 +439,13 @@ public final class FaRitualHelper {
         }
         // Strategy 4: Forge IItemHandler capability
         try {
-            var cap = net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER;
+            var cap = ForgeCapabilities.ITEM_HANDLER;
             var handler = be.getClass().getMethod("getCapability",
-                    net.minecraftforge.common.capabilities.Capability.class,
-                    net.minecraft.core.Direction.class)
+                    Capability.class,
+                    Direction.class)
                     .invoke(be, cap, null);
             if (handler != null) {
-                var ih = (net.minecraftforge.items.IItemHandler) handler;
+                var ih = (IItemHandler) handler;
                 if (slot < ih.getSlots()) {
                     ih.extractItem(slot, ih.getStackInSlot(slot).getCount(), false);
                     if (!stack.isEmpty()) ih.insertItem(slot, stack.copy(), false);
@@ -446,11 +457,11 @@ public final class FaRitualHelper {
         }
         // Strategy 5: itemStackHandler field
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 Object h = f.get(be);
-                if (h instanceof net.minecraftforge.items.IItemHandler ih) {
+                if (h instanceof IItemHandler ih) {
                     if (slot < ih.getSlots()) {
                         ih.extractItem(slot, ih.getStackInSlot(slot).getCount(), false);
                         if (!stack.isEmpty()) ih.insertItem(slot, stack.copy(), false);
@@ -463,12 +474,12 @@ public final class FaRitualHelper {
         }
         // Strategy 6: inventory / items NonNullList field
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
             if (f == null) f = Reflect.findField(be.getClass(), "items").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
-                var list = (net.minecraft.core.NonNullList<ItemStack>) f.get(be);
-                if (slot < list.size()) { list.set(slot, stack.copy()); ((net.minecraft.world.level.block.entity.BlockEntity) be).setChanged(); }
+                var list = (NonNullList<ItemStack>) f.get(be);
+                if (slot < list.size()) { list.set(slot, stack.copy()); ((BlockEntity) be).setChanged(); }
                 return;
             }
         } catch (Exception e) {
@@ -504,13 +515,13 @@ public final class FaRitualHelper {
         }
         // Strategy 4: Forge IItemHandler capability
         try {
-            var cap = net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER;
+            var cap = ForgeCapabilities.ITEM_HANDLER;
             var handler = be.getClass().getMethod("getCapability",
-                    net.minecraftforge.common.capabilities.Capability.class,
-                    net.minecraft.core.Direction.class)
+                    Capability.class,
+                    Direction.class)
                     .invoke(be, cap, null);
             if (handler != null) {
-                var ih = (net.minecraftforge.items.IItemHandler) handler;
+                var ih = (IItemHandler) handler;
                 if (slot < ih.getSlots()) return ih.getStackInSlot(slot);
             }
         } catch (Exception e) {
@@ -518,11 +529,11 @@ public final class FaRitualHelper {
         }
         // Strategy 5: itemStackHandler field
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "itemStackHandler").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
                 Object h = f.get(be);
-                if (h instanceof net.minecraftforge.items.IItemHandler ih) {
+                if (h instanceof IItemHandler ih) {
                     if (slot < ih.getSlots()) return ih.getStackInSlot(slot);
                 }
             }
@@ -531,11 +542,11 @@ public final class FaRitualHelper {
         }
         // Strategy 6: inventory / items NonNullList field
         try {
-            java.lang.reflect.Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
+            Field f = Reflect.findField(be.getClass(), "inventory").orElse(null);
             if (f == null) f = Reflect.findField(be.getClass(), "items").orElse(null);
             if (f != null) {
                 f.setAccessible(true);
-                var list = (net.minecraft.core.NonNullList<ItemStack>) f.get(be);
+                var list = (NonNullList<ItemStack>) f.get(be);
                 if (slot < list.size()) return list.get(slot);
             }
         } catch (Exception e) {
@@ -603,11 +614,11 @@ public final class FaRitualHelper {
             if (m != null) return m.invoke(ritualManager);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         try {
-            java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "validRitual").orElse(null);
+            Field f = Reflect.findField(FAReflection.ritualManagerClass, "validRitual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         try {
-            java.lang.reflect.Field f = Reflect.findField(FAReflection.ritualManagerClass, "ritual").orElse(null);
+            Field f = Reflect.findField(FAReflection.ritualManagerClass, "ritual").orElse(null);
             if (f != null) { f.setAccessible(true); return f.get(ritualManager); }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
         return null;
@@ -681,7 +692,7 @@ public final class FaRitualHelper {
 
                         ItemStack req = rsStack.copy();
                         req.setCount(1);
-                        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        ItemStack extracted = CraftStorageEndpoints
                                 .extractExactLegacy(network, player, req, 1, false);
                         if (!extracted.isEmpty()) {
                             RSIntegrationMod.LOGGER.debug("[RSI-FA] Extracted RitualStarterItem '{}' from RS",
@@ -830,7 +841,7 @@ public final class FaRitualHelper {
     // ── Recipe resolution (used by GenericCraftPacket) ────────────
 
     private static volatile Item faForgeBlockItem;
-    private static volatile java.lang.reflect.Method faSetTierOnStack;
+    private static volatile Method faSetTierOnStack;
 
     /** Create a HephaestusForgeBlock ItemStack with {@code upgradedTier}
      *  applied via {@code setTierOnStack}, matching FA's own JEI display. */
@@ -838,8 +849,8 @@ public final class FaRitualHelper {
     public static ItemStack makeFaUpgradeOutput(int upgradedTier) {
         try {
             if (faForgeBlockItem == null) {
-                net.minecraft.world.level.block.Block block =
-                        net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(
+                Block block =
+                        ForgeRegistries.BLOCKS.getValue(
                                 new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                 if (block == null) return ItemStack.EMPTY;
                 faForgeBlockItem = block.asItem();
@@ -865,7 +876,7 @@ public final class FaRitualHelper {
     @Nullable
     public static ItemStack faFallbackOutput(Object ritual, ResourceLocation recipeId) {
         try {
-            java.lang.reflect.Method getMain = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
+            Method getMain = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
             if (getMain == null) return ItemStack.EMPTY;
             Object main = getMain.invoke(ritual);
             if (main instanceof Ingredient ing && !ing.isEmpty()) {
@@ -888,8 +899,8 @@ public final class FaRitualHelper {
         if (key == null) return null;
         try {
             @SuppressWarnings({"unchecked", "rawtypes"})
-            net.minecraft.core.Registry<?> registry = level.registryAccess()
-                    .registryOrThrow((ResourceKey<? extends net.minecraft.core.Registry<?>>) (Object) key);
+            Registry<?> registry = level.registryAccess()
+                    .registryOrThrow((ResourceKey<? extends Registry<?>>) (Object) key);
             for (var entry : registry.entrySet()) {
                 if (entry.getKey().location().equals(recipeId)) {
                     return wrapFaRitual(recipeId, entry.getValue());
@@ -905,12 +916,12 @@ public final class FaRitualHelper {
     @Nullable
     public static Recipe<?> wrapFaRitual(ResourceLocation recipeId, Object ritual) {
         try {
-                java.lang.reflect.Method getResult = Reflect.findMethod(ritual.getClass(), "result", new Class<?>[0]);
+                Method getResult = Reflect.findMethod(ritual.getClass(), "result", new Class<?>[0]);
             Object result = getResult != null ? getResult.invoke(ritual) : null;
 
             ItemStack output = ItemStack.EMPTY;
             if (result != null && FAReflection.createItemResultClass.isInstance(result)) {
-                java.lang.reflect.Method getStack = Reflect.findMethod(result.getClass(),
+                Method getStack = Reflect.findMethod(result.getClass(),
                         "getResult", new Class<?>[0]);
                 if (getStack != null) {
                     Object s = getStack.invoke(result);
@@ -919,8 +930,8 @@ public final class FaRitualHelper {
                 }
             } else if (result != null && FAReflection.upgradeTierResultClass != null
                     && FAReflection.upgradeTierResultClass.isInstance(result)) {
-                java.lang.reflect.Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
-                java.lang.reflect.Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
+                Method getFrom = Reflect.findMethod(result.getClass(), "getRequiredTier", new Class<?>[0]);
+                Method getTo = Reflect.findMethod(result.getClass(), "getUpgradedTier", new Class<?>[0]);
                 int from = 0, to = 0;
                 try { if (getFrom != null) from = (int) getFrom.invoke(result); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }
                 try { if (getTo != null) to = (int) getTo.invoke(result); } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Fa] reflection probe failed", e); }

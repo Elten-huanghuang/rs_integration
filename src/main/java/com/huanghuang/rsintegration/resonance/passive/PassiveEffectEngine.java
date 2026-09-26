@@ -12,6 +12,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.common.Tags;
+import net.minecraftforge.network.NetworkDirection;
 
 import java.util.List;
 import java.util.Map;
@@ -69,7 +71,7 @@ public final class PassiveEffectEngine {
         for (ResonanceStorageView disk : views) {
             for (ResonanceStorageView.StoredStack stored : disk.storedStacks()) {
                 ItemStack stack = stored.stack();
-                if (!stack.isEmpty() && stack.is(net.minecraftforge.common.Tags.Items.GEMS)) {
+                if (!stack.isEmpty() && stack.is(Tags.Items.GEMS)) {
                     gemCount += stack.getCount();
                 }
             }
@@ -90,7 +92,7 @@ public final class PassiveEffectEngine {
         NetworkHandler.CHANNEL.sendTo(
                 new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision),
                 player.connection.connection,
-                net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
+                NetworkDirection.PLAY_TO_CLIENT);
     }
 
     private record DiskSyncState(int gemCount, int lycheeCatalystMask,

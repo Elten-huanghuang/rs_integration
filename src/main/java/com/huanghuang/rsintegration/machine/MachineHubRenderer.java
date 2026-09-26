@@ -10,6 +10,10 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
+import java.util.Optional;
+import net.minecraft.ChatFormatting;
+import net.minecraftforge.fml.ModList;
 
 /**
  * Renders the Terminal Hub overlay — a grid of machine icons displayed
@@ -252,7 +256,7 @@ public final class MachineHubRenderer {
 
             // Tooltip
             if (isHovered) {
-                var tip = new java.util.ArrayList<Component>();
+                var tip = new ArrayList<Component>();
                 Component displayName;
                 ItemStack ds = info.displayStack();
                 if (ds != null && !ds.isEmpty()) {
@@ -273,7 +277,7 @@ public final class MachineHubRenderer {
                     tip.add(Component.literal(st));
                 } else {
                     tip.add(Component.translatable("rsi.hub.type.gui_machine")
-                            .withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
+                            .withStyle(ChatFormatting.LIGHT_PURPLE));
                 }
                 if (info.dim() != null) {
                     String dimName = I18n.get(info.dim().toString());
@@ -282,22 +286,22 @@ public final class MachineHubRenderer {
                 if (iType == MachineInteractType.QUICK) {
                     if (iStatus.state() == MachineState.HAS_OUTPUT) {
                         tip.add(Component.translatable("rsi.hub.controls.quick_has_output")
-                                .withStyle(net.minecraft.ChatFormatting.AQUA));
+                                .withStyle(ChatFormatting.AQUA));
                     } else {
                         tip.add(Component.translatable("rsi.hub.controls.quick_normal")
-                                .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+                                .withStyle(ChatFormatting.DARK_GRAY));
                     }
                 } else {
                     tip.add(Component.translatable("rsi.hub.controls.gui")
-                            .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+                            .withStyle(ChatFormatting.DARK_GRAY));
                 }
                 tip.add(Component.translatable(favorite
                                 ? "rsi.hub.unfavorite" : "rsi.hub.favorite")
-                        .withStyle(net.minecraft.ChatFormatting.YELLOW));
+                        .withStyle(ChatFormatting.YELLOW));
                 tip.add(Component.translatable("rsi.hub.unbind")
-                        .withStyle(net.minecraft.ChatFormatting.RED));
+                        .withStyle(ChatFormatting.RED));
                 MachineHub.isRenderingOurTooltip = true;
-                g.renderTooltip(font, tip, java.util.Optional.empty(), mouseX, mouseY);
+                g.renderTooltip(font, tip, Optional.empty(), mouseX, mouseY);
                 MachineHub.isRenderingOurTooltip = false;
             }
         }
@@ -325,7 +329,7 @@ public final class MachineHubRenderer {
     }
 
     private static boolean isFavorite(BindingInfo info) {
-        if (net.minecraftforge.fml.ModList.get().isLoaded("refinedstorage")) {
+        if (ModList.get().isLoaded("refinedstorage")) {
             return MachineFavoritesClient.isFavorite(info);
         }
         return MachineHub.isLocalFavorite(info);

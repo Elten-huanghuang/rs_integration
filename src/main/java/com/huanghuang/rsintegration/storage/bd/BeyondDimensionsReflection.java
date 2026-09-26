@@ -15,6 +15,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.fluids.FluidStack;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -33,7 +36,7 @@ public final class BeyondDimensionsReflection {
     public static StorageResolutionResult resolvePrimary(ServerPlayer player, StorageBackendId id) {
         StorageResolutionResult primary;
         try {
-            Object net = invokeStatic(NET, "getPrimaryNetFromPlayer", new Class<?>[]{net.minecraft.world.entity.player.Player.class}, player);
+            Object net = invokeStatic(NET, "getPrimaryNetFromPlayer", new Class<?>[]{Player.class}, player);
             primary = session(net, player, id);
         } catch (Exception | LinkageError e) {
             // Older BD builds may not expose the implicit-primary helper.
@@ -71,7 +74,7 @@ public final class BeyondDimensionsReflection {
 
     static StorageDiscoveryResult discover(ServerPlayer player, StorageBackendId id) {
         try {
-            Object value = invokeStatic(NET, "getAllNetFromPlayer", new Class<?>[]{net.minecraft.world.entity.player.Player.class}, player);
+            Object value = invokeStatic(NET, "getAllNetFromPlayer", new Class<?>[]{Player.class}, player);
             List<StorageNetworkDescriptor> networks = new ArrayList<>();
             if (value instanceof Collection<?> nets) {
                 for (Object net : nets) {
@@ -133,9 +136,9 @@ public final class BeyondDimensionsReflection {
 
     static boolean hasPlayerAccess(Object net, ServerPlayer player) throws ReflectiveOperationException {
         Method owner = net.getClass().getMethod("isOwner",
-                net.minecraft.world.entity.player.Player.class);
+                Player.class);
         Method manager = net.getClass().getMethod("isManager",
-                net.minecraft.world.entity.player.Player.class);
+                Player.class);
         if (Boolean.TRUE.equals(owner.invoke(net, player))
                 || Boolean.TRUE.equals(manager.invoke(net, player))) {
             return true;
@@ -165,7 +168,7 @@ public final class BeyondDimensionsReflection {
         // storage session. CuriosAccess is reflective and returns an empty
         // list when Curios is not installed.
         addBoundNetworkIds(ids,
-                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+                CuriosAccess.stacks(player));
         return ids;
     }
 
@@ -235,7 +238,7 @@ public final class BeyondDimensionsReflection {
         return ((ItemStack) key.getClass().getMethod("getReadOnlyStack").invoke(key)).copy();
     }
 
-    static ItemStack keyStack(Object key, Set<net.minecraft.world.item.Item> itemTypes) throws Exception {
+    static ItemStack keyStack(Object key, Set<Item> itemTypes) throws Exception {
         ItemStack stack = (ItemStack) key.getClass().getMethod("getReadOnlyStack").invoke(key);
         // Inspect only the item type on BD's read-only stack; copy matching
         // stacks before handing them to any identity or ingredient code.

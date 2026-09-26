@@ -1,8 +1,11 @@
 package com.huanghuang.rsintegration.storage;
+import java.lang.reflect.Method;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import java.util.List;
+import net.minecraft.world.item.Item;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -44,7 +47,7 @@ public interface StorageSession {
 
     /** Fresh candidates including all NBT variants; null requests all item types. */
     default StorageSnapshotResult snapshotItems(ServerPlayer player,
-                                                Set<net.minecraft.world.item.Item> itemTypes) {
+                                                Set<Item> itemTypes) {
         return snapshotItems(player);
     }
 
@@ -78,7 +81,7 @@ public interface StorageSession {
                                                           boolean simulate) {
         return StorageOperationResult.failedExtraction(
                 simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM,
-                amount, StorageOperationStatus.UNAVAILABLE, java.util.List.of(), java.util.List.of());
+                amount, StorageOperationStatus.UNAVAILABLE, List.of(), List.of());
     }
 
     /** Reverses a previously committed container conversion during rollback. */

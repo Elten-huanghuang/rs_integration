@@ -152,7 +152,7 @@ public final class CraftProgressTracker {
 
     public static Collection<CraftProgressSnapshot> snapshots() {
         expireTerminal();
-        return java.util.List.copyOf(ACTIVE.values());
+        return List.copyOf(ACTIVE.values());
     }
 
     public static void remove(UUID craftId) {

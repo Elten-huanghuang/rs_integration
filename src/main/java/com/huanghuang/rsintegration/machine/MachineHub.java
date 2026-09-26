@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.machine;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
@@ -14,6 +15,8 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import java.util.HashSet;
+import java.util.Set;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +57,7 @@ public final class MachineHub {
     private final List<BindingInfo> machines = new ArrayList<>();
     private final List<BindingInfo> filteredMachines = new ArrayList<>();
     /** Local fallback favorites used by non-RS storage terminals. */
-    private final java.util.Set<String> localFavorites = new java.util.HashSet<>();
+    private final Set<String> localFavorites = new HashSet<>();
     private int hoveredIndex = -1;
     private int favoriteHoveredIndex = -1;
     private boolean closeButtonHovered;

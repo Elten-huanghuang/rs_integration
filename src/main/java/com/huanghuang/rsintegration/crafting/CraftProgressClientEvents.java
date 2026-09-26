@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 
 /** Client connection lifecycle for progress status synchronization. */
@@ -17,6 +18,6 @@ public final class CraftProgressClientEvents {
 
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         CraftProgressTracker.clear();
-        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.clear();
+        PlanningProgressTracker.clear();
     }
 }

@@ -13,6 +13,13 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
+import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
+import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
+import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
+import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient;
 
 /** Owns client-only listener references so the common mod class remains dedicated-server safe. */
 @OnlyIn(Dist.CLIENT)
@@ -26,26 +33,26 @@ public final class ClientEventBootstrap {
 
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(PlanningProgressOverlay.class);
-        MinecraftForge.EVENT_BUS.register(com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.class);
+        MinecraftForge.EVENT_BUS.register(CraftFailureClientCommands.class);
         MinecraftForge.EVENT_BUS.register(
-                com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient.class);
+                VillagerTradeLockClient.class);
         // The auto-eat UI supports both RS Grid and the BD terminal. The
         // listener uses class-name checks, so it remains safe in BD-only
         // installations where RS client classes are absent.
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                 || ModList.get().isLoaded("beyonddimensions")) {
             MinecraftForge.EVENT_BUS.register(
-                    com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents.class);
+                    AutoEatClientEvents.class);
             MinecraftForge.EVENT_BUS.addListener(
-                    com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents::onScreenRender);
+                    AutoEatClientEvents::onScreenRender);
         }
         if (ModList.get().isLoaded("beyonddimensions")) {
             MinecraftForge.EVENT_BUS.register(
-                    com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient.class);
+                    BeyondDimensionsMachineHubClient.class);
         }
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             MinecraftForge.EVENT_BUS.register(
-                    com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime.class);
+                    FtbQuestJeiRuntime.class);
         }
         MinecraftForge.EVENT_BUS.addListener(CraftProgressClientEvents::onClientLogin);
         MinecraftForge.EVENT_BUS.addListener(CraftProgressClientEvents::onClientLogout);
@@ -57,8 +64,8 @@ public final class ClientEventBootstrap {
         JeiNetworkItemCache.INSTANCE.clear();
         JeiCraftingPlanContext.INSTANCE.clear();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-            com.huanghuang.rsintegration.sidepanel.RSSidePanelClient.clearOnLogout();
+            RSSidePanelClient.clearOnLogout();
         }
-        com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.clear();
+        ClientDiskData.clear();
     }
 }

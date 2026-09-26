@@ -7,6 +7,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,8 +20,8 @@ public final class BindingStorage {
     private BindingStorage() {}
 
     public record BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey,
-                                @javax.annotation.Nullable String blockRegKey,
-                                @javax.annotation.Nullable ItemStack displayStack) {
+                                @Nullable String blockRegKey,
+                                @Nullable ItemStack displayStack) {
         public CompoundTag toTag() {
             CompoundTag tag = new CompoundTag();
             tag.putString("dim", dim.toString());
@@ -119,8 +120,8 @@ public final class BindingStorage {
      *  Prevents the client render thread (JEI) from seeing a half-mutated
      *  CompoundTag when reading {@link #getBindings} concurrently. */
     public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                      String blockKey, @javax.annotation.Nullable String blockRegKey,
-                                      @javax.annotation.Nullable ItemStack displayStack) {
+                                      String blockKey, @Nullable String blockRegKey,
+                                      @Nullable ItemStack displayStack) {
         CompoundTag oldTag = stack.getTag();
         CompoundTag tag = oldTag != null ? oldTag.copy() : new CompoundTag();
         migrateFromLegacy(tag);

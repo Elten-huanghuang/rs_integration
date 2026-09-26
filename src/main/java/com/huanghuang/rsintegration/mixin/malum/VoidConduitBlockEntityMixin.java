@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.malum;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
@@ -12,6 +13,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess;
+import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData;
+import net.minecraft.world.item.Item;
 
 @Mixin(value = com.sammy.malum.common.block.curiosities.weeping_well.VoidConduitBlockEntity.class,
         remap = false)
@@ -19,7 +23,7 @@ public class VoidConduitBlockEntityMixin {
 
     @Inject(method = "spitOutItem", at = @At("HEAD"))
     private void rsi$unlockResonanceDisk(ItemStack stack,
-                                         CallbackInfoReturnable<net.minecraft.world.item.Item> cir) {
+                                         CallbackInfoReturnable<Item> cir) {
         var level = ((BlockEntity) (Object) this).getLevel();
         if (!(level instanceof ServerLevel serverLevel)) return;
         ResonanceDiskAbilityService.UnlockResult result =
@@ -29,7 +33,7 @@ public class VoidConduitBlockEntityMixin {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-Resonance] Resonance disk unlocked Malum void-favor crafting at {}",
                     ((BlockEntity) (Object) this).getBlockPos());
-            if (com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+            if (BDResonanceDiskAccess
                     .isDisk(stack)) {
                 notifyBdOwner(serverLevel, stack);
             }
@@ -38,10 +42,10 @@ public class VoidConduitBlockEntityMixin {
 
     private void notifyBdOwner(ServerLevel level, ItemStack stack) {
         ServerPlayer recipient = null;
-        var diskId = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+        var diskId = BDResonanceDiskAccess
                 .getDiskId(stack);
         if (diskId != null) {
-            var record = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData
+            var record = BDResonanceDiskData
                     .get(level.getServer()).find(diskId);
             if (record != null && record.owner() != null) {
                 recipient = level.getServer().getPlayerList().getPlayer(record.owner());

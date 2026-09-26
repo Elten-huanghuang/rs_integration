@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.craftflow;
+import java.lang.reflect.Method;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.slashblade;
+import java.lang.reflect.Method;
 
 import com.google.gson.JsonElement;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeJsonCompat;

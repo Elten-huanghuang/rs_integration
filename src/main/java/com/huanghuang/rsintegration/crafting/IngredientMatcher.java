@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
@@ -13,6 +14,9 @@ import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.item.alchemy.Potions;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import net.minecraft.nbt.NumericTag;
+import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
 import java.util.Objects;
 import java.util.HashSet;
@@ -32,7 +36,7 @@ public final class IngredientMatcher {
     public static boolean hasCompleteItemList(Ingredient ingredient) {
         Class<?> type = ingredient.getClass();
         return type == Ingredient.class || type == StrictNBTIngredient.class
-                || type == net.minecraftforge.common.crafting.PartialNBTIngredient.class;
+                || type == PartialNBTIngredient.class;
     }
 
     /** Null means the predicate may match outside its display items; never filter those ingredients. */
@@ -176,8 +180,8 @@ public final class IngredientMatcher {
             Tag expectedValue = expected.get(key);
             Tag actualValue = actual.get(key);
             if ("Unbreakable".equals(key)) {
-                if (!(expectedValue instanceof net.minecraft.nbt.NumericTag expectedNumeric)
-                        || !(actualValue instanceof net.minecraft.nbt.NumericTag actualNumeric)
+                if (!(expectedValue instanceof NumericTag expectedNumeric)
+                        || !(actualValue instanceof NumericTag actualNumeric)
                         || expectedNumeric.getAsInt() != actualNumeric.getAsInt()) return false;
             } else if (expectedValue instanceof CompoundTag expectedCompound
                     && actualValue instanceof CompoundTag actualCompound) {
@@ -223,7 +227,7 @@ public final class IngredientMatcher {
     private static boolean isDefaultDamage(CompoundTag tag) {
         if (!tag.contains("Damage")) return true;
         return tag.contains("Damage", Tag.TAG_ANY_NUMERIC)
-                && ((net.minecraft.nbt.NumericTag) tag.get("Damage")).getAsDouble() == 0;
+                && ((NumericTag) tag.get("Damage")).getAsDouble() == 0;
     }
 
     /** Iron 3.15 rewrote scroll-container NBT while retaining spell identity. */
@@ -233,7 +237,7 @@ public final class IngredientMatcher {
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(expected.getItem());
         if (!IRON_SPELL_SCROLL.equals(itemId)) return false;
         try {
-            return com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+            return IronSpellBooksRecipeCatalog
                     .sameSpellScroll(expected, actual);
         } catch (RuntimeException | LinkageError ignored) {
             return false;
@@ -288,7 +292,7 @@ public final class IngredientMatcher {
         var actualTag = actual.getTag() == null ? null : actual.getTag().copy();
         if (expectedTag != null) expectedTag.remove("Purity");
         if (actualTag != null) actualTag.remove("Purity");
-        return java.util.Objects.equals(expectedTag, actualTag);
+        return Objects.equals(expectedTag, actualTag);
     }
 
     private static boolean isVanillaPotionContainer(ItemStack stack) {

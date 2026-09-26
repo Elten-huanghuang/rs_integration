@@ -3,10 +3,12 @@ package com.huanghuang.rsintegration.util;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.apache.logging.log4j.Logger;
+import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,7 +58,7 @@ public final class Reflect {
                 var f = holder.getClass().getDeclaredField(name);
                 f.setAccessible(true);
                 Object raw = f.get(holder);
-                if (raw instanceof java.util.function.Supplier<?> s) {
+                if (raw instanceof Supplier<?> s) {
                     return s.get();
                 }
                 return raw;
@@ -73,13 +75,13 @@ public final class Reflect {
             return null;
         }
         for (var f : holderFields) {
-            if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+            if (Modifier.isStatic(f.getModifiers())) continue;
             if (f.isSynthetic()) continue;
             if (f.getType() == Object.class) {
                 f.setAccessible(true);
                 try {
                     Object raw = f.get(holder);
-                    if (raw instanceof java.util.function.Supplier<?> s) {
+                    if (raw instanceof Supplier<?> s) {
                         return s.get();
                     }
                     return raw;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.reflection.probes;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.reflection.contract.ReflectionContract;
@@ -35,7 +36,7 @@ public final class DistantWorldsReflection {
     private static void register(String className, String fieldName) {
         String description = MOD + "." + className.substring(className.lastIndexOf('.') + 1);
         try {
-            java.lang.reflect.Field target = DistantWorldsReflection.class.getDeclaredField(fieldName);
+            Field target = DistantWorldsReflection.class.getDeclaredField(fieldName);
             ContractValidation.register(new ReflectionContract(MOD, description, className, true));
             ContractValidation.registerTarget(description, target);
         } catch (NoSuchFieldException e) {

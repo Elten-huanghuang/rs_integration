@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -36,6 +38,13 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Locale;
+import java.util.UUID;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.world.item.Items;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -61,8 +70,8 @@ public final class CraftingResolver {
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
         if (itemId == null || !stack.hasTag()) return itemId;
         String identity = itemId + "|" + stack.getTag();
-        java.util.UUID hash = java.util.UUID.nameUUIDFromBytes(
-                identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        UUID hash = UUID.nameUUIDFromBytes(
+                identity.getBytes(StandardCharsets.UTF_8));
         return new ResourceLocation("rs_integration", "stack/" + hash.toString().replace("-", ""));
     }
 
@@ -92,8 +101,8 @@ public final class CraftingResolver {
 
     /** Cache for {@link #extractHiddenOutput(Recipe)} — avoids repeated
      *  reflection field-scanning in DFS candidate loops. */
-    private static final java.util.concurrent.ConcurrentHashMap<ResourceLocation, ItemStack>
-            HIDDEN_OUTPUT_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<ResourceLocation, ItemStack>
+            HIDDEN_OUTPUT_CACHE = new ConcurrentHashMap<>();
 
     private CraftingResolver() {}
 
@@ -516,7 +525,7 @@ public final class CraftingResolver {
 
     private static ItemStack firstDisplayStack(Ingredient ingredient) {
         for (ItemStack stack : ingredient.getItems()) {
-            if (stack != null && !stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR)
+            if (stack != null && !stack.isEmpty() && stack.getItem() != Items.AIR)
                 return stack.copyWithCount(1);
         }
         return ItemStack.EMPTY;
@@ -956,7 +965,7 @@ public final class CraftingResolver {
     }
 
     private static Set<StackKey> getRecipeInputKeys(RecipeIndex.Entry entry,
-                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+                                                     @Nullable RegistryAccess access) {
         if (entry.recipe() instanceof CraftingRecipe) {
             return getRecipeInputKeys(entry.recipe(), access);
         }
@@ -972,7 +981,7 @@ public final class CraftingResolver {
     }
 
     private static Set<StackKey> getRecipeInputKeys(Recipe<?> recipe,
-                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+                                                     @Nullable RegistryAccess access) {
         Set<StackKey> inputs = new HashSet<>();
         if (recipe instanceof CraftingRecipe cr) {
             for (Ingredient ing : cr.getIngredients()) {
@@ -1089,12 +1098,12 @@ public final class CraftingResolver {
     }
 
     private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
-                                        net.minecraft.core.RegistryAccess access) {
+                                        RegistryAccess access) {
         return output.getCount() - selfConsumedPerBatch(entry, output, access);
     }
 
     private static int selfConsumedPerBatch(RecipeIndex.Entry entry, ItemStack output,
-                                             net.minecraft.core.RegistryAccess access) {
+                                             RegistryAccess access) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int selfConsumed = 0;
             for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
@@ -1126,7 +1135,7 @@ public final class CraftingResolver {
     }
 
     private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
-                                                     @Nullable net.minecraft.core.RegistryAccess access) {
+                                                     @Nullable RegistryAccess access) {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(entry.recipe());
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), access);
@@ -1296,7 +1305,7 @@ public final class CraftingResolver {
 
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
+            for (Field f : clazz.getDeclaredFields()) {
                 if (f.getType() != ItemStack.class) continue;
                 f.setAccessible(true);
                 try {
@@ -1322,7 +1331,7 @@ public final class CraftingResolver {
 
     static ItemStack resolveDeclaredOutput(
             Recipe<?> recipe, ItemStack staticResult,
-            @Nullable com.huanghuang.rsintegration.recipe.ModRecipeHandler handler) {
+            @Nullable ModRecipeHandler handler) {
         if (staticResult.isEmpty()) return ItemStack.EMPTY;
         if (handler != null && handler.hasRuntimeDependentPrimaryNbt(recipe)) {
             ItemStack dynamic = staticResult.copy();
@@ -1350,7 +1359,7 @@ public final class CraftingResolver {
             if (spec.isEmpty()) continue;
             for (ItemStack stack : spec.ingredient().getItems()) {
                 if (stack.isEmpty()) continue;
-                if (stack.getItem() == net.minecraft.world.item.Items.AIR) return true;
+                if (stack.getItem() == Items.AIR) return true;
                 ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
                 if (rl != null && !stack.hasTag()) {
                     String ns = rl.getNamespace();
@@ -1368,7 +1377,7 @@ public final class CraftingResolver {
      * {@code List<ItemStack>} fields, skipping fields that match the
      * recipe output.
      */
-    public static List<ItemStack> getRepairedInputStacks(Recipe<?> recipe, net.minecraft.core.RegistryAccess access) {
+    public static List<ItemStack> getRepairedInputStacks(Recipe<?> recipe, RegistryAccess access) {
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, access);
         output = resolveDeclaredOutput(recipe, output);
 
@@ -1376,15 +1385,15 @@ public final class CraftingResolver {
         Class<?> clazz = recipe.getClass();
 
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field f : clazz.getDeclaredFields()) {
-                String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+            for (Field f : clazz.getDeclaredFields()) {
+                String name = f.getName().toLowerCase(Locale.ROOT);
                 if (name.contains("out") || name.contains("result")) continue;
 
                 f.setAccessible(true);
                 try {
                     Object val = f.get(recipe);
                     if (val instanceof ItemStack stack) {
-                        if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
+                        if (!stack.isEmpty() && stack.getItem() != Items.AIR) {
                             if (!MaterialMatcher.equivalentRuntimeFragment(stack, output)) {
                                 repaired.add(stack.copy());
                             }
@@ -1392,7 +1401,7 @@ public final class CraftingResolver {
                     } else if (val instanceof List<?> list) {
                         for (Object elem : list) {
                             if (elem instanceof ItemStack stack) {
-                                if (!stack.isEmpty() && stack.getItem() != net.minecraft.world.item.Items.AIR) {
+                                if (!stack.isEmpty() && stack.getItem() != Items.AIR) {
                                     if (!MaterialMatcher.equivalentRuntimeFragment(stack, output)) {
                                         repaired.add(stack.copy());
                                     }

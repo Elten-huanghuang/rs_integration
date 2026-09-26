@@ -30,6 +30,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -351,10 +353,10 @@ public final class ApotheosisLibraryService {
 
     @Nullable
     private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
-        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+        CraftStorageEndpoint endpoint = StorageRestockSupport
                 .resolve(player).orElse(null);
         if (endpoint == null || !endpoint.session().hasPermission(player,
-                com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
+                StoragePermission.EXTRACT)) return null;
         return endpoint;
     }
 

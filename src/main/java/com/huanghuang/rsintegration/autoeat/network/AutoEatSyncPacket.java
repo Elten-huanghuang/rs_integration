@@ -5,6 +5,9 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
 
 public class AutoEatSyncPacket {
     public final AutoEatMode mode;
@@ -31,7 +34,7 @@ public class AutoEatSyncPacket {
         );
     }
 
-    public static void handle(AutoEatSyncPacket packet, java.util.function.Supplier<net.minecraftforge.network.NetworkEvent.Context> ctx) {
+    public static void handle(AutoEatSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> AutoEatClientPacketHandler.onSync(packet)));
         ctx.get().setPacketHandled(true);

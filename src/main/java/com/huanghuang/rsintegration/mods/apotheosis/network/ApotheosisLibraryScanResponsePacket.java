@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +42,7 @@ public record ApotheosisLibraryScanResponsePacket(ResourceLocation dimension, Bl
         long snapshotId = buf.readLong();
         int size = buf.readVarInt();
         if (size < 0 || size > ApotheosisLibraryModels.MAX_ENTRIES) {
-            throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis entry count");
+            throw new DecoderException("Invalid Apotheosis entry count");
         }
         List<Entry> entries = new ArrayList<>(size);
         for (int i = 0; i < size; i++) entries.add(Entry.decode(buf));

@@ -1,6 +1,13 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.TagParser;
+import net.minecraft.world.SimpleContainer;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -19,7 +26,6 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -76,7 +82,7 @@ public final class WRWandCraftPacket {
     public static void handle(WRWandCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -96,7 +102,7 @@ public final class WRWandCraftPacket {
 
             // Verify binding before accessing remote machine at client-supplied coords
             if (packet.dim != null) {
-                ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, packet.dim);
                 if (!AltarBindingRegistry.isBound(key, packet.pos, player)) {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
                     return;
@@ -119,7 +125,7 @@ public final class WRWandCraftPacket {
                 return;
             }
 
-            CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+            CraftStorageEndpoint endpoint = StorageRestockSupport
                     .resolve(player).orElse(null);
             if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
                 handleWissenCrystallizer(player, be, recipe, endpoint);
@@ -351,11 +357,11 @@ public final class WRWandCraftPacket {
         BlockPos pos = be.getBlockPos();
         ResourceKey<Level> dim = beLevel != null ? beLevel.dimension() : Level.OVERWORLD;
 
-        net.minecraftforge.items.ItemStackHandler itemHandler;
+        ItemStackHandler itemHandler;
         try {
             itemHandler = be instanceof ArcaneWorkbenchBlockEntityAccessor accessor
                     ? accessor.rsi$getItemHandler()
-                    : (net.minecraftforge.items.ItemStackHandler) be.getClass()
+                    : (ItemStackHandler) be.getClass()
                             .getField("itemHandler").get(be);
         } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.warn("[RSI-WR] Failed to get itemHandler from ArcaneWorkbench", e);
@@ -602,7 +608,7 @@ public final class WRWandCraftPacket {
     private static Object rsi$extractRitual(Recipe<?> recipe) {
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+            for (Field field : clazz.getDeclaredFields()) {
                 if (field.getName().equals("ritual")) {
                     field.setAccessible(true);
                     try {
@@ -633,7 +639,7 @@ public final class WRWandCraftPacket {
                 ItemStack leftover = endpoint.insert(player, refund, false).remainder().orElse(ItemStack.EMPTY);
                 if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
             } else if (network != null) {
-                ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                ItemStack leftover = CraftStorageEndpoints
                         .insertLegacy(network, player, refund, false);
                 if (!leftover.isEmpty()) {
                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -674,7 +680,7 @@ public final class WRWandCraftPacket {
                 available.entrySet().stream().map(e -> {
                     ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
                     if (e.getKey().tag() != null) {
-                        try { s.setTag(net.minecraft.nbt.TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
+                        try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
                     }
                     return s;
                 }).toList(),
@@ -709,11 +715,11 @@ public final class WRWandCraftPacket {
         return WRContainerHelper.getForgeItemHandler(be);
     }
 
-    private static net.minecraft.world.SimpleContainer rsi$getLiveSimpleContainer(Object be) {
+    private static SimpleContainer rsi$getLiveSimpleContainer(Object be) {
         return WRContainerHelper.getLiveSimpleContainer(be);
     }
 
-    private static net.minecraft.world.SimpleContainer rsi$getSimpleContainer(Object be) {
+    private static SimpleContainer rsi$getSimpleContainer(Object be) {
         return WRContainerHelper.getSimpleContainer(be);
     }
 
@@ -729,9 +735,9 @@ public final class WRWandCraftPacket {
         WRContainerHelper.setContainerItem(be, slot, stack);
     }
 
-    private static java.lang.reflect.Method rsi$getMethod(Class<?> clazz, String name, Class<?>... paramTypes)
+    private static Method rsi$getMethod(Class<?> clazz, String name, Class<?>... paramTypes)
             throws NoSuchMethodException {
-        java.lang.reflect.Method m = Reflect.findMethod(
+        Method m = Reflect.findMethod(
                 clazz, name, paramTypes);
         if (m == null) throw new NoSuchMethodException(clazz.getName() + "." + name);
         return m;
@@ -760,7 +766,7 @@ public final class WRWandCraftPacket {
 
     private static int readWissenCost(Recipe<?> recipe) {
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(
+            Method m = Reflect.findMethod(
                     recipe.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(recipe);
         } catch (Exception e) {
@@ -780,7 +786,7 @@ public final class WRWandCraftPacket {
             return accessor.rsi$getWissen();
         }
         try {
-            java.lang.reflect.Method m = Reflect.findMethod(
+            Method m = Reflect.findMethod(
                     be.getClass(), "getWissen", new Class<?>[0]);
             if (m != null) return (int) m.invoke(be);
         } catch (Exception | LinkageError e) {
@@ -791,7 +797,7 @@ public final class WRWandCraftPacket {
             Class<?> clazz = be.getClass();
             while (clazz != null && clazz != Object.class) {
                 try {
-                    java.lang.reflect.Field f = clazz.getDeclaredField("wissen");
+                    Field f = clazz.getDeclaredField("wissen");
                     f.setAccessible(true);
                     return f.getInt(be);
                 } catch (NoSuchFieldException e) {

@@ -6,6 +6,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import javax.annotation.Nullable;
+import net.minecraft.core.registries.Registries;
 
 /**
  * Client-side snapshot of a bound machine, carried in the side-panel sync packet.
@@ -17,11 +19,11 @@ public record BindingInfo(
     BlockPos pos,            // Machine block position
     String blockKey,         // Block description ID with optional prefix (e.g. "tacz||block.tacz.workbench_b")
     String displayName,      // Human-readable machine name for UI
-    @javax.annotation.Nullable String blockRegKey,  // Block registry key (e.g. "tacz:workbench_b"), nullable for legacy
-    @javax.annotation.Nullable ItemStack displayStack  // Full NBT-bearing ItemStack from getCloneItemStack (TACZ etc.)
+    @Nullable String blockRegKey,  // Block registry key (e.g. "tacz:workbench_b"), nullable for legacy
+    @Nullable ItemStack displayStack  // Full NBT-bearing ItemStack from getCloneItemStack (TACZ etc.)
 ) {
     public ResourceKey<Level> dimensionKey() {
-        return ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+        return ResourceKey.create(Registries.DIMENSION, dim);
     }
 
     /** Serialize to network buffer (called server-side). */

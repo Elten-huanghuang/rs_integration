@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.loadbalancer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 /** Tracks single-operation leases for a dynamic machine worker pool. */
 public final class OperationQueue {
@@ -36,7 +37,7 @@ public final class OperationQueue {
         if (dispatchStopped || inFlight.containsKey(workerId) || nextOperation >= totalOperations
                 || maxOperations <= 0) return List.of();
         int count = Math.min(maxOperations, totalOperations - nextOperation);
-        List<Integer> claimed = java.util.stream.IntStream
+        List<Integer> claimed = IntStream
                 .range(nextOperation, nextOperation + count).boxed().toList();
         nextOperation += count;
         inFlight.put(workerId, claimed);

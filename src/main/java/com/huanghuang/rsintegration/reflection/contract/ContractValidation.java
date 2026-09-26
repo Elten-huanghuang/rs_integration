@@ -23,6 +23,7 @@ import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
+import java.util.function.Supplier;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -200,7 +201,7 @@ public final class ContractValidation {
         tryLoadProbe("YHK", () -> YHKReflection.cookingBEClass);
     }
 
-    private static void tryLoadProbe(String probeName, java.util.function.Supplier<Object> fieldAccess) {
+    private static void tryLoadProbe(String probeName, Supplier<Object> fieldAccess) {
         try {
             Object o = fieldAccess.get();
             // suppress "unused" warning — the read above is the whole point

@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -408,7 +410,7 @@ public final class PureDemandTreeInspector {
         private List<RecipeNode> inventoryFirstCandidates(List<RecipeNode> candidates) {
             if (candidates.size() < 2) return candidates;
             List<RecipeNode> ordered = new ArrayList<>(candidates);
-            ordered.sort(java.util.Comparator.comparingDouble(this::inputStockCoverage).reversed());
+            ordered.sort(Comparator.comparingDouble(this::inputStockCoverage).reversed());
             return ordered;
         }
 
@@ -504,14 +506,14 @@ public final class PureDemandTreeInspector {
             }
 
             private Iterable<MaterialRef> matching(IngredientRef ingredient) {
-                java.util.LinkedHashSet<MaterialRef> candidates = new java.util.LinkedHashSet<>();
+                LinkedHashSet<MaterialRef> candidates = new LinkedHashSet<>();
                 for (MaterialRef alternative : ingredient.alternatives()) {
                     candidates.addAll(byItem.getOrDefault(alternative.itemId(), List.of()));
                 }
                 candidates.removeIf(material -> !ImmutableRecipeGraphProjector.matchesIngredient(
                         material, ingredient));
                 return candidates.stream()
-                        .sorted(java.util.Comparator.comparingInt(material ->
+                        .sorted(Comparator.comparingInt(material ->
                                 orderPositions.getOrDefault(material, Integer.MAX_VALUE)))
                         .toList();
             }

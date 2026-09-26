@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.storage;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -115,7 +116,7 @@ public final class StorageSnapshot {
             }
             List<StoredItem> matches = new ArrayList<>();
             for (StoredItem item : candidates(ingredient)) {
-                if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, item.stack())) {
+                if (IngredientMatcher.test(ingredient, item.stack())) {
                     matches.add(item);
                 }
             }
@@ -127,7 +128,7 @@ public final class StorageSnapshot {
     }
 
     private List<StoredItem> candidates(Ingredient ingredient) {
-        Set<Item> requestedTypes = com.huanghuang.rsintegration.crafting.IngredientMatcher
+        Set<Item> requestedTypes = IngredientMatcher
                 .itemTypesForMatching(ingredient);
         if (requestedTypes == null) {
             return items;

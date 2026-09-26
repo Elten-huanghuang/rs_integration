@@ -6,6 +6,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import java.util.Optional;
+import net.minecraftforge.network.NetworkDirection;
 
 import java.util.function.Supplier;
 
@@ -55,6 +57,6 @@ public record StorageSearchTextPacket(int containerId, String text) {
                 StorageSearchTextPacket::encode,
                 StorageSearchTextPacket::decode,
                 StorageSearchTextPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 }

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraft.network.chat.Component;

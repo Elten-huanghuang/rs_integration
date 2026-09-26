@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
 import net.minecraft.world.InteractionHand;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.world.InteractionResult;
 
 public final class LithumCoreInteractionHandler {
     private LithumCoreInteractionHandler() {}
@@ -18,6 +19,6 @@ public final class LithumCoreInteractionHandler {
                 || !DistantWorldsReflection.lithumCoreBlockClass.isInstance(
                 event.getLevel().getBlockState(event.getPos()).getBlock())) return;
         event.setCanceled(true);
-        event.setCancellationResult(net.minecraft.world.InteractionResult.SUCCESS);
+        event.setCancellationResult(InteractionResult.SUCCESS);
     }
 }

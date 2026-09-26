@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.resources.ResourceLocation;
+import java.util.stream.Collectors;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +16,7 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
     }
 
     public ImmutableRecipeGraph {
-        recipesByOutput = recipesByOutput.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+        recipesByOutput = recipesByOutput.entrySet().stream().collect(Collectors.toUnmodifiableMap(
                 Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
         recipesById = Map.copyOf(recipesById);
     }

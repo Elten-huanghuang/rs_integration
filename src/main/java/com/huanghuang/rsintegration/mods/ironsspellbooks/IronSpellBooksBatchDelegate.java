@@ -27,6 +27,7 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -71,7 +72,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
 
     @Override public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        List<net.minecraft.world.item.crafting.Ingredient> ingredients = recipe.inputIngredients();
+        List<Ingredient> ingredients = recipe.inputIngredients();
         List<ItemStack> displays = recipe.inputs();
         List<IngredientSpec> result = new ArrayList<>();
         for (int i = 0; i < ingredients.size(); i++) {

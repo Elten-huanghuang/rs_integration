@@ -1,7 +1,13 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import java.util.Map;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -105,11 +111,11 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
         String cn = recipe.getClass().getName();
         if (cn.equals(FERMENT_RECIPE)) {
             try {
-                java.lang.reflect.Field f = findFieldUp(recipe.getClass(), "ingredients");
+                Field f = findFieldUp(recipe.getClass(), "ingredients");
                 if (f == null) return null;
                 f.setAccessible(true);
                 Object val = f.get(recipe);
-                if (val instanceof java.util.List<?> list) {
+                if (val instanceof List<?> list) {
                     List<IngredientSpec> specs = new ArrayList<>();
                     for (Object obj : list) {
                         if (obj instanceof Ingredient ing && !ing.isEmpty())
@@ -136,9 +142,9 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
         }
         if (isPotCookingRecipe(recipe)) {
             try {
-                java.lang.reflect.Method getInput = recipe.getClass().getMethod("getInput");
+                Method getInput = recipe.getClass().getMethod("getInput");
                 Object val = getInput.invoke(recipe);
-                if (val instanceof java.util.List<?> list) {
+                if (val instanceof List<?> list) {
                     List<IngredientSpec> specs = new ArrayList<>();
                     for (Object obj : list) {
                         if (obj instanceof Ingredient ing && !ing.isEmpty())
@@ -213,7 +219,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
             if (result instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
         } catch (ReflectiveOperationException | RuntimeException ignored) {
         }
-        java.lang.reflect.Field field = findFieldUp(recipe.getClass(), "container");
+        Field field = findFieldUp(recipe.getClass(), "container");
         if (field == null) return ItemStack.EMPTY;
         try {
             field.setAccessible(true);
@@ -226,7 +232,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
     }
 
     @Nullable
-    private static java.lang.reflect.Field findFieldUp(Class<?> clazz, String name) {
+    private static Field findFieldUp(Class<?> clazz, String name) {
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
             try {
@@ -251,7 +257,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
     private static ItemStack potFoodServings(Recipe<?> recipe, RegistryAccess access) {
         ItemStack result = recipe.getResultItem(access);
         if (result == null || result.isEmpty()
-                || !(result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)
+                || !(result.getItem() instanceof BlockItem blockItem)
                 || !(blockItem.getBlock() instanceof PotFoodBlock potFood)) {
             return ItemStack.EMPTY;
         }
@@ -266,8 +272,8 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
         if (servings.isEmpty()) return ItemStack.EMPTY;
         ItemStack unit = servings.copyWithCount(1);
         if (!unit.hasCraftingRemainingItem()) return ItemStack.EMPTY;
-        net.minecraft.world.item.Item bowl = unit.getCraftingRemainingItem().getItem();
-        if (bowl == net.minecraft.world.item.Items.AIR) return ItemStack.EMPTY;
+        Item bowl = unit.getCraftingRemainingItem().getItem();
+        if (bowl == Items.AIR) return ItemStack.EMPTY;
         return new ItemStack(bowl, servings.getCount());
     }
 
@@ -286,19 +292,19 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
 
         // 1. Base-model ingredients from VariantTableItemBase.MAP
         try {
-            java.lang.reflect.Method baseMethod = recipe.getClass().getMethod("base");
+            Method baseMethod = recipe.getClass().getMethod("base");
             ResourceLocation baseId = (ResourceLocation) baseMethod.invoke(recipe);
 
             try {
                 Class<?> vtbClass = Class.forName(
                         "dev.xkmc.youkaishomecoming.content.pot.table.item.VariantTableItemBase");
-                java.lang.reflect.Field mapField = vtbClass.getField("MAP");
-                java.util.Map<?, ?> map = (java.util.Map<?, ?>) mapField.get(null);
+                Field mapField = vtbClass.getField("MAP");
+                Map<?, ?> map = (Map<?, ?>) mapField.get(null);
                 Object vtb = map.get(baseId);
                 if (vtb != null) {
                     List<Ingredient> baseList = new ArrayList<>();
                     List<Ingredient> extraList = new ArrayList<>();
-                    java.lang.reflect.Method cm = vtbClass.getMethod(
+                    Method cm = vtbClass.getMethod(
                             "collectIngredients", List.class, List.class);
                     cm.invoke(vtb, baseList, extraList);
                     for (Ingredient ing : baseList) {
@@ -314,11 +320,11 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
                 try {
                     Class<?> itiClass = Class.forName(
                             "dev.xkmc.youkaishomecoming.content.pot.table.item.IngredientTableItem");
-                    java.lang.reflect.Field fixedField = itiClass.getField("FIXED");
-                    java.util.Map<?, ?> fixedMap = (java.util.Map<?, ?>) fixedField.get(null);
+                    Field fixedField = itiClass.getField("FIXED");
+                    Map<?, ?> fixedMap = (Map<?, ?>) fixedField.get(null);
                     Object fixed = fixedMap.get(baseId);
                     if (fixed != null) {
-                        java.lang.reflect.Method cm = itiClass.getMethod(
+                        Method cm = itiClass.getMethod(
                                 "collectIngredients", List.class);
                         cm.invoke(fixed, all);
                     }
@@ -332,7 +338,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
 
         // 2. Recipe-specific ingredients
         try {
-            java.lang.reflect.Method gci = recipe.getClass().getMethod("getCustomIngredients");
+            Method gci = recipe.getClass().getMethod("getCustomIngredients");
             List<Ingredient> custom = (List<Ingredient>) gci.invoke(recipe);
             if (custom != null) {
                 for (Ingredient ing : custom) {

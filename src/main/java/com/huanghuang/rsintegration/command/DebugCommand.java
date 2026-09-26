@@ -1,13 +1,14 @@
 package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.*;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
@@ -209,7 +210,7 @@ public final class DebugCommand {
         }
 
         ItemStack target = new ItemStack(item);
-        var ingredient = net.minecraft.world.item.crafting.Ingredient.of(target);
+        var ingredient = Ingredient.of(target);
 
         String modeLabel = noInventory ? " (no-inventory)" : "";
 
@@ -425,7 +426,7 @@ public final class DebugCommand {
         allStacks.addAll(player.getInventory().items);
         allStacks.addAll(player.getInventory().offhand);
         allStacks.addAll(player.getInventory().armor);
-        allStacks.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+        allStacks.addAll(CuriosAccess.stacks(player));
 
         int totalBindings = 0;
         for (ItemStack stack : allStacks) {

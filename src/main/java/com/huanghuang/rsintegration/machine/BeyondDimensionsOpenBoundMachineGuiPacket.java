@@ -9,6 +9,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.util.function.Supplier;
 
@@ -22,12 +24,12 @@ public final class BeyondDimensionsOpenBoundMachineGuiPacket {
         this.pos = pos;
     }
 
-    public void encode(net.minecraft.network.FriendlyByteBuf buf) {
+    public void encode(FriendlyByteBuf buf) {
         buf.writeResourceLocation(dim);
         buf.writeBlockPos(pos);
     }
 
-    public static BeyondDimensionsOpenBoundMachineGuiPacket decode(net.minecraft.network.FriendlyByteBuf buf) {
+    public static BeyondDimensionsOpenBoundMachineGuiPacket decode(FriendlyByteBuf buf) {
         return new BeyondDimensionsOpenBoundMachineGuiPacket(buf.readResourceLocation(), buf.readBlockPos());
     }
 
@@ -42,7 +44,7 @@ public final class BeyondDimensionsOpenBoundMachineGuiPacket {
     }
 
     private static void open(ServerPlayer player, BeyondDimensionsOpenBoundMachineGuiPacket packet) {
-        ResourceKey<Level> dimension = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,
+        ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION,
                 packet.dim);
         if (!AltarBindingRegistry.isBound(dimension, packet.pos, player)) return;
         var level = player.getServer().getLevel(dimension);

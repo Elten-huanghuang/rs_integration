@@ -12,6 +12,7 @@ import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.DistExecutor;
+import com.huanghuang.rsintegration.recipe.CursedInfuserRecipeHandler;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -94,7 +95,7 @@ public final class GoetyRSModule implements IModIntegration {
 
     @Override
     public void registerRecipeHandler() {
-        ModRecipeHandlers.register(new com.huanghuang.rsintegration.recipe.CursedInfuserRecipeHandler());
+        ModRecipeHandlers.register(new CursedInfuserRecipeHandler());
         ModRecipeHandlers.register(GoetyRecipeHandler.ritual());
         ModRecipeHandlers.register(GoetyRecipeHandler.brazier());
     }

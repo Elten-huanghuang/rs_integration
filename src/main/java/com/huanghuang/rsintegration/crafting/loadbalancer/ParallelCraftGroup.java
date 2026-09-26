@@ -35,6 +35,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -56,8 +60,8 @@ import java.util.function.BiFunction;
 public final class ParallelCraftGroup implements IBatchDelegate {
 
     private final List<WorkerSlot> workers = new ArrayList<>();
-    private final java.util.Map<Integer, CraftOutputInterceptor.CaptureHandle> legacyCaptureHandles =
-            new java.util.HashMap<>();
+    private final Map<Integer, CraftOutputInterceptor.CaptureHandle> legacyCaptureHandles =
+            new HashMap<>();
     private final List<ItemStack> settledResults = new ArrayList<>();
     private final ModType modType;
     private final ResourceLocation recipeId;
@@ -95,7 +99,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private OperationBudget craftOperationBudget;
     private OperationBudget globalOperationBudget;
     private OperationExecutionKernel operationKernel;
-    private java.util.UUID craftId;
+    private UUID craftId;
     private NodeId nodeId;
     private boolean sharedMaterialMode;
     private boolean started;
@@ -199,7 +203,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         this.player = player;
         this.operations = new OperationQueue(totalOperations);
         this.safelyRecoverableVirtual = new boolean[totalOperations];
-        java.util.Arrays.fill(this.safelyRecoverableVirtual, true);
+        Arrays.fill(this.safelyRecoverableVirtual, true);
         int workerId = 0;
         for (BoundMachine machine : machines) {
             if (!needsMoreWorkers(workers.size(), maxWorkers, totalOperations)) break;
@@ -392,7 +396,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     public void setOperationKernel(OperationExecutionKernel kernel,
-                                   java.util.UUID craftId, NodeId nodeId,
+                                   UUID craftId, NodeId nodeId,
                                    OperationBudget craftBudget) {
         this.operationKernel = kernel;
         this.craftId = craftId;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.tetra;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.tetra.client.TetraWorkbenchMaterialState;
 import net.minecraft.client.gui.GuiGraphics;

@@ -1,6 +1,20 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Array;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import java.util.Arrays;
+import java.util.function.Function;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.TagParser;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.TransientCraftingContainer;
+import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraftforge.common.ForgeHooks;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -11,7 +25,6 @@ import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.util.CraftLogContext;
@@ -71,8 +84,8 @@ public final class CraftPacketUtils {
     private static final Set<ResourceLocation> emptyIngredientMarkers = ConcurrentHashMap.newKeySet();
     private static final Map<Ingredient, DemandRole> craftingDemandRoleCache = new ConcurrentHashMap<>();
     /** Caches the ingredient-list Field per recipe class for scanAllFieldsForIngredients. */
-    private static final Map<Class<?>, java.lang.reflect.Field> ingredientFieldCache = new ConcurrentHashMap<>();
-    private static final java.lang.reflect.Field NO_INGREDIENT_FIELD;
+    private static final Map<Class<?>, Field> ingredientFieldCache = new ConcurrentHashMap<>();
+    private static final Field NO_INGREDIENT_FIELD;
     static {
         try { NO_INGREDIENT_FIELD = CraftPacketUtils.class.getDeclaredField("ingredientCache"); }
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
@@ -108,7 +121,7 @@ public final class CraftPacketUtils {
                                            @Nonnull ServerPlayer player) {
         if (dim != null) {
             ResourceKey<Level> key = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, dim);
+                    Registries.DIMENSION, dim);
             ServerLevel level = server.getLevel(key);
             if (level != null) return level;
         }
@@ -160,14 +173,14 @@ public final class CraftPacketUtils {
      */
     @Nonnull
     public static Component formatMissingSummary(@Nonnull List<String> missing) {
-        java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
+        LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
         for (String name : missing) {
             counts.merge(name, 1, Integer::sum);
         }
         int total = counts.size();
         int shown = 0;
         MutableComponent result = Component.empty();
-        for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
             if (shown > 0) result.append(", ");
             // The resolver emits descriptionIds; anything else (a pre-formatted
             // overflow marker, for instance) is passed through verbatim.
@@ -242,7 +255,7 @@ public final class CraftPacketUtils {
 
                 RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {} x{} type={} virtualInvBefore={}"),
                         stepIdx + 1, steps.size(), stepId, executions, recipe.getClass().getSimpleName(),
-                        virtualInventory.stream().map(s -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
+                        virtualInventory.stream().map(s -> BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
 
                 if (recipe instanceof CraftingRecipe craftingRecipe) {
                     List<IngredientSpec> specs = extractCraftingIngredientSpecs(craftingRecipe);
@@ -281,11 +294,11 @@ public final class CraftPacketUtils {
                             stillNeeded -= reserved.getCount();
                             RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: reserved {} from ledger"),
                                     stepIdx + 1, steps.size(), stepId,
-                                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
+                                    BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
                         }
                     }
 
-                    ItemStack[] reusableState = java.util.Arrays.stream(consumed)
+                    ItemStack[] reusableState = Arrays.stream(consumed)
                             .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
                             .toArray(ItemStack[]::new);
                     for (int operation = 0; operation < executions; operation++) {
@@ -367,7 +380,7 @@ public final class CraftPacketUtils {
                             ItemStack[] opts = spec.ingredient().getItems();
                             RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: need {} more of {}, reserving from ledger..."),
                                     stepIdx + 1, steps.size(), stepId, stillNeeded,
-                                    opts.length > 0 ? net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
+                                    opts.length > 0 ? BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
                             ItemStack reserved = endpoint != null
                                     ? ledger.reserveFromEndpoint(spec.ingredient(), stillNeeded, endpoint, player)
                                     : ItemStack.EMPTY;
@@ -382,7 +395,7 @@ public final class CraftPacketUtils {
                             stillNeeded -= reserved.getCount();
                             RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: reserved {} from ledger (stillNeeded={})"),
                                     stepIdx + 1, steps.size(), stepId,
-                                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount(),
+                                    BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount(),
                                     stillNeeded);
                         }
                     }
@@ -392,7 +405,7 @@ public final class CraftPacketUtils {
                         addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
                         RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
                                 stepIdx + 1, steps.size(), stepId,
-                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
+                                BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
                     }
                     // Add secondary outputs (byproducts) to virtual inventory
                     for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
@@ -466,10 +479,10 @@ public final class CraftPacketUtils {
             CraftingRecipe recipe, ItemStack[] consumed) {
         List<IngredientSpec> specs = extractCraftingIngredientSpecs(recipe);
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
-            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
-            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+            @Override public ItemStack quickMoveStack(Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(Player p) { return false; }
         };
-        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
+        var container = new TransientCraftingContainer(dummyMenu, 3, 3);
         int slots = Math.min(specs.size(), 9);
         for (int i = 0; i < slots; i++) {
             if (i < consumed.length && consumed[i] != null && !consumed[i].isEmpty()) {
@@ -500,10 +513,10 @@ public final class CraftPacketUtils {
     public static List<ItemStack> getRecipeRemainders(CraftingRecipe recipe) {
         List<IngredientSpec> specs = extractCraftingIngredientSpecs(recipe);
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
-            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
-            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+            @Override public ItemStack quickMoveStack(Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(Player p) { return false; }
         };
-        var container = new net.minecraft.world.inventory.TransientCraftingContainer(dummyMenu, 3, 3);
+        var container = new TransientCraftingContainer(dummyMenu, 3, 3);
         for (int i = 0; i < Math.min(specs.size(), 9); i++) {
             Ingredient ing = specs.get(i).ingredient();
             if (!ing.isEmpty()) {
@@ -538,8 +551,8 @@ public final class CraftPacketUtils {
     public static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
                                                     RegistryAccess registryAccess) {
         AbstractContainerMenu dummyMenu = new AbstractContainerMenu(null, -1) {
-            @Override public ItemStack quickMoveStack(net.minecraft.world.entity.player.Player p, int i) { return ItemStack.EMPTY; }
-            @Override public boolean stillValid(net.minecraft.world.entity.player.Player p) { return false; }
+            @Override public ItemStack quickMoveStack(Player p, int i) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(Player p) { return false; }
         };
         return assembleCraftingOutput(recipe, consumed, registryAccess, dummyMenu);
     }
@@ -547,7 +560,7 @@ public final class CraftPacketUtils {
     private static ItemStack assembleCraftingOutput(CraftingRecipe recipe, ItemStack[] consumed,
                                                      RegistryAccess registryAccess,
                                                      AbstractContainerMenu menu) {
-        var container = new net.minecraft.world.inventory.TransientCraftingContainer(menu, 3, 3);
+        var container = new TransientCraftingContainer(menu, 3, 3);
         for (int i = 0; i < consumed.length && i < 9; i++) {
             if (consumed[i] != null && !consumed[i].isEmpty()) {
                 container.setItem(craftingGridSlot(recipe, i), consumed[i].copy());
@@ -562,7 +575,7 @@ public final class CraftPacketUtils {
     }
 
     static int craftingGridSlot(CraftingRecipe recipe, int ingredientIndex) {
-        if (recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
+        if (recipe instanceof ShapedRecipe shaped) {
             int width = shaped.getWidth();
             if (width > 0 && width <= 3) {
                 return (ingredientIndex / width) * 3 + ingredientIndex % width;
@@ -642,7 +655,7 @@ public final class CraftPacketUtils {
 
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+            for (Field field : scan.getDeclaredFields()) {
                 if (field.getName().equals("ingredients")
                         && List.class.isAssignableFrom(field.getType())) {
                     field.setAccessible(true);
@@ -736,15 +749,15 @@ public final class CraftPacketUtils {
             return ingredients;
         }
 
-        java.util.Set<Item> crystalItems = new java.util.HashSet<>();
+        Set<Item> crystalItems = new HashSet<>();
 
         // CrystalRitualRecipe has getRitual(); CrystalInfusionRecipe has neither.
         // For both, the crystal sits in a separate Crystal block as a catalyst
         // and must NOT be extracted from RS as a material.
         Object ritual = null;
-        java.lang.reflect.Method getCrystalType = null;
+        Method getCrystalType = null;
         try {
-            java.lang.reflect.Method getRitual = Reflect.findMethod(
+            Method getRitual = Reflect.findMethod(
                     recipe.getClass(), "getRitual", new Class<?>[0]);
             if (getRitual != null) {
                 ritual = getRitual.invoke(recipe);
@@ -778,9 +791,9 @@ public final class CraftPacketUtils {
             try {
                 Class<?> handlerClass = Class.forName(
                         "mod.maxbogomol.wizards_reborn.api.crystal.CrystalHandler");
-                java.lang.reflect.Method getItems = handlerClass.getMethod("getItems");
+                Method getItems = handlerClass.getMethod("getItems");
                 @SuppressWarnings("unchecked")
-                java.util.ArrayList<Item> registered = (java.util.ArrayList<Item>) getItems.invoke(null);
+                ArrayList<Item> registered = (ArrayList<Item>) getItems.invoke(null);
                 if (registered != null) {
                     crystalItems.addAll(registered);
                 }
@@ -858,7 +871,7 @@ public final class CraftPacketUtils {
             boolean targetOnly = candidates.length > 0;
             for (ItemStack candidate : candidates) {
                 ResourceLocation itemId = candidate.isEmpty() ? null
-                        : net.minecraftforge.registries.ForgeRegistries.ITEMS
+                        : ForgeRegistries.ITEMS
                                 .getKey(candidate.getItem());
                 if (candidate.isEmpty()
                         || !isNbtInsensitiveWRCrystalInfusion(r.getId(), itemId)) {
@@ -901,10 +914,10 @@ public final class CraftPacketUtils {
      */
     private static boolean isArcaneIteratorEnchantRecipe(Object recipe) {
         try {
-            java.lang.reflect.Method hasEnch = Reflect.findMethod(
+            Method hasEnch = Reflect.findMethod(
                     recipe.getClass(), "hasEnchantment", new Class<?>[0]);
             if (hasEnch != null && (boolean) hasEnch.invoke(recipe)) return true;
-            java.lang.reflect.Method hasArcane = Reflect.findMethod(
+            Method hasArcane = Reflect.findMethod(
                     recipe.getClass(), "hasArcaneEnchantment", new Class<?>[0]);
             if (hasArcane != null && (boolean) hasArcane.invoke(recipe)) return true;
         } catch (Exception e) {
@@ -945,7 +958,7 @@ public final class CraftPacketUtils {
     @SuppressWarnings("unchecked")
     private static List<Ingredient> scanAllFieldsForIngredients(Object recipe) {
         Class<?> clazz = recipe.getClass();
-        java.lang.reflect.Field cached = ingredientFieldCache.get(clazz);
+        Field cached = ingredientFieldCache.get(clazz);
         if (cached != null) {
             if (cached == NO_INGREDIENT_FIELD) return null;
             try {
@@ -957,7 +970,7 @@ public final class CraftPacketUtils {
         }
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+            for (Field field : scan.getDeclaredFields()) {
                 if (!List.class.isAssignableFrom(field.getType())) continue;
                 field.setAccessible(true);
                 try {
@@ -981,13 +994,13 @@ public final class CraftPacketUtils {
         String key = clazz.getName() + "::getSteps";
         if (methodAbsenceMarkers.contains(key)) return null;
         try {
-            java.lang.reflect.Method stepsMethod = clazz.getMethod("getSteps");
+            Method stepsMethod = clazz.getMethod("getSteps");
             List<?> steps = (List<?>) stepsMethod.invoke(recipe);
             if (steps == null || steps.isEmpty()) return null;
             List<Ingredient> all = new ArrayList<>();
             for (Object step : steps) {
                 try {
-                    java.lang.reflect.Field matchesField = step.getClass().getField("matches");
+                    Field matchesField = step.getClass().getField("matches");
                     List<Ingredient> matches = (List<Ingredient>) matchesField.get(step);
                     if (matches != null) {
                         for (Ingredient ing : matches) {
@@ -1012,7 +1025,7 @@ public final class CraftPacketUtils {
 
         // Probe mainIngredient field (FA Ritual, generic ritual recipes)
         try {
-            java.lang.reflect.Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
+            Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
             if (mainField != null && Ingredient.class.isAssignableFrom(mainField.getType())) {
                 mainField.setAccessible(true);
                 Ingredient main = (Ingredient) mainField.get(recipe);
@@ -1022,14 +1035,14 @@ public final class CraftPacketUtils {
 
         // Probe inputs field — list of objects each with an `ingredient` sub-field
         try {
-            java.lang.reflect.Field inputsField = findAnyField(recipe.getClass(), "inputs");
+            Field inputsField = findAnyField(recipe.getClass(), "inputs");
             if (inputsField != null && List.class.isAssignableFrom(inputsField.getType())) {
                 inputsField.setAccessible(true);
                 List<?> inputs = (List<?>) inputsField.get(recipe);
                 if (inputs != null) {
                     for (Object ri : inputs) {
                         try {
-                            java.lang.reflect.Field ingField = findAnyField(ri.getClass(), "ingredient");
+                            Field ingField = findAnyField(ri.getClass(), "ingredient");
                             if (ingField != null && Ingredient.class.isAssignableFrom(ingField.getType())) {
                                 ingField.setAccessible(true);
                                 Ingredient ing = (Ingredient) ingField.get(ri);
@@ -1064,7 +1077,7 @@ public final class CraftPacketUtils {
             List<IngredientSpec> kubeJsSpecs = KubeJsCraftingSemantics.extractSpecs(craftingRecipe);
             if (kubeJsSpecs != null) return kubeJsSpecs;
         }
-        if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
+        if (recipe instanceof Recipe<?> r) {
             var handler = ModRecipeHandlers.handlerFor(r);
             if (handler != null && handler.preferHandlerIngredients()) {
                 List<IngredientSpec> result = handler.getIngredients(r);
@@ -1076,7 +1089,7 @@ public final class CraftPacketUtils {
         if (craftTweakerSpecs != null) return craftTweakerSpecs;
 
         // Try registered handler first (explicit per-mod logic)
-        if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> r) {
+        if (recipe instanceof Recipe<?> r) {
             var handler = ModRecipeHandlers.handlerFor(r);
             if (handler != null) {
                 List<IngredientSpec> result = handler.getIngredients(r);
@@ -1132,7 +1145,7 @@ public final class CraftPacketUtils {
 
     static DemandRole craftingDemandRole(
             Ingredient ingredient,
-            java.util.function.Function<ItemStack, ItemStack> remainderLookup) {
+            Function<ItemStack, ItemStack> remainderLookup) {
         if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
             return DemandRole.CATALYST;
         }
@@ -1219,9 +1232,9 @@ public final class CraftPacketUtils {
         }
         Class<?> type = value.getClass();
         if (type.isArray()) {
-            int length = java.lang.reflect.Array.getLength(value);
+            int length = Array.getLength(value);
             for (int i = 0; i < length; i++) {
-                collectCraftTweakerSpecs(java.lang.reflect.Array.get(value, i), result);
+                collectCraftTweakerSpecs(Array.get(value, i), result);
             }
             return;
         }
@@ -1232,18 +1245,18 @@ public final class CraftPacketUtils {
             return;
         }
 
-        com.huanghuang.rsintegration.crafting.graph.DemandRole role =
-                com.huanghuang.rsintegration.crafting.graph.DemandRole.CONSUMED;
+        DemandRole role =
+                DemandRole.CONSUMED;
         try {
             Object transformer = type.getMethod("getTransformer").invoke(value);
             if (transformer != null) {
                 String transformerName = transformer.getClass().getName();
                 if (transformerName.endsWith(".TransformReuse")) {
-                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.CATALYST;
+                    role = DemandRole.CATALYST;
                 } else if (transformerName.endsWith(".TransformReplace")) {
-                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.CONTAINER_RETURNING;
+                    role = DemandRole.CONTAINER_RETURNING;
                 } else {
-                    role = com.huanghuang.rsintegration.crafting.graph.DemandRole.TRANSFORMED;
+                    role = DemandRole.TRANSFORMED;
                 }
             }
         } catch (NoSuchMethodException ignored) {
@@ -1258,11 +1271,11 @@ public final class CraftPacketUtils {
         try {
             Class<?> iwcClass = Class.forName(
                     "team.lodestar.lodestone.systems.recipe.IngredientWithCount");
-            java.lang.reflect.Field ingField = iwcClass.getField("ingredient");
-            java.lang.reflect.Field countField = iwcClass.getField("count");
+            Field ingField = iwcClass.getField("ingredient");
+            Field countField = iwcClass.getField("count");
             List<IngredientSpec> result = new ArrayList<>();
 
-            java.lang.reflect.Field inputField = findAnyField(recipe.getClass(), "input");
+            Field inputField = findAnyField(recipe.getClass(), "input");
             if (inputField != null && iwcClass.isAssignableFrom(inputField.getType())) {
                 inputField.setAccessible(true);
                 Object iwc = inputField.get(recipe);
@@ -1273,7 +1286,7 @@ public final class CraftPacketUtils {
                 }
             }
 
-            java.lang.reflect.Field extraField = findAnyField(recipe.getClass(), "extraItems");
+            Field extraField = findAnyField(recipe.getClass(), "extraItems");
             if (extraField != null && List.class.isAssignableFrom(extraField.getType())) {
                 extraField.setAccessible(true);
                 List<?> list = (List<?>) extraField.get(recipe);
@@ -1288,7 +1301,7 @@ public final class CraftPacketUtils {
                 }
             }
 
-            java.lang.reflect.Field spiritsField = findAnyField(recipe.getClass(), "spirits");
+            Field spiritsField = findAnyField(recipe.getClass(), "spirits");
             if (spiritsField != null && List.class.isAssignableFrom(spiritsField.getType())) {
                 spiritsField.setAccessible(true);
                 List<?> spiritList = (List<?>) spiritsField.get(recipe);
@@ -1296,7 +1309,7 @@ public final class CraftPacketUtils {
                     for (Object swc : spiritList) {
                         try {
                             Optional<Object> itemOpt = Reflect.invoke(swc, "getItem");
-                            if (itemOpt.isPresent() && itemOpt.get() instanceof net.minecraft.world.item.Item it) {
+                            if (itemOpt.isPresent() && itemOpt.get() instanceof Item it) {
                                 int count = Reflect.getIntField(swc, "count").orElse(1);
                                 result.add(new IngredientSpec(Ingredient.of(it), count));
                             }
@@ -1330,7 +1343,7 @@ public final class CraftPacketUtils {
         List<IngredientSpec> specs = new ArrayList<>();
 
         try {
-            java.lang.reflect.Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
+            Field mainField = findAnyField(recipe.getClass(), "mainIngredient");
             if (mainField != null && Ingredient.class.isAssignableFrom(mainField.getType())) {
                 mainField.setAccessible(true);
                 Ingredient main = (Ingredient) mainField.get(recipe);
@@ -1339,15 +1352,15 @@ public final class CraftPacketUtils {
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
 
         try {
-            java.lang.reflect.Field inputsField = findAnyField(recipe.getClass(), "inputs");
+            Field inputsField = findAnyField(recipe.getClass(), "inputs");
             if (inputsField != null && List.class.isAssignableFrom(inputsField.getType())) {
                 inputsField.setAccessible(true);
                 List<?> inputs = (List<?>) inputsField.get(recipe);
                 if (inputs != null) {
                     for (Object ri : inputs) {
                         try {
-                            java.lang.reflect.Field ingField = findAnyField(ri.getClass(), "ingredient");
-                            java.lang.reflect.Field amtField = findAnyField(ri.getClass(), "amount");
+                            Field ingField = findAnyField(ri.getClass(), "ingredient");
+                            Field amtField = findAnyField(ri.getClass(), "amount");
                             if (ingField != null && Ingredient.class.isAssignableFrom(ingField.getType())) {
                                 ingField.setAccessible(true);
                                 Ingredient ing = (Ingredient) ingField.get(ri);
@@ -1369,7 +1382,7 @@ public final class CraftPacketUtils {
         return specs.isEmpty() ? null : specs;
     }
 
-    private static java.lang.reflect.Field findAnyField(Class<?> clazz, String name) {
+    private static Field findAnyField(Class<?> clazz, String name) {
         return Reflect.findField(clazz, name).orElse(null);
     }
 
@@ -1590,7 +1603,7 @@ public final class CraftPacketUtils {
             ItemStack stack = new ItemStack(key.item(), count);
             if (key.tag() != null) {
                 try {
-                    stack.setTag(net.minecraft.nbt.TagParser.parseTag(key.tag()));
+                    stack.setTag(TagParser.parseTag(key.tag()));
                 } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", key, ex); }
             }
             list.add(stack);
@@ -1722,10 +1735,10 @@ public final class CraftPacketUtils {
         int bestScore = 0;
         for (var entry : itemAvailable.entrySet()) {
             try {
-                if (net.minecraftforge.common.ForgeHooks.getBurnTime(
+                if (ForgeHooks.getBurnTime(
                         new ItemStack(entry.getKey()), null) > 0) {
                     int score = entry.getValue();
-                    ResourceLocation rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(entry.getKey());
+                    ResourceLocation rl = ForgeRegistries.ITEMS.getKey(entry.getKey());
                     if (rl != null && "minecraft".equals(rl.getNamespace())) score += 64;
                     if (score > bestScore) {
                         bestScore = score;
@@ -1737,7 +1750,7 @@ public final class CraftPacketUtils {
             }
         }
         if (bestFuel == null) {
-            bestFuel = net.minecraft.world.item.Items.COAL;
+            bestFuel = Items.COAL;
         }
         int fuelNeeded = Math.max(1, repeatCount / 4);
         neededCounts.merge(bestFuel, fuelNeeded, Integer::sum);

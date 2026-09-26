@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.network.chat.Component;
@@ -517,7 +518,7 @@ public final class AutoEatScreen extends Screen {
 
         @Override
         protected void updateWidgetNarration(
-                net.minecraft.client.gui.narration.NarrationElementOutput output) {
+                NarrationElementOutput output) {
             defaultButtonNarrationText(output);
         }
     }

@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.storage.rs;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
 import com.huanghuang.rsintegration.storage.StorageItemSubscription;
@@ -19,7 +21,7 @@ interface RefinedStorageDriver {
     }
 
     /** Optional candidate filter. Drivers may return a superset; matching remains authoritative. */
-    default RefinedStorageSnapshotRead snapshotItems(java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+    default RefinedStorageSnapshotRead snapshotItems(Set<Item> itemTypes) {
         return snapshotItems();
     }
 

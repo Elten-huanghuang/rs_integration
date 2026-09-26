@@ -31,6 +31,11 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import org.jetbrains.annotations.NotNull;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -739,7 +744,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         for (ItemStack stack : pool) {
             if (remaining <= 0) break;
             if (stack == null || stack.isEmpty()
-                    || !com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) continue;
+                    || !IngredientMatcher.test(ingredient, stack)) continue;
             int amount = Math.min(remaining, stack.getCount());
             taken.add(stack.copyWithCount(amount));
             stack.shrink(amount);
@@ -897,7 +902,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         }
         // Fallback: getCapability
         IItemHandler cap = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
         if (cap instanceof SimpleContainer sc) return sc;
         return null;
@@ -1011,7 +1016,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             try { return (IFluidHandler) getFluidHandlerMethod.invoke(be); }
             catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Ferment] getFluidHandler reflection failed", e); }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER)
+        return be.getCapability(ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
     }
 
@@ -1027,7 +1032,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 Object typeHolder = yhFluidTypeField.get(fluid.getFluid());
                 if (typeHolder != null) {
                     // Check if this fluid type represents water by registry name
-                    ResourceLocation key = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid.getFluid());
+                    ResourceLocation key = BuiltInRegistries.FLUID.getKey(fluid.getFluid());
                     if (key != null && key.getPath().contains("water")) return fluid.getAmount();
                 }
             } catch (Exception ignored) { /* fall through */ }
@@ -1118,9 +1123,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     private static int getYHWaterBottleAmount() {
         // Look up vanilla water from the Forge fluid registry; if YHK wraps it
         // in a YHFluid, read type.amount() from there.
-        net.minecraft.world.level.material.Fluid waterFluid =
-                net.minecraft.core.registries.BuiltInRegistries.FLUID.get(
-                        new net.minecraft.resources.ResourceLocation("water"));
+        Fluid waterFluid =
+                BuiltInRegistries.FLUID.get(
+                        new ResourceLocation("water"));
         if (waterFluid == null || waterFluid == Fluids.EMPTY) return 0;
         if (YHKReflection.yhFluidClass != null
                 && YHKReflection.yhFluidClass.isInstance(waterFluid)
@@ -1141,8 +1146,8 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
             // Check if it's a water bottle or water bucket
-            if (stack.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                    || stack.is(net.minecraft.world.item.Items.POTION)) // water bottle
+            if (stack.is(Items.WATER_BUCKET)
+                    || stack.is(Items.POTION)) // water bottle
                 return stack;
             // Check for YHK fluid holders (getFluid() returns a YHFluid, not an enum)
             if (YHKReflection.yhFluidHolderClass != null
@@ -1167,15 +1172,15 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    private static ItemStack findWaterHolder(com.huanghuang.rsintegration.crafting.CraftStorageEndpoint endpoint,
+    private static ItemStack findWaterHolder(CraftStorageEndpoint endpoint,
                                              ServerPlayer player) {
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         for (var entry : snapshot.items()) {
             ItemStack stack = entry.stack();
             if (stack.isEmpty()) continue;
-            if (stack.is(net.minecraft.world.item.Items.WATER_BUCKET)
-                    || stack.is(net.minecraft.world.item.Items.POTION)) return stack;
+            if (stack.is(Items.WATER_BUCKET)
+                    || stack.is(Items.POTION)) return stack;
             if (YHKReflection.yhFluidHolderClass != null
                     && YHKReflection.yhFluidHolderClass.isInstance(stack.getItem())) {
                 try {
@@ -1194,10 +1199,10 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     /** Get the empty container returned when using a fluid holder. */
     private static ItemStack getYHWaterEmptyContainer(ItemStack holder) {
-        if (holder.is(net.minecraft.world.item.Items.WATER_BUCKET))
-            return new ItemStack(net.minecraft.world.item.Items.BUCKET);
-        if (holder.is(net.minecraft.world.item.Items.POTION))
-            return new ItemStack(net.minecraft.world.item.Items.GLASS_BOTTLE);
+        if (holder.is(Items.WATER_BUCKET))
+            return new ItemStack(Items.BUCKET);
+        if (holder.is(Items.POTION))
+            return new ItemStack(Items.GLASS_BOTTLE);
         // YHK fluid holders expose their real empty container directly.
         if (yhFluidTypeField != null && holderAsStackMethod != null
                 && YHKReflection.yhFluidHolderClass != null
@@ -1213,7 +1218,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                                 "getContainer");
                         Object container = containerMethod.invoke(typeHolder);
                         if (container instanceof Item item
-                                && item != net.minecraft.world.item.Items.AIR) {
+                                && item != Items.AIR) {
                             return new ItemStack(item);
                         }
                     }
@@ -1306,9 +1311,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     /** Get a water bottle stack using YHK fluid system. */
     private static ItemStack getYHWaterAsStack(int count) {
-        net.minecraft.world.level.material.Fluid waterFluid =
-                net.minecraft.core.registries.BuiltInRegistries.FLUID.get(
-                        new net.minecraft.resources.ResourceLocation("water"));
+        Fluid waterFluid =
+                BuiltInRegistries.FLUID.get(
+                        new ResourceLocation("water"));
         if (waterFluid != null && waterFluid != Fluids.EMPTY
                 && YHKReflection.yhFluidClass != null
                 && YHKReflection.yhFluidClass.isInstance(waterFluid)
@@ -1321,7 +1326,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Ferment] getYHWaterAsStack failed", e);
             }
         }
-        return new ItemStack(net.minecraft.world.item.Items.POTION);
+        return new ItemStack(Items.POTION);
     }
 
     private void refund(ItemStack stack) {

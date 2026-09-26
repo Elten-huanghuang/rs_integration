@@ -23,6 +23,22 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.Locale;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.Tag;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -75,7 +91,7 @@ public final class AltarBindingRegistry {
         action.accept(inv.items);
         action.accept(inv.offhand);
         action.accept(inv.armor);
-        for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+        for (ItemStack curio : CuriosAccess.stacks(player)) {
             action.accept(List.of(curio));
         }
     }
@@ -90,7 +106,7 @@ public final class AltarBindingRegistry {
         if (result != null) return result;
         result = extractor.apply(inv.armor);
         if (result != null) return result;
-        for (ItemStack curio : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+        for (ItemStack curio : CuriosAccess.stacks(player)) {
             result = extractor.apply(List.of(curio));
             if (result != null) return result;
         }
@@ -157,13 +173,13 @@ public final class AltarBindingRegistry {
         MachineFavoritesSavedData.get(player.server).removeAt(player.getUUID(), dim, pos);
 
         ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, dim);
+                Registries.DIMENSION, dim);
         for (ResourceLocation type : HOOKS.keySet()) {
             unbind(player.getUUID(), dimKey, pos, type);
         }
         invalidateScanCache();
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-            com.huanghuang.rsintegration.network.RSIntegrationNetwork
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            RSIntegrationNetwork
                     .invalidateNetworkResolution(player.getUUID());
         }
         return removed[0];
@@ -260,7 +276,7 @@ public final class AltarBindingRegistry {
         // Never force-load a chunk during a freshness probe — if the chunk
         // is asleep no-one can have broken the machine, so remain optimistic.
         if (!level.isLoaded(pos)) return true;
-        net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
+        BlockEntity be = level.getBlockEntity(pos);
         String currentId;
         if (be != null) {
             currentId = be.getBlockState().getBlock().getDescriptionId();
@@ -292,7 +308,7 @@ public final class AltarBindingRegistry {
      * AIR — blocks replaced by other mod content are left alone (the player
      * may have temporarily swapped the machine and will restore it later).
      */
-    private static void lazyCleanupGhostBinding(net.minecraft.server.MinecraftServer server,
+    private static void lazyCleanupGhostBinding(MinecraftServer server,
                                                  ResourceKey<Level> dim, BlockPos pos) {
         ServerLevel level = server.getLevel(dim);
         if (level == null || !level.isLoaded(pos)) return;
@@ -335,7 +351,7 @@ public final class AltarBindingRegistry {
     // ── multi-block machine query ───────────────────────────────
 
     public record BoundMachine(ResourceLocation dim, BlockPos pos, ModType type,
-                                @javax.annotation.Nullable String blockKey) {}
+                                @Nullable String blockKey) {}
 
     /**
      * Check whether the player has a bound machine compatible with the given
@@ -344,7 +360,7 @@ public final class AltarBindingRegistry {
      * extracts the machine hint from the recipe ID path and matches it against
      * the block key of each bound machine.
      */
-    public static boolean hasBindingForRecipe(ServerPlayer player, net.minecraft.world.item.crafting.Recipe<?> recipe) {
+    public static boolean hasBindingForRecipe(ServerPlayer player, Recipe<?> recipe) {
         return hasBindingForRecipe(player, recipe, ModType.classifyRecipe(recipe));
     }
 
@@ -354,18 +370,18 @@ public final class AltarBindingRegistry {
      * cannot be reconstructed from the recipe class alone.
      */
     public static boolean hasBindingForRecipe(ServerPlayer player,
-                                              net.minecraft.world.item.crafting.Recipe<?> recipe,
+                                              Recipe<?> recipe,
                                               @Nullable ModType expectedType) {
         ModType type = expectedType;
         if (type == null || type == ModType.GENERIC) {
-            return !(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)
-                    && !(recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe);
+            return !(recipe instanceof SmithingTransformRecipe)
+                    && !(recipe instanceof SmithingTrimRecipe);
         }
         // Prefer the recipe registry type for Aether machines. This remains
         // stable when Aether renames Java recipe classes and prevents the broad
         // parent `aether` fallback from hiding freezer/incubator/altar recipes.
         ResourceLocation recipeType = recipe.getType() != null
-                ? net.minecraftforge.registries.ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
+                ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
         if (recipeType != null && "aether".equals(recipeType.getNamespace())) {
             String mapped = switch (recipeType.getPath()) {
                 case "freezing" -> "aether_freezer";
@@ -388,7 +404,7 @@ public final class AltarBindingRegistry {
         if (keys == null) return false;
         for (String bk : keys) {
             if (subType != null && (bk == null
-                    || !bk.toLowerCase(java.util.Locale.ROOT).contains(subType))) {
+                    || !bk.toLowerCase(Locale.ROOT).contains(subType))) {
                 continue;
             }
             if (isRecipeBindingCompatible(recipe, type, bk)) return true;
@@ -397,7 +413,7 @@ public final class AltarBindingRegistry {
     }
 
     static boolean isRecipeBindingCompatible(
-            net.minecraft.world.item.crafting.Recipe<?> recipe,
+            Recipe<?> recipe,
             ModType type, @Nullable String blockKey) {
         ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler == null || handler.modType() == ModType.GENERIC) {
@@ -442,7 +458,7 @@ public final class AltarBindingRegistry {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (entryType == null) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                        Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
                 if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
@@ -451,7 +467,7 @@ public final class AltarBindingRegistry {
                 if (hasUsableStorageBinding(player, altarDim, entry.pos())) {
                     addCompatibleTypeIds(entryType, entry.blockKey(), modTypeIds, blockKeysByType);
                     if (isPmmoSalvageBinding(entry)) {
-                        addTypeId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID,
+                        addTypeId(PmmoRSModule.TYPE_ID,
                                 entry.blockKey(), modTypeIds, blockKeysByType);
                     }
                 }
@@ -502,14 +518,14 @@ public final class AltarBindingRegistry {
     public static void onServerStopped(ServerStoppedEvent event) {
         BINDINGS.clear();
         SCAN_CACHE.clear();
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-            com.huanghuang.rsintegration.network.RSIntegrationNetwork
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            RSIntegrationNetwork
                     .clearNetworkResolutionCache();
         }
     }
 
     @SubscribeEvent
-    public static void onBlockBreak(net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return;
         if (!(event.getLevel() instanceof Level level)) return;
         ResourceKey<Level> dim = level.dimension();
@@ -525,7 +541,7 @@ public final class AltarBindingRegistry {
         // Clean up all online players' NBT and sync their side panels.
         // Only cleaning the breaker would leave stale bindings on other
         // players' items and out-of-date MachineHub tabs on their clients.
-        net.minecraft.server.MinecraftServer server = level.getServer();
+        MinecraftServer server = level.getServer();
         int removedEntries = 0;
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -546,10 +562,10 @@ public final class AltarBindingRegistry {
 
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-                    com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+                    RSIntegrationNetwork
                             .invalidateNetworkResolution(p.getUUID());
-                    com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                    RSSidePanelNetworkHandler
                             .sendBindingSync(p);
                 }
             }
@@ -587,7 +603,7 @@ public final class AltarBindingRegistry {
     /** Enumerate machines that can execute this exact recipe. */
     public static List<BoundMachine> getBoundMachinesForRecipe(
             ServerPlayer player, ModType type, ResourceLocation recipeId) {
-        net.minecraft.world.item.crafting.Recipe<?> recipe = player.serverLevel()
+        Recipe<?> recipe = player.serverLevel()
                 .getRecipeManager().byKey(recipeId).orElse(null);
         String subType = recipe != null
                 ? recipeMachineSubType(recipe, type)
@@ -615,7 +631,7 @@ public final class AltarBindingRegistry {
     private static List<BoundMachine> getBoundMachinesForType(
             ServerPlayer player, ModType type, @Nullable String subTypeHint,
             @Nullable ResourceLocation recipeId,
-            @Nullable net.minecraft.world.item.crafting.Recipe<?> recipe) {
+            @Nullable Recipe<?> recipe) {
         List<BoundMachine> result = new ArrayList<>();
         forEachInventoryGroup(player, stacks -> collectBindingsForType(
                 stacks, type, subTypeHint, recipeId, recipe, player, result));
@@ -640,10 +656,10 @@ public final class AltarBindingRegistry {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (!isCompatibleMachineType(type, entryType)
-                        && !(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID
+                        && !(PmmoRSModule.TYPE_ID
                         .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                        Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
                 if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
@@ -660,7 +676,7 @@ public final class AltarBindingRegistry {
     private static void collectBindingsForType(List<ItemStack> stacks, ModType type,
                                                 String subTypeHint,
                                                 @Nullable ResourceLocation recipeId,
-                                                @Nullable net.minecraft.world.item.crafting.Recipe<?> recipe,
+                                                @Nullable Recipe<?> recipe,
                                                 ServerPlayer player,
                                                 List<BoundMachine> out) {
         // A resolved recipe supplies the canonical class/ID mapping from
@@ -673,7 +689,7 @@ public final class AltarBindingRegistry {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (!isCompatibleMachineType(type, entryType)
-                        && !(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID
+                        && !(PmmoRSModule.TYPE_ID
                         .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (recipeId != null && ModIds.TACZ.equals(type.id())
@@ -683,11 +699,11 @@ public final class AltarBindingRegistry {
                 if (recipe != null
                         && !isRecipeBindingCompatible(recipe, type, entry.blockKey())) continue;
                 if (normalized != null && entry.blockKey() != null
-                        && !entry.blockKey().toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
+                        && !entry.blockKey().toLowerCase(Locale.ROOT).contains(normalized)) {
                     continue;
                 }
                 ResourceKey<Level> altarDim = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                        Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
                 if (!isBindingFresh(entryLevel, altarDim, entry.pos(), entry.blockKey())) {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
@@ -727,7 +743,7 @@ public final class AltarBindingRegistry {
         }
         for (AltarBinding binding : bindings) {
             if (AltarBinding.RS_NETWORK.equals(binding.type())) {
-                if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                         && RSAltarBindingResolver.resolveNetworkForBinding(player, binding) != null) {
                     return true;
                 }
@@ -735,7 +751,7 @@ public final class AltarBindingRegistry {
             }
             if (AltarBinding.BD_NETWORK.equals(binding.type())) {
                 CompoundTag data = binding.data();
-                if (!data.contains("networkId", net.minecraft.nbt.Tag.TAG_INT)) continue;
+                if (!data.contains("networkId", Tag.TAG_INT)) continue;
                 int networkId = data.getInt("networkId");
                 if (networkId < 0) continue;
                 try {
@@ -751,16 +767,15 @@ public final class AltarBindingRegistry {
     }
 
     private static boolean isPmmoSalvageBinding(BindingStorage.BindingEntry entry) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) return false;
-        ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo
-                .PmmoSalvageCatalog.salvageBlockId();
+        if (!ModList.get().isLoaded(ModIds.PMMO)) return false;
+        ResourceLocation configured = PmmoSalvageCatalog.salvageBlockId();
         return configured != null && configured.toString().equals(entry.blockRegKey());
     }
 
     static boolean isExecutableBinding(ModType type, String blockKey) {
         if (type == null || blockKey == null) return false;
         if (!"goety".equals(type.id())) return true;
-        String key = blockKey.toLowerCase(java.util.Locale.ROOT);
+        String key = blockKey.toLowerCase(Locale.ROOT);
         return !key.startsWith("goety_component")
                 && !key.contains("cursed_cage")
                 && !key.contains("soul_candlestick");
@@ -781,7 +796,7 @@ public final class AltarBindingRegistry {
         String path = recipeId.getPath();
         int slash = path.indexOf('/');
         if (slash <= 0) return null;
-        String hint = path.substring(0, slash).toLowerCase(java.util.Locale.ROOT);
+        String hint = path.substring(0, slash).toLowerCase(Locale.ROOT);
         return "kjs".equals(hint) ? null : hint;
     }
 
@@ -791,7 +806,7 @@ public final class AltarBindingRegistry {
      * class mapping still identifies the physical workstation reliably.
      */
     @Nullable
-    static String recipeMachineSubType(net.minecraft.world.item.crafting.Recipe<?> recipe,
+    static String recipeMachineSubType(Recipe<?> recipe,
                                        ModType type) {
         if (recipe == null) return null;
         String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
@@ -821,7 +836,7 @@ public final class AltarBindingRegistry {
         // PMMO exposes one globally configured salvage interaction block. The
         // synthetic recipe path starts with pmmo_salvage, but an existing
         // binding may legitimately retain the owning mod's block key.
-        if (com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID.equals(type.id())) {
+        if (PmmoRSModule.TYPE_ID.equals(type.id())) {
             return null;
         }
         // These vanilla ModTypes each represent exactly one machine. A slash in a

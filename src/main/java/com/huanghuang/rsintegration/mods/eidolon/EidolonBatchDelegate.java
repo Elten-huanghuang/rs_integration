@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.mods.eidolon;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import java.util.Arrays;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -10,7 +16,6 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -43,8 +48,8 @@ import java.util.Set;
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     // ── Shared class refs (resolved from probe) ─────────────────
-    private static volatile java.lang.reflect.Field boilingField;
-    private static volatile java.lang.reflect.Field stepsField;
+    private static volatile Field boilingField;
+    private static volatile Field stepsField;
 
     static {
         if (EidolonReflection.crucibleTileEntityClass != null) {
@@ -160,7 +165,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (isRitualRecipe && isBrazier) {
             Object currentRitual = null;
             try {
-                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
+                Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
                 f.setAccessible(true);
                 currentRitual = f.get(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
@@ -170,7 +175,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             }
             boolean burning = false;
             try {
-                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
+                Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                 f.setAccessible(true);
                 burning = f.getBoolean(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
@@ -373,7 +378,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Drain water, stop boiling, clear steps (consume resources)
         try {
-            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            Field tankField = crucible.getClass().getDeclaredField("tank");
             tankField.setAccessible(true);
             Object tank = tankField.get(crucible);
             tank.getClass()
@@ -487,10 +492,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Check brazier is not busy
         try {
-            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
+            Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             f.setAccessible(true);
             if (f.get(brazier) != null) return false;
-            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
+            Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
@@ -540,7 +545,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private Ingredient getRitualReagent() {
         try {
-            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("reagent");
+            Field f = EidolonReflection.ritualRecipeClass.getField("reagent");
             return (Ingredient) f.get(recipe);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getRitualReagent failed", e);
@@ -555,11 +560,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private boolean matchesSelectedRitual(ServerLevel level, ItemStack reagentStack) {
         if (brazier == null || recipe == null || EidolonReflection.ritualRecipeClass == null
                 || EidolonReflection.brazierTileEntityClass == null) return false;
-        java.lang.reflect.Method setStack = null;
+        Method setStack = null;
         try {
             setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, reagentStack.copyWithCount(1));
-            java.lang.reflect.Method matches = EidolonReflection.ritualRecipeClass.getMethod(
+            Method matches = EidolonReflection.ritualRecipeClass.getMethod(
                     "matches", EidolonReflection.brazierTileEntityClass, Level.class);
             return Boolean.TRUE.equals(matches.invoke(recipe, brazier, level));
         } catch (Exception e) {
@@ -579,7 +584,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private List<Ingredient> getRitualPedestalItems() {
         try {
-            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
+            Field f = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
@@ -591,7 +596,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private List<Ingredient> getRitualFocusItems() {
         try {
-            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("focusItems");
+            Field f = EidolonReflection.ritualRecipeClass.getField("focusItems");
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
@@ -603,7 +608,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private List<Ingredient> getRitualInvariantItems() {
         try {
-            java.lang.reflect.Field f = EidolonReflection.ritualRecipeClass.getField("invariantItems");
+            Field f = EidolonReflection.ritualRecipeClass.getField("invariantItems");
             @SuppressWarnings("unchecked")
             List<Ingredient> items = (List<Ingredient>) f.get(recipe);
             return items;
@@ -629,10 +634,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Check brazier not busy
         try {
-            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
+            Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             f.setAccessible(true);
             if (f.get(brazier) != null) return false;
-            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
+            Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             if (bf.getBoolean(brazier)) return false;
         } catch (Exception e) { return false; }
@@ -696,7 +701,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             Object provider = findEmptyProvider(providers, used);
             if (provider == null) return false;
             ItemStack stack = materials.get(index[0]++).copyWithCount(1);
-            if (!com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) return false;
+            if (!IngredientMatcher.test(ingredient, stack)) return false;
             writeRitualProvider(provider, focus, stack);
             used.add(provider);
             installedRitualInputs.add(new RitualInputSlot(provider, focus, stack));
@@ -741,7 +746,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                 // HandTileEntity is also an IRitualItemProvider, but intentionally
                 // exposes only provide()/take(). Its stack needs this compatibility
                 // path so a hand pedestal can receive an RSI-reserved sacrifice.
-                java.lang.reflect.Field itemStack = findField(provider.getClass(), "stack");
+                Field itemStack = findField(provider.getClass(), "stack");
                 itemStack.setAccessible(true);
                 itemStack.set(provider, stack.copy());
                 provider.getClass().getMethod("sync").invoke(provider);
@@ -750,7 +755,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (provider instanceof BlockEntity blockEntity) blockEntity.setChanged();
     }
 
-    private static java.lang.reflect.Field findField(Class<?> type, String name) throws NoSuchFieldException {
+    private static Field findField(Class<?> type, String name) throws NoSuchFieldException {
         for (Class<?> current = type; current != null; current = current.getSuperclass()) {
             try {
                 return current.getDeclaredField(name);
@@ -766,7 +771,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (required <= 0.0F) return true;
         try {
             Class<?> ritual = Class.forName("elucent.eidolon.api.ritual.Ritual");
-            net.minecraft.world.phys.AABB bounds = (net.minecraft.world.phys.AABB) ritualDefaultBounds(ritual);
+            AABB bounds = (AABB) ritualDefaultBounds(ritual);
             float available = 0.0F;
             for (Mob mob : level.getEntitiesOfClass(Mob.class, bounds, mob -> !mob.isInvulnerable())) {
                 available += mob.getHealth();
@@ -792,7 +797,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     private float ritualHealthRequirement() {
         try {
-            java.lang.reflect.Field health = EidolonReflection.ritualRecipeClass
+            Field health = EidolonReflection.ritualRecipeClass
                     .getDeclaredField("healthRequirement");
             health.setAccessible(true);
             return health.getFloat(recipe);
@@ -805,11 +810,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private boolean placeReagentAndStartRitual(ServerLevel level, ItemStack reagent, ServerPlayer player) {
         try {
             ItemStack oneReagent = reagent.copyWithCount(1);
-            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, oneReagent);
             ((BlockEntity) brazier).setChanged();
-            java.lang.reflect.Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
-                    "startBurning", net.minecraft.world.entity.player.Player.class, Level.class, BlockPos.class);
+            Method startBurning = EidolonReflection.brazierTileEntityClass.getMethod(
+                    "startBurning", Player.class, Level.class, BlockPos.class);
             startBurning.invoke(brazier, player, level, myPos);
             return true;
         } catch (Exception e) {
@@ -870,7 +875,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             Ingredient[] core = (Ingredient[]) recipe.getClass()
                     .getMethod("getCore").invoke(recipe);
-            return core != null ? java.util.Arrays.asList(core) : null;
+            return core != null ? Arrays.asList(core) : null;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getCore failed", e);
             return null;
@@ -881,7 +886,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         try {
             Ingredient[] outer = (Ingredient[]) recipe.getClass()
                     .getMethod("getOuter").invoke(recipe);
-            return outer != null ? java.util.Arrays.asList(outer) : null;
+            return outer != null ? Arrays.asList(outer) : null;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] getOuter failed", e);
             return null;
@@ -1053,7 +1058,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         // Drain water, stop boiling, clear steps
         try {
-            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            Field tankField = crucible.getClass().getDeclaredField("tank");
             tankField.setAccessible(true);
             Object tank = tankField.get(crucible);
             tank.getClass()
@@ -1089,15 +1094,15 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             if (craftCompleted) return true;
             // Check ritualDone flag on brazier
             try {
-                java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
+                Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
                 f.setAccessible(true);
                 if (f.getBoolean(be)) return true;
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
             // Check item entity above brazier
             BlockPos pos = be.getBlockPos();
-            for (net.minecraft.world.entity.item.ItemEntity entity :
-                    level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
-                            new net.minecraft.world.phys.AABB(
+            for (ItemEntity entity :
+                    level.getEntitiesOfClass(ItemEntity.class,
+                            new AABB(
                                     pos.getX() - 0.5, pos.getY() + 2.0, pos.getZ() - 0.5,
                                     pos.getX() + 1.5, pos.getY() + 3.5, pos.getZ() + 1.5))) {
                 if (!entity.getItem().isEmpty()) return true;
@@ -1121,12 +1126,12 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         // Priority 1: Collect ItemEntity above brazier
         ServerLevel level = resolveMachineLevel(player);
         if (myPos != null) {
-            List<net.minecraft.world.entity.item.ItemEntity> entities =
-                    level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
-                            new net.minecraft.world.phys.AABB(
+            List<ItemEntity> entities =
+                    level.getEntitiesOfClass(ItemEntity.class,
+                            new AABB(
                                     myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
                                     myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5));
-            for (net.minecraft.world.entity.item.ItemEntity entity : entities) {
+            for (ItemEntity entity : entities) {
                 ItemStack stack = entity.getItem().copy();
                 if (!stack.isEmpty()) {
                     entity.discard();
@@ -1181,19 +1186,19 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (brazier == null || myPos == null) return;
         try {
             // Clear reagent from brazier if ritual didn't consume it
-            java.lang.reflect.Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
+            Method setStack = brazier.getClass().getMethod("setStack", ItemStack.class);
             setStack.invoke(brazier, ItemStack.EMPTY);
             ((BlockEntity) brazier).setChanged();
 
-            java.lang.reflect.Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
+            Field f = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritualDone");
             f.setAccessible(true);
             f.setBoolean(brazier, false);
 
-            java.lang.reflect.Field rf = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
+            Field rf = EidolonReflection.brazierTileEntityClass.getDeclaredField("ritual");
             rf.setAccessible(true);
             rf.set(brazier, null);
 
-            java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
+            Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
             bf.setAccessible(true);
             bf.setBoolean(brazier, false);
         } catch (Exception e) {
@@ -1215,9 +1220,9 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         if (!isRitual || myPos == null) return null;
-        return new net.minecraft.world.phys.AABB(
+        return new AABB(
                 myPos.getX() - 0.5, myPos.getY() + 2.0, myPos.getZ() - 0.5,
                 myPos.getX() + 1.5, myPos.getY() + 3.5, myPos.getZ() + 1.5);
     }
@@ -1298,27 +1303,27 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private int readCurrentWaterAmount() {
         if (crucible == null) return Integer.MAX_VALUE;
         try {
-            java.lang.reflect.Field tankField = crucible.getClass().getDeclaredField("tank");
+            Field tankField = crucible.getClass().getDeclaredField("tank");
             tankField.setAccessible(true);
             Object tank = tankField.get(crucible);
             // Try getFluidAmount() first (common Forge tank pattern)
             try {
-                java.lang.reflect.Method m = tank.getClass().getMethod("getFluidAmount");
+                Method m = tank.getClass().getMethod("getFluidAmount");
                 return (int) m.invoke(tank);
             } catch (NoSuchMethodException e) { /* fall through */ }
             // Try getFluidInTank(0).getAmount()
             try {
-                java.lang.reflect.Method m = tank.getClass().getMethod("getFluidInTank", int.class);
+                Method m = tank.getClass().getMethod("getFluidInTank", int.class);
                 Object fluidStack = m.invoke(tank, 0);
                 if (fluidStack != null) {
-                    java.lang.reflect.Method am = fluidStack.getClass().getMethod("getAmount");
+                    Method am = fluidStack.getClass().getMethod("getAmount");
                     return (int) am.invoke(fluidStack);
                 }
             } catch (NoSuchMethodException e) { /* fall through */ }
             // Try IFluidHandler.getTankCapacity(0) - not useful for current amount
             // Try reading a public `amount` field on the tank
             try {
-                java.lang.reflect.Field f = tank.getClass().getDeclaredField("amount");
+                Field f = tank.getClass().getDeclaredField("amount");
                 f.setAccessible(true);
                 return f.getInt(tank);
             } catch (NoSuchFieldException e) { /* fall through */ }
@@ -1367,7 +1372,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                         if (be != null && EidolonReflection.crucibleTileEntityClass.isInstance(be)) {
                             boolean hasWater = false;
                             try {
-                                java.lang.reflect.Field f = be.getClass().getDeclaredField("hasWater");
+                                Field f = be.getClass().getDeclaredField("hasWater");
                                 f.setAccessible(true);
                                 hasWater = f.getBoolean(be);
                             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
@@ -1392,7 +1397,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (isRitual) {
             // Number of pedestal / focus items required
             try {
-                java.lang.reflect.Field pf = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
+                Field pf = EidolonReflection.ritualRecipeClass.getField("pedestalItems");
                 @SuppressWarnings("unchecked")
                 List<Ingredient> pi = (List<Ingredient>) pf.get(recipe);
                 if (pi != null && !pi.isEmpty()) {
@@ -1412,7 +1417,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                                 && EidolonReflection.brazierTileEntityClass.isInstance(be)) {
                             boolean burning = false;
                             try {
-                                java.lang.reflect.Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
+                                Field bf = EidolonReflection.brazierTileEntityClass.getDeclaredField("burning");
                                 bf.setAccessible(true);
                                 burning = bf.getBoolean(be);
                             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
@@ -1432,16 +1437,16 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
     static int readWaterAmountStatic(Recipe<?> recipe) {
         try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getWaterAmount");
+            Method m = recipe.getClass().getMethod("getWaterAmount");
             return (int) m.invoke(recipe);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("waterAmount");
+            Field f = recipe.getClass().getDeclaredField("waterAmount");
             f.setAccessible(true);
             return f.getInt(recipe);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         try {
-            java.lang.reflect.Method m = recipe.getClass().getMethod("getWater");
+            Method m = recipe.getClass().getMethod("getWater");
             return (int) m.invoke(recipe);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
         return 1000;

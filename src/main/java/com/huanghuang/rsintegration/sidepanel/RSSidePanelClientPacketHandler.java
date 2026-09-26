@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel;
 
+import com.huanghuang.rsintegration.sidepanel.client.WorldPickClient;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -24,7 +25,7 @@ final class RSSidePanelClientPacketHandler {
     }
 
     static void onOperationResult(RSSidePanelOperationResultPacket packet) {
-        com.huanghuang.rsintegration.sidepanel.client.WorldPickClient.onOperationResult(
+        WorldPickClient.onOperationResult(
                 packet.operationId(), packet.success(), packet.actualCount());
         if (RSSidePanelModule.isEnabled()) RSSidePanelClient.onOperationResult(packet);
     }

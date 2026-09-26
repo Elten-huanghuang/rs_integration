@@ -6,6 +6,8 @@ import dev.shadowsoffire.apotheosis.adventure.socket.gem.Gem;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.GemRegistry;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.GemInstance;
 import net.minecraft.world.item.ItemStack;
+import java.util.Comparator;
+import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -68,7 +70,7 @@ public final class ApotheosisGemCuttingCatalog {
 
     private static void add(List<ApotheosisGemCuttingRecipe> out, Gem gem,
                             LootRarity from, LootRarity to,
-                            net.minecraft.world.item.Item material, int count, int branch) {
+                            Item material, int count, int branch) {
         if (material != null) out.add(new ApotheosisGemCuttingRecipe(
                 gem, from, to, new ItemStack(material, count), branch));
     }
@@ -87,7 +89,7 @@ public final class ApotheosisGemCuttingCatalog {
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Unable to read Apotheosis rarity registry", exception);
         }
-        result.sort(java.util.Comparator.comparingInt(LootRarity::ordinal));
+        result.sort(Comparator.comparingInt(LootRarity::ordinal));
         return result;
     }
 }

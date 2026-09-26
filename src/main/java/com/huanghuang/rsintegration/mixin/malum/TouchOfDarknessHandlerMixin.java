@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.malum;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilityService;

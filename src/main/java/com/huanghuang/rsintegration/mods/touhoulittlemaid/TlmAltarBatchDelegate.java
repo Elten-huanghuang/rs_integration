@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.mods.touhoulittlemaid;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
+import net.minecraftforge.common.capabilities.Capability;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -58,7 +64,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         powerCapProbed = true;
         if (TLMReflection.powerCapProviderClass != null) {
             try {
-                java.lang.reflect.Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
+                Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
                 capField.setAccessible(true);
                 powerCapToken = capField.get(null);
             } catch (Exception e) {
@@ -77,7 +83,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private BlockPos centrePos;
     @Nullable
-    private net.minecraft.world.phys.AABB outputCaptureRegion;
+    private AABB outputCaptureRegion;
     private Recipe<?> recipe;
     private boolean craftEverConfirmed;
     @Nullable
@@ -223,15 +229,15 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     // outside the structure block bounds returned by the
                     // resolver. Always include that point so magnets and other
                     // pickup handlers cannot win the race before interception.
-                    net.minecraft.world.phys.AABB spawnBox =
-                            new net.minecraft.world.phys.AABB(spawnPos).inflate(1.0);
+                    AABB spawnBox =
+                            new AABB(spawnPos).inflate(1.0);
                     if (this.outputCaptureRegion == null) {
-                        this.outputCaptureRegion = new net.minecraft.world.phys.AABB(
+                        this.outputCaptureRegion = new AABB(
                                 minX, Math.min(minY, spawnPos.getY()), minZ,
                                 maxX + 1, Math.max(maxY + 1, spawnPos.getY() + 1), maxZ + 1)
                                 .inflate(1.0);
                     } else {
-                        this.outputCaptureRegion = new net.minecraft.world.phys.AABB(
+                        this.outputCaptureRegion = new AABB(
                                 Math.min(this.outputCaptureRegion.minX, spawnBox.minX),
                                 Math.min(this.outputCaptureRegion.minY, spawnBox.minY),
                                 Math.min(this.outputCaptureRegion.minZ, spawnBox.minZ),
@@ -540,9 +546,9 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // (copyInput recipes copy NBT from ingredients into the output entity).
         BlockPos scanCenter = centrePos != null ? centrePos : myPos;
         BlockPos outputPos = scanCenter.above(2); // exactly where TLM spawns it
-        net.minecraft.world.phys.AABB scanRegion = outputCaptureRegion != null
+        AABB scanRegion = outputCaptureRegion != null
                 ? outputCaptureRegion
-                : new net.minecraft.world.phys.AABB(outputPos).inflate(2.0);
+                : new AABB(outputPos).inflate(2.0);
         ItemStack expected = getExpectedOutput();
         if (expected == null || expected.isEmpty()) return ItemStack.EMPTY;
         List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class, scanRegion);
@@ -605,10 +611,10 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         if (outputCaptureRegion != null) return outputCaptureRegion;
         BlockPos base = centrePos != null ? centrePos : myPos;
-        return base == null ? null : new net.minecraft.world.phys.AABB(base.above(2)).inflate(2.0);
+        return base == null ? null : new AABB(base.above(2)).inflate(2.0);
     }
 
     // ── Helpers ──
@@ -708,7 +714,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private Object resolvePowerCapability(ServerPlayer player) {
         probePowerCap();
         if (powerCapToken == null) return null;
-        return player.getCapability((net.minecraftforge.common.capabilities.Capability<?>) powerCapToken)
+        return player.getCapability((Capability<?>) powerCapToken)
                 .resolve().orElse(null);
     }
 
@@ -765,7 +771,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (powerCapToken == null) return null;
         try {
             var capInstance = player.getCapability(
-                    (net.minecraftforge.common.capabilities.Capability<?>) powerCapToken)
+                    (Capability<?>) powerCapToken)
                     .resolve();
             if (capInstance.isEmpty()) return null;
 
@@ -820,14 +826,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     private boolean invokeAltarCraft(ServerLevel level) {
         try {
             Method altarCraftMethod = Reflect.findMethod(TLMReflection.blockAltarClass, "altarCraft",
-                    new Class<?>[]{Level.class, TLMReflection.altarBEClass, net.minecraft.world.entity.player.Player.class});
+                    new Class<?>[]{Level.class, TLMReflection.altarBEClass, Player.class});
             if (altarCraftMethod == null) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft method not found");
                 return false;
             }
             altarCraftMethod.invoke(blockAltar, level, altar, player);
             return true;
-        } catch (java.lang.reflect.InvocationTargetException e) {
+        } catch (InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft failed", root);
             return false;
@@ -853,7 +859,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     expected = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
                 }
                 for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class,
-                        new net.minecraft.world.phys.AABB(myPos).inflate(2.5))) {
+                        new AABB(myPos).inflate(2.5))) {
                     if (entity.isRemoved()) continue;
                     ItemStack stack = entity.getItem();
                     if (stack.isEmpty()) continue;
@@ -928,7 +934,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     private static ItemStackHandler rsi$tlmsGetHandler(Object storageBe)
             throws NoSuchFieldException, IllegalAccessException {
-        java.lang.reflect.Field f = TLMReflection.altarBEClass.getDeclaredField("handler");
+        Field f = TLMReflection.altarBEClass.getDeclaredField("handler");
         f.setAccessible(true);
         return (ItemStackHandler) f.get(storageBe);
     }
@@ -970,7 +976,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // 2. power_point items that can be absorbed on demand
         CraftStorageEndpoint endpoint = selectedEndpoint != null
                 ? selectedEndpoint
-                : com.huanghuang.rsintegration.storage.StorageRestockSupport
+                : StorageRestockSupport
                 .resolve(player).orElse(null);
         int itemPower = countPowerPointItems(player, dim, pos, endpoint);
 
@@ -987,7 +993,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         powerCapProbed = true;
         if (TLMReflection.powerCapProviderClass != null) {
             try {
-                java.lang.reflect.Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
+                Field capField = TLMReflection.powerCapProviderClass.getField("POWER_CAP");
                 capField.setAccessible(true);
                 powerCapToken = capField.get(null);
             } catch (Exception e) {
@@ -1015,7 +1021,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         if (powerCapToken == null) return null;
         try {
             var capInstance = player.getCapability(
-                    (net.minecraftforge.common.capabilities.Capability<?>) powerCapToken)
+                    (Capability<?>) powerCapToken)
                     .resolve();
             if (capInstance.isEmpty()) return null;
             Class<?> powerCapClass = capInstance.get().getClass();

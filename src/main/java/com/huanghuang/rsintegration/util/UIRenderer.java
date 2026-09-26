@@ -6,6 +6,8 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Rounded-rect and gradient drawing primitives for polished UI.
@@ -187,8 +189,8 @@ public final class UIRenderer {
 
     /** Split {@code text} into lines that each fit within {@code maxWidth},
      *  breaking at spaces when possible. */
-    public static java.util.List<String> wrapLines(Font font, String text, int maxWidth) {
-        java.util.List<String> lines = new java.util.ArrayList<>();
+    public static List<String> wrapLines(Font font, String text, int maxWidth) {
+        List<String> lines = new ArrayList<>();
         String remaining = text;
         while (!remaining.isEmpty()) {
             String line = font.plainSubstrByWidth(remaining, maxWidth);

@@ -1,11 +1,12 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
@@ -71,14 +72,14 @@ public final class MachineCollectPacket {
             context.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
         context.enqueueWork(() -> {
 
             ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                Registries.DIMENSION, packet.dim);
 
             if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
                 player.sendSystemMessage(

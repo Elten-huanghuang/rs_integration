@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,7 +72,7 @@ public final class SelfAmplifyingRecipePolicy {
                 .toList();
         if (filtered.isEmpty() || filtered.size() == candidates.length) return spec;
         return new IngredientSpec(
-                net.minecraft.world.item.crafting.Ingredient.of(filtered.stream()),
+                Ingredient.of(filtered.stream()),
                 spec.count(), spec.role());
     }
 

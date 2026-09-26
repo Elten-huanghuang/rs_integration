@@ -13,6 +13,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Containers;
+import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -28,7 +34,7 @@ public final class LithumAltarFuelHelper {
     private ItemStack fuelType = ItemStack.EMPTY;
     private int insertedCount;
 
-    public boolean findAndLock(net.minecraft.server.level.ServerLevel level, BlockPos corePos) {
+    public boolean findAndLock(ServerLevel level, BlockPos corePos) {
         BlockEntity existing = furnacePos == null ? null : level.getBlockEntity(furnacePos);
         if (LithumAltarStructureHelper.isFurnace(existing)) return true;
         furnacePos = null;
@@ -60,8 +66,8 @@ public final class LithumAltarFuelHelper {
         return false;
     }
 
-    public boolean ensureFuel(net.minecraft.server.level.ServerLevel level, INetwork network,
-                              net.minecraft.server.level.ServerPlayer player) {
+    public boolean ensureFuel(ServerLevel level, INetwork network,
+                              ServerPlayer player) {
         if (furnacePos == null || network == null) return false;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
         if (!LithumAltarStructureHelper.isFurnace(furnace)) return false;
@@ -78,10 +84,10 @@ public final class LithumAltarFuelHelper {
         ItemStack simulated = handler.insertItem(FUEL_SLOT, candidate.copyWithCount(requested), true);
         int accepted = requested - simulated.getCount();
         if (accepted <= 0) return false;
-        ItemStack simulatedExtract = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        ItemStack simulatedExtract = CraftStorageEndpoints
                 .extractExactLegacy(network, player, candidate.copyWithCount(1), accepted, true);
         if (simulatedExtract.getCount() != accepted) return false;
-        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        ItemStack extracted = CraftStorageEndpoints
                 .extractExactLegacy(network, player, candidate.copyWithCount(1), accepted, false);
         if (extracted.getCount() != accepted) {
             refund(network, extracted, player);
@@ -98,8 +104,8 @@ public final class LithumAltarFuelHelper {
         return true;
     }
 
-    public boolean ensureFuel(net.minecraft.server.level.ServerLevel level, CraftStorageEndpoint endpoint,
-                              net.minecraft.server.level.ServerPlayer player) {
+    public boolean ensureFuel(ServerLevel level, CraftStorageEndpoint endpoint,
+                              ServerPlayer player) {
         if (furnacePos == null || endpoint == null) return false;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
         if (!LithumAltarStructureHelper.isFurnace(furnace)) return false;
@@ -135,8 +141,8 @@ public final class LithumAltarFuelHelper {
         return true;
     }
 
-    public void refundUnused(net.minecraft.server.level.ServerLevel level, INetwork network,
-                             net.minecraft.server.level.ServerPlayer player) {
+    public void refundUnused(ServerLevel level, INetwork network,
+                             ServerPlayer player) {
         if (furnacePos == null || insertedCount <= 0) return;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
         IItemHandler handler = handler(furnace);
@@ -147,16 +153,16 @@ public final class LithumAltarFuelHelper {
         ItemStack extracted = handler.extractItem(FUEL_SLOT, count, false);
         ItemStack remainder = refund(network, extracted, player);
         if (!remainder.isEmpty() && player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, remainder);
+            ItemHandlerHelper.giveItemToPlayer(player, remainder);
         } else if (!remainder.isEmpty()) {
-            net.minecraft.world.Containers.dropItemStack(level, furnacePos.getX() + 0.5,
+            Containers.dropItemStack(level, furnacePos.getX() + 0.5,
                     furnacePos.getY() + 1, furnacePos.getZ() + 0.5, remainder);
         }
         insertedCount = Math.max(0, insertedCount - extracted.getCount());
     }
 
-    public void refundUnused(net.minecraft.server.level.ServerLevel level, CraftStorageEndpoint endpoint,
-                             net.minecraft.server.level.ServerPlayer player) {
+    public void refundUnused(ServerLevel level, CraftStorageEndpoint endpoint,
+                             ServerPlayer player) {
         if (endpoint == null || furnacePos == null || insertedCount <= 0) return;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
         IItemHandler handler = handler(furnace);
@@ -166,7 +172,7 @@ public final class LithumAltarFuelHelper {
         if (count <= 0) return;
         ItemStack extracted = handler.extractItem(FUEL_SLOT, count, false);
         ItemStack remainder = extracted.isEmpty() ? ItemStack.EMPTY : endpoint.insert(player, extracted, false).remainder().orElse(ItemStack.EMPTY);
-        if (!remainder.isEmpty() && player != null) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, remainder);
+        if (!remainder.isEmpty() && player != null) ItemHandlerHelper.giveItemToPlayer(player, remainder);
         insertedCount = Math.max(0, insertedCount - extracted.getCount());
     }
 
@@ -178,9 +184,9 @@ public final class LithumAltarFuelHelper {
     }
 
     private static ItemStack refund(INetwork network, ItemStack stack,
-                                    net.minecraft.server.level.ServerPlayer player) {
+                                    ServerPlayer player) {
         if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
-        return com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        return CraftStorageEndpoints
                 .insertLegacy(network, player, stack, false);
     }
 
@@ -192,18 +198,18 @@ public final class LithumAltarFuelHelper {
             if (!stack.isEmpty() && stack.is(FUEL_TAG)) candidates.add(stack.copyWithCount(1));
         }
         candidates.sort(Comparator.comparingInt((ItemStack stack) -> {
-            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
             int index = key == null ? -1 : priority.indexOf(key.toString());
             return index < 0 ? Integer.MAX_VALUE : index;
         }).thenComparing((ItemStack stack) -> {
-            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
             return key == null ? "" : key.toString();
         }));
         return candidates.isEmpty() ? ItemStack.EMPTY : candidates.get(0);
     }
 
     private static ItemStack selectFuel(CraftStorageEndpoint endpoint,
-                                        net.minecraft.server.level.ServerPlayer player) {
+                                        ServerPlayer player) {
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         List<? extends String> priority = RSIntegrationConfig.DISTANT_WORLDS_FUEL_PRIORITY.get();
@@ -213,11 +219,11 @@ public final class LithumAltarFuelHelper {
             if (!stack.isEmpty() && stack.is(FUEL_TAG)) candidates.add(stack.copyWithCount(1));
         }
         candidates.sort(Comparator.comparingInt((ItemStack stack) -> {
-            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
             int index = key == null ? -1 : priority.indexOf(key.toString());
             return index < 0 ? Integer.MAX_VALUE : index;
         }).thenComparing(stack -> {
-            ResourceLocation key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
             return key == null ? "" : key.toString();
         }));
         return candidates.isEmpty() ? ItemStack.EMPTY : candidates.get(0);
