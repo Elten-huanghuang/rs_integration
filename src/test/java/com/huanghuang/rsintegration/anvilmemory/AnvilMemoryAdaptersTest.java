@@ -8,7 +8,11 @@ import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AnvilMemoryAdaptersTest {
     @BeforeAll
@@ -32,5 +36,16 @@ class AnvilMemoryAdaptersTest {
         };
 
         assertNull(AnvilMemoryAdapters.find(menu));
+    }
+
+    @Test
+    void preciseGoetyAdapterPrecedesVanillaAnvilFallback() throws ReflectiveOperationException {
+        Field adaptersField = AnvilMemoryAdapters.class.getDeclaredField("ADAPTERS");
+        adaptersField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<AnvilMemoryAdapter> adapters = (List<AnvilMemoryAdapter>) adaptersField.get(null);
+        List<String> ids = adapters.stream().map(AnvilMemoryAdapter::id).toList();
+
+        assertTrue(ids.indexOf("goety_dark_anvil") < ids.indexOf("minecraft_anvil"));
     }
 }

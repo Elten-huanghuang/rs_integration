@@ -11,14 +11,14 @@ public final class AnvilMemoryAdapters {
     private static final List<AnvilMemoryAdapter> ADAPTERS = new CopyOnWriteArrayList<>();
 
     static {
+        register(menuAdapter("goety_dark_anvil", "goety:dark_anvil"));
+        register(menuAdapter("irons_spellbooks_arcane_anvil", "irons_spellbooks:arcane_anvil_menu"));
         register(new AnvilMemoryAdapter() {
             public String id() { return "minecraft_anvil"; }
             public boolean supports(AbstractContainerMenu menu) { return menu instanceof AnvilMenu; }
             public int primarySlot() { return 0; }
             public int materialSlot() { return 1; }
         });
-        register(menuAdapter("goety_dark_anvil", "goety:dark_anvil"));
-        register(menuAdapter("irons_spellbooks_arcane_anvil", "irons_spellbooks:arcane_anvil_menu"));
     }
 
     private AnvilMemoryAdapters() {}
