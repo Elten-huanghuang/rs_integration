@@ -30,3 +30,6 @@ libs/
 # Local agent tooling state
 .agent/
 .agents/
+
+# 本地文档，不提交到仓库
+/docs/
