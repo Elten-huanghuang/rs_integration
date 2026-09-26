@@ -63,6 +63,16 @@ public interface ModRecipeHandler {
     List<IngredientSpec> getIngredients(Recipe<?> recipe);
 
     /**
+     * 返回允许进入递归合成图的材料。运行时专用资源可以在这里移除，同时继续
+     * 保留在 {@link #getIngredients(Recipe)} 中，供实际预留和机器执行使用。
+     */
+    @Nonnull
+    default List<IngredientSpec> getRecursiveIngredients(
+            @Nonnull Recipe<?> recipe, @Nullable List<IngredientSpec> ingredients) {
+        return ingredients == null ? List.of() : ingredients;
+    }
+
+    /**
      * Total quantity required for one input when planning a multi-execution order.
      * Most inputs use their demand role directly; machine handlers may override
      * this when one physical cycle covers several logical executions.
@@ -100,7 +110,7 @@ public interface ModRecipeHandler {
         if (!hasDeterministicPrimaryOutput(recipe)) {
             return false;
         }
-        List<IngredientSpec> specs = getIngredients(recipe);
+        List<IngredientSpec> specs = getRecursiveIngredients(recipe, getIngredients(recipe));
         return specs != null && !specs.isEmpty();
     }
 

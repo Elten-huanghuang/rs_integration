@@ -1112,6 +1112,20 @@ public final class CraftPacketUtils {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 提取允许进入递归合成图的材料。运行时工具仍由代理单独预留，避免缺失时
+     * 被通用规划器当成普通材料自动制作。
+     */
+    @Nullable
+    public static List<IngredientSpec> extractRecursiveIngredientSpecs(Object recipe) {
+        List<IngredientSpec> ingredients = extractIngredientSpecs(recipe);
+        if (!(recipe instanceof Recipe<?> typedRecipe)) return ingredients;
+        var handler = ModRecipeHandlers.handlerFor(typedRecipe);
+        return handler == null
+                ? ingredients
+                : handler.getRecursiveIngredients(typedRecipe, ingredients);
+    }
+
     public static List<IngredientSpec> extractCraftingIngredientSpecs(CraftingRecipe recipe) {
         // Some machine recipes implement CraftingRecipe only so JEI can display
         // them.  Give their registered handler a chance to preserve semantics

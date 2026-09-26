@@ -98,6 +98,30 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
                 ModType.CUSTOM_GUI, recipe));
     }
 
+    @Test
+    void backgroundPlanningUsesRecursiveIngredientsInsteadOfRuntimeResources() {
+        Recipe<?> recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "runtime_only_resource"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
+        ModRecipeHandler handler = new ModRecipeHandler() {
+            @Override public ModType modType() { return ModType.FARMINGFORBLOCKHEADS_MARKET; }
+            @Override public boolean canHandle(Recipe<?> ignored) { return true; }
+            @Override public ItemStack getResultItem(Recipe<?> ignored, RegistryAccess access) {
+                return new ItemStack(Items.DIAMOND);
+            }
+            @Override public List<IngredientSpec> getIngredients(Recipe<?> ignored) {
+                return List.of(new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1));
+            }
+            @Override public List<IngredientSpec> getRecursiveIngredients(
+                    Recipe<?> ignored, List<IngredientSpec> ingredients) {
+                return List.of();
+            }
+        };
+
+        assertFalse(handler.supportsBackgroundPlanning(recipe));
+    }
+
     private static ModRecipeHandler handler(boolean deterministic) {
         return new ModRecipeHandler() {
             @Override public ModType modType() {
