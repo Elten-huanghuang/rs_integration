@@ -10,9 +10,9 @@
 
 RS Integration lets Refined Storage operate machines from other mods. Choose an item in JEI and it checks materials, resolves prerequisite recipes, operates bound machines, and returns the result to the RS network.
 
-**Current version: 1.4.5 | Minecraft 1.20.1**
+**Current version: 1.4.5.1 | Minecraft 1.20.1**
 
-[1.4.5 release notes](docs/RELEASE_NOTES_1.4.5.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
+[1.4.5.1 release notes](docs/RELEASE_NOTES_1.4.5.1.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
 
 ## Requirements
 
@@ -36,6 +36,8 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 - Uses the current inventory and RS snapshot to select one planner up front, avoiding duplicate planning work for recipes whose dependencies require special handlers.
 - Distinguishes consumed materials, returned containers, and reusable catalysts in cards, the tree, and total requirements. Missing material names can be bookmarked individually in JEI.
 - Prunes recursive no-gain conversions between equivalent colors or material variants while preserving exact-output and quantity-increasing recipes.
+- Selects the shallowest direct decomposition when several pure-planning producers are valid, while preserving normal recipe feasibility checks.
+- Restores leftovers from supported RS crafting stations before virtual recursive planning; an incomplete restore cancels the request instead of planning against stale contents.
 - Runs independent graph nodes concurrently and load-balances repeated work across compatible machines.
 - Splits large vanilla crafting batches across ticks and shares a global operation budget fairly between active players and chains.
 - Tracks material provenance and performs transactional reservation, rollback, refund, and output delivery.
@@ -66,6 +68,13 @@ RS Integration lets Refined Storage operate machines from other mods. Choose an 
 - The search box keeps a bounded, persistent history by search scope; recent entries can be restored, favorited, deleted individually, or cleared from the history overlay.
 - Sol Carrot's player-specific Eaten/Not Eaten tooltip state stays dynamic in both RS and JEI instead of leaking into shared search text.
 - Missing materials in recipe cards, tree totals, and text lists can be added to JEI bookmarks one at a time or as a group.
+- JEI can pull one group of a hovered item from the active RS or BD network with the configurable **Pull one group from storage network** shortcut (default: middle mouse button). Server-side checks cover permissions, space, stock, and safe rollback of leftovers.
+
+### Tetra JEI integration
+
+- While a Tetra workbench is open, JEI filters materials to the current target, module slot, and selected schematic; leaving the workbench restores the normal list.
+- Hold `Ctrl` while hovering a JEI material to preview its result on the current Tetra plan. The optional `keepJeiMaterialPreview` setting retains the last preview until the workbench context changes.
+- Tetra materials can be sorted in JEI by category, hardness, density, flexibility, durability, tool level/efficiency, integrity gain/cost, or magic capacity, with independent primary and secondary directions.
 
 ### JEI registration and recipe entry points
 
@@ -121,6 +130,7 @@ Open an RS crafting grid to consume food directly from the network:
 - **Automatic Aetherium Anvil hammering**: while holding a Tinker Hammer, enabling Auto Hammer in the anvil settings makes RSI strike whenever the anvil's hit cooldown permits. The same screen configures temperature bounds, forge-lever temperature control, and automatic material refilling.
 - **Dimensional Magnet collection for mutant remains**: Distant Worlds Wither Totems and Charged Wither Totems (`wither_totem` / `charged_wither_totem`) are converted from direct inventory rewards into magnet-compatible drops. A bound Dimensional Magnet can send them straight to RS instead of placing them in the player's inventory.
 - **Safe Goety manual rituals**: summoning, sacrifice, and conversion requests prepare pedestal materials and return the activation item to the player, but do not start the ritual automatically. This leaves target and environment confirmation to the player and prevents accidental material loss.
+- Goety ritual soul requirements use the configured per-tick cost multiplied by the ritual duration; long rituals are no longer undercounted.
 - **Kettle and steamer structures**: Farmer's Respite kettle automation preserves native container/fluid behavior, while Youkai's Homecoming accepts both full-height steamers and a valid single-layer rack with a lid.
 - **Youkai fermentation fluids**: pure-fluid and mixed solid/fluid fermentation recipes from Youkai's Homecoming and Gensokyo Delight reserve their filled containers recursively, collect outputs and empty containers, and retain compatibility with legacy water recipes.
 
@@ -195,6 +205,7 @@ The Resonance Disk is an RS storage disk whose contents can act as if carried by
 - Explicit quest submission can consume missing items directly from RS; missing requirements are bookmarked in JEI.
 - Crafted and externally acquired items are accounted for separately to prevent duplicate progress.
 - Requires FTB Quests and FTB Teams; RSI yields to another compatible automatic detector when one is installed.
+- The FTB Quests sidebar scan/submit controls can be disabled independently. Offline or batch submissions use the quest planner, and reward claims re-check Curios/accessory inventory so rewards are not misclassified or counted twice.
 
 ## Quick Start
 
@@ -266,6 +277,7 @@ The table lists dedicated recipe integrations registered by the current code. Re
 | Farming for Blockheads | Market exchanges as virtual recipes and recursive crafting intermediates |
 | Project MMO | Probabilistic salvage recipes with recursive material planning, level checks, XP, secondary outputs, and configurable multiblock binding |
 | Crabber's Delight | Crab Trap processing |
+| Tetra | Workbench material filtering, Ctrl-hover result preview, and configurable JEI material sorting |
 
 Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apotheosis, and Ancient Reforging. They provide binding and remote GUI access even when no automatic recipe delegate exists.
 
@@ -275,7 +287,7 @@ Configuration files are documented in-place with comments and validation ranges:
 
 - `config/rs_integration/common.toml`: feature switches, optional integrations, passive effects, auto-eat, nearby-binding range/budget, side panel, GUI-machine allowlist.
 - `saves/<world>/serverconfig/rs_integration/server.toml`: recipe selection, pure/typed planning budgets, preview admission, recursive limits, catalyst preference, variant-conversion guard, vanilla per-tick budgets, DAG concurrency, protected reserves, machine-specific policies.
-- `config/rs_integration/client.toml`: side-panel layout, HUD preferences, and RS special-search warm-up, progressive refresh, index, pinyin-worker, and disk-cache settings.
+- `config/rs_integration/client.toml`: side-panel layout, HUD preferences, FTB Quests sidebar controls, Tetra JEI preview/sorting, JEI storage extraction, and RS special-search warm-up, progressive refresh, index, pinyin-worker, and disk-cache settings.
 
 Important server controls include recipe preference/blacklists, repeat limits, resolution budgets, concurrent graph nodes/operations, per-mod parallel policy, and global chain timeout. Versioned migrations update selected legacy default values while preserving custom values; new list entries still need to be merged manually or regenerated.
 
