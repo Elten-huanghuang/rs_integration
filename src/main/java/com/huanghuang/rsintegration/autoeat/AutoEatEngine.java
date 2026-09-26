@@ -9,13 +9,16 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.PacketDistributor;
@@ -25,6 +28,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class AutoEatEngine {
 
@@ -40,10 +44,10 @@ public final class AutoEatEngine {
     private static final ResourceLocation GNAWS_GIFT = new ResourceLocation("crockpot", "gnaws_gift");
     /** Keep this equal to the wire decoder bound: the UI can blacklist the full food registry. */
     public static final int MAX_BLACKLIST_SIZE = AutoEatBlacklistPolicy.MAX_SIZE;
-    private static final Set<UUID> runningTasks = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    private static final Map<UUID, Request> pendingTasks = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Set<UUID> runningTasks = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, Request> pendingTasks = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> stackRoundRobinOffsets =
-            new java.util.concurrent.ConcurrentHashMap<>();
+            new ConcurrentHashMap<>();
 
     private record Request(AutoEatMode mode, List<ResourceLocation> selectedItems) {
         private Request {
@@ -82,7 +86,7 @@ public final class AutoEatEngine {
 
             Class<?> foodListCls = Class.forName("com.cazsius.solcarrot.tracking.FoodList");
             foodList_get = lookup.findStatic(foodListCls, "get",
-                    MethodType.methodType(foodListCls, net.minecraft.world.entity.player.Player.class));
+                    MethodType.methodType(foodListCls, Player.class));
             foodList_hasEaten = lookup.findVirtual(foodListCls, "hasEaten",
                     MethodType.methodType(boolean.class, Item.class));
             foodList_addFood = lookup.findVirtual(foodListCls, "addFood",
@@ -94,11 +98,11 @@ public final class AutoEatEngine {
 
             Class<?> mhCls = Class.forName("com.cazsius.solcarrot.tracking.MaxHealthHandler");
             maxHealth_update = lookup.findStatic(mhCls, "updateFoodHPModifier",
-                    MethodType.methodType(boolean.class, net.minecraft.world.entity.player.Player.class));
+                    MethodType.methodType(boolean.class, Player.class));
 
             Class<?> apiCls = Class.forName("com.cazsius.solcarrot.api.SOLCarrotAPI");
             solApi_sync = lookup.findStatic(apiCls, "syncFoodList",
-                    MethodType.methodType(void.class, net.minecraft.world.entity.player.Player.class));
+                    MethodType.methodType(void.class, Player.class));
         } catch (Throwable e) {
             foodList_get = null;
         }
@@ -110,19 +114,18 @@ public final class AutoEatEngine {
             MethodHandles.Lookup lookup = MethodHandles.publicLookup();
 
             lazyOptional_orElse = lookup.findVirtual(
-                    net.minecraftforge.common.util.LazyOptional.class, "orElse",
+                    LazyOptional.class, "orElse",
                     MethodType.methodType(Object.class, Object.class));
 
             Class<?> capCls = Class.forName("com.illusivesoulworks.diet.common.capability.DietCapability");
             dietCapability_get = lookup.findStatic(capCls, "get",
-                    MethodType.methodType(net.minecraftforge.common.util.LazyOptional.class,
-                            net.minecraft.world.entity.player.Player.class));
+                    MethodType.methodType(LazyOptional.class, Player.class));
 
             Class<?> apiCls = Class.forName("com.illusivesoulworks.diet.api.DietApi");
             dietApi_getInstance = lookup.findStatic(apiCls, "getInstance",
                     MethodType.methodType(apiCls));
             dietApi_getGroupsForStack = lookup.findVirtual(apiCls, "getGroups",
-                    MethodType.methodType(Set.class, net.minecraft.world.entity.player.Player.class,
+                    MethodType.methodType(Set.class, Player.class,
                             ItemStack.class));
 
             Class<?> trackerCls = Class.forName("com.illusivesoulworks.diet.api.type.IDietTracker");
@@ -162,7 +165,7 @@ public final class AutoEatEngine {
     }
 
     /** Process at most one bounded batch per player per server tick. */
-    public static void tick(net.minecraft.server.MinecraftServer server) {
+    public static void tick(MinecraftServer server) {
         for (var entry : pendingTasks.entrySet()) {
             UUID playerId = entry.getKey();
             ServerPlayer player = server.getPlayerList().getPlayer(playerId);
@@ -205,11 +208,11 @@ public final class AutoEatEngine {
     }
 
 
-    public static Set<ResourceLocation> getBlacklist(net.minecraft.world.entity.player.Player player) {
+    public static Set<ResourceLocation> getBlacklist(Player player) {
         return readResourceLocations(player.getPersistentData(), NBT_KEY);
     }
 
-    public static Set<ResourceLocation> getEffectBlacklist(net.minecraft.world.entity.player.Player player) {
+    public static Set<ResourceLocation> getEffectBlacklist(Player player) {
         return readResourceLocations(player.getPersistentData(), EFFECT_NBT_KEY);
     }
 
@@ -223,17 +226,17 @@ public final class AutoEatEngine {
         return set;
     }
 
-    public static void updateBlacklist(net.minecraft.world.entity.player.Player player,
+    public static void updateBlacklist(Player player,
                                         Set<ResourceLocation> added, Set<ResourceLocation> removed) {
         updateResourceLocations(player, NBT_KEY, getBlacklist(player), added, removed);
     }
 
-    public static void updateEffectBlacklist(net.minecraft.world.entity.player.Player player,
+    public static void updateEffectBlacklist(Player player,
                                               Set<ResourceLocation> added, Set<ResourceLocation> removed) {
         updateResourceLocations(player, EFFECT_NBT_KEY, getEffectBlacklist(player), added, removed);
     }
 
-    private static void updateResourceLocations(net.minecraft.world.entity.player.Player player,
+    private static void updateResourceLocations(Player player,
                                                 String key, Set<ResourceLocation> current,
                                                 Set<ResourceLocation> added, Set<ResourceLocation> removed) {
         Set<ResourceLocation> merged = AutoEatBlacklistPolicy.merge(current, added, removed);
@@ -381,7 +384,10 @@ public final class AutoEatEngine {
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
                             Component.translatable("rsi.autoeat.result.none")));
         }
-        return eaten >= maxPerBatch && runningTasks.contains(player.getUUID());
+        // Every button press is one bounded request. Do not retain the task
+        // after a full batch, otherwise the server consumes another batch on
+        // the next tick while storage still contains matching food.
+        return false;
     }
 
     // ── Cost deduction ────────────────────────────────────────────
@@ -711,7 +717,9 @@ public final class AutoEatEngine {
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
                             Component.translatable("rsi.autoeat.result.none")));
         }
-        return eaten >= maxPerBatch && runningTasks.contains(player.getUUID());
+        // Diet mode is also one-shot; reaching the batch limit is not a
+        // request to continue eating indefinitely.
+        return false;
     }
 
     private static ItemStack fireEatEvent(ServerPlayer player, ItemStack eaten, ItemStack remainder) {
