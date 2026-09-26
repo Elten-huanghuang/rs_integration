@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.compat.ftbquests.RsAutocraftProgressTracker;

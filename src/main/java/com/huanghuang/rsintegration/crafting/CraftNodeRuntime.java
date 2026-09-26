@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
@@ -14,6 +15,9 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import java.util.ArrayList;
+import net.minecraft.server.level.ServerLevel;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -109,7 +113,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
         if (outputs == null) return List.of();
-        List<ItemStack> actual = new java.util.ArrayList<>(drainSettledResults());
+        List<ItemStack> actual = new ArrayList<>(drainSettledResults());
         if (!actual.isEmpty()) {
             waitTicks = 0;
             progressObserved = true;
@@ -325,7 +329,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             // Graph workers previously passed null here. Delegates that resolve
             // machine state through the supplied level (notably Goety rituals)
             // then dereferenced a null ServerLevel during recursive crafts.
-            net.minecraft.server.level.ServerLevel observeLevel = resolveObservationLevel();
+            ServerLevel observeLevel = resolveObservationLevel();
             if (observeLevel == null) {
                 failureReason = "graph observation level unavailable";
                 return ConcurrentNodeExecutor.Observation.FAILED;
@@ -339,7 +343,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 // machine abort the whole graph worker thread.
                 failureReason = "machine observation crashed: "
                         + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error(
+                RSIntegrationMod.LOGGER.error(
                         "[RSI] Graph node {} observation failed", nodeId, error);
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
@@ -355,7 +359,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 failureReason = observation.detail();
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
-            List<ItemStack> capturedSnapshot = new java.util.ArrayList<>();
+            List<ItemStack> capturedSnapshot = new ArrayList<>();
             if (operationSession != null) capturedSnapshot.addAll(operationSession.capturedSnapshot());
             if (capture != null) capturedSnapshot.addAll(capture.snapshot());
             boolean captureHasOutput = (operationSession != null && operationSession.hasCaptured())
@@ -406,17 +410,17 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     @Nullable
-    private net.minecraft.server.level.ServerLevel resolveObservationLevel() {
+    private ServerLevel resolveObservationLevel() {
         if (player == null || player.getServer() == null) return null;
         ResourceLocation dimension = null;
-        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate base) {
+        if (delegate instanceof AbstractBatchDelegate base) {
             dimension = base.getMachineDim();
         }
         if (dimension == null && machineLease != null) {
             dimension = machineLease.machine().dimension();
         }
         if (dimension != null) {
-            net.minecraft.server.level.ServerLevel resolved = player.getServer().getLevel(
+            ServerLevel resolved = player.getServer().getLevel(
                     ResourceKey.create(Registries.DIMENSION, dimension));
             if (resolved != null) return resolved;
         }
@@ -462,7 +466,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                         delegate.onBatchFailed(null,
                                 failureReason != null ? failureReason : "node failure");
                         failureRecoveredInputs = delegate.failureRecoveredInputs();
-                        if (delegate instanceof com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate abstractDelegate) {
+                        if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
                             physicalFailureCleanupCompleted =
                                     abstractDelegate.physicalFailureCleanupCompleted();
                         } else if (delegate instanceof ParallelCraftGroup group) {
@@ -521,7 +525,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private void doSucceed() {
         if (terminal) return;
         terminal = true;
-        List<ItemStack> outputs = new java.util.ArrayList<>();
+        List<ItemStack> outputs = new ArrayList<>();
         List<ItemStack> captured = disarmCapture();
         for (ItemStack s : captured) {
             if (s != null && !s.isEmpty()) outputs.add(s.copy());
@@ -556,7 +560,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private void releaseReusableMaterials(@Nullable ServerPlayer online) {
         if (delegate == null || online == null) return;
         delegate.releaseReusableMaterials(online);
-        if (delegate instanceof com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup) return;
+        if (delegate instanceof ParallelCraftGroup) return;
         if (reusableReservationsSettled || reusableReservationTokens.isEmpty()
                 || nodeLedger == null || !nodeLedger.isCommitted()
                 || operationSession == null || !operationSession.startAttempted()) return;
@@ -572,7 +576,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     List<ItemStack> disarmCapture() {
-        List<ItemStack> drained = new java.util.ArrayList<>();
+        List<ItemStack> drained = new ArrayList<>();
         if (operationSession != null) drained.addAll(operationSession.drainCapture());
         CaptureSession handle = capture;
         capture = null;

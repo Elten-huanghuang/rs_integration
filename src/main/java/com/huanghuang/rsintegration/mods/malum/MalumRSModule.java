@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.MalumRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 
 import java.util.List;
 
@@ -48,7 +49,7 @@ public final class MalumRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.malum.MalumBatchDelegate"));
         ModType.registerVirtual(VOID_FAVOR_TYPE_ID,
                 new String[]{"com.sammy.malum.common.recipe.FavorOfTheVoidRecipe"},
-                com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new);
+                GenericBatchDelegate::new);
         ModType.configureJei("malum",
                 new String[][]{{"malum:spirit_infusion", "spirit_altar"},
                         {"malum:spirit_focusing", "spirit_crucible"},

@@ -13,6 +13,8 @@ import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import java.util.Set;
+import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -64,7 +66,7 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     }
 
     @Override
-    public RefinedStorageSnapshotRead snapshotItems(java.util.Set<net.minecraft.world.item.Item> itemTypes) {
+    public RefinedStorageSnapshotRead snapshotItems(Set<Item> itemTypes) {
         requireAvailable();
         var cache = network.getItemStorageCache();
         if (cache == null || cache.getList() == null) return RefinedStorageSnapshotRead.unavailable();

@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.sidepanel.client;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+import java.util.HashSet;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.resources.language.I18n;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.TooltipFlag;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.sidepanel.PanelStack;
@@ -22,8 +28,8 @@ import java.util.*;
  */
 public final class SidePanelRenderer {
 
-    private static final Set<net.minecraft.world.item.Item> RENDER_ERRORED_ITEMS =
-            new java.util.HashSet<>();
+    private static final Set<Item> RENDER_ERRORED_ITEMS =
+            new HashSet<>();
 
     private SidePanelRenderer() {}
 
@@ -62,7 +68,7 @@ public final class SidePanelRenderer {
                                                  int visibleRows, int scrollRow,
                                                  boolean networkAvailable, String networkName,
                                                  int totalSlotCount,
-                                                 net.minecraft.client.gui.components.EditBox searchWidget,
+                                                 EditBox searchWidget,
                                                  String searchText, boolean searchFocused,
                                                  int viewType, boolean sortAsc,
                                                  int sortMode, int searchMode, int gridSize,
@@ -168,7 +174,7 @@ public final class SidePanelRenderer {
                         label = "0";
                         labelColor = 0xFF5555;
                     } else if (ps.craftable) {
-                        label = net.minecraft.client.resources.language.I18n.get(
+                        label = I18n.get(
                                 "gui.refinedstorage.grid.craft");
                     } else if (ps.getCount() > 1) {
                         label = formatCount(ps.getCount());
@@ -359,8 +365,8 @@ public final class SidePanelRenderer {
         List<Component> lines = new ArrayList<>(stack.getTooltipLines(
                 Minecraft.getInstance().player,
                 Minecraft.getInstance().options.advancedItemTooltips
-                        ? net.minecraft.world.item.TooltipFlag.Default.ADVANCED
-                        : net.minecraft.world.item.TooltipFlag.Default.NORMAL));
+                        ? TooltipFlag.Default.ADVANCED
+                        : TooltipFlag.Default.NORMAL));
         int stored = stack.getCount();
         if (stored > 0)
             lines.add(Component.literal("§7" +

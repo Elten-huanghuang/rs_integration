@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.BackpackOperationOwner;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
@@ -38,6 +39,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.List;
 import java.util.Optional;
@@ -100,7 +102,7 @@ public abstract class MagnetUpgradeWrapperMixin
         this.rsi$upgradeTag = tag;
         this.rsi$operationOwner = BackpackOperationOwner.read(tag).orElse(null);
         this.rsi$operationOwnerResolved = this.rsi$operationOwner != null;
-        this.rsi$storageReference = com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils.readReference(tag);
+        this.rsi$storageReference = StorageBackpackUtils.readReference(tag);
         if (this.rsi$storageReference != null) {
             if (!tag.contains("disabled")) {
                 this.rsi$voidUpgrade = true;
@@ -138,7 +140,7 @@ public abstract class MagnetUpgradeWrapperMixin
     @Unique
     private static void rsi$reportInsertion(ItemStack input, ItemStack remainder) {
         ServerPlayer player = RsOperationPlayerContext.current();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             ExternalItemProgressSuppression.consume();
             return;
         }

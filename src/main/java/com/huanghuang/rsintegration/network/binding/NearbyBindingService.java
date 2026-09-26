@@ -18,6 +18,7 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import java.util.HashSet;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -159,7 +160,7 @@ public final class NearbyBindingService {
         private final int maxMachines;
         private final int minX, maxX, minY, maxY, minZ, maxZ;
         private final Set<BlockPos> knownPlayerBindings;
-        private final Set<BlockPos> seenRoots = new java.util.HashSet<>();
+        private final Set<BlockPos> seenRoots = new HashSet<>();
         private final Map<Block, Boolean> targetCache = new IdentityHashMap<>();
         private final Map<Long, PermissionDecision> permissionCache = new LinkedHashMap<>();
         private final long startedNanos = System.nanoTime();
@@ -192,7 +193,7 @@ public final class NearbyBindingService {
         }
 
         private static Set<BlockPos> collectPlayerBindings(ServerPlayer player, ServerLevel level) {
-            Set<BlockPos> result = new java.util.HashSet<>();
+            Set<BlockPos> result = new HashSet<>();
             for (List<ItemStack> group : List.of(
                     player.getInventory().items,
                     player.getInventory().offhand,
@@ -236,7 +237,7 @@ public final class NearbyBindingService {
             advance();
             boolean exhausted = x > maxX;
             if (!level.isLoaded(pos)) return exhausted;
-            net.minecraft.world.level.block.Block block = level.getBlockState(pos).getBlock();
+            Block block = level.getBlockState(pos).getBlock();
             Boolean potential = targetCache.get(block);
             if (potential == null) {
                 potential = BindingEventHandler.isPotentialNearbyTarget(block);

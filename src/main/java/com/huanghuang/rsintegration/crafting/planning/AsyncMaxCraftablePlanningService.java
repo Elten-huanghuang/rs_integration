@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch.Verdict;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,7 @@ final class AsyncMaxCraftablePlanningService {
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,
                                    int maxSearchStates, int maxMemoizedFailures) {
         return compute(snapshot, limit, maxSteps, maxSearchStates, maxMemoizedFailures,
-                com.huanghuang.rsintegration.config.CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS);
+                CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS);
     }
 
     static CompletedSearch compute(PlanningSnapshot snapshot, int limit, int maxSteps,

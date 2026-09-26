@@ -19,6 +19,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandlerModifiable;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -64,7 +65,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         this.machineDim = dim;
         this.machineServer = player.getServer();
         this.level = dim == null ? player.serverLevel() : player.getServer().getLevel(
-                ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim));
+                ResourceKey.create(Registries.DIMENSION, dim));
         if (level == null) return PreparationResult.retry("Wishing Fountain dimension is unavailable");
         if (!level.hasChunkAt(machinePos)) {
             return PreparationResult.retry("Wishing Fountain chunk is unloaded");

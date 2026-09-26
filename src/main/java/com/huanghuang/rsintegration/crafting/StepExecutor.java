@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+import java.util.stream.Collectors;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.Items;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -157,7 +160,7 @@ final class StepExecutor {
                 if (spec.isEmpty()) continue;
                 for (ItemStack stack : spec.ingredient().getItems()) {
                     if (stack.isEmpty()) continue;
-                    if (stack.getItem() == net.minecraft.world.item.Items.AIR) { broken = true; break; }
+                    if (stack.getItem() == Items.AIR) { broken = true; break; }
                     ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
                     if (rl != null && !stack.hasTag()) {
                         String ns = rl.getNamespace();
@@ -180,7 +183,7 @@ final class StepExecutor {
         }
 
         if (demandedOutput != null
-                && entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+                && entry.recipe() instanceof SmithingTransformRecipe smithing) {
             specs = SmithingRecipeHandler.requireDemandedOutputTag(
                     smithing, specs, demandedOutput);
         }
@@ -331,8 +334,8 @@ final class StepExecutor {
         List<ItemStack> variants = Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .map(stack -> stack.copyWithCount(1))
-                .collect(java.util.stream.Collectors.collectingAndThen(
-                        java.util.stream.Collectors.toMap(
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
                                 stack -> CraftingResolver.StackKey.of(stack, stack.hasTag()),
                                 stack -> stack,
                                 (first, ignored) -> first,

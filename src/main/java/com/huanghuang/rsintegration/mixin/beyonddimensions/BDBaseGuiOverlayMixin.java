@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
 import net.minecraft.client.gui.GuiGraphics;

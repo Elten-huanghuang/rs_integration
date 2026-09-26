@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.sidepanel.PanelStack;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.item.Items;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -242,7 +243,7 @@ public final class PanelDataModel {
     // ── Internal helpers (mirrored from RSSidePanelClient) ──────────
 
     private static String keyOf(ItemStack stack) {
-        if (stack == null || stack.getItem() == net.minecraft.world.item.Items.AIR) return "";
+        if (stack == null || stack.getItem() == Items.AIR) return "";
         var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
         String key = rl != null ? rl.toString() : "";
         String nbt = PanelStack.stableNbtString(stack.getTag());

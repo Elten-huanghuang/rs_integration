@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -21,6 +22,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -37,7 +39,7 @@ public abstract class RestockUpgradeWrapperMixin
     @Unique
     private static volatile boolean rsi$bcLoaded;
     @Unique
-    private static volatile java.lang.reflect.Method rsi$isTwoHandedMethod;
+    private static volatile Method rsi$isTwoHandedMethod;
 
     protected RestockUpgradeWrapperMixin(IStorageWrapper storageWrapper, ItemStack upgrade,
                                          Consumer<ItemStack> upgradeSaveHandler) {
@@ -63,7 +65,7 @@ public abstract class RestockUpgradeWrapperMixin
             return;
         }
 
-        List<ItemStack> restocked = player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
+        List<ItemStack> restocked = player instanceof ServerPlayer serverPlayer
                 ? StorageBackpackUtils.handleRestock(getFilterLogic(), this.storageWrapper,
                 serverPlayer, this.rsi$storageReference)
                 : List.of();

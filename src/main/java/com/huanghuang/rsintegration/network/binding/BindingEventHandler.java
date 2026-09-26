@@ -1,8 +1,24 @@
 package com.huanghuang.rsintegration.network.binding;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.mods.goety.GoetyInfuserMachineSupport;
+import com.huanghuang.rsintegration.mods.wishingfountain.WishingFountainStructure;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure;
+import com.huanghuang.rsintegration.util.Reflect;
+import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -97,7 +113,7 @@ public final class BindingEventHandler {
         // native terminal action. RSI has no legacy RS binding gesture to
         // preserve there, so machine binding must always come from the
         // explicit configurable Alt+right-click packet.
-        if (!ModList.get().isLoaded(com.huanghuang.rsintegration.util.ModIds.REFINED_STORAGE)
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                 && !EXPLICIT_BIND_REQUEST.get()) {
             return;
         }
@@ -123,8 +139,7 @@ public final class BindingEventHandler {
         BlockPos pos = clickedPos;
         BlockPos bindingPos = resolveRootPos(event.getLevel(), pos, block, className);
         if ("goety_cursed_infuser".equals(matched.modType.id())) {
-            Component problem = com.huanghuang.rsintegration.mods.goety
-                    .GoetyInfuserMachineSupport.bindingProblem(event.getLevel(), bindingPos);
+            Component problem = GoetyInfuserMachineSupport.bindingProblem(event.getLevel(), bindingPos);
             if (problem != null) {
                 player.displayClientMessage(problem, true);
                 event.setCanceled(true);
@@ -154,7 +169,7 @@ public final class BindingEventHandler {
 
         ResourceLocation dim = event.getLevel().dimension().location();
         BlockState state = event.getLevel().getBlockState(pos);
-        net.minecraft.world.level.block.entity.BlockEntity be = event.getLevel().getBlockEntity(pos);
+        BlockEntity be = event.getLevel().getBlockEntity(pos);
         String blockKey = matched.blockKey(block);
         if ("ironfurnaces_furnace".equals(matched.modType.id())
                 && be != null && isIronFurnace(be)) {
@@ -174,14 +189,14 @@ public final class BindingEventHandler {
             // item and breaks RS Addons network item detection.
             boolean isTacz = be.getClass().getName().contains("GunSmithTable");
             if (isTacz) {
-                net.minecraft.nbt.CompoundTag beData = be.saveWithoutMetadata();
+                CompoundTag beData = be.saveWithoutMetadata();
                 if (!beData.isEmpty()) {
                     beData.remove("Items");
                     beData.remove("Inventory");
                     beData.remove("inventory");
                     beData.remove("Energy");
                     displayStack.getOrCreateTag().put("BlockEntityTag", beData);
-                    if (beData.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+                    if (beData.contains("BlockId", Tag.TAG_STRING)) {
                         displayStack.getOrCreateTag().putString("BlockId", beData.getString("BlockId"));
                     }
                 }
@@ -241,11 +256,11 @@ public final class BindingEventHandler {
 
     /** Reuses the normal binding path for client-configurable mouse chords. */
     public static void handleExplicitBind(ServerPlayer player, BlockPos pos,
-                                          net.minecraft.world.InteractionHand hand) {
+                                          InteractionHand hand) {
         if (player == null || pos == null || hand == null) return;
-        net.minecraft.world.phys.BlockHitResult hit = new net.minecraft.world.phys.BlockHitResult(
-                net.minecraft.world.phys.Vec3.atCenterOf(pos),
-                net.minecraft.core.Direction.UP, pos, false);
+        BlockHitResult hit = new BlockHitResult(
+                Vec3.atCenterOf(pos),
+                Direction.UP, pos, false);
         PlayerInteractEvent.RightClickBlock event =
                 new PlayerInteractEvent.RightClickBlock(player, hand, pos, hit);
         EXPLICIT_BIND_REQUEST.set(true);
@@ -268,7 +283,7 @@ public final class BindingEventHandler {
     }
 
     @Nullable
-    static NearbyTarget prepareNearbyTarget(net.minecraft.server.level.ServerLevel level,
+    static NearbyTarget prepareNearbyTarget(ServerLevel level,
                                             BlockPos clickedPos) {
         Block block = level.getBlockState(clickedPos).getBlock();
         String className = block.getClass().getName();
@@ -288,7 +303,7 @@ public final class BindingEventHandler {
 
         BlockPos rootPos = resolveRootPos(level, clickedPos, block, className);
         if ("goety_cursed_infuser".equals(target.modType.id())
-                && com.huanghuang.rsintegration.mods.goety.GoetyInfuserMachineSupport
+                && GoetyInfuserMachineSupport
                 .bindingProblem(level, rootPos) != null) {
             return null;
         }
@@ -308,7 +323,7 @@ public final class BindingEventHandler {
     }
 
     static NearbyBindResult bindNearbyTarget(ServerPlayer player,
-                                             net.minecraft.server.level.ServerLevel level,
+                                             ServerLevel level,
                                              ItemStack connector,
                                              AltarBinding networkBinding,
                                              NearbyTarget nearbyTarget,
@@ -376,14 +391,14 @@ public final class BindingEventHandler {
                 || !be.getClass().getName().contains("GunSmithTable")) {
             return displayStack;
         }
-        net.minecraft.nbt.CompoundTag beData = be.saveWithoutMetadata();
+        CompoundTag beData = be.saveWithoutMetadata();
         if (beData.isEmpty()) return displayStack;
         beData.remove("Items");
         beData.remove("Inventory");
         beData.remove("inventory");
         beData.remove("Energy");
         displayStack.getOrCreateTag().put("BlockEntityTag", beData);
-        if (beData.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+        if (beData.contains("BlockId", Tag.TAG_STRING)) {
             displayStack.getOrCreateTag().putString("BlockId", beData.getString("BlockId"));
         }
         return displayStack;
@@ -405,7 +420,7 @@ public final class BindingEventHandler {
     private static String ironFurnacePrefix(BlockEntity be) {
         try {
             Object recipeType = be.getClass().getField("recipeType").get(be);
-            ResourceLocation id = recipeType instanceof net.minecraft.world.item.crafting.RecipeType<?> type
+            ResourceLocation id = recipeType instanceof RecipeType<?> type
                     ? ForgeRegistries.RECIPE_TYPES.getKey(type) : null;
             if (id != null && "blasting".equals(id.getPath())) return "ironfurnaces_blast_furnace";
             if (id != null && "smoking".equals(id.getPath())) return "ironfurnaces_smoker";
@@ -454,8 +469,8 @@ public final class BindingEventHandler {
         boolean matches(Block block, String className) {
             // PMMO's salvage block belongs to the active world's server config,
             // which is not available when common setup registers targets.
-            if (com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID.equals(modType.id())
-                    && com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure
+            if (PmmoRSModule.TYPE_ID.equals(modType.id())
+                    && PmmoSalvageStructure
                     .isBindingBlock(block)) {
                 return true;
             }
@@ -524,11 +539,11 @@ public final class BindingEventHandler {
         if (displayStack != null && !displayStack.isEmpty() && displayStack.hasTag()) {
             String realBlockId = null;
             var tag = displayStack.getTag();
-            if (tag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+            if (tag.contains("BlockId", Tag.TAG_STRING)) {
                 realBlockId = tag.getString("BlockId");
             } else if (tag.contains("BlockEntityTag")) {
                 var beTag = tag.getCompound("BlockEntityTag");
-                if (beTag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+                if (beTag.contains("BlockId", Tag.TAG_STRING)) {
                     realBlockId = beTag.getString("BlockId");
                 }
             }
@@ -541,7 +556,7 @@ public final class BindingEventHandler {
                 var rl = ResourceLocation.tryParse(resolveId);
                 if (rl != null) {
                     var realBlock = ForgeRegistries.BLOCKS.getValue(rl);
-                    if (realBlock != null && realBlock != net.minecraft.world.level.block.Blocks.AIR) {
+                    if (realBlock != null && realBlock != Blocks.AIR) {
                         return Component.translatable(realBlock.getDescriptionId());
                     }
                 }
@@ -550,7 +565,7 @@ public final class BindingEventHandler {
                 // nested in BlockEntityTag (existing bindings), temporarily
                 // lift it to the root level on a COPY so that
                 // GunSmithTableItem.getName() can see it.
-                String rootBlockId = tag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)
+                String rootBlockId = tag.contains("BlockId", Tag.TAG_STRING)
                         ? tag.getString("BlockId") : null;
                 if (rootBlockId == null) {
                     ItemStack copy = displayStack.copy();
@@ -644,9 +659,9 @@ public final class BindingEventHandler {
         if (!supportsGuiByBlockKey(info.blockKey())) return false;
         String regKey = info.blockRegKey();
         if (regKey != null) {
-            var rl = net.minecraft.resources.ResourceLocation.tryParse(regKey);
+            var rl = ResourceLocation.tryParse(regKey);
             if (rl != null) {
-                var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
+                var block = ForgeRegistries.BLOCKS.getValue(rl);
                 if (block != null) {
                     MachineBindingTarget target = findTarget(block);
                     if (target != null && !target.supportsGui) return false;
@@ -656,7 +671,7 @@ public final class BindingEventHandler {
         return true;
     }
 
-    public static boolean supportsGuiAt(net.minecraft.world.level.Level level, net.minecraft.core.BlockPos pos) {
+    public static boolean supportsGuiAt(Level level, BlockPos pos) {
         if (level == null || pos == null) return false;
         MachineBindingTarget target = findTarget(level.getBlockState(pos).getBlock());
         return target != null && target.supportsGui;
@@ -664,7 +679,7 @@ public final class BindingEventHandler {
 
     /** Client-side read-only target lookup shared by the binding HUD. */
     @Nullable
-    public static BlockPos bindingTargetPos(net.minecraft.world.level.Level level, BlockPos clickedPos) {
+    public static BlockPos bindingTargetPos(Level level, BlockPos clickedPos) {
         if (level == null || clickedPos == null) return null;
         Block block = level.getBlockState(clickedPos).getBlock();
         MachineBindingTarget target = findTarget(block);
@@ -688,13 +703,13 @@ public final class BindingEventHandler {
         return null;
     }
 
-    private static String extractBlockId(net.minecraft.nbt.CompoundTag tag) {
-        if (tag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+    private static String extractBlockId(CompoundTag tag) {
+        if (tag.contains("BlockId", Tag.TAG_STRING)) {
             return tag.getString("BlockId");
         }
         if (tag.contains("BlockEntityTag")) {
             var beTag = tag.getCompound("BlockEntityTag");
-            if (beTag.contains("BlockId", net.minecraft.nbt.Tag.TAG_STRING)) {
+            if (beTag.contains("BlockId", Tag.TAG_STRING)) {
                 return beTag.getString("BlockId");
             }
         }
@@ -729,7 +744,7 @@ public final class BindingEventHandler {
                     if (mapped != null) iconItemId = ResourceLocation.tryParse(mapped);
                 }
                 if (iconItemId != null) {
-                    net.minecraft.world.item.Item iconItem = ForgeRegistries.ITEMS.getValue(iconItemId);
+                    Item iconItem = ForgeRegistries.ITEMS.getValue(iconItemId);
                     if (iconItem != null && iconItem != Items.AIR) {
                         ItemStack result = new ItemStack(iconItem);
                         result.setTag(displayStack.getTag().copy());
@@ -823,7 +838,7 @@ public final class BindingEventHandler {
         var item = ForgeRegistries.ITEMS.getValue(rl);
         if (item != null && item != Items.AIR) return new ItemStack(item);
         var block = ForgeRegistries.BLOCKS.getValue(rl);
-        if (block != null && block != net.minecraft.world.level.block.Blocks.AIR) {
+        if (block != null && block != Blocks.AIR) {
             var blockItem = block.asItem();
             if (blockItem != Items.AIR) return new ItemStack(blockItem);
         }
@@ -853,8 +868,8 @@ public final class BindingEventHandler {
                 }
             }
         }
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
-            BlockPos pmmoRoot = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure
+        if (ModList.get().isLoaded(ModIds.PMMO)) {
+            BlockPos pmmoRoot = PmmoSalvageStructure
                     .resolveRoot(level, pos);
             if (pmmoRoot != null) return pmmoRoot;
         }
@@ -865,7 +880,7 @@ public final class BindingEventHandler {
                 || className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoHorizontalSideBlock")
                 || className.equals("com.stal111.forbidden_arcanus.common.block.ClibanoVerticalSideBlock")) {
             try {
-                java.lang.reflect.Method findMainPos = block.getClass()
+                Method findMainPos = block.getClass()
                         .getMethod("findMainPos", Level.class, BlockPos.class);
                 Object resolved = findMainPos.invoke(block, level, pos);
                 if (resolved instanceof Optional<?> optional
@@ -892,8 +907,8 @@ public final class BindingEventHandler {
         // TACZ: 1×2 gun workbench — getRootPos is on the block, not the BE
         if (className.contains("GunSmithTableBlock")) {
             try {
-                java.lang.reflect.Method getRootPos = block.getClass()
-                        .getMethod("getRootPos", BlockPos.class, net.minecraft.world.level.block.state.BlockState.class);
+                Method getRootPos = block.getClass()
+                        .getMethod("getRootPos", BlockPos.class, BlockState.class);
                 BlockPos root = (BlockPos) getRootPos.invoke(block, pos, level.getBlockState(pos));
                 if (root != null && !root.equals(pos)) {
                     return root;
@@ -912,12 +927,12 @@ public final class BindingEventHandler {
         ResourceLocation blockKey = ForgeRegistries.BLOCKS.getKey(block);
         if (blockKey != null && blockKey.toString().equals("irons_spellbooks:inscription_table")) {
             BlockState state = level.getBlockState(pos);
-            net.minecraft.core.Direction facing = null;
+            Direction facing = null;
             String part = null;
             for (var property : state.getProperties()) {
                 Object value = state.getValue(property);
                 if ("facing".equals(property.getName())
-                        && value instanceof net.minecraft.core.Direction direction) {
+                        && value instanceof Direction direction) {
                     facing = direction;
                 } else if ("type".equals(property.getName())) {
                     part = String.valueOf(value);
@@ -934,7 +949,7 @@ public final class BindingEventHandler {
         if (blockKey != null && blockKey.toString().equals("ars_nouveau:scribes_table")) {
             BlockEntity clickedTile = level.getBlockEntity(pos);
             if (clickedTile != null) {
-                Object logic = com.huanghuang.rsintegration.util.Reflect
+                Object logic = Reflect
                         .invoke(clickedTile, "getLogicTile").orElse(null);
                 if (logic instanceof BlockEntity logicTile && !logicTile.isRemoved()) {
                     return logicTile.getBlockPos();
@@ -959,8 +974,7 @@ public final class BindingEventHandler {
         }
 
         if (className.equals("io.github.poisonsheep.wishingfountain.block.WFBlock")) {
-            BlockPos core = com.huanghuang.rsintegration.mods.wishingfountain
-                    .WishingFountainStructure.resolveCorePosition(level, pos);
+            BlockPos core = WishingFountainStructure.resolveCorePosition(level, pos);
             if (core != null) return core;
         }
 
@@ -977,7 +991,7 @@ public final class BindingEventHandler {
                     // Walk downward to find the steamer pot
                     BlockPos.MutableBlockPos cursor = pos.mutable();
                     for (int i = 0; i < 16; i++) {
-                        cursor.move(net.minecraft.core.Direction.DOWN);
+                        cursor.move(Direction.DOWN);
                         BlockState below = level.getBlockState(cursor);
                         ResourceLocation belowKey = ForgeRegistries.BLOCKS.getKey(below.getBlock());
                         if (belowKey != null
@@ -1035,7 +1049,7 @@ public final class BindingEventHandler {
      * across all clicks on the same multiblock.
      */
     private static BlockPos resolveTlmAltarCentre(BlockEntity be, BlockPos pos) {
-        if (be.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+        if (be.getLevel() instanceof ServerLevel serverLevel) {
             TlmAltarStructure.Resolved resolved = TlmAltarStructure.resolve(serverLevel, be);
             if (resolved != null && !resolved.mainPos().equals(pos)) return resolved.mainPos();
         }

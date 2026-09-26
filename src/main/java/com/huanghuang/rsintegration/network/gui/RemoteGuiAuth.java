@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network.gui;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import net.minecraft.core.BlockPos;
@@ -11,6 +12,8 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.server.ServerLifecycleHooks;
+import javax.annotation.Nullable;
+import net.minecraft.world.level.block.Block;
 
 import java.util.Map;
 import java.util.UUID;
@@ -83,7 +86,7 @@ public final class RemoteGuiAuth {
     }
 
     /** Bind the pending authorization to a specific newly opened menu. */
-    public static boolean bindOpenedMenu(ServerPlayer player, @javax.annotation.Nullable AbstractContainerMenu menu) {
+    public static boolean bindOpenedMenu(ServerPlayer player, @Nullable AbstractContainerMenu menu) {
         if (menu == null) return false;
         UUID playerId = player.getUUID();
         Authorization auth = ACTIVE.get(playerId);
@@ -194,7 +197,7 @@ public final class RemoteGuiAuth {
     }
 
     /** Check if player has active authorization for a specific block type. */
-    public static boolean hasActiveAuthorizationForBlock(UUID playerId, @javax.annotation.Nullable net.minecraft.world.level.block.Block block) {
+    public static boolean hasActiveAuthorizationForBlock(UUID playerId, @Nullable Block block) {
         var auth = ACTIVE.get(playerId);
         if (auth == null) return false;
         if (isExpired(auth)) {

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -30,6 +31,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.function.Consumer;
 
@@ -67,7 +69,7 @@ public abstract class FeedingUpgradeWrapperMixin
                                              CallbackInfoReturnable<Boolean> cir) {
         if (this.rsi$storageReference == null) return;
 
-        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
+        if (!(player instanceof ServerPlayer serverPlayer)) {
             cir.setReturnValue(false);
             cir.cancel();
             return;

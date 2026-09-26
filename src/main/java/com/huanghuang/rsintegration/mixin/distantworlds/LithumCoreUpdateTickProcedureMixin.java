@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.distantworlds;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.core.BlockPos;

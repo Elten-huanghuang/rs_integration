@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageSession;
 
 import javax.annotation.Nonnull;
 import java.util.List;
@@ -64,7 +65,7 @@ public final class CraftStorageEndpoints {
      * not inspect or reference any native storage implementation.
      */
     public static Optional<CraftStorageEndpoint> resolveDefault(@Nonnull ServerPlayer player) {
-        List<com.huanghuang.rsintegration.storage.StorageSession> sessions =
+        List<StorageSession> sessions =
                 RSIntegrationMod.STORAGE_BACKENDS.registry().resolveDefaultSessionsForPlayer(player);
         if (!sessions.isEmpty()) {
             return Optional.of(new SessionCraftStorageEndpoint(sessions.get(0)));

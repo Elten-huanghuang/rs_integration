@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.jei;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
@@ -9,6 +10,40 @@ import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResol
 import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
+import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
+import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
+import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
+import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
+import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
+import com.huanghuang.rsintegration.mods.malum.MalumVoidFavorVirtualRecipeHandler;
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import javax.annotation.Nullable;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.Registry;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -96,7 +131,7 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private final List<ResourceLocation> rsi$recipeIds = new ArrayList<>();
     @Unique
-    private final java.util.Map<Integer, RecipeAvailabilityKey> rsi$availabilityKeys = new java.util.HashMap<>();
+    private final Map<Integer, RecipeAvailabilityKey> rsi$availabilityKeys = new HashMap<>();
     @Unique
     private final List<Boolean> rsi$hasMachineGui = new ArrayList<>();
 
@@ -191,29 +226,28 @@ public class RecipeGuiLayoutsMixin {
                 continue;
             }
             if (recipeClassName.equals("snownee.lychee.item_inside.ItemInsideRecipe")
-                    && !com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                    && !LycheeVirtualRecipeHandler
                     .isSupported(recipe)) {
                 RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Lychee recipe rejected: id={} reason={}",
                         getRecipeIdSafe(recipe),
-                        com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+                        LycheeVirtualRecipeHandler
                                 .unsupportedReason(recipe));
                 skippedNoRecipe++;
                 continue;
             }
             if (recipeClassName.equals("snownee.lychee.interaction.BlockInteractingRecipe")
-                    && !com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler
+                    && !LycheeBlockInteractingRecipeHandler
                     .isSupported(recipe)) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI-Mixin] Lychee block interaction rejected: id={} reason={}",
                         getRecipeIdSafe(recipe),
-                        com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler
+                        LycheeBlockInteractingRecipeHandler
                                 .unsupportedReason(recipe));
                 skippedNoRecipe++;
                 continue;
             }
             if (recipeClassName.equals("com.sammy.malum.common.recipe.FavorOfTheVoidRecipe")
-                    && !com.huanghuang.rsintegration.mods.malum
-                    .MalumVoidFavorVirtualRecipeHandler.isSupported(recipe)) {
+                    && !MalumVoidFavorVirtualRecipeHandler.isSupported(recipe)) {
                 skippedNoRecipe++;
                 continue;
             }
@@ -232,7 +266,7 @@ public class RecipeGuiLayoutsMixin {
                 // Keep the generic crafting button visible without RS. The
                 // storage backend determines whether clicking it can execute;
                 // RS availability must not suppress the JEI affordance.
-                if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) {
+                if (recipe instanceof CraftingRecipe) {
                     filter = "generic";
                     isGeneric = true;
                 } else {
@@ -280,7 +314,7 @@ public class RecipeGuiLayoutsMixin {
             }
 
             // Skip SmithingTrimRecipe — output depends on input armor NBT, not predictable
-            if (recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+            if (recipe instanceof SmithingTrimRecipe) {
                 continue;
             }
 
@@ -344,7 +378,7 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] WR arcane iterator output capture: recipeId={} output={}",
                         recipeId, concreteTargetOutput != null ? concreteTargetOutput.getHoverName().getString() : "null");
             } else if (recipe instanceof Recipe<?> goetyRecipe
-                    && com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe
+                    && GoetyDynamicRitualRecipe
                             .isSupported(goetyRecipe)) {
                 concreteTargetOutput = extractOutputStack(recipeLayout);
                 RSIntegrationMod.LOGGER.debug(
@@ -369,7 +403,7 @@ public class RecipeGuiLayoutsMixin {
             ModType modType = filteredType != null ? filteredType : recipeModType;
 
             String tooltipKey;
-            if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
+            if (recipe instanceof PmmoSalvageRecipe) {
                 tooltipKey = "gui.rs_integration.jei.pmmo_salvage_craft";
             } else if (rsi$isGoetyRitual(recipe)) {
                 tooltipKey = "gui.rs_integration.jei.altar_craft";
@@ -584,7 +618,7 @@ public class RecipeGuiLayoutsMixin {
         // a resize or category change cannot leave the injected buttons stale.
         rsi$refreshButtonPositions();
         if (rsi$positions.isEmpty()) return;
-        List<net.minecraft.network.chat.Component> tooltip = null;
+        List<Component> tooltip = null;
         for (int i = 0; i < rsi$positions.size(); i++) {
             // JEI can invoke draw during a layout swap.  The layout list and
             // the button metadata are rebuilt in separate callbacks; skip a
@@ -600,10 +634,10 @@ public class RecipeGuiLayoutsMixin {
             if (hovered) {
                 var data = AltarCraftButtons.getButtonData(i);
                 tooltip = new ArrayList<>();
-                if (data != null) tooltip.add(net.minecraft.network.chat.Component.translatable(data.tooltip()));
+                if (data != null) tooltip.add(Component.translatable(data.tooltip()));
                 if (rsi$availabilityKeys.containsKey(i)) {
-                    tooltip.add(net.minecraft.network.chat.Component.translatable(state.translationKey()));
-                    tooltip.add(net.minecraft.network.chat.Component.translatable("rsi.recipe.materials.scope"));
+                    tooltip.add(Component.translatable(state.translationKey()));
+                    tooltip.add(Component.translatable("rsi.recipe.materials.scope"));
                 }
             }
         }
@@ -616,7 +650,7 @@ public class RecipeGuiLayoutsMixin {
             boolean hovered = mouseX >= mx && mouseX < mx + mw && mouseY >= my && mouseY < my + mh;
 
             CraftButtonTextures.machine(guiGraphics, mx, my, mw, mh, hovered);
-            if (hovered) tooltip = List.of(net.minecraft.network.chat.Component.translatable("rsi.jei.open_machine"));
+            if (hovered) tooltip = List.of(Component.translatable("rsi.jei.open_machine"));
         }
         if (tooltip != null) guiGraphics.renderComponentTooltip(Minecraft.getInstance().font, tooltip, mouseX, mouseY);
     }
@@ -640,7 +674,7 @@ public class RecipeGuiLayoutsMixin {
         // from the interface method while still retaining the delegate.
         for (Class<?> type = layout.getClass(); type != null; type = type.getSuperclass()) {
             try {
-                java.lang.reflect.Field field = type.getDeclaredField("recipe");
+                Field field = type.getDeclaredField("recipe");
                 field.setAccessible(true);
                 Object recipe = field.get(layout);
                 if (recipe != null) {
@@ -680,7 +714,7 @@ public class RecipeGuiLayoutsMixin {
         if (category == null || !category.startsWith("lychee:item_inside/")) return null;
         try {
             Object recipeCategory = layout.getRecipeCategory();
-            java.lang.reflect.Field field = null;
+            Field field = null;
             for (Class<?> type = recipeCategory.getClass(); type != null && field == null; type = type.getSuperclass()) {
                 try {
                     field = type.getDeclaredField("initialRecipes");
@@ -698,13 +732,13 @@ public class RecipeGuiLayoutsMixin {
             int supportedCount = 0;
             for (Object candidate : recipes) {
                 if (!(candidate instanceof Recipe<?> recipe)
-                        || !com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler.isSupported(candidate)) {
+                        || !LycheeVirtualRecipeHandler.isSupported(candidate)) {
                     continue;
                 }
                 soleCandidate = candidate;
                 supportedCount++;
                 if (renderedOutput != null && !renderedOutput.isEmpty() && Minecraft.getInstance().level != null) {
-                    ItemStack expected = new com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler()
+                    ItemStack expected = new LycheeVirtualRecipeHandler()
                             .getResultItem(recipe, Minecraft.getInstance().level.registryAccess());
                     if (!expected.isEmpty() && ItemStack.isSameItemSameTags(renderedOutput, expected)) {
                         RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] recovered Lychee recipe by output: {}", recipe.getId());
@@ -728,17 +762,17 @@ public class RecipeGuiLayoutsMixin {
         if (rsi$isBirdcageEggDisplay(recipe)) {
             return "crockpot_birdcage";
         }
-        if (recipe instanceof com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe) {
+        if (recipe instanceof ApotheosisGemCuttingRecipe) {
             return "apotheosis_gem_cutting";
         }
         // RSI owns this synthetic category. Recognise it directly so its
         // recursive button cannot be lost to ModType/JEI registration timing.
-        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe
+        if (recipe instanceof PmmoSalvageRecipe
                 && ModList.get().isLoaded(ModIds.PMMO)
                 && RSIntegrationConfig.ENABLE_PMMO.get()) {
-            return com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID;
+            return PmmoRSModule.TYPE_ID;
         }
-        if (rsi$isGoetyRitual(recipe)) return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.ALTAR_FILTER;
+        if (rsi$isGoetyRitual(recipe)) return GoetyBindingRules.ALTAR_FILTER;
 
         // YHK cooking pot recipes: 3 ModTypes share 1 JEI UID, so we use
         // result.getCraftingRemainingItem() to pick the right pot type.
@@ -778,9 +812,9 @@ public class RecipeGuiLayoutsMixin {
             // JEI category UID changed from glyph to glyph_recipe.  Prefer
             // the native type as a final fallback so wrapped/third-party JEI
             // categories still resolve to the bound Scribes' Table.
-            if (recipe instanceof net.minecraft.world.item.crafting.Recipe<?> arsRecipe
-                    && com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier
-                    .isGlyph(com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess
+            if (recipe instanceof Recipe<?> arsRecipe
+                    && ArsRecipeClassifier
+                    .isGlyph(ArsTileAccess
                             .recipeTypeId(arsRecipe))) {
                 return ModIds.ID_ARS_SCRIBES_TABLE;
             }
@@ -805,7 +839,7 @@ public class RecipeGuiLayoutsMixin {
         String recipeClassName = recipe.getClass().getName();
 
         if (recipeClassName.equals("com.Polarice3.Goety.common.crafting.BrazierRecipe"))
-            return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.BRAZIER_FILTER;
+            return GoetyBindingRules.BRAZIER_FILTER;
 
         // Avaritia — multiple sub-types with different filters; not resolved by single-ModType lookup
         if (recipeClassName.startsWith("committee.nova.mods.avaritia.common.crafting.recipe.")) {
@@ -905,14 +939,14 @@ public class RecipeGuiLayoutsMixin {
             return null;
         }
 
-        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe salvage) {
+        if (recipe instanceof PmmoSalvageRecipe salvage) {
             return salvage.recipeId();
         }
 
         if (className.equals("dev.shadowsoffire.apotheosis.adventure.compat.GemCuttingCategory$GemCuttingRecipe")) {
             ItemStack output = rsi$readGemCuttingOutput(recipe);
             var virtualRecipe = output.isEmpty() ? null
-                    : com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog
+                    : ApotheosisGemCuttingCatalog
                     .recipeForTarget(output);
             return virtualRecipe == null ? null : virtualRecipe.getId();
         }
@@ -955,7 +989,7 @@ public class RecipeGuiLayoutsMixin {
                 Method getInput = recipe.getClass().getMethod("getInput");
                 ItemStack input = (ItemStack) getInput.invoke(recipe);
                 if (!input.isEmpty()) {
-                    ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(input.getItem());
+                    ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(input.getItem());
                     if (itemId != null) return new ResourceLocation("crabbersdelight", "crab_trap_loot/" + itemId.getNamespace() + "/" + itemId.getPath());
                 }
             } catch (Exception e) {
@@ -973,7 +1007,7 @@ public class RecipeGuiLayoutsMixin {
         // JEI's vanilla brewing display is not a Recipe and has no stable ID.
         // Resolve it against the server-side Forge brewing catalog by exact
         // input, reagent and output stacks (including potion NBT).
-        if (className.toLowerCase(java.util.Locale.ROOT).contains("brewing")) {
+        if (className.toLowerCase(Locale.ROOT).contains("brewing")) {
             ResourceLocation brewingId = rsi$findBrewingCatalogId(recipe);
             if (brewingId != null) return brewingId;
         }
@@ -1019,19 +1053,19 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ItemStack rsi$readGemCuttingOutput(Object recipe) {
         try {
-            java.lang.reflect.Field output = recipe.getClass().getDeclaredField("out");
+            Field output = recipe.getClass().getDeclaredField("out");
             output.setAccessible(true);
             Object value = output.get(recipe);
             if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
         } catch (ReflectiveOperationException ignored) {
         }
-        for (java.lang.reflect.Field field : recipe.getClass().getDeclaredFields()) {
+        for (Field field : recipe.getClass().getDeclaredFields()) {
             if (!ItemStack.class.isAssignableFrom(field.getType())) continue;
             try {
                 field.setAccessible(true);
                 ItemStack stack = (ItemStack) field.get(recipe);
                 if (stack != null && !stack.isEmpty()) {
-                    if (com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog
+                    if (ApotheosisGemCuttingCatalog
                             .isUnsocketedGem(stack)) return stack.copy();
                 }
             } catch (ReflectiveOperationException ignored) {
@@ -1053,8 +1087,7 @@ public class RecipeGuiLayoutsMixin {
                 }
                 for (ItemStack input : brewing.getPotionInputs()) {
                     for (ItemStack reagent : brewing.getIngredients()) {
-                        ResourceLocation id = com.huanghuang.rsintegration.mods.vanilla.brewing
-                                .VanillaBrewingCatalog.registerExact(input, reagent, output);
+                        ResourceLocation id = VanillaBrewingCatalog.registerExact(input, reagent, output);
                         if (id != null) return id;
                     }
                 }
@@ -1075,10 +1108,10 @@ public class RecipeGuiLayoutsMixin {
                                                                ItemStack output) {
         if (input.isEmpty() || reagent.isEmpty() || output.isEmpty()) return null;
         if (Minecraft.getInstance().level != null) {
-            com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+            VanillaBrewingCatalog
                     .ensureBuilt(Minecraft.getInstance().level);
         }
-        return com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+        return VanillaBrewingCatalog
                 .findId(input, reagent, output);
     }
 
@@ -1098,8 +1131,8 @@ public class RecipeGuiLayoutsMixin {
 
     // ── FA fingerprint cache (built once, like betterjei) ──────────────
     @Unique
-    private static final java.util.Map<String, ResourceLocation> rsi$faFingerprintCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, ResourceLocation> rsi$faFingerprintCache =
+            new ConcurrentHashMap<>();
     @Unique
     private static volatile boolean rsi$faCacheBuilt;
 
@@ -1113,10 +1146,10 @@ public class RecipeGuiLayoutsMixin {
                 return null;
             }
 
-            java.util.Optional<?> optKey;
+            Optional<?> optKey;
             try {
                 @SuppressWarnings({"unchecked", "rawtypes"})
-                var registry = (net.minecraft.core.Registry) rsi$getFaRegistry(level);
+                var registry = (Registry) rsi$getFaRegistry(level);
                 if (registry == null) return null;
 
                 // 1. Identity match via registry.getKey() (like betterjei)
@@ -1126,7 +1159,7 @@ public class RecipeGuiLayoutsMixin {
                 // 2. getResourceKey() fallback
                 optKey = registry.getResourceKey(ritual);
                 if (optKey.isPresent()) {
-                    return ((net.minecraft.resources.ResourceKey<?>) optKey.get()).location();
+                    return ((ResourceKey<?>) optKey.get()).location();
                 }
 
                 // 3. Build fingerprint cache on first use, then lookup
@@ -1155,16 +1188,16 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void rsi$ensureFaFingerprintCache(net.minecraft.core.Registry registry) {
+    private static void rsi$ensureFaFingerprintCache(Registry registry) {
         if (rsi$faCacheBuilt) return;
 
         try {
             int skipped = 0;
             int failed = 0;
             for (Object rawEntry : registry.entrySet()) {
-                    java.util.Map.Entry<?, ?> entry = (java.util.Map.Entry<?, ?>) rawEntry;
+                    Map.Entry<?, ?> entry = (Map.Entry<?, ?>) rawEntry;
                 try {
-                    var key = (net.minecraft.resources.ResourceKey<?>) entry.getKey();
+                    var key = (ResourceKey<?>) entry.getKey();
                     Object value = entry.getValue();
                     if (value == null || !FAReflection.ritualClass.isInstance(value)) {
                         skipped++;
@@ -1213,7 +1246,7 @@ public class RecipeGuiLayoutsMixin {
             if (mainIng instanceof Ingredient ing) {
                 ItemStack[] items = ing.getItems();
                 if (items.length > 0) {
-                    ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                    ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(
                             items[0].getItem());
                     sb.append("M=").append(itemId != null ? itemId : "?").append('|');
                 }
@@ -1230,7 +1263,7 @@ public class RecipeGuiLayoutsMixin {
                     int amt = (int) ric.getMethod("amount").invoke(ri);
                     ItemStack[] items = ing.getItems();
                     String itemName = items.length > 0
-                            ? String.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(items[0].getItem()))
+                            ? String.valueOf(BuiltInRegistries.ITEM.getKey(items[0].getItem()))
                             : "?";
                     sb.append('I').append(i).append('=').append(itemName).append(':').append(amt).append('|');
                 }
@@ -1245,26 +1278,26 @@ public class RecipeGuiLayoutsMixin {
 
     /** Get FA ritual registry, with Forge RegistryManager fallback (like betterjei). */
     @Unique
-    private static net.minecraft.core.Registry<?> rsi$getFaRegistry(net.minecraft.client.multiplayer.ClientLevel level) {
+    private static Registry<?> rsi$getFaRegistry(ClientLevel level) {
         try {
-            java.lang.reflect.Field f = FAReflection.faRegistriesClass.getField("RITUAL");
+            Field f = FAReflection.faRegistriesClass.getField("RITUAL");
             Object regKey = f.get(null);
             @SuppressWarnings({"unchecked", "rawtypes"})
-            var key = (net.minecraft.resources.ResourceKey<? extends net.minecraft.core.Registry<?>>) regKey;
+            var key = (ResourceKey<? extends Registry<?>>) regKey;
             return level.registryAccess().registryOrThrow(key);
         } catch (Exception e1) {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] FA registryOrThrow failed, trying RegistryManager", e1);
             try {
                 Class<?> rmClass = Class.forName("net.minecraftforge.registries.RegistryManager");
-                java.lang.reflect.Field activeField = rmClass.getField("ACTIVE");
+                Field activeField = rmClass.getField("ACTIVE");
                 Object active = activeField.get(null);
-                for (java.lang.reflect.Method m : active.getClass().getMethods()) {
+                for (Method m : active.getClass().getMethods()) {
                     if (m.getName().equals("getRegistry") && m.getParameterCount() == 1) {
                         m.setAccessible(true);
-                        java.lang.reflect.Field f = FAReflection.faRegistriesClass.getField("RITUAL");
+                        Field f = FAReflection.faRegistriesClass.getField("RITUAL");
                         Object key = f.get(null);
                         Object reg = m.invoke(active, key);
-                        if (reg instanceof net.minecraft.core.Registry<?> r) return r;
+                        if (reg instanceof Registry<?> r) return r;
                     }
                 }
             } catch (Exception e2) {
@@ -1281,15 +1314,15 @@ public class RecipeGuiLayoutsMixin {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Unique
     private static ResourceLocation rsi$faFingerprintMatch(
-            net.minecraft.core.Registry registry, Object target) {
+            Registry registry, Object target) {
         try {
-            java.lang.reflect.Method essencesM = FAReflection.ritualClass.getMethod("essences");
-            java.lang.reflect.Method resultM = FAReflection.ritualClass.getMethod("result");
-            java.lang.reflect.Method inputsM = FAReflection.ritualClass.getMethod("inputs");
-            java.lang.reflect.Method aurealM = FAReflection.essencesDefinitionClass.getMethod("aureal");
-            java.lang.reflect.Method soulsM  = FAReflection.essencesDefinitionClass.getMethod("souls");
-            java.lang.reflect.Method bloodM  = FAReflection.essencesDefinitionClass.getMethod("blood");
-            java.lang.reflect.Method expM    = FAReflection.essencesDefinitionClass.getMethod("experience");
+            Method essencesM = FAReflection.ritualClass.getMethod("essences");
+            Method resultM = FAReflection.ritualClass.getMethod("result");
+            Method inputsM = FAReflection.ritualClass.getMethod("inputs");
+            Method aurealM = FAReflection.essencesDefinitionClass.getMethod("aureal");
+            Method soulsM  = FAReflection.essencesDefinitionClass.getMethod("souls");
+            Method bloodM  = FAReflection.essencesDefinitionClass.getMethod("blood");
+            Method expM    = FAReflection.essencesDefinitionClass.getMethod("experience");
 
             Object targetResult = resultM.invoke(target);
             Object targetEssences = essencesM.invoke(target);
@@ -1309,7 +1342,7 @@ public class RecipeGuiLayoutsMixin {
             }
 
             for (Object key : registry.keySet()) {
-                Object candidate = registry.get((net.minecraft.resources.ResourceKey<?>) key);
+                Object candidate = registry.get((ResourceKey<?>) key);
                 if (candidate == null || !FAReflection.ritualClass.isInstance(candidate)) continue;
 
                 Object candResult = resultM.invoke(candidate);
@@ -1325,22 +1358,22 @@ public class RecipeGuiLayoutsMixin {
 
                 if (FAReflection.createItemResultClass.isInstance(targetResult)
                         && FAReflection.createItemResultClass.isInstance(candResult)) {
-                    java.lang.reflect.Method getResultM =
+                    Method getResultM =
                             FAReflection.createItemResultClass.getMethod("getResult");
                     ItemStack targetOut = (ItemStack) getResultM.invoke(targetResult);
                     ItemStack candOut = (ItemStack) getResultM.invoke(candResult);
                     if (ItemStack.isSameItemSameTags(targetOut, candOut)) {
-                        return ((net.minecraft.resources.ResourceKey<?>) key).location();
+                        return ((ResourceKey<?>) key).location();
                     }
                 } else if (FAReflection.upgradeTierResultClass.isInstance(targetResult)
                         && FAReflection.upgradeTierResultClass.isInstance(candResult)) {
-                    java.lang.reflect.Method getReqM =
+                    Method getReqM =
                             FAReflection.upgradeTierResultClass.getMethod("getRequiredTier");
-                    java.lang.reflect.Method getUpM =
+                    Method getUpM =
                             FAReflection.upgradeTierResultClass.getMethod("getUpgradedTier");
                     if ((int) getReqM.invoke(targetResult) == (int) getReqM.invoke(candResult)
                             && (int) getUpM.invoke(targetResult) == (int) getUpM.invoke(candResult)) {
-                        return ((net.minecraft.resources.ResourceKey<?>) key).location();
+                        return ((ResourceKey<?>) key).location();
                     }
                 }
             }
@@ -1358,7 +1391,7 @@ public class RecipeGuiLayoutsMixin {
         // Try getRitual() first, then ritual() for Java Records
         for (String methodName : new String[]{"getRitual", "ritual"}) {
             try {
-                java.lang.reflect.Method m = obj.getClass().getMethod(methodName);
+                Method m = obj.getClass().getMethod(methodName);
                 Object inner = m.invoke(obj);
                 if (inner != null
                         && inner.getClass().getName().startsWith("com.stal111.forbidden_arcanus")) {
@@ -1381,12 +1414,12 @@ public class RecipeGuiLayoutsMixin {
             if (level == null) return null;
 
             // Access InitRecipes.ALTAR_CRAFTING recipe type
-            java.lang.reflect.Field f = TLMReflection.initRecipesClass.getField("ALTAR_CRAFTING");
-            var recipeType = (net.minecraft.world.item.crafting.RecipeType<?>) f.get(null);
+            Field f = TLMReflection.initRecipesClass.getField("ALTAR_CRAFTING");
+            var recipeType = (RecipeType<?>) f.get(null);
 
             var access = level.registryAccess();
             @SuppressWarnings({"unchecked", "rawtypes"})
-            List<Recipe<?>> recipes = (List) level.getRecipeManager().getAllRecipesFor((net.minecraft.world.item.crafting.RecipeType) recipeType);
+            List<Recipe<?>> recipes = (List) level.getRecipeManager().getAllRecipesFor((RecipeType) recipeType);
             for (Recipe<?> r : recipes) {
                 if (ItemStack.isSameItemSameTags(r.getResultItem(access), output)) {
                     return r.getId();
@@ -1418,11 +1451,11 @@ public class RecipeGuiLayoutsMixin {
     private static ResourceLocation rsi$birdcageEggRecipeId(Object recipe) {
         if (!rsi$isBirdcageEggDisplay(recipe)) return null;
         try {
-            java.lang.reflect.Field min = recipe.getClass().getDeclaredField("min");
+            Field min = recipe.getClass().getDeclaredField("min");
             min.setAccessible(true);
             return min.getInt(recipe) > 0
-                    ? com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog.MEAT_EGG_ID
-                    : com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog.MONSTER_MEAT_EGG_ID;
+                    ? BirdcageEggCatalog.MEAT_EGG_ID
+                    : BirdcageEggCatalog.MONSTER_MEAT_EGG_ID;
         } catch (ReflectiveOperationException e) {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Birdcage egg display ID recovery failed", e);
             return null;
@@ -1432,14 +1465,14 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static Runnable createHandler(Object recipe, ResourceLocation recipeId,
                                            ResourceLocation dim, BlockPos machinePos, String filter,
-                                           @javax.annotation.Nullable ItemStack faSmithingBase,
-                                           @javax.annotation.Nullable ItemStack targetOutput) {
+                                           @Nullable ItemStack faSmithingBase,
+                                           @Nullable ItemStack targetOutput) {
         if (filter.equals("generic")) {
             return () -> {
                 GenericCraftPacket pkt;
-                long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+                long requestId = PlanningRequestIds.next();
                 try {
-                    pkt = new GenericCraftPacket(recipeId, true, java.util.Map.of(),
+                    pkt = new GenericCraftPacket(recipeId, true, Map.of(),
                             null, null, 1, false, null, null, requestId);
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
@@ -1489,9 +1522,9 @@ public class RecipeGuiLayoutsMixin {
         final ItemStack finalTargetOutput = targetOutput;
         return () -> {
             GenericCraftPacket pkt;
-            long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
+            long requestId = PlanningRequestIds.next();
             try {
-                pkt = new GenericCraftPacket(recipeId, true, java.util.Map.of(), dim,
+                pkt = new GenericCraftPacket(recipeId, true, Map.of(), dim,
                         machinePos, 1, false, finalCapturedBase, finalTargetOutput, requestId);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
@@ -1509,7 +1542,7 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static void rsi$showPlanRequestStarted(long requestId, ResourceLocation recipeId) {
-        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+        PlanningProgressTracker.start(
                 requestId, recipeId);
     }
 
@@ -1560,7 +1593,7 @@ public class RecipeGuiLayoutsMixin {
 
             // Vanilla smithing: standard layout template/base/addition
             // Named "base" slot first, then index 1
-            java.util.Optional<IRecipeSlotView> named = slotsView.findSlotByName("base");
+            Optional<IRecipeSlotView> named = slotsView.findSlotByName("base");
             if (named.isPresent()) {
                 return named.get().getDisplayedItemStack().orElse(null);
             }
@@ -1575,7 +1608,7 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static BindingStorage.BindingEntry findBinding(String filter, @javax.annotation.Nullable Object recipe) {
+    private static BindingStorage.BindingEntry findBinding(String filter, @Nullable Object recipe) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
@@ -1601,7 +1634,7 @@ public class RecipeGuiLayoutsMixin {
             }
         }
 
-        for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess.stacks(player)) {
+        for (ItemStack stack : CuriosAccess.stacks(player)) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(entry, filter)
@@ -1619,20 +1652,20 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static boolean rsi$bindingMatchesRecipe(BindingStorage.BindingEntry entry,
-                                                     String filter, @javax.annotation.Nullable Object recipe) {
-        if (!ModIds.ID_AVARITIA_CRAFTING.equals(filter) || !(recipe instanceof net.minecraft.world.item.crafting.Recipe<?> avaritiaRecipe)) {
+                                                     String filter, @Nullable Object recipe) {
+        if (!ModIds.ID_AVARITIA_CRAFTING.equals(filter) || !(recipe instanceof Recipe<?> avaritiaRecipe)) {
             return true;
         }
-        int requiredTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
+        int requiredTier = CraftingTableBatchDelegate
                 .recipeTier(avaritiaRecipe);
         if (requiredTier <= 0) return true;
 
         String blockId = entry.blockRegKey();
         if (blockId == null || blockId.isBlank()) blockId = entry.blockKey();
-        int machineTier = com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate
-                .machineTier(net.minecraft.resources.ResourceLocation.tryParse(blockId));
+        int machineTier = CraftingTableBatchDelegate
+                .machineTier(ResourceLocation.tryParse(blockId));
         if (machineTier <= 0 && blockId != null) {
-            String lower = blockId.toLowerCase(java.util.Locale.ROOT);
+            String lower = blockId.toLowerCase(Locale.ROOT);
             machineTier = lower.contains("sculk_crafting_table") ? 1
                     : lower.contains("nether_crafting_table") ? 2
                     : lower.contains("end_crafting_table") ? 3
@@ -1645,14 +1678,13 @@ public class RecipeGuiLayoutsMixin {
     private static boolean rsi$bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {
         String blockKey = entry.blockKey();
         if (blockKey == null || filter == null) return false;
-        if (com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.isGoetyMachineFilter(filter)) {
-            return com.huanghuang.rsintegration.mods.goety.GoetyBindingRules.matches(
+        if (GoetyBindingRules.isGoetyMachineFilter(filter)) {
+            return GoetyBindingRules.matches(
                     blockKey, entry.blockRegKey(), filter);
         }
         if (blockKey.contains(filter)) return true;
         if ("pmmo_salvage".equals(filter)) {
-            ResourceLocation configured = com.huanghuang.rsintegration.mods.pmmo.client
-                    .PmmoSalvageAccess.salvageBlockId();
+            ResourceLocation configured = PmmoSalvageAccess.salvageBlockId();
             return configured != null && configured.toString().equals(entry.blockRegKey());
         }
         int sep = blockKey.indexOf("||");
@@ -1680,11 +1712,11 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static ResourceLocation rsi$getMarketEntryId(Object recipe) {
         try {
-            java.lang.reflect.Method getEntryId = Reflect.findMethod(recipe.getClass(),
+            Method getEntryId = Reflect.findMethod(recipe.getClass(),
                     "getEntryId", new Class<?>[0]);
             if (getEntryId != null) {
                 Object result = getEntryId.invoke(recipe);
-                if (result instanceof java.util.UUID uuid) {
+                if (result instanceof UUID uuid) {
                     return new ResourceLocation("farmingforblockheads", "market/" + uuid);
                 }
             }
@@ -1731,13 +1763,13 @@ public class RecipeGuiLayoutsMixin {
         if (!cn.startsWith("dev.xkmc.youkaishomecoming.content.pot.cooking."))
             return null;
         try {
-            java.lang.reflect.Method getResult = recipe.getClass().getMethod("getResult");
-            net.minecraft.world.item.ItemStack result =
-                    (net.minecraft.world.item.ItemStack) getResult.invoke(recipe);
+            Method getResult = recipe.getClass().getMethod("getResult");
+            ItemStack result =
+                    (ItemStack) getResult.invoke(recipe);
             if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
-                net.minecraft.world.item.ItemStack container = result.getCraftingRemainingItem();
-                net.minecraft.resources.ResourceLocation key =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                ItemStack container = result.getCraftingRemainingItem();
+                ResourceLocation key =
+                        BuiltInRegistries.ITEM.getKey(
                                 container.getItem());
                 String k = key.toString();
                 if ("youkaishomecoming:short_iron_pot".equals(k))
@@ -1755,7 +1787,7 @@ public class RecipeGuiLayoutsMixin {
     @Unique
     private static boolean rsi$isGoetyNonItemRitual(Object recipe) {
         try {
-            java.lang.reflect.Method getRitual = recipe.getClass().getMethod("getRitual");
+            Method getRitual = recipe.getClass().getMethod("getRitual");
             Object ritual = getRitual.invoke(recipe);
             if (ritual == null) return false;
             String name = ritual.getClass().getName();
@@ -1778,8 +1810,8 @@ public class RecipeGuiLayoutsMixin {
         if (rsi$isBirdcageEggDisplay(recipe)) {
             return ModType.byId("crockpot_birdcage");
         }
-        if (recipe instanceof com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe) {
-            return ModType.byId(com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule.TYPE_ID);
+        if (recipe instanceof PmmoSalvageRecipe) {
+            return ModType.byId(PmmoRSModule.TYPE_ID);
         }
         if (className.startsWith("net.blay09.mods.farmingforblockheads.")) {
             return ModType.byId("farmingforblockheads");
@@ -1794,12 +1826,12 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static boolean supportsGuiWithRegCheck(String blockKey, @javax.annotation.Nullable String blockRegKey) {
+    private static boolean supportsGuiWithRegCheck(String blockKey, @Nullable String blockRegKey) {
         if (!BindingEventHandler.supportsGuiByBlockKey(blockKey)) return false;
         if (blockRegKey != null) {
-            var rl = net.minecraft.resources.ResourceLocation.tryParse(blockRegKey);
+            var rl = ResourceLocation.tryParse(blockRegKey);
             if (rl != null) {
-                var block = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getValue(rl);
+                var block = ForgeRegistries.BLOCKS.getValue(rl);
                 if (block != null) {
                     var target = BindingEventHandler.CLASS_TARGET_MAP
                             .get(block.getClass().getName());
@@ -1824,8 +1856,8 @@ public class RecipeGuiLayoutsMixin {
             Object displayed = catalyst.getClass().getMethod("getDisplayed").invoke(catalyst);
             if (displayed instanceof Iterable<?> states) {
                 for (Object value : states) {
-                    if (!(value instanceof net.minecraft.world.level.block.state.BlockState state)) continue;
-                    ResourceLocation id = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(state.getBlock());
+                    if (!(value instanceof BlockState state)) continue;
+                    ResourceLocation id = ForgeRegistries.BLOCKS.getKey(state.getBlock());
                     if (id == null) continue;
                     if ("botania".equals(id.getNamespace()) && "conjuration_catalyst".equals(id.getPath())) {
                         return "conjuration_catalyst";

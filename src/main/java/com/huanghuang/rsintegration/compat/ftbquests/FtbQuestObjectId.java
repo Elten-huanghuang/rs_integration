@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
+import java.lang.reflect.Field;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;

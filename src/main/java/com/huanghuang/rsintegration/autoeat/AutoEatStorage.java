@@ -42,7 +42,7 @@ final class AutoEatStorage {
         // RS and BD are installed, then falls back to the registered default.
         // An active RS Grid still resolves to RS because RS is the authenticated
         // current context and remains the first default backend.
-        return com.huanghuang.rsintegration.storage.StorageRestockSupport.resolve(player);
+        return StorageRestockSupport.resolve(player);
     }
 
     List<StoredItem> items() {

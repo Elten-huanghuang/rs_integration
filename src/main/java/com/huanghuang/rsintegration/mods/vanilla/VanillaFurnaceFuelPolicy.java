@@ -7,6 +7,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.registries.ForgeRegistries;
+import java.util.function.ToIntFunction;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -38,7 +39,7 @@ public final class VanillaFurnaceFuelPolicy {
     public static Selection select(List<ItemStack> candidates,
                             List<? extends String> priorityIds,
                             int requiredTicks,
-                            java.util.function.ToIntFunction<ItemStack> burnTime) {
+                            ToIntFunction<ItemStack> burnTime) {
         if (requiredTicks <= 0) return null;
 
         List<ItemStack> safe = new ArrayList<>();
@@ -96,7 +97,7 @@ public final class VanillaFurnaceFuelPolicy {
     @Nullable
     private static Selection fullSelection(@Nullable ItemStack stack,
                                            int requiredTicks,
-                                           java.util.function.ToIntFunction<ItemStack> burnTime) {
+                                           ToIntFunction<ItemStack> burnTime) {
         if (stack == null || stack.isEmpty()) return null;
         int singleBurnTime = burnTime.applyAsInt(stack);
         int amount = requiredAmount(requiredTicks, singleBurnTime);

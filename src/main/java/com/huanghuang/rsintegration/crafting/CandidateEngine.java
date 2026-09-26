@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
@@ -18,6 +19,13 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
+import javax.annotation.Nullable;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 
 import java.util.*;
 
@@ -48,7 +56,7 @@ final class CandidateEngine {
      * Same as above, but fills {@code diag} with per-candidate scoring/skip info.
      */
     static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
-                                                   @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
+                                                   @Nullable List<CandidateDiagnostic> diag) {
         // Shared recipes can have distinct machine routes and runtime outputs.
         Map<CandidateKey, RecipeIndex.Entry> byId = new LinkedHashMap<>();
         long p1Start = System.nanoTime();
@@ -275,7 +283,7 @@ final class CandidateEngine {
 
     static ItemStack inheritSmithingBaseTag(Recipe<?> recipe, ItemStack output,
                                             Ingredient demand, ResolutionContext ctx) {
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing
+        if (recipe instanceof SmithingTransformRecipe smithing
                 && IngredientMatcher.requiresNbt(demand)) {
             ItemStack inherited = findStockedSmithingOutput(smithing,
                     stack -> IngredientMatcher.test(demand, stack), ctx.counts, ctx.index,
@@ -286,26 +294,26 @@ final class CandidateEngine {
     }
 
     static ItemStack findStockedSmithingOutput(
-            net.minecraft.world.item.crafting.SmithingTransformRecipe recipe,
-            java.util.function.Predicate<ItemStack> accepts,
+            SmithingTransformRecipe recipe,
+            Predicate<ItemStack> accepts,
             Map<CraftingResolver.StackKey, Integer> available,
-            Map<Item, List<RecipeIndex.Entry>> index, net.minecraft.core.RegistryAccess access,
-            Set<ResourceLocation> visited, java.util.function.BooleanSupplier timedOut) {
+            Map<Item, List<RecipeIndex.Entry>> index, RegistryAccess access,
+            Set<ResourceLocation> visited, BooleanSupplier timedOut) {
         return findStockedSmithingOutput(recipe, accepts, new InventoryCandidateLookup(available),
                 index, access, visited, timedOut);
     }
 
     static ItemStack findStockedSmithingOutput(
-            net.minecraft.world.item.crafting.SmithingTransformRecipe recipe,
-            java.util.function.Predicate<ItemStack> accepts,
+            SmithingTransformRecipe recipe,
+            Predicate<ItemStack> accepts,
             InventoryCandidateLookup available,
-            Map<Item, List<RecipeIndex.Entry>> index, net.minecraft.core.RegistryAccess access,
-            Set<ResourceLocation> visited, java.util.function.BooleanSupplier timedOut) {
+            Map<Item, List<RecipeIndex.Entry>> index, RegistryAccess access,
+            Set<ResourceLocation> visited, BooleanSupplier timedOut) {
         if (timedOut.getAsBoolean() || visited.size() >= 64 || !visited.add(recipe.getId())) {
             return ItemStack.EMPTY;
         }
-        var handler = new com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler();
-        var specs = recipe.getClass() == net.minecraft.world.item.crafting.SmithingTransformRecipe.class
+        var handler = new SmithingRecipeHandler();
+        var specs = recipe.getClass() == SmithingTransformRecipe.class
                 ? handler.getIngredients(recipe) : null;
         var stockKeys = specs != null && specs.size() == 3
                 ? available.keysFor(specs.get(1).ingredient()) : available.allKeys();
@@ -314,7 +322,7 @@ final class CandidateEngine {
             if (available.count(stored) <= 0) continue;
             ItemStack base = stored.toStack();
             if (!recipe.isBaseIngredient(base)) continue;
-            ItemStack assembled = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+            ItemStack assembled = SmithingRecipeHandler
                     .assembleWithBase(recipe, base, access);
             if (!assembled.isEmpty() && accepts.test(assembled)) return assembled;
         }
@@ -322,15 +330,15 @@ final class CandidateEngine {
         if (specs == null || specs.size() != 3) return ItemStack.EMPTY;
         for (ItemStack base : specs.get(1).ingredient().getItems()) {
             for (RecipeIndex.Entry entry : index.getOrDefault(base.getItem(), List.of())) {
-                if (!(entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe upstream)) continue;
+                if (!(entry.recipe() instanceof SmithingTransformRecipe upstream)) continue;
                 ItemStack inheritedBase = findStockedSmithingOutput(upstream, candidate -> {
                     if (!recipe.isBaseIngredient(candidate)) return false;
-                    ItemStack assembled = com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+                    ItemStack assembled = SmithingRecipeHandler
                             .assembleWithBase(recipe, candidate, access);
                     return !assembled.isEmpty() && accepts.test(assembled);
                 }, available, index, access, visited, timedOut);
                 if (!inheritedBase.isEmpty()) {
-                    return com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler
+                    return SmithingRecipeHandler
                             .assembleWithBase(recipe, inheritedBase, access);
                 }
             }
@@ -349,7 +357,7 @@ final class CandidateEngine {
                                             Ingredient demand) {
         if (output == null || output.isEmpty() || demand == null
                 || demand.isEmpty()) return output;
-        if (!(recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe)) {
+        if (!(recipe instanceof SmithingTransformRecipe)) {
             return output;
         }
         for (ItemStack requested : demand.getItems()) {
@@ -362,7 +370,7 @@ final class CandidateEngine {
         return output;
     }
 
-    @javax.annotation.Nullable
+    @Nullable
     private static List<RecipeIndex.Entry> semanticSpellRecipes(
             ItemStack requested, ResolutionContext ctx) {
         ResourceLocation id = ForgeRegistries.ITEMS.getKey(requested.getItem());
@@ -373,8 +381,7 @@ final class CandidateEngine {
             // A compound ingredient may intentionally accept several distinct
             // spell scrolls; keep the normal candidate union for that case.
             if (requested == null || requested.isEmpty()) return null;
-            var key = com.huanghuang.rsintegration.mods.ironsspellbooks
-                    .IronSpellBooksRecipeCatalog.spellScrollKey(requested);
+            var key = IronSpellBooksRecipeCatalog.spellScrollKey(requested);
             return key == null ? null : RecipeIndex.spellScrollCandidates(ctx.level, requested);
         } catch (LinkageError ignored) {
             return null;
@@ -409,9 +416,9 @@ final class CandidateEngine {
         return 0;
     }
 
-    private static void logDiag(List<CandidateDiagnostic> diag, @javax.annotation.Nullable Item item,
-                                 @javax.annotation.Nullable RecipeIndex.Entry entry, int score,
-                                 @javax.annotation.Nullable ModType mt, boolean skipped, String reason) {
+    private static void logDiag(List<CandidateDiagnostic> diag, @Nullable Item item,
+                                 @Nullable RecipeIndex.Entry entry, int score,
+                                 @Nullable ModType mt, boolean skipped, String reason) {
         ResourceLocation id = entry != null ? entry.recipe().getId() :
                 (item != null ? ForgeRegistries.ITEMS.getKey(item) : null);
         if (id == null) id = new ResourceLocation("unknown", "unknown");
@@ -425,8 +432,8 @@ final class CandidateEngine {
         }
         // Binding is an execution authorization, not a prerequisite for
         // discovering the vanilla smithing upgrade chain.
-        if (entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
-                || entry.recipe() instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+        if (entry.recipe() instanceof SmithingTransformRecipe
+                || entry.recipe() instanceof SmithingTrimRecipe) {
             return true;
         }
         if (entry.modType() == ModType.GENERIC || entry.modType().isVirtual()) return true;
@@ -450,7 +457,7 @@ final class CandidateEngine {
     }
 
     private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict,
-                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+                                    @Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return scoreRecipe(cr, ctx, nbtStrict, matchCache) + (entry.modType() == ModType.GENERIC ? 10 : 0);
         }
@@ -488,7 +495,7 @@ final class CandidateEngine {
     }
 
     private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict,
-                                     @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+                                     @Nullable Map<Ingredient, Integer> matchCache) {
         int score = 0;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
         ResourceLocation outputKey = CraftingResolver.preferenceKey(output);
@@ -534,14 +541,14 @@ final class CandidateEngine {
     }
 
     private static int cachedCountMatching(ResolutionContext ctx, Ingredient ing,
-                                           @javax.annotation.Nullable Map<Ingredient, Integer> cache) {
+                                           @Nullable Map<Ingredient, Integer> cache) {
         if (cache == null) return ctx.countMatching(ing);
         return cache.computeIfAbsent(ing, ctx::countMatching);
     }
 
     private static int reusableCatalystPreferenceScore(
             List<IngredientSpec> recipeSpecs, Collection<IngredientDemand> demands,
-            ResolutionContext ctx, @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+            ResolutionContext ctx, @Nullable Map<Ingredient, Integer> matchCache) {
         if (!catalystPreferenceEnabled()) return 0;
 
         int score = 0;
@@ -563,7 +570,7 @@ final class CandidateEngine {
 
     private static boolean hasAvailableReusableCatalystProducer(
             Ingredient demanded, ResolutionContext ctx,
-            @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+            @Nullable Map<Ingredient, Integer> matchCache) {
         Set<ResourceLocation> checked = new HashSet<>();
         for (ItemStack option : demanded.getItems()) {
             if (option.isEmpty()) continue;
@@ -588,7 +595,7 @@ final class CandidateEngine {
 
     private static boolean reusableCatalystsAvailable(
             List<IngredientSpec> specs, ResolutionContext ctx,
-            @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+            @Nullable Map<Ingredient, Integer> matchCache) {
         boolean found = false;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty() || spec.role() != DemandRole.CATALYST) continue;
@@ -624,7 +631,7 @@ final class CandidateEngine {
 
     /** Returns true when every non-empty ingredient has at least one matching item available. */
     private static boolean allIngredientsAvailable(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+                                                    @Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (IngredientDemand demand : craftingDemands(cr).values()) {
                 if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) {
@@ -643,7 +650,7 @@ final class CandidateEngine {
 
     /** Count how many distinct ingredients of a recipe have matching items available. */
     private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                    @javax.annotation.Nullable Map<Ingredient, Integer> matchCache) {
+                                                    @Nullable Map<Ingredient, Integer> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return (int) craftingDemands(cr).values().stream()
                     .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)
@@ -697,7 +704,7 @@ final class CandidateEngine {
     private static boolean passesOutputCheck(RecipeIndex.Entry entry, ItemStack output,
                                               Ingredient ingredient, boolean ingredientAllNbt,
                                               boolean nbtStrict,
-                                              @javax.annotation.Nullable List<CandidateDiagnostic> diag) {
+                                              @Nullable List<CandidateDiagnostic> diag) {
         if (output.isEmpty() || (!IngredientMatcher.test(ingredient, output)
                 && !matchesSemanticSpellScroll(ingredient, output))) {
             boolean slashBladeChain = false;
@@ -735,8 +742,7 @@ final class CandidateEngine {
         try {
             for (ItemStack declared : ingredient.getItems()) {
                 if (!declared.isEmpty()
-                        && com.huanghuang.rsintegration.mods.ironsspellbooks
-                                .IronSpellBooksRecipeCatalog.sameSpellScroll(declared, output)) {
+                        && IronSpellBooksRecipeCatalog.sameSpellScroll(declared, output)) {
                     return true;
                 }
             }

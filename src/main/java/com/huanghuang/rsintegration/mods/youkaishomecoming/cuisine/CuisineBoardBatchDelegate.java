@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -22,6 +23,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import java.util.Optional;
+import net.minecraft.world.entity.player.Player;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -406,13 +409,13 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
             // Preferred path: VariantTableItemBase (covers most recipes)
             if (YHKReflection.variantTableItemBaseClass != null) {
                 try {
-                    java.lang.reflect.Field mapField = YHKReflection.variantTableItemBaseClass.getField("MAP");
+                    Field mapField = YHKReflection.variantTableItemBaseClass.getField("MAP");
                     Map<?, ?> map = (Map<?, ?>) mapField.get(null);
                     Object vtb = map.get(baseId);
                     if (vtb != null) {
                         List<Ingredient> baseList = new ArrayList<>();
                         List<Ingredient> extraList = new ArrayList<>();
-                        java.lang.reflect.Method cm = YHKReflection.variantTableItemBaseClass.getMethod(
+                        Method cm = YHKReflection.variantTableItemBaseClass.getMethod(
                                 "collectIngredients", List.class, List.class);
                         cm.invoke(vtb, baseList, extraList);
                         for (Ingredient ing : baseList) {
@@ -427,11 +430,11 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
             // Fallback: IngredientTableItem.FIXED (standalone fixed items)
             if (all.isEmpty() && YHKReflection.ingredientTableItemClass != null) {
                 try {
-                    java.lang.reflect.Field fixedField = YHKReflection.ingredientTableItemClass.getField("FIXED");
+                    Field fixedField = YHKReflection.ingredientTableItemClass.getField("FIXED");
                     Map<?, ?> fixedMap = (Map<?, ?>) fixedField.get(null);
                     Object fixed = fixedMap.get(baseId);
                     if (fixed != null) {
-                        java.lang.reflect.Method cm = YHKReflection.ingredientTableItemClass.getMethod(
+                        Method cm = YHKReflection.ingredientTableItemClass.getMethod(
                                 "collectIngredients", List.class);
                         cm.invoke(fixed, all);
                     }
@@ -445,7 +448,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
         // 2. Recipe-specific ingredients (custom per-recipe)
         try {
-            java.lang.reflect.Method gci = recipe.getClass().getMethod("getCustomIngredients");
+            Method gci = recipe.getClass().getMethod("getCustomIngredients");
             List<Ingredient> custom = (List<Ingredient>) gci.invoke(recipe);
             if (custom != null) {
                 for (Ingredient ing : custom) {
@@ -476,7 +479,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
             addItemMethod.setAccessible(true);
 
             addToPlayerMethod = YHKReflection.cuisineBoardBEClass.getMethod("addToPlayer",
-                    net.minecraft.world.entity.player.Player.class);
+                    Player.class);
             addToPlayerMethod.setAccessible(true);
 
             clearMethod = YHKReflection.cuisineBoardBEClass.getMethod("clear");
@@ -577,7 +580,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         if (completeMethod != null && model != null) {
             try {
                 Object result = completeMethod.invoke(model, level);
-                if (result instanceof java.util.Optional<?> opt && opt.isPresent()) {
+                if (result instanceof Optional<?> opt && opt.isPresent()) {
                     if (opt.get() instanceof ItemStack s && !s.isEmpty()) {
                         return s;
                     }

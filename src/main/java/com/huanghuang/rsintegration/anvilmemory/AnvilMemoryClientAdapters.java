@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.anvilmemory;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.AnvilScreen;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -54,7 +55,7 @@ public final class AnvilMemoryClientAdapters {
         };
     }
 
-    private static String menuTypeId(net.minecraft.world.inventory.AbstractContainerMenu menu) {
+    private static String menuTypeId(AbstractContainerMenu menu) {
         try {
             var key = ForgeRegistries.MENU_TYPES.getKey(menu.getType());
             return key == null ? null : key.toString();

@@ -12,6 +12,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
 
 public class ResonanceBackpackContainer extends AbstractContainerMenu implements ResonanceStorageMenu {
 
@@ -97,7 +98,7 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu implements
             // Debit the disk before crediting the player. Mutating the live slot stack
             // first lets a rejected disk write duplicate everything already moved.
             Slot source = this.slots.get(index);
-            int debitCount = com.huanghuang.rsintegration.resonance.api.ResonanceStackRules.isLogicallyNonStackable(original)
+            int debitCount = ResonanceStackRules.isLogicallyNonStackable(original)
                     ? 1 : original.getCount();
             ItemStack debited = source.remove(debitCount);
             if (debited.isEmpty()) return ItemStack.EMPTY;

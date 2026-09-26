@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
@@ -7,19 +8,21 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import java.util.function.Function;
+import net.minecraft.server.level.ServerLevel;
 
 @Mixin(value = com.refinedmods.refinedstorage.util.StackUtils.class, remap = false)
 public abstract class StackUtilsMixin {
 
     @Inject(method = "createStorages", at = @At("TAIL"), remap = false)
     private static void rsi$enforceOneResonanceDisk(
-            net.minecraft.server.level.ServerLevel level,
+            ServerLevel level,
             ItemStack stack,
             int slotIndex,
             IStorageDisk<ItemStack>[] itemDisks,
             IStorageDisk<?>[] fluidDisks,
-            java.util.function.Function<IStorageDisk<ItemStack>, IStorageDisk<ItemStack>> itemWrapper,
-            java.util.function.Function<?, ?> fluidWrapper,
+            Function<IStorageDisk<ItemStack>, IStorageDisk<ItemStack>> itemWrapper,
+            Function<?, ?> fluidWrapper,
             CallbackInfo ci) {
 
         IStorageDisk<ItemStack> current = itemDisks[slotIndex];

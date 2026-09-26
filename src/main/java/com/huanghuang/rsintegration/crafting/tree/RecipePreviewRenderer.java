@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
+import java.lang.reflect.Field;
+
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.util.UIRenderer;
@@ -18,6 +21,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -38,11 +44,11 @@ public final class RecipePreviewRenderer {
     private IJeiRuntime cachedJeiRuntime;
 
     // Cached items for synthetic recipe icons
-    private net.minecraft.world.item.Item gemCuttingTableItem;
-    private net.minecraft.world.item.Item marketItem;
-    private net.minecraft.world.item.Item scrollForgeItem;
-    private net.minecraft.world.item.Item arcaneAnvilItem;
-    private net.minecraft.world.item.Item goetyDarkAltarItem;
+    private Item gemCuttingTableItem;
+    private Item marketItem;
+    private Item scrollForgeItem;
+    private Item arcaneAnvilItem;
+    private Item goetyDarkAltarItem;
 
     public RecipePreviewRenderer() {
         this.mc = Minecraft.getInstance();
@@ -316,9 +322,9 @@ public final class RecipePreviewRenderer {
                                     int x, int y, int size) {
         if (isIronSpellBooksRecipe(recipeId)) {
             boolean scrollForge = recipeId.getPath().startsWith("irons_spellbooks/scroll_forge/");
-            net.minecraft.world.item.Item item = scrollForge ? scrollForgeItem : arcaneAnvilItem;
+            Item item = scrollForge ? scrollForgeItem : arcaneAnvilItem;
             if (item == null) {
-                item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(new ResourceLocation(
+                item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(
                         "irons_spellbooks", scrollForge ? "scroll_forge" : "arcane_anvil"));
                 if (scrollForge) scrollForgeItem = item;
                 else arcaneAnvilItem = item;
@@ -327,29 +333,28 @@ public final class RecipePreviewRenderer {
         }
         if (isGoetyRitualRecipe(recipeId)) {
             if (goetyDarkAltarItem == null) {
-                goetyDarkAltarItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                goetyDarkAltarItem = ForgeRegistries.ITEMS
                         .getValue(new ResourceLocation("goety", "dark_altar"));
             }
             if (renderItemIcon(gfx, goetyDarkAltarItem, x, y, size)) return true;
         }
         if (isPmmoSalvageRecipe(recipeId)) {
-            ItemStack salvageBlock = com.huanghuang.rsintegration.mods.pmmo.client
-                    .PmmoSalvageAccess.salvageBlock();
+            ItemStack salvageBlock = PmmoSalvageAccess.salvageBlock();
             if (!salvageBlock.isEmpty()) {
                 gfx.renderItem(salvageBlock, x, y);
                 return true;
             }
         }
         if (isSyntheticBrewingRecipe(recipeId)) {
-            gfx.renderItem(new ItemStack(net.minecraft.world.item.Items.BREWING_STAND), x, y);
+            gfx.renderItem(new ItemStack(Items.BREWING_STAND), x, y);
             return true;
         }
         if (isSyntheticGemCuttingRecipe(recipeId)) {
             if (gemCuttingTableItem == null) {
-                gemCuttingTableItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                gemCuttingTableItem = ForgeRegistries.ITEMS
                         .getValue(new ResourceLocation("apotheosis", "gem_cutting_table"));
             }
-            if (gemCuttingTableItem != null && gemCuttingTableItem != net.minecraft.world.item.Items.AIR) {
+            if (gemCuttingTableItem != null && gemCuttingTableItem != Items.AIR) {
                 gfx.renderItem(new ItemStack(gemCuttingTableItem), x, y);
                 return true;
             }
@@ -357,10 +362,10 @@ public final class RecipePreviewRenderer {
         if (isVirtualMarketRecipe(recipeId)) {
             try {
                 if (marketItem == null) {
-                    marketItem = net.minecraftforge.registries.ForgeRegistries.ITEMS
+                    marketItem = ForgeRegistries.ITEMS
                             .getValue(new ResourceLocation("farmingforblockheads", "market"));
                 }
-                if (marketItem != null && marketItem != net.minecraft.world.item.Items.AIR) {
+                if (marketItem != null && marketItem != Items.AIR) {
                     gfx.pose().pushPose();
                     try {
                         gfx.pose().translate(x, y, 0);
@@ -434,9 +439,9 @@ public final class RecipePreviewRenderer {
                 .equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
     }
 
-    private static boolean renderItemIcon(GuiGraphics gfx, @Nullable net.minecraft.world.item.Item item,
+    private static boolean renderItemIcon(GuiGraphics gfx, @Nullable Item item,
                                           int x, int y, int size) {
-        if (item == null || item == net.minecraft.world.item.Items.AIR) return false;
+        if (item == null || item == Items.AIR) return false;
         gfx.pose().pushPose();
         try {
             gfx.pose().translate(x, y, 0);

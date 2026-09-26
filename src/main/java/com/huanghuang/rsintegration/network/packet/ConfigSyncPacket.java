@@ -4,6 +4,9 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import java.util.Optional;
+import net.minecraftforge.network.NetworkDirection;
 
 import java.util.function.Supplier;
 
@@ -56,20 +59,20 @@ public class ConfigSyncPacket {
 
     public static ConfigSyncPacket fromServerConfig() {
         return new ConfigSyncPacket(
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_AUTO_EAT.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_NETWORK_OVERLAY.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_MARQUEE_SELECTION.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_APOTHEOSIS.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
-                com.huanghuang.rsintegration.config.RSIntegrationConfig.REPEAT_COUNT_MAX.get());
+                RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get(),
+                RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get(),
+                RSIntegrationConfig.ENABLE_AUTO_EAT.get(),
+                RSIntegrationConfig.ENABLE_JEI.get(),
+                RSIntegrationConfig.ENABLE_JEI_NETWORK_OVERLAY.get(),
+                RSIntegrationConfig.ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY.get(),
+                RSIntegrationConfig.ENABLE_JEI_MARQUEE_SELECTION.get(),
+                RSIntegrationConfig.ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION.get(),
+                RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get(),
+                RSIntegrationConfig.ENABLE_APOTHEOSIS.get(),
+                RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get(),
+                RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
+                RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
+                RSIntegrationConfig.REPEAT_COUNT_MAX.get());
     }
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
@@ -97,14 +100,14 @@ public class ConfigSyncPacket {
                 Math.max(2, Math.min(buf.readVarInt(), 32)),
                 // Server-authoritative crafting request limit.
                 Math.max(1, Math.min(buf.readVarInt(),
-                        com.huanghuang.rsintegration.config.RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)));
+                        RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)));
     }
 
     public static void register() {
         if (registered) return;
         NetworkHandler.CHANNEL.registerMessage(NetworkPacketIds.CONFIG_SYNC, ConfigSyncPacket.class,
                 ConfigSyncPacket::encode, ConfigSyncPacket::decode, ConfigSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         registered = true;
     }
 

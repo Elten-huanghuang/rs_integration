@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.retraining;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.villager.tradelock.VillagerTradeLockHooks;
 import net.minecraft.server.level.ServerPlayer;

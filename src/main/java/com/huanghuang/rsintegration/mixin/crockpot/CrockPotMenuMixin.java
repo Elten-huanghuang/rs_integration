@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.crockpot;
+import java.lang.reflect.Method;
 
 import com.sihenzhang.crockpot.block.entity.CrockPotBlockEntity;
 import com.sihenzhang.crockpot.inventory.CrockPotMenu;

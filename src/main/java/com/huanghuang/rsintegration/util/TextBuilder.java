@@ -6,6 +6,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.locale.Language;
+import net.minecraft.network.chat.contents.TranslatableContents;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -258,8 +260,8 @@ public class TextBuilder {
     public TextBuilder applyGradient(GradientConfig config) {
         Objects.requireNonNull(config, "gradient config must not be null");
         String text = component.getString();
-        if (text.isEmpty() && component.getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents tc) {
-            text = net.minecraft.locale.Language.getInstance().getOrDefault(tc.getKey());
+        if (text.isEmpty() && component.getContents() instanceof TranslatableContents tc) {
+            text = Language.getInstance().getOrDefault(tc.getKey());
         }
         if (text.isEmpty()) return this;
 

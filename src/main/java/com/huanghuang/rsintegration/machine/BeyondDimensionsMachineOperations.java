@@ -34,6 +34,11 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -152,7 +157,7 @@ public final class BeyondDimensionsMachineOperations {
         // BD-only snapshot.
         if (ModList.get().isLoaded("refinedstorage")) {
             try {
-                com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler
+                RSSidePanelNetworkHandler
                         .sendBindingSync(player);
             } catch (Exception | LinkageError ignored) {
                 // The standalone packet below remains the fallback for a
@@ -170,14 +175,14 @@ public final class BeyondDimensionsMachineOperations {
                         entry.blockKey(), display, entry.blockRegKey(), entry.displayStack()));
             }
         }
-        com.huanghuang.rsintegration.network.packet.NetworkHandler.CHANNEL.send(
-                net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+        NetworkHandler.CHANNEL.send(
+                PacketDistributor.PLAYER.with(() -> player),
                 new BeyondDimensionsBindingSyncPacket(bindings));
     }
 
     private static ServerLevel resolveTarget(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
         ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, dim);
+                Registries.DIMENSION, dim);
         if (!AltarBindingRegistry.isBound(dimKey, pos, player)) {
             player.sendSystemMessage(Component.translatable("rsi.machine.error.not_bound"));
             return null;
@@ -228,7 +233,7 @@ public final class BeyondDimensionsMachineOperations {
         stacks.addAll(player.getInventory().items);
         stacks.addAll(player.getInventory().offhand);
         stacks.addAll(player.getInventory().armor);
-        stacks.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+        stacks.addAll(CuriosAccess.stacks(player));
         return stacks;
     }
 

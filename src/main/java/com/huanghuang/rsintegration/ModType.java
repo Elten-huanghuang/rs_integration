@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -10,6 +11,9 @@ import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
+import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -319,8 +323,8 @@ public final class ModType {
         // names no longer start with the registered vanilla recipe prefixes.
         // Classify by the recipe contract so binding and execution agree with
         // SmithingRecipeHandler (for example Sophisticated Backpacks upgrades).
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
-                || recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe) {
+        if (recipe instanceof SmithingTransformRecipe
+                || recipe instanceof SmithingTrimRecipe) {
             return byId("smithing");
         }
 
@@ -350,13 +354,13 @@ public final class ModType {
      */
     private static ModType classifyCookingPotRecipe(Recipe<?> recipe) {
         try {
-            java.lang.reflect.Method getResult = recipe.getClass().getMethod("getResult");
-            net.minecraft.world.item.ItemStack result =
-                    (net.minecraft.world.item.ItemStack) getResult.invoke(recipe);
+            Method getResult = recipe.getClass().getMethod("getResult");
+            ItemStack result =
+                    (ItemStack) getResult.invoke(recipe);
             if (!result.isEmpty() && result.hasCraftingRemainingItem()) {
-                net.minecraft.world.item.ItemStack container = result.getCraftingRemainingItem();
-                net.minecraft.resources.ResourceLocation key =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                ItemStack container = result.getCraftingRemainingItem();
+                ResourceLocation key =
+                        BuiltInRegistries.ITEM.getKey(
                                 container.getItem());
                 // IRON_BOWL  → small_iron_pot   (SmallCookingPotBlockEntity)
                 // IRON_POT   → short_iron_pot   (MidCookingPotBlockEntity)

@@ -7,6 +7,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.LevelAccessor;
 
 @OnlyIn(Dist.CLIENT)
 public final class LeverInterceptHandler {
@@ -44,8 +46,8 @@ public final class LeverInterceptHandler {
         }
     }
 
-    private static boolean isNearAnvilOrForge(net.minecraft.world.level.LevelAccessor level,
-                                              net.minecraft.core.BlockPos leverPos) {
+    private static boolean isNearAnvilOrForge(LevelAccessor level,
+                                              BlockPos leverPos) {
         for (int dx = -5; dx <= 5; dx++)
             for (int dy = -3; dy <= 3; dy++)
                 for (int dz = -5; dz <= 5; dz++) {

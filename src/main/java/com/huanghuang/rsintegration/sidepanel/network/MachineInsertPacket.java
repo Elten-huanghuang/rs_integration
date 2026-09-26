@@ -27,6 +27,8 @@ import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.function.Supplier;
 
@@ -67,7 +69,7 @@ public final class MachineInsertPacket {
             context.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -77,7 +79,7 @@ public final class MachineInsertPacket {
             if (carried.isEmpty()) return;
 
             ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                Registries.DIMENSION, packet.dim);
 
             if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
                 player.sendSystemMessage(

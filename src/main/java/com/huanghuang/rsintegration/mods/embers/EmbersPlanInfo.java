@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.core.BlockPos;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -40,7 +41,7 @@ public record EmbersPlanInfo(
                                        @Nullable INetwork network, ResourceLocation recipeId,
                                        @Nullable String recipeModTypeId,
                                        @Nullable ResourceLocation dim,
-                                       @Nullable net.minecraft.core.BlockPos pos) {
+                                       @Nullable BlockPos pos) {
         return build(player, recipe, network, null, recipeId, recipeModTypeId, dim, pos);
     }
 
@@ -51,7 +52,7 @@ public record EmbersPlanInfo(
                                        ResourceLocation recipeId,
                                        @Nullable String recipeModTypeId,
                                        @Nullable ResourceLocation dim,
-                                       @Nullable net.minecraft.core.BlockPos pos) {
+                                       @Nullable BlockPos pos) {
         if (!ModIds.ID_EMBERS_ALCHEMY.equals(recipeModTypeId)) {
             return new EmbersPlanInfo(null, null, null, 0, false, false);
         }

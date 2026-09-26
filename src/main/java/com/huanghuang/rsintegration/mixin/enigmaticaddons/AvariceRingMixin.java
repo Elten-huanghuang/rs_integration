@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.enigmaticaddons;
+import java.lang.reflect.Method;
 
 import auviotre.enigmatic.addon.contents.items.AvariceRing;
 import com.huanghuang.rsintegration.mixin.minecraft.InventoryAccessor;
@@ -13,6 +14,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import net.minecraftforge.common.Tags;
 
 /**
  * Injects into {@code AvariceRing.getDamageBoost(Player)} so gems stored
@@ -30,7 +32,7 @@ public abstract class AvariceRingMixin {
         int diskGems;
         if (player instanceof ServerPlayer sp) {
             diskGems = ResonanceInventoryBridge.countItems(
-                    sp, stack -> stack.is(net.minecraftforge.common.Tags.Items.GEMS));
+                    sp, stack -> stack.is(Tags.Items.GEMS));
         } else if (player.level().isClientSide()) {
             diskGems = ClientDiskData.getGemCount();
         } else {
@@ -54,7 +56,7 @@ public abstract class AvariceRingMixin {
         for (NonNullList<ItemStack> comp :
                 ((InventoryAccessor) player.getInventory()).rsi$getCompartments()) {
             for (ItemStack stack : comp) {
-                if (!stack.isEmpty() && stack.is(net.minecraftforge.common.Tags.Items.GEMS)) {
+                if (!stack.isEmpty() && stack.is(Tags.Items.GEMS)) {
                     count += stack.getCount();
                 }
             }

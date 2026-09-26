@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 import java.util.HashSet;
@@ -78,7 +80,7 @@ public record OperationStartContext(
             List<ItemStack> orderedMaterials, @Nullable InputBufferPlan inputBufferPlan) {
         MaterialPlan plan = materialPlan == null ? MaterialPlan.none() : materialPlan;
         List<ItemStack> ordered = orderedMaterials == null ? List.of() : orderedMaterials;
-        List<ReservedMaterial> reserved = new java.util.ArrayList<>(plan.entries().size());
+        List<ReservedMaterial> reserved = new ArrayList<>(plan.entries().size());
         boolean compact = ordered.size() == plan.entries().size()
                 && ordered.stream().allMatch(stack -> stack != null && !stack.isEmpty());
         for (int index = 0; index < plan.entries().size(); index++) {
@@ -134,7 +136,7 @@ public record OperationStartContext(
     private static void validateMaterialReferences(MaterialPlan plan,
                                                    List<ReservedMaterial> materials) {
         Set<String> knownIds = plan.entries().stream().map(MaterialPlan.Entry::id)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         Set<String> suppliedIds = new HashSet<>();
         for (ReservedMaterial material : materials) {
             if (!knownIds.contains(material.entryId())) {

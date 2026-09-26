@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.apotheosis;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient;
 import net.minecraft.world.Container;

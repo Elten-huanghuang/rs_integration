@@ -23,6 +23,7 @@ import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.ContentsFilterLogic;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.FilterLogic;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.voiding.VoidUpgradeWrapper;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -89,7 +90,7 @@ public final class BackpackRSUtils {
             }
         }
 
-        var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        var endpoint = CraftStorageEndpoints
                 .fromLegacyNetwork(network);
         if (simulate) return endpoint.insert(getOrCreateFakePlayer((ServerLevel) world, backpackUuid),
                 stack.copy(), true).remainder().orElse(ItemStack.EMPTY);
@@ -104,7 +105,7 @@ public final class BackpackRSUtils {
         if (network == null) return restocked;
 
         IItemHandler backpackInv = storageWrapper.getInventoryForUpgradeProcessing();
-        var endpoint = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        var endpoint = CraftStorageEndpoints
                 .fromLegacyNetwork(network);
         Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level,
                 new UUID(rsPos.asLong(), rsPos.asLong() ^ 0x5f3759dfL));

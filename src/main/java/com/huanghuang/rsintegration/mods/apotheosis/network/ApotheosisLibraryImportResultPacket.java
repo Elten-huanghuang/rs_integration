@@ -36,7 +36,7 @@ public record ApotheosisLibraryImportResultPacket(ResourceLocation dimension, Bl
         buf.writeVarInt(stats.refunded());
         buf.writeVarInt(stats.dropped());
         scan.encode(buf);
-        buf.writeUtf(errorKey == null ? "" : errorKey, com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.MAX_ERROR_LENGTH);
+        buf.writeUtf(errorKey == null ? "" : errorKey, ApotheosisLibraryModels.MAX_ERROR_LENGTH);
     }
 
     public static ApotheosisLibraryImportResultPacket decode(FriendlyByteBuf buf) {

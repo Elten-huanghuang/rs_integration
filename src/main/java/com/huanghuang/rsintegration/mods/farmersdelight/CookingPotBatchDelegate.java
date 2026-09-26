@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import java.util.Arrays;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -619,7 +622,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }
@@ -726,7 +729,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 return (IItemHandler) inventoryField.get(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] reflection probe failed", e); }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
     }
 
@@ -790,7 +793,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     /** SRG-safe recipe result using the active level's registry access. */
     protected static ItemStack getRecipeResult(Recipe<?> recipe, @Nullable RegistryAccess access) {
-        if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe) return ItemStack.EMPTY;
+        if (recipe instanceof CraftingRecipe) return ItemStack.EMPTY;
         try {
             return ModRecipeHandlers.tryGetResultItem(recipe, access);
         } catch (Exception e) {

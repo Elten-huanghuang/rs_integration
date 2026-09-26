@@ -7,6 +7,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
+import com.huanghuang.rsintegration.network.gui.RemotePlaceboMenuSnapshot;
 
 import javax.annotation.Nullable;
 import java.util.function.Supplier;
@@ -27,7 +28,7 @@ public record PlaceboRemoteMenuSnapshotPacket(BlockPos pos, int blockStateId,
     public static void handle(PlaceboRemoteMenuSnapshotPacket packet,
                               Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> com.huanghuang.rsintegration.network.gui.RemotePlaceboMenuSnapshot
+        context.enqueueWork(() -> RemotePlaceboMenuSnapshot
                 .accept(packet.pos, packet.blockStateId, packet.blockEntityTag));
         context.setPacketHandled(true);
     }

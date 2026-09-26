@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.storage.bd;
+import java.lang.reflect.Method;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -11,6 +12,12 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.fluids.FluidStack;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import java.util.Optional;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,17 +57,17 @@ final class BeyondDimensionsSession implements StorageSession {
     }
 
     @Override
-    public java.util.Optional<StorageItemSubscription> subscribeItemChanges(
+    public Optional<StorageItemSubscription> subscribeItemChanges(
             StorageItemChangeListener listener) {
         Objects.requireNonNull(listener, "listener");
         try {
             Object nativeStorage = storage();
-            return java.util.Optional.of(BeyondDimensionsReflection.subscribeItemChanges(
+            return Optional.of(BeyondDimensionsReflection.subscribeItemChanges(
                     network, nativeStorage, reference.networkId(), listener));
         } catch (Exception | LinkageError failure) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-JEI] BD item subscription unavailable", failure);
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 
@@ -82,7 +89,7 @@ final class BeyondDimensionsSession implements StorageSession {
             return StorageSnapshotResult.success(readItemSnapshot(reference.backendId(), list, itemTypes,
                     (stack, failure) -> warnSkippedItem(player, stack, failure)));
         } catch (Exception | LinkageError e) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+            RSIntegrationMod.LOGGER.warn(
                     "[RSI-Storage] BD item snapshot failed player={} network={} cause={}",
                     player.getGameProfile().getName(), reference.networkId(), e.toString());
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
@@ -125,7 +132,7 @@ final class BeyondDimensionsSession implements StorageSession {
         var itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         String warningKey = reference.backendId() + ":" + reference.networkId() + ":" + itemId;
         if (SKIPPED_ITEM_WARNINGS.asMap().putIfAbsent(warningKey, Boolean.TRUE) != null) return;
-        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+        RSIntegrationMod.LOGGER.warn(
                 "[RSI-Storage] BD snapshot skipped unsupported item player={} network={} item={} cause={}; "
                         + "native item unchanged, other items remain available (once per minute per network/item)",
                 player.getGameProfile().getName(), reference.networkId(), itemId, failure.toString());
@@ -135,8 +142,8 @@ final class BeyondDimensionsSession implements StorageSession {
     public long countDerivedContainer(ServerPlayer player, ItemStack filledContainer) {
         StorageThreadGuard.requireServerThread(player);
         if (filledContainer.isEmpty()
-                || (filledContainer.getItem() != net.minecraft.world.item.Items.WATER_BUCKET
-                && filledContainer.getItem() != net.minecraft.world.item.Items.LAVA_BUCKET)) {
+                || (filledContainer.getItem() != Items.WATER_BUCKET
+                && filledContainer.getItem() != Items.LAVA_BUCKET)) {
             return 0L;
         }
         StoragePermissionResult permission = checkPermission(player, StoragePermission.VIEW);
@@ -147,8 +154,8 @@ final class BeyondDimensionsSession implements StorageSession {
             long emptyBuckets = 0L;
             long ironForBuckets = 0L;
             long fluidMilliBuckets = 0L;
-            ItemStack empty = new ItemStack(net.minecraft.world.item.Items.BUCKET);
-            Fluid wanted = filledContainer.getItem() == net.minecraft.world.item.Items.WATER_BUCKET
+            ItemStack empty = new ItemStack(Items.BUCKET);
+            Fluid wanted = filledContainer.getItem() == Items.WATER_BUCKET
                     ? Fluids.WATER : Fluids.LAVA;
             if (values instanceof Iterable<?> entries) {
                 for (Object value : entries) {
@@ -159,7 +166,7 @@ final class BeyondDimensionsSession implements StorageSession {
                         ItemStack stack = BeyondDimensionsReflection.keyStack(key);
                         if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, empty)) {
                             emptyBuckets = saturatedAdd(emptyBuckets, amount);
-                        } else if (!stack.isEmpty() && stack.is(net.minecraft.world.item.Items.IRON_INGOT)) {
+                        } else if (!stack.isEmpty() && stack.is(Items.IRON_INGOT)) {
                             ironForBuckets = saturatedAdd(ironForBuckets, amount);
                         }
                     } else {
@@ -173,10 +180,10 @@ final class BeyondDimensionsSession implements StorageSession {
                             fluidStack = null;
                         }
                         if (fluidStack != null && !fluidStack.isEmpty()
-                                && net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
+                                && ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
                                 != null
-                                && net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
-                                .equals(net.minecraftforge.registries.ForgeRegistries.FLUIDS.getKey(wanted))) {
+                                && ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
+                                .equals(ForgeRegistries.FLUIDS.getKey(wanted))) {
                             // BD 0.7.x stores fluid entries as milliBuckets;
                             // tolerate older key-count representations where
                             // the entry count is the number of key stacks.
@@ -188,13 +195,13 @@ final class BeyondDimensionsSession implements StorageSession {
                 }
             }
             long derived = Math.min(saturatedAdd(emptyBuckets, ironForBuckets / 3L), fluidMilliBuckets / 1000L);
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-Storage] BD derived container={} emptyBuckets={} ironForBuckets={} fluidMb={} derived={}",
-                    net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(filledContainer.getItem()),
+                    ForgeRegistries.ITEMS.getKey(filledContainer.getItem()),
                     emptyBuckets, ironForBuckets / 3L, fluidMilliBuckets, derived);
             return derived;
         } catch (Exception | LinkageError e) {
-            com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.debug(
+            RSIntegrationMod.LOGGER.debug(
                     "[RSI-Storage] BD derived container count failed network={}",
                     reference.networkId(), e);
             return 0L;
@@ -284,7 +291,7 @@ final class BeyondDimensionsSession implements StorageSession {
     }
 
     static Set<Item> extractionItemTypes(Ingredient ingredient) {
-        return com.huanghuang.rsintegration.crafting.IngredientMatcher.itemTypesForMatching(ingredient);
+        return IngredientMatcher.itemTypesForMatching(ingredient);
     }
 
     private StorageSnapshotResult snapshotForExtraction(ServerPlayer player, Set<Item> itemTypes) {
@@ -319,13 +326,13 @@ final class BeyondDimensionsSession implements StorageSession {
                     StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
         }
         if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
-        boolean waterBucket = filledContainer.is(net.minecraft.world.item.Items.WATER_BUCKET);
-        boolean lavaBucket = filledContainer.is(net.minecraft.world.item.Items.LAVA_BUCKET);
+        boolean waterBucket = filledContainer.is(Items.WATER_BUCKET);
+        boolean lavaBucket = filledContainer.is(Items.LAVA_BUCKET);
         if (!waterBucket && !lavaBucket) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,
                     StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
         }
-        Fluid fluid = BuiltInRegistries.FLUID.get(new net.minecraft.resources.ResourceLocation("minecraft",
+        Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation("minecraft",
                 waterBucket ? "water" : "lava"));
         if (fluid == null || fluid == Fluids.EMPTY) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,
@@ -361,7 +368,7 @@ final class BeyondDimensionsSession implements StorageSession {
             Object ironKey = null;
             long ironExtracted = 0L;
             if (ironBuckets > 0) {
-                ironKey = BeyondDimensionsReflection.itemKey(new ItemStack(net.minecraft.world.item.Items.IRON_INGOT));
+                ironKey = BeyondDimensionsReflection.itemKey(new ItemStack(Items.IRON_INGOT));
                 Object iron = extract.invoke(nativeStorage, ironKey, 3L * ironBuckets, simulate, false);
                 ironExtracted = BeyondDimensionsReflection.amount(iron);
                 if (ironExtracted < 3L * ironBuckets) {
@@ -380,7 +387,7 @@ final class BeyondDimensionsSession implements StorageSession {
                     Object remainder = nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
                             .invoke(nativeStorage, bucketKey, bucketAmount, false);
                     if (BeyondDimensionsReflection.amount(remainder) > 0) {
-                        com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.error("[RSI-Storage] BD container conversion rollback left buckets unrecovered");
+                        RSIntegrationMod.LOGGER.error("[RSI-Storage] BD container conversion rollback left buckets unrecovered");
                     }
                     if (ironExtracted > 0 && ironKey != null) {
                         nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
@@ -408,7 +415,7 @@ final class BeyondDimensionsSession implements StorageSession {
         if (!permission.allowedAccess()) return permissionFailureExtraction(mode(simulate), amount, permission);
         Object nativeKey;
         Object nativeStorage;
-        java.lang.reflect.Method extract;
+        Method extract;
         try {
             nativeStorage = storage();
             StorageItemKey storedKey = snapshotForExtraction(player,
@@ -471,7 +478,7 @@ final class BeyondDimensionsSession implements StorageSession {
         if (!permission.allowedAccess()) return permissionFailureInsert(mode(simulate), stack, permission);
         Object nativeKey;
         Object storage;
-        java.lang.reflect.Method insert;
+        Method insert;
         try {
             storage = storage();
             nativeKey = BeyondDimensionsReflection.itemKey(stack);

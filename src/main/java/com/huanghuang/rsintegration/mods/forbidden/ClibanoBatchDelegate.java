@@ -38,6 +38,9 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
+import java.util.Arrays;
+import java.util.function.Predicate;
+import net.minecraftforge.items.ItemStackHandler;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -189,7 +192,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 1) return InputBufferContract.none();
         IngredientSpec spec = specs.get(0);
-        ItemStack prototype = java.util.Arrays.stream(spec.ingredient().getItems())
+        ItemStack prototype = Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         if (prototype.isEmpty()) return InputBufferContract.none();
@@ -507,7 +510,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     private static ItemStack restoreToSlot(IItemHandler inventory, int slot, ItemStack stack) {
         ItemStack current = inventory.getStackInSlot(slot);
         if (current.isEmpty()) {
-            if (inventory instanceof net.minecraftforge.items.ItemStackHandler handler) {
+            if (inventory instanceof ItemStackHandler handler) {
                 handler.setStackInSlot(slot, stack.copy());
                 return ItemStack.EMPTY;
             }
@@ -517,7 +520,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         int room = Math.min(inventory.getSlotLimit(slot), current.getMaxStackSize()) - current.getCount();
         if (room <= 0) return stack;
         int moved = Math.min(room, stack.getCount());
-        if (inventory instanceof net.minecraftforge.items.ItemStackHandler handler) {
+        if (inventory instanceof ItemStackHandler handler) {
             ItemStack merged = current.copy();
             merged.grow(moved);
             handler.setStackInSlot(slot, merged);
@@ -627,7 +630,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 inventory.getStackInSlot(ClibanoInventoryLogic.SECOND_OUTPUT_SLOT)), expectedOutput);
     }
 
-    private ItemStack findNetworkItem(java.util.function.Predicate<ItemStack> predicate) {
+    private ItemStack findNetworkItem(Predicate<ItemStack> predicate) {
         for (ItemStack stack : storageItems()) {
             if (!stack.isEmpty() && predicate.test(stack)) return stack.copyWithCount(1);
         }

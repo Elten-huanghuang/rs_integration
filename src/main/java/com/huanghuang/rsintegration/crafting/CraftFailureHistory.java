@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import net.minecraft.world.item.ItemStack;
+import java.util.HashSet;
+import java.util.Set;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,7 +12,7 @@ import java.util.UUID;
 final class CraftFailureHistory {
     static final int MAX_ENTRIES = 8;
     private final LinkedHashMap<UUID, Entry> entries = new LinkedHashMap<>();
-    private final java.util.Set<UUID> seen = new java.util.HashSet<>();
+    private final Set<UUID> seen = new HashSet<>();
 
     boolean record(CraftProgressSnapshot snapshot, ItemStack target) {
         return record(snapshot, target, CraftFailureContext.unknown("unknown"));

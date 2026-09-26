@@ -23,6 +23,10 @@ import net.p3pp3rf1y.sophisticatedbackpacks.api.CapabilityBackpackWrapper;
 import net.p3pp3rf1y.sophisticatedbackpacks.api.IItemHandlerInteractionUpgrade;
 import net.p3pp3rf1y.sophisticatedbackpacks.upgrades.deposit.DepositUpgradeWrapper;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import net.minecraft.world.entity.LivingEntity;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -317,7 +321,7 @@ final class ContainerTransferLogic {
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             // getCuriosInventory takes LivingEntity (not Player — exact match required by reflection)
-            Object result = curiosApiClass.getMethod("getCuriosInventory", net.minecraft.world.entity.LivingEntity.class)
+            Object result = curiosApiClass.getMethod("getCuriosInventory", LivingEntity.class)
                     .invoke(null, player);
             if (result == null) return null;
 
@@ -325,7 +329,7 @@ final class ContainerTransferLogic {
             Object handler;
             try {
                 Object opt = result.getClass().getMethod("resolve").invoke(result);
-                if (opt instanceof java.util.Optional<?> o) {
+                if (opt instanceof Optional<?> o) {
                     handler = o.orElse(null);
                 } else {
                     return null;
@@ -337,11 +341,11 @@ final class ContainerTransferLogic {
             // handler.getCurios() -> Map<String, ICurioStacksHandler>
             Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
             @SuppressWarnings("unchecked")
-            java.util.Map<String, ?> curiosMap = (java.util.Map<String, ?>) curios;
+            Map<String, ?> curiosMap = (Map<String, ?>) curios;
             // Scan every curio slot type (back, belt, charm, necklace, ring, head, etc.)
             for (var entry : curiosMap.values()) {
                 Object stacks = entry.getClass().getMethod("getStacks").invoke(entry);
-                if (stacks instanceof net.minecraftforge.items.IItemHandler itemHandler) {
+                if (stacks instanceof IItemHandler itemHandler) {
                     for (int s = 0; s < itemHandler.getSlots(); s++) {
                         IItemHandler bh = getBackpackHandler(itemHandler.getStackInSlot(s));
                         if (bh != null) return bh;
@@ -385,12 +389,12 @@ final class ContainerTransferLogic {
         try {
             Class<?> curiosApiClass = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             Object result = curiosApiClass.getMethod("getCuriosInventory",
-                    net.minecraft.world.entity.LivingEntity.class).invoke(null, player);
+                    LivingEntity.class).invoke(null, player);
             if (result == null) return null;
             Object handler;
             try {
                 Object opt = result.getClass().getMethod("resolve").invoke(result);
-                if (opt instanceof java.util.Optional<?> o) {
+                if (opt instanceof Optional<?> o) {
                     handler = o.orElse(null);
                 } else {
                     return null;
@@ -401,10 +405,10 @@ final class ContainerTransferLogic {
             if (handler == null) return null;
             Object curios = handler.getClass().getMethod("getCurios").invoke(handler);
             @SuppressWarnings("unchecked")
-            java.util.Map<String, ?> curiosMap = (java.util.Map<String, ?>) curios;
+            Map<String, ?> curiosMap = (Map<String, ?>) curios;
             for (var entry : curiosMap.values()) {
                 Object stacks = entry.getClass().getMethod("getStacks").invoke(entry);
-                if (stacks instanceof net.minecraftforge.items.IItemHandler itemHandler) {
+                if (stacks instanceof IItemHandler itemHandler) {
                     for (int s = 0; s < itemHandler.getSlots(); s++) {
                         IStorageWrapper w = getBackpackWrapper(itemHandler.getStackInSlot(s));
                         if (w != null) return w;
@@ -563,7 +567,7 @@ final class ContainerTransferLogic {
     private static String simpleClassName(String className) {
         if (className == null) return "";
         int separator = Math.max(className.lastIndexOf('.'), className.lastIndexOf('$'));
-        return className.substring(separator + 1).toLowerCase(java.util.Locale.ROOT);
+        return className.substring(separator + 1).toLowerCase(Locale.ROOT);
     }
 
     private static boolean isBoundToBeyondDimensionsNetwork(ItemStack stack,

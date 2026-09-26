@@ -1,6 +1,15 @@
 package com.huanghuang.rsintegration.mods.vanilla;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
+import java.util.Arrays;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -18,7 +27,6 @@ import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -79,14 +87,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private int campfireSlot = -1;
     private Object campfireBE;
     private ItemStack suppliedCampfireInput = ItemStack.EMPTY;
-    private static final java.lang.reflect.Field CAMPFIRE_ITEMS;
-    private static final java.lang.reflect.Field CAMPFIRE_COOKING_PROGRESS;
-    private static final java.lang.reflect.Field CAMPFIRE_COOKING_TIME;
+    private static final Field CAMPFIRE_ITEMS;
+    private static final Field CAMPFIRE_COOKING_PROGRESS;
+    private static final Field CAMPFIRE_COOKING_TIME;
 
     static {
-        java.lang.reflect.Field items = null;
-        java.lang.reflect.Field cookingProgress = null;
-        java.lang.reflect.Field cookingTime = null;
+        Field items = null;
+        Field cookingProgress = null;
+        Field cookingTime = null;
         try {
             Class<?> cfb = Class.forName(
                     "net.minecraft.world.level.block.entity.CampfireBlockEntity");
@@ -99,8 +107,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         CAMPFIRE_COOKING_TIME = cookingTime;
     }
 
-    private static java.lang.reflect.Field resolveCampfireField(Class<?> clazz, String official, String srg) {
-        java.lang.reflect.Field field = findDeclaredField(clazz, official, srg);
+    private static Field resolveCampfireField(Class<?> clazz, String official, String srg) {
+        Field field = findDeclaredField(clazz, official, srg);
         if (field == null) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Vanilla] Campfire field unavailable: {} (tried {}, {})",
@@ -110,10 +118,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Nullable
-    static java.lang.reflect.Field findDeclaredField(Class<?> clazz, String... candidateNames) {
+    static Field findDeclaredField(Class<?> clazz, String... candidateNames) {
         for (String name : candidateNames) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
             } catch (NoSuchFieldException ignored) {}
@@ -127,12 +135,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 && CAMPFIRE_COOKING_TIME != null;
     }
 
-    private static final java.lang.reflect.Field LIT_TIME_FIELD = resolveLitTimeField();
+    private static final Field LIT_TIME_FIELD = resolveLitTimeField();
 
-    private static java.lang.reflect.Field resolveLitTimeField() {
+    private static Field resolveLitTimeField() {
         for (String name : new String[]{"litTime", "f_58316_"}) {
             try {
-                java.lang.reflect.Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
+                Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
             } catch (NoSuchFieldException ignored) {}
@@ -248,7 +256,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
             this.furnaceBE = fbe;
             this.kind = MachineKind.FURNACE;
-        } else if (be instanceof net.minecraft.world.level.block.entity.CampfireBlockEntity) {
+        } else if (be instanceof CampfireBlockEntity) {
             if (!(recipe instanceof CampfireCookingRecipe)) {
                 this.kind = MachineKind.VIRTUAL;
                 return true;
@@ -260,8 +268,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             }
             try {
                 @SuppressWarnings("unchecked")
-                net.minecraft.core.NonNullList<ItemStack> items =
-                        (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
+                NonNullList<ItemStack> items =
+                        (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
                 // Find an empty slot
                 int slot = -1;
                 for (int i = 0; i < items.size(); i++) {
@@ -419,7 +427,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (ingredients.isEmpty() || ingredients.get(0).isEmpty() || result.isEmpty()) {
             return InputBufferContract.none();
         }
-        ItemStack prototype = java.util.Arrays.stream(ingredients.get(0).getItems())
+        ItemStack prototype = Arrays.stream(ingredients.get(0).getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         if (prototype.isEmpty()) return InputBufferContract.none();
@@ -493,7 +501,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     private int furnaceInputCapacity(Ingredient ingredient) {
         int machineLimit = furnaceBE == null ? 64 : furnaceBE.getMaxStackSize();
-        return java.util.Arrays.stream(ingredient.getItems())
+        return Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .mapToInt(stack -> Math.min(stack.getMaxStackSize(), machineLimit))
                 .min().orElse(1);
@@ -908,7 +916,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private ItemStack computeResult() {
         try {
             if (recipe instanceof CampfireCookingRecipe) {
-                return com.huanghuang.rsintegration.recipe.CampfireRecipeSupport.resolveOutput(
+                return CampfireRecipeSupport.resolveOutput(
                         recipe, myLevel.registryAccess());
             }
             return recipe.getResultItem(myLevel.registryAccess()).copy();
@@ -922,7 +930,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── CAMPFIRE path ──────────────────────────────────────────────
 
     private void ensureCampfireLit() {
-        net.minecraft.world.level.block.state.BlockState state = myLevel.getBlockState(myPos);
+        BlockState state = myLevel.getBlockState(myPos);
         if (state.hasProperty(BlockStateProperties.LIT) && !state.getValue(BlockStateProperties.LIT)) {
             myLevel.setBlock(myPos, state.setValue(BlockStateProperties.LIT, true), 3);
         }
@@ -960,8 +968,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
             try {
                 @SuppressWarnings("unchecked")
-                net.minecraft.core.NonNullList<ItemStack> items =
-                        (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+                NonNullList<ItemStack> items =
+                        (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
                 items.set(campfireSlot, inputTemplate.copy());
                 suppliedCampfireInput = inputTemplate.copy();
                 int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
@@ -988,8 +996,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
         try {
             @SuppressWarnings("unchecked")
-            net.minecraft.core.NonNullList<ItemStack> items =
-                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            NonNullList<ItemStack> items =
+                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             items.set(campfireSlot, materials.get(0).copy());
             suppliedCampfireInput = materials.get(0).copy();
             int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
@@ -1016,8 +1024,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // being empty.
         try {
             @SuppressWarnings("unchecked")
-            net.minecraft.core.NonNullList<ItemStack> items =
-                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            NonNullList<ItemStack> items =
+                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             return items.get(campfireSlot).isEmpty();
         } catch (Exception e) {
             return false;
@@ -1030,10 +1038,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Vanilla spawned the result as an ItemEntity above the campfire.
         // Capture it for full NBT fidelity.
         if (myLevel != null && myLevel.isLoaded(myPos)) {
-            List<net.minecraft.world.entity.item.ItemEntity> entities =
-                    myLevel.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
-                            new net.minecraft.world.phys.AABB(myPos).inflate(2.0));
-            for (net.minecraft.world.entity.item.ItemEntity entity : entities) {
+            List<ItemEntity> entities =
+                    myLevel.getEntitiesOfClass(ItemEntity.class,
+                            new AABB(myPos).inflate(2.0));
+            for (ItemEntity entity : entities) {
                 if (!entity.isRemoved()) {
                     ItemStack stack = entity.getItem();
                     if (!stack.isEmpty()) {
@@ -1053,8 +1061,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private ItemStack clearCampfireSlot(boolean refundToRS) {
         try {
             @SuppressWarnings("unchecked")
-            net.minecraft.core.NonNullList<ItemStack> items =
-                    (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            NonNullList<ItemStack> items =
+                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             ItemStack slotItem = items.get(campfireSlot);
             if (!slotItem.isEmpty()
                     && !PhysicalInputRecovery.recoveredExpected(
@@ -1316,9 +1324,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Nullable
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         return kind == MachineKind.CAMPFIRE && myPos != null
-                ? new net.minecraft.world.phys.AABB(myPos).inflate(2.0) : null;
+                ? new AABB(myPos).inflate(2.0) : null;
     }
 
     // ── helpers ───────────────────────────────────────────────────

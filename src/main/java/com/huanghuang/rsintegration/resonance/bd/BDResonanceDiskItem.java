@@ -12,6 +12,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import com.huanghuang.rsintegration.storage.bd.BeyondDimensionsReflection;
 
 import java.util.List;
 import java.util.UUID;
@@ -64,7 +65,7 @@ public final class BDResonanceDiskItem extends Item {
             if (reboundDiskId != null) diskId = reboundDiskId;
         }
 
-        if (!com.huanghuang.rsintegration.storage.bd.BeyondDimensionsReflection
+        if (!BeyondDimensionsReflection
                 .isAuthorizedNetwork(serverPlayer, networkId)) {
             serverPlayer.sendSystemMessage(Component.translatable(
                     "rsi.resonance.bd.access_denied"));

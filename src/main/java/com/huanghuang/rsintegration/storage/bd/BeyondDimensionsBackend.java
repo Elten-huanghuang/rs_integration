@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.storage.bd;
 import com.huanghuang.rsintegration.storage.*;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 
 import java.util.Objects;
 
@@ -40,7 +41,7 @@ public final class BeyondDimensionsBackend implements StorageBackend {
             if (id < 0) return StorageResolutionResult.failure(StorageResolutionStatus.INVALID_REFERENCE);
             StorageResolutionResult result = BeyondDimensionsReflection.resolveById(id, player, ID);
             if (!result.resolved()) {
-                com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+                RSIntegrationMod.LOGGER.warn(
                         "[RSI-Storage] BD reference unavailable player={} id={} status={}",
                         player.getGameProfile().getName(), id, result.status());
             }

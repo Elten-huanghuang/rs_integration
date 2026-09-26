@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network.binding;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -8,6 +9,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -43,11 +46,11 @@ public final class RSAltarBindingResolver {
         if (!AltarBinding.RS_NETWORK.equals(binding.type())) return null;
         try {
             CompoundTag data = binding.data();
-            net.minecraft.resources.ResourceLocation dimId =
-                    net.minecraft.resources.ResourceLocation.tryParse(data.getString("dim"));
+            ResourceLocation dimId =
+                    ResourceLocation.tryParse(data.getString("dim"));
             if (dimId == null) return null;
             ResourceKey<Level> netDim = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, dimId);
+                    Registries.DIMENSION, dimId);
             BlockPos netPos = new BlockPos(data.getInt("x"), data.getInt("y"), data.getInt("z"));
             return RSIntegrationNetwork.resolveNetwork(player.server, netDim, netPos);
         } catch (RuntimeException | LinkageError ignored) {
@@ -64,7 +67,7 @@ public final class RSAltarBindingResolver {
                 if (stack.isEmpty()) continue;
                 for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                     ResourceKey<Level> altarDim = ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, entry.dim());
+                            Registries.DIMENSION, entry.dim());
                     List<AltarBinding> bindings = AltarBindingRegistry.bindingsFor(
                             player, altarDim, entry.pos());
                     if (bindings.isEmpty()

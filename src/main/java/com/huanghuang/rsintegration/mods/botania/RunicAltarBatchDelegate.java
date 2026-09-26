@@ -22,6 +22,7 @@ import vazkii.botania.api.recipe.RunicAltarRecipe;
 import vazkii.botania.common.block.block_entity.RunicAltarBlockEntity;
 import vazkii.botania.common.item.material.RuneItem;
 import vazkii.botania.xplat.XplatAbstractions;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -63,7 +64,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
         this.machineDim = dim;
         this.machineServer = player.getServer();
         this.level = dim == null ? player.serverLevel() : player.getServer().getLevel(
-                ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim));
+                ResourceKey.create(Registries.DIMENSION, dim));
         this.recipe = null;
         this.expected = ItemStack.EMPTY;
         this.network = null;

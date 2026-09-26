@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.jei;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.rs.GridItemRenderContext;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;

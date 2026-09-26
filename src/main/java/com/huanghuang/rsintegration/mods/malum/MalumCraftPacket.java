@@ -1,6 +1,12 @@
 package com.huanghuang.rsintegration.mods.malum;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.ChunkUtils;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -12,10 +18,8 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -68,7 +72,7 @@ public final class MalumCraftPacket {
     public static void handle(MalumCraftPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player == null || player instanceof FakePlayer) {
             context.setPacketHandled(true);
             return;
         }
@@ -99,7 +103,7 @@ public final class MalumCraftPacket {
 
         // Verify binding before accessing remote machine at client-supplied coords
         if (dim != null) {
-            ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim);
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
             if (!AltarBindingRegistry.isBound(key, pos, player)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.not_bound"));
                 return;
@@ -176,7 +180,7 @@ public final class MalumCraftPacket {
                 recipeId, centerCount, extraCount, spiritCount, emptyPedestalSlots);
 
         // -- Phase 2: reserve all items (deferred extraction via ledger) --
-        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+        CraftStorageEndpoint endpoint = StorageRestockSupport
                 .resolve(player).orElse(null);
         INetwork network = endpoint == null
                 ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
@@ -265,7 +269,7 @@ public final class MalumCraftPacket {
             // -- Phase 3: start the infusion --
             boolean startedWithAnimation = false;
             try {
-                for (java.lang.reflect.Method m : altar.getClass().getMethods()) {
+                for (Method m : altar.getClass().getMethods()) {
                     if (m.getName().equals("craft") && m.getParameterCount() == 1
                             && Recipe.class.isAssignableFrom(m.getParameterTypes()[0])) {
                         m.invoke(altar, recipe);
@@ -354,16 +358,16 @@ public final class MalumCraftPacket {
                     if (endpoint != null || network != null) {
                         if (endpoint != null) {
                             ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         } else {
-                        ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        ItemStack leftover = CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
-                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         }
                         }
                     } else if (player != null) {
-                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }
                     setIHandlerSlot(invMain, i, ItemStack.EMPTY);
                 }
@@ -377,16 +381,16 @@ public final class MalumCraftPacket {
                     if (endpoint != null || network != null) {
                         if (endpoint != null) {
                             ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         } else {
-                        ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        ItemStack leftover = CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
-                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         }
                         }
                     } else if (player != null) {
-                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }
                     setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                 }
@@ -409,16 +413,16 @@ public final class MalumCraftPacket {
                     if (endpoint != null || network != null) {
                         if (endpoint != null) {
                             ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         } else {
-                        ItemStack leftover = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                        ItemStack leftover = CraftStorageEndpoints
                                 .insertLegacy(network, player, stack.copy(), false);
                         if (!leftover.isEmpty() && player != null) {
-                            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
                         }
                         }
                     } else if (player != null) {
-                        net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
                     }
                 }
                 inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)
@@ -477,7 +481,7 @@ public final class MalumCraftPacket {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f.get(obj);
             } catch (NoSuchFieldException e) {
@@ -494,7 +498,7 @@ public final class MalumCraftPacket {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 f.set(obj, value);
                 return;

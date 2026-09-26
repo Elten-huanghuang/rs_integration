@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.machine;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
@@ -18,6 +20,12 @@ import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
+import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
+import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 /** BD-only machine-center entrypoint. Keeps RS Grid mixins and layout untouched. */
-@net.minecraftforge.api.distmarker.OnlyIn(Dist.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public final class BeyondDimensionsMachineHubClient {
     // BD anchors native RightTabButton widgets at the 176px content edge;
     // the background texture itself continues to 194px for the tab overhang.
@@ -233,9 +241,9 @@ public final class BeyondDimensionsMachineHubClient {
             int iconY = sy + BD_RIGHT_ICON_Y_OFFSET;
             g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, iconX, iconY, 0, 0,
                     BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE, BD_ICON_SIZE);
-            ItemStack icon = com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer
+            ItemStack icon = MachineTabRenderer
                     .resolveIcon(favorites.get(i));
-            if (icon.isEmpty()) icon = new ItemStack(net.minecraft.world.item.Items.BARRIER);
+            if (icon.isEmpty()) icon = new ItemStack(Items.BARRIER);
             g.renderItem(icon, iconX, iconY);
             g.renderItemDecorations(Minecraft.getInstance().font, icon, iconX, iconY);
             if (hovered) {
@@ -268,7 +276,7 @@ public final class BeyondDimensionsMachineHubClient {
 
     private static List<BindingInfo> getFavoriteMachines() {
         if (ModList.get().isLoaded("refinedstorage")) {
-            return com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient
+            return MachineFavoritesClient
                     .getFavoriteMachines();
         }
         return MachineHub.getLocalFavoriteMachines();
@@ -278,7 +286,7 @@ public final class BeyondDimensionsMachineHubClient {
         Class<?> type = screen.getClass();
         while (type != null) {
             try {
-                java.lang.reflect.Field field = type.getDeclaredField(fieldName);
+                Field field = type.getDeclaredField(fieldName);
                 field.setAccessible(true);
                 Object value = field.get(screen);
                 if (value instanceof Number n) return n.intValue();
@@ -307,7 +315,7 @@ public final class BeyondDimensionsMachineHubClient {
 
     private static int resolveBDImageHeight(Screen screen) {
         try {
-            java.lang.reflect.Method method = findMethod(screen.getClass(), "rebuildImageHeight");
+            Method method = findMethod(screen.getClass(), "rebuildImageHeight");
             if (method != null) {
                 method.setAccessible(true);
                 Object value = method.invoke(screen);
@@ -320,7 +328,7 @@ public final class BeyondDimensionsMachineHubClient {
         return 24 + 18 + Math.max(0, lines - 2) * 18 + 26 + 89;
     }
 
-    private static java.lang.reflect.Method findMethod(Class<?> type, String name) {
+    private static Method findMethod(Class<?> type, String name) {
         while (type != null) {
             try {
                 return type.getDeclaredMethod(name);
@@ -335,11 +343,11 @@ public final class BeyondDimensionsMachineHubClient {
         Class<?> type = screen.getClass();
         while (type != null) {
             try {
-                java.lang.reflect.Field field = type.getDeclaredField("menu");
+                Field field = type.getDeclaredField("menu");
                 field.setAccessible(true);
                 Object menu = field.get(screen);
                 if (menu != null) {
-                    java.lang.reflect.Method method = menu.getClass().getMethod("getLines");
+                    Method method = menu.getClass().getMethod("getLines");
                     Object value = method.invoke(menu);
                     if (value instanceof Number n) return n.intValue();
                 }
@@ -365,10 +373,10 @@ public final class BeyondDimensionsMachineHubClient {
         stacks.addAll(mc.player.getInventory().armor);
         // BD terminals are valid Curios equipment; include their bindings in
         // the local machine-center view just like inventory-held terminals.
-        stacks.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(mc.player));
+        stacks.addAll(CuriosAccess.stacks(mc.player));
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            ResourceLocation itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
             if (itemId == null || !"beyonddimensions".equals(itemId.getNamespace())
                     || !"net_terminal_item".equals(itemId.getPath())) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {

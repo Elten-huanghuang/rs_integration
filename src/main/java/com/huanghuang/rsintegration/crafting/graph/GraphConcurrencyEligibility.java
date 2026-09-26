@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import java.util.ArrayList;
+import net.minecraft.core.BlockPos;
 
 import java.util.Locale;
 import java.util.Set;
@@ -98,12 +100,12 @@ public final class GraphConcurrencyEligibility {
             BatchConcurrencyCapabilities.OutputOwnership output,
             BatchConcurrencyCapabilities.SideEffects sideEffects,
             int supportRadius) {
-        java.util.ArrayList<net.minecraft.core.BlockPos> supportOffsets = new java.util.ArrayList<>();
+        ArrayList<BlockPos> supportOffsets = new ArrayList<>();
         if (supportRadius > 0) {
             for (int x = -supportRadius; x <= supportRadius; x++) {
                 for (int z = -supportRadius; z <= supportRadius; z++) {
                     if (x == 0 && z == 0) continue;
-                    supportOffsets.add(new net.minecraft.core.BlockPos(x, 0, z));
+                    supportOffsets.add(new BlockPos(x, 0, z));
                 }
             }
         }

@@ -25,6 +25,10 @@ import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.ContentsFilterLogic;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.FilterLogic;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.voiding.VoidUpgradeWrapper;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import java.util.ArrayList;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 
 import java.util.List;
 
@@ -37,10 +41,10 @@ public final class StorageBackpackUtils {
     private StorageBackpackUtils() {}
 
     /** Reads the current backend-qualified binding, including old RS tags. */
-    public static StorageReference readReference(net.minecraft.nbt.CompoundTag tag) {
+    public static StorageReference readReference(CompoundTag tag) {
         if (tag == null) return null;
-        if (tag.contains(BACKEND_TAG, net.minecraft.nbt.Tag.TAG_STRING)
-                && tag.contains(NETWORK_TAG, net.minecraft.nbt.Tag.TAG_STRING)) {
+        if (tag.contains(BACKEND_TAG, Tag.TAG_STRING)
+                && tag.contains(NETWORK_TAG, Tag.TAG_STRING)) {
             String backend = tag.getString(BACKEND_TAG);
             String network = tag.getString(NETWORK_TAG);
             if (!backend.isBlank() && !network.isBlank()) {
@@ -48,8 +52,8 @@ public final class StorageBackpackUtils {
                 catch (IllegalArgumentException ignored) { return null; }
             }
         }
-        if (tag.contains("RSBlockPos", net.minecraft.nbt.Tag.TAG_LONG)
-                && tag.contains("RSBlockDimension", net.minecraft.nbt.Tag.TAG_STRING)) {
+        if (tag.contains("RSBlockPos", Tag.TAG_LONG)
+                && tag.contains("RSBlockDimension", Tag.TAG_STRING)) {
             ResourceLocation dimension = ResourceLocation.tryParse(tag.getString("RSBlockDimension"));
             if (dimension != null) {
                 BlockPos pos = BlockPos.of(tag.getLong("RSBlockPos"));
@@ -60,7 +64,7 @@ public final class StorageBackpackUtils {
         return null;
     }
 
-    public static void writeReference(net.minecraft.nbt.CompoundTag tag, StorageReference reference) {
+    public static void writeReference(CompoundTag tag, StorageReference reference) {
         tag.putString(BACKEND_TAG, reference.backendId().value());
         tag.putString(NETWORK_TAG, reference.networkId());
     }
@@ -156,13 +160,13 @@ public final class StorageBackpackUtils {
                                                   IStorageWrapper storageWrapper,
                                                   ServerPlayer player,
                                                   StorageReference reference) {
-        List<ItemStack> restocked = new java.util.ArrayList<>();
+        List<ItemStack> restocked = new ArrayList<>();
         if (filter == null || storageWrapper == null || player == null || reference == null) {
             return restocked;
         }
         StorageSession session = resolve(player, reference);
         if (session == null || !session.hasPermission(player,
-                com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return restocked;
+                StoragePermission.EXTRACT)) return restocked;
         StorageSnapshotResult snapshot = session.snapshotItems(player);
         if (!snapshot.successful()) return restocked;
         IItemHandler backpackInv = storageWrapper.getInventoryForUpgradeProcessing();

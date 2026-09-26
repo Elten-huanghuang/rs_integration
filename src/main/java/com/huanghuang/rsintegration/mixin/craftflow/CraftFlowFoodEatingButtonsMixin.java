@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.craftflow;
+import java.lang.reflect.Method;
 
 import net.minecraftforge.client.event.ScreenEvent;
 import org.spongepowered.asm.mixin.Mixin;

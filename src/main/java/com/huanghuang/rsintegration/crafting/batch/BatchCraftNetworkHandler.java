@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanPacket;
 import com.huanghuang.rsintegration.util.ModIds;
+import java.util.Optional;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.network.NetworkDirection;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressPacket;
@@ -26,65 +29,65 @@ public final class BatchCraftNetworkHandler {
         ch.registerMessage(NetworkPacketIds.RECIPE_AVAILABILITY_REQUEST, RecipeAvailabilityRequestPacket.class,
                 RecipeAvailabilityRequestPacket::encode, RecipeAvailabilityRequestPacket::decode,
                 RecipeAvailabilityRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.RECIPE_AVAILABILITY_RESULT, RecipeAvailabilityResultPacket.class,
                 RecipeAvailabilityResultPacket::encode, RecipeAvailabilityResultPacket::decode,
                 RecipeAvailabilityResultPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.GENERIC_CRAFT, GenericCraftPacket.class,
                 GenericCraftPacket::encode, GenericCraftPacket::decode, GenericCraftPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.PLAN_RESPONSE, PlanResponsePacket.class,
                 PlanResponsePacket::encode, PlanResponsePacket::decode, PlanResponsePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_STARTED, CraftStartedPacket.class,
                 CraftStartedPacket::encode, CraftStartedPacket::decode, CraftStartedPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_PROGRESS, CraftProgressPacket.class,
                 CraftProgressPacket::encode, CraftProgressPacket::decode, CraftProgressPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.PLANNING_PROGRESS, PlanningProgressPacket.class,
                 PlanningProgressPacket::encode, PlanningProgressPacket::decode,
                 PlanningProgressPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_PROGRESS_DELTA, CraftProgressDeltaPacket.class,
                 CraftProgressDeltaPacket::encode, CraftProgressDeltaPacket::decode,
                 CraftProgressDeltaPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.PREPARE_INTERMEDIATE_MATERIALS,
                 PrepareIntermediateMaterialsPacket.class,
                 PrepareIntermediateMaterialsPacket::encode,
                 PrepareIntermediateMaterialsPacket::decode,
                 PrepareIntermediateMaterialsPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.CRAFT_CANCEL, CraftCancelPacket.class,
                 CraftCancelPacket::encode, CraftCancelPacket::decode, CraftCancelPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.CRAFT_STATUS_REQUEST, CraftStatusRequestPacket.class,
                 CraftStatusRequestPacket::encode, CraftStatusRequestPacket::decode, CraftStatusRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.CRAFT_STATUS_SYNC, CraftStatusSyncPacket.class,
                 CraftStatusSyncPacket::encode, CraftStatusSyncPacket::decode, CraftStatusSyncPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_SUBMISSION_REQUEST,
                     QuestSubmissionRequestPacket.class,
                     QuestSubmissionRequestPacket::encode,
                     QuestSubmissionRequestPacket::decode,
                     QuestSubmissionRequestPacket::handle,
-                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                    Optional.of(NetworkDirection.PLAY_TO_SERVER));
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_MISSING_BOOKMARK,
                     QuestMissingBookmarkPacket.class,
                     QuestMissingBookmarkPacket::encode,
                     QuestMissingBookmarkPacket::decode,
                     QuestMissingBookmarkPacket::handle,
-                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                    Optional.of(NetworkDirection.PLAY_TO_CLIENT));
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_CONFIRM_CHECKMARKS, CheckmarkConfirmPacket.class,
                     CheckmarkConfirmPacket::encode, CheckmarkConfirmPacket::decode, CheckmarkConfirmPacket::handle,
-                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                    Optional.of(NetworkDirection.PLAY_TO_SERVER));
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_STORAGE_SCAN, StorageQuestScanPacket.class,
                     StorageQuestScanPacket::encode, StorageQuestScanPacket::decode, StorageQuestScanPacket::handle,
-                    java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                    Optional.of(NetworkDirection.PLAY_TO_SERVER));
         }
         registered = true;
     }

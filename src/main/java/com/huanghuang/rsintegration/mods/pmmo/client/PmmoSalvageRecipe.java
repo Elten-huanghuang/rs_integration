@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.pmmo.client;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRecipeWrapper;
 
 import java.util.Map;
 
@@ -30,7 +31,7 @@ public record PmmoSalvageRecipe(
     }
 
     public ResourceLocation recipeId() {
-        return com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageRecipeWrapper
+        return PmmoSalvageRecipeWrapper
                 .recipeId(inputId, outputId);
     }
 }

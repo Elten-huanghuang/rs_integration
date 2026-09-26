@@ -11,6 +11,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
+import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeClient;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -25,7 +26,7 @@ public final class RSVoidUpgradeItem extends Item {
         ItemStack stack = player.getItemInHand(hand);
         if (level.isClientSide) {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                    () -> () -> com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeClient
+                    () -> () -> VoidUpgradeClient
                             .open(hand, stack));
         }
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);

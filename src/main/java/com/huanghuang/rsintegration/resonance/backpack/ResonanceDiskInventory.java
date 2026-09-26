@@ -8,6 +8,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
+import java.util.List;
+import net.minecraft.nbt.CompoundTag;
 
 public class ResonanceDiskInventory implements Container {
 
@@ -39,12 +42,12 @@ public class ResonanceDiskInventory implements Container {
         int loaded = 0;
         int migrated = 0;
         int split = disk.normalizeForMenu();
-        java.util.List<ItemStack> storedStacks = new java.util.ArrayList<>();
+        List<ItemStack> storedStacks = new ArrayList<>();
         for (ResonanceStorageView.StoredStack entry : disk.storedStacks()) {
             ItemStack stored = entry.stack().copy();
             if (stored.isEmpty()) continue;
             ItemStack display = stored.copy();
-            net.minecraft.nbt.CompoundTag tag = display.getTag();
+            CompoundTag tag = display.getTag();
             int designated = entry.slot();
             if ((designated < 0 || designated >= SLOTS)
                     && tag != null && tag.contains(RSI_SLOT_TAG)) {

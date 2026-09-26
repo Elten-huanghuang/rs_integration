@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrappe
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -38,6 +39,6 @@ public final class MarketRecipeHandler extends AbstractRecipeHandler {
         MarketRecipeWrapper w = (MarketRecipeWrapper) recipe;
         ItemStack cost = w.costItem();
         if (cost.isEmpty()) return null;
-        return List.of(new IngredientSpec(net.minecraft.world.item.crafting.Ingredient.of(cost), cost.getCount()));
+        return List.of(new IngredientSpec(Ingredient.of(cost), cost.getCount()));
     }
 }

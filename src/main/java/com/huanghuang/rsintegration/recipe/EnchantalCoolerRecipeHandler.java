@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -69,7 +70,7 @@ public final class EnchantalCoolerRecipeHandler extends AbstractRecipeHandler {
     public static ItemStack getContainerItem(Recipe<?> recipe) {
         if (recipe == null) return ItemStack.EMPTY;
         try {
-            java.lang.reflect.Method method = recipe.getClass().getMethod("getContainer");
+            Method method = recipe.getClass().getMethod("getContainer");
             Object value = method.invoke(recipe);
             if (value instanceof ItemStack stack && !stack.isEmpty()) return stack.copy();
         } catch (ReflectiveOperationException e) {

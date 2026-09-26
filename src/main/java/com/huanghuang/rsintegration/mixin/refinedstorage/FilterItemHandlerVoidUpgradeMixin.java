@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModItems;
 import com.refinedmods.refinedstorage.inventory.item.FilterItemHandler;

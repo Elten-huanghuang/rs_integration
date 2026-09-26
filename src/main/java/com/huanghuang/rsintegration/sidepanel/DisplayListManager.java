@@ -7,6 +7,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.registries.ForgeRegistries;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import net.minecraft.world.item.TooltipFlag;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -64,8 +67,8 @@ final class DisplayListManager {
                 list.removeIf(ps -> {
                     for (Component line : ps.getStack().getTooltipLines(mc.player,
                             mc.options.advancedItemTooltips
-                                    ? net.minecraft.world.item.TooltipFlag.Default.ADVANCED
-                                    : net.minecraft.world.item.TooltipFlag.Default.NORMAL)) {
+                                    ? TooltipFlag.Default.ADVANCED
+                                    : TooltipFlag.Default.NORMAL)) {
                         String text = ChatFormatting.stripFormatting(line.getString());
                         if (text != null && text.toLowerCase().contains(tq)) return false;
                     }
@@ -73,14 +76,14 @@ final class DisplayListManager {
                 });
             } else {
                 try {
-                    java.util.regex.Pattern p = java.util.regex.Pattern.compile(query,
-                            java.util.regex.Pattern.CASE_INSENSITIVE);
+                    Pattern p = Pattern.compile(query,
+                            Pattern.CASE_INSENSITIVE);
                     list.removeIf(ps -> {
                         String name = ps.getName();
                         if (p.matcher(name).find()) return false;
                         return !matchesPinyin(name, query);
                     });
-                } catch (java.util.regex.PatternSyntaxException e) {
+                } catch (PatternSyntaxException e) {
                     String lower = query.toLowerCase();
                     list.removeIf(ps -> {
                         String name = ps.getName();

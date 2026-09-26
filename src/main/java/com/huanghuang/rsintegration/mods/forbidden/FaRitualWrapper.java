@@ -10,6 +10,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
+import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
 
@@ -46,7 +47,7 @@ public final class FaRitualWrapper implements Recipe<Container> {
         this.id = id;
         this.ritual = ritual;
         this.resultItem = mainIngredientStack.copy();
-        this.resultItem.setHoverName(net.minecraft.network.chat.Component.translatable(
+        this.resultItem.setHoverName(Component.translatable(
                 "rsi.fa.plan.upgrade_title", fromTier, toTier));
         this.isUpgrade = true;
         this.upgradeFromTier = fromTier;

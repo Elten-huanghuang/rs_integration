@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import java.util.Objects;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,24 +24,24 @@ public final class PlanRequestService implements AutoCloseable {
 
     public PlanRequestService(int parallelism) {
         this(parallelism,
-                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                RSIntegrationConfig
                         .DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY);
     }
 
     public PlanRequestService(int parallelism, int queueCapacity) {
         this(parallelism, queueCapacity,
-                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                RSIntegrationConfig
                         .DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES,
-                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                RSIntegrationConfig
                         .DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES,
-                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                RSIntegrationConfig
                         .DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS);
     }
 
     public PlanRequestService(int parallelism, int queueCapacity,
                               int maxSearchStates, int maxMemoizedFailures) {
         this(parallelism, queueCapacity, maxSearchStates, maxMemoizedFailures,
-                com.huanghuang.rsintegration.config.RSIntegrationConfig
+                RSIntegrationConfig
                         .DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS);
     }
 
@@ -60,7 +62,7 @@ public final class PlanRequestService implements AutoCloseable {
     }
 
     public boolean isCurrent(UUID playerId, long generation) {
-        return generation != 0L && java.util.Objects.equals(generations.get(playerId), generation);
+        return generation != 0L && Objects.equals(generations.get(playerId), generation);
     }
 
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,

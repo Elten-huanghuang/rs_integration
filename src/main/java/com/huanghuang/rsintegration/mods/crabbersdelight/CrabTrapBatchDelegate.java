@@ -19,6 +19,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -279,7 +281,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
     private void refundToRSNetwork(ItemStack stack) {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (!leftover.isEmpty() && player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 
@@ -304,7 +306,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
                 return (IItemHandler) inventoryField.get(be);
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CrabTrap] field access failed", e); }
         }
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
     }
 

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.itemcollectors;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import net.minecraft.world.level.Level;

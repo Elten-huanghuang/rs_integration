@@ -11,6 +11,8 @@ import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.core.BlockPos;
 
 import java.util.HashMap;
 import java.util.List;
@@ -23,7 +25,7 @@ public final class ApothSpawnerUpgradeScreen extends Screen {
     private enum View { UPGRADES, MATERIALS }
 
     private final ResourceLocation dimension;
-    private final net.minecraft.core.BlockPos pos;
+    private final BlockPos pos;
     private List<Entry> entries;
     private final Map<ResourceLocation, Integer> selected = new HashMap<>();
     private View view = View.UPGRADES;
@@ -223,7 +225,7 @@ public final class ApothSpawnerUpgradeScreen extends Screen {
             g.drawCenteredString(font, getMessage(), getX() + width / 2, getY() + (height - 8) / 2, 0xFFE5F3EA);
         }
         @Override protected void updateWidgetNarration(
-                net.minecraft.client.gui.narration.NarrationElementOutput output) {
+                NarrationElementOutput output) {
             defaultButtonNarrationText(output);
         }
     }

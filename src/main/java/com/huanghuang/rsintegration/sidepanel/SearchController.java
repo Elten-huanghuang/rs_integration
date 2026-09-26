@@ -9,6 +9,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import org.lwjgl.glfw.GLFW;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +55,7 @@ final class SearchController {
         if (mc.screen == null) return false;
         // The panel is an inventory/machine overlay. Keep the global keybind
         // out of chat, JEI, options/key-bindings and other non-container screens.
-        return mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>;
+        return mc.screen instanceof AbstractContainerScreen<?>;
     }
 
     // ── Key input (no screen open) ────────────────────────────────
@@ -66,7 +67,7 @@ final class SearchController {
         // The panel is an RS-grid overlay. Do not let its global keybind
         // fire while typing in another screen or changing controls.
         if (!isSidePanelHostScreen(mc)) return;
-        if (mc.screen.getFocused() instanceof net.minecraft.client.gui.components.EditBox) return;
+        if (mc.screen.getFocused() instanceof EditBox) return;
         if (RSSidePanelClient.KEY_TOGGLE_PANEL.isActiveAndMatches(
                 com.mojang.blaze3d.platform.InputConstants.getKey(event.getKey(), event.getScanCode()))
                 && event.getAction() == GLFW.GLFW_PRESS) {

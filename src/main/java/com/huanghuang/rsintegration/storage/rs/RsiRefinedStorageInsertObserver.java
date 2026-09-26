@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.storage.StorageInsertObserver;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.common.util.FakePlayer;
 
 /** Preserves RSI's existing cache and menu notifications for tracked RS inserts. */
 final class RsiRefinedStorageInsertObserver implements StorageInsertObserver {
@@ -16,7 +17,7 @@ final class RsiRefinedStorageInsertObserver implements StorageInsertObserver {
     public void beforePerform(ServerPlayer player, StorageReference reference,
                               ItemStack acceptedEstimate) {
         MaterialSources.invalidateFor(player);
-        if (!(player instanceof net.minecraftforge.common.util.FakePlayer)) {
+        if (!(player instanceof FakePlayer)) {
             player.containerMenu.broadcastChanges();
         }
     }

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.jei;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.tetra.client.TetraWorkbenchMaterialState;
 import com.huanghuang.rsintegration.mods.jei.JeiIngredientFilterRefresh;

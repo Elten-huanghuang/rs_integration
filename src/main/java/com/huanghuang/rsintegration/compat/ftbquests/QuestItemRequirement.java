@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
 import net.minecraft.world.item.ItemStack;
+import java.util.Objects;
 
 import java.util.List;
 
@@ -59,7 +60,7 @@ public record QuestItemRequirement(
 
     private static boolean sameItem(ItemStack left, ItemStack right) {
         return left.getItem() == right.getItem()
-                && java.util.Objects.equals(left.getTag(), right.getTag());
+                && Objects.equals(left.getTag(), right.getTag());
     }
 
     private static boolean sameItemSet(List<ItemStack> left, List<ItemStack> right) {

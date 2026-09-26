@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
+import java.lang.reflect.Method;
 
 import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.ModType;
@@ -19,6 +20,7 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.common.brewing.BrewingRecipeRegistry;
 import net.minecraftforge.common.brewing.IBrewingRecipe;
 import org.slf4j.Logger;
+import java.util.HashMap;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -249,7 +251,7 @@ public final class VanillaBrewingCatalog {
                                               Map<Item, List<RecipeIndex.Entry>> index,
                                               Set<ResourceLocation> seen) {
         try {
-            java.lang.reflect.Method method = brewing.getClass().getMethod("getProcessingMappings");
+            Method method = brewing.getClass().getMethod("getProcessingMappings");
             Object value = method.invoke(brewing);
             if (!(value instanceof Map<?, ?> mappings)) return;
             for (Map.Entry<?, ?> mapping : mappings.entrySet()) {
@@ -330,7 +332,7 @@ public final class VanillaBrewingCatalog {
     }
 
     public static synchronized void ensureBuilt(Level level) {
-        if (BY_ID.isEmpty()) index(level, new java.util.HashMap<>(), new java.util.HashSet<>());
+        if (BY_ID.isEmpty()) index(level, new HashMap<>(), new HashSet<>());
     }
 
     private static List<ItemStack> inputCandidates() {

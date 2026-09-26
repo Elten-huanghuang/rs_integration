@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.mods.farmersdelight.CuttingBoardBatchDelegate;
+
 import com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -68,7 +71,7 @@ public final class PlanWarnings {
     }
 
     public static int goetyTotemSoulCost(Recipe<?> recipe) {
-        return recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe crafting
+        return recipe instanceof CraftingRecipe crafting
                 ? GoetySoulTotemCrafting.soulCostPerCraft(crafting) : 0;
     }
 
@@ -201,8 +204,7 @@ public final class PlanWarnings {
                 warnings.addAll(SkilletBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.ID_FD_CUTTING_BOARD:
-                var cuttingBoardCheck = com.huanghuang.rsintegration.mods.farmersdelight
-                        .CuttingBoardBatchDelegate.getPlanCheck(player, recipe, endpoint);
+                var cuttingBoardCheck = CuttingBoardBatchDelegate.getPlanCheck(player, recipe, endpoint);
                 warnings.addAll(cuttingBoardCheck.warnings());
                 blocksExecution = cuttingBoardCheck.blocksExecution();
                 break;

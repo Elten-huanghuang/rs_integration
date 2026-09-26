@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.refinedmods.refinedstorage.api.autocrafting.ICraftingPattern;

@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.Map;
+import java.lang.reflect.InvocationTargetException;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -10,7 +13,6 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -164,7 +166,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             if (requirements != null) {
                 List<?> requiredEnhancers = FaRitualHelper.invokeList(requirements, "enhancers");
                 if (requiredEnhancers != null && !requiredEnhancers.isEmpty()) {
-                    java.lang.reflect.Field accessorField = Reflect.findField(
+                    Field accessorField = Reflect.findField(
                             FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                     List<?> installedEnhancers = null;
                     if (accessorField != null) {
@@ -442,7 +444,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 returnStarterToSource(starterStack);
                 return false;
             }
-        } catch (java.lang.reflect.InvocationTargetException e) {
+        } catch (InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed — forge rejected", root);
             rollbackPhysical();
@@ -701,7 +703,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 returnStarterToSource(starterStack);
                 return false;
             }
-        } catch (java.lang.reflect.InvocationTargetException e) {
+        } catch (InvocationTargetException e) {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed (withMaterials) — forge rejected", root);
             rollbackAll();
@@ -900,7 +902,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     // ── RitualStarterItem helpers ─────────────────────────────────
 
-    @javax.annotation.Nullable
+    @Nullable
     private transient ItemStack starterFromRS;
     private transient ItemStack starterFromStorage;
 
@@ -965,7 +967,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
      */
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                @Nullable ResourceLocation dim,
-                                               @Nullable net.minecraft.core.BlockPos pos) {
+                                               @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
         if (!(recipe instanceof FaRitualWrapper wrapper)) return warnings;
         if (FAReflection.hephaestusForgeBEClass == null || FAReflection.ritualClass == null || FAReflection.essencesDefinitionClass == null)
@@ -994,7 +996,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         allStacks.addAll(player.getInventory().offhand);
                         allStacks.addAll(player.getInventory().armor);
                         allStacks.addAll(
-                                com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+                                CuriosAccess.stacks(player));
                         ResourceLocation foundDim = null;
                         BlockPos foundPos = null;
                         outer:
@@ -1089,11 +1091,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     if (level != null && level.isLoaded(pos)) {
                         BlockEntity be = level.getBlockEntity(pos);
                         if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
-                            java.lang.reflect.Field slotMapField = Reflect.findField(
+                            Field slotMapField = Reflect.findField(
                                     FAReflection.hephaestusForgeBEClass, "SLOT_FROM_ESSENCE_TYPE_MAP").orElse(null);
                             if (slotMapField != null) {
                                 Object slotMap = slotMapField.get(null);
-                                if (slotMap instanceof java.util.Map<?, ?> map) {
+                                if (slotMap instanceof Map<?, ?> map) {
                                     Object curEssences = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssences", "getEssences").invoke(be);
                                     int curA = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "aureal", "aureal").invoke(curEssences);
                                     int curS = (int) Reflect.getMethodOrThrow(FAReflection.essencesDefinitionClass, "souls", "souls").invoke(curEssences);
@@ -1187,7 +1189,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                             if (be != null && FAReflection.hephaestusForgeBEClass.isInstance(be)) {
                                 Object rm = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getRitualManager", "getRitualManager").invoke(be);
                                 if (rm != null) {
-                                    java.lang.reflect.Field af = Reflect.findField(
+                                    Field af = Reflect.findField(
                                             FAReflection.ritualManagerClass, "enhancerAccessor").orElse(null);
                                     List<?> installedEnhancers = null;
                                     if (af != null) {
@@ -1245,8 +1247,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     static final class DelegateBooleanConsumer implements InvocationHandler {
         private final FaBatchDelegate delegate;
-        @javax.annotation.Nullable private final ItemStack starterStack;
-        @javax.annotation.Nullable private final ServerPlayer starterPlayer;
+        @Nullable private final ItemStack starterStack;
+        @Nullable private final ServerPlayer starterPlayer;
         boolean accepted;
         boolean wasCalled;
 
@@ -1255,8 +1257,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         }
 
         DelegateBooleanConsumer(FaBatchDelegate delegate,
-                                @javax.annotation.Nullable ItemStack starterStack,
-                                @javax.annotation.Nullable ServerPlayer starterPlayer) {
+                                @Nullable ItemStack starterStack,
+                                @Nullable ServerPlayer starterPlayer) {
             this.delegate = delegate;
             this.starterStack = starterStack;
             this.starterPlayer = starterPlayer;

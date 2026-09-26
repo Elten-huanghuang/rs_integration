@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Atomically admits ready DAG nodes by reserving their material allocations.
@@ -114,7 +115,7 @@ public final class NodeAdmissionCoordinator {
 
     /** Refund recovered producer fragments and settle every unrecovered claim. */
     public void refundRecoveredMaterial(Admission admission,
-                                        List<net.minecraft.world.item.ItemStack> recovered) {
+                                        List<ItemStack> recovered) {
         materials.refundRecoveredProducerFragments(admission.materialToken(), recovered);
         materials.settle(admission.materialToken());
     }

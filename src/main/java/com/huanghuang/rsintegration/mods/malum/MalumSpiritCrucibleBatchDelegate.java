@@ -1,10 +1,17 @@
 package com.huanghuang.rsintegration.mods.malum;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import java.util.Arrays;
+import java.util.Optional;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.Item;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
@@ -58,8 +65,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     static final String CATALYST_ENTRY_ID = "malum:catalyst";
     static String spiritEntryId(int index) { return "malum:spirit:" + index; }
 
-    private static java.lang.reflect.Field iwcIngField;
-    private static java.lang.reflect.Field iwcCountField;
+    private static Field iwcIngField;
+    private static Field iwcCountField;
 
     private static synchronized void ensureIWCFields() {
         if (iwcIngField != null || MalumReflection.ingredientWithCountClass == null) return;
@@ -97,7 +104,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, BlockPos pos) {
         if (!MalumReflection.isAvailable()) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.mod_missing"));
             return false;
         }
@@ -109,15 +116,15 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Resolve level
         ServerLevel level;
         if (dim != null) {
-            net.minecraft.resources.ResourceKey<Level> key =
-                    net.minecraft.resources.ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, dim);
+            ResourceKey<Level> key =
+                    ResourceKey.create(
+                            Registries.DIMENSION, dim);
             level = player.getServer().getLevel(key);
         } else {
             level = player.serverLevel();
         }
         if (level == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.dim_not_found"));
             return false;
         }
@@ -127,7 +134,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // may have clicked on a component block rather than the core.  Scan a
         // 2-block radius for the core BE.
         if (pos == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.machine_not_found"));
             return false;
         }
@@ -141,7 +148,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             }
         }
         if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.not_crucible"));
             return false;
         }
@@ -150,7 +157,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Resolve recipe
         this.recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -167,7 +174,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         this.invCatalyst = readHandler(be, "inventory");
         this.invSpirits = readHandler(be, "spiritInventory");
         if (invCatalyst == null || invSpirits == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.inventory_error"));
             return false;
         }
@@ -189,7 +196,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Check crucible is idle (no active recipe)
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
         if (currentRecipe != null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.warn.already_crafting"));
             return false;
         }
@@ -206,11 +213,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 try {
                     Object val = inputField.get(recipe);
                     if (val != null) {
-                        net.minecraft.world.item.crafting.Ingredient ri = null;
+                        Ingredient ri = null;
                         if (MalumReflection.ingredientWithCountClass != null && MalumReflection.ingredientWithCountClass.isInstance(val)) {
                             Object ing = iwcIngField.get(val);
-                            if (ing instanceof net.minecraft.world.item.crafting.Ingredient r) ri = r;
-                        } else if (val instanceof net.minecraft.world.item.crafting.Ingredient r) {
+                            if (ing instanceof Ingredient r) ri = r;
+                        } else if (val instanceof Ingredient r) {
                             ri = r;
                         }
                         if (ri != null && ri.test(existing) && hasReusableCatalystInput()) {
@@ -438,7 +445,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }
@@ -492,10 +499,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     if (MalumReflection.ingredientWithCountClass != null && MalumReflection.ingredientWithCountClass.isInstance(val)) {
                         Object ing = iwcIngField.get(val);
                         int count = iwcCountField.getInt(val);
-                        if (ing instanceof net.minecraft.world.item.crafting.Ingredient ri && count > 0) {
+                        if (ing instanceof Ingredient ri && count > 0) {
                             result.add(new IngredientSpec(ri, count));
                         }
-                    } else if (val instanceof net.minecraft.world.item.crafting.Ingredient ri) {
+                    } else if (val instanceof Ingredient ri) {
                         result.add(new IngredientSpec(ri, 1));
                     }
                 }
@@ -512,9 +519,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     for (Object swc : spirits) {
                         int count = Reflect.getIntField(swc, "count").orElse(1);
                         Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
-                        if (itemObj instanceof net.minecraft.world.item.Item it && count > 0) {
+                        if (itemObj instanceof Item it && count > 0) {
                             result.add(new IngredientSpec(
-                                    net.minecraft.world.item.crafting.Ingredient.of(it), count));
+                                    Ingredient.of(it), count));
                         }
                     }
                 }
@@ -572,7 +579,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Re-validate BE still exists and is idle
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.not_crucible"));
             return false;
         }
@@ -580,7 +587,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         this.invCatalyst = readHandler(be, "inventory");
         this.invSpirits = readHandler(be, "spiritInventory");
         if (invCatalyst == null || invSpirits == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.inventory_error"));
             return false;
         }
@@ -588,7 +595,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Check still idle
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
         if (currentRecipe != null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.warn.already_crafting"));
             return false;
         }
@@ -619,14 +626,14 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                             // IngredientWithCount path (older Malum recipes)
                             Object ing = iwcIngField.get(val);
                             int count = iwcCountField.getInt(val);
-                            if (ing instanceof net.minecraft.world.item.crafting.Ingredient ri && count > 0) {
+                            if (ing instanceof Ingredient ri && count > 0) {
                                 ItemStack extracted = extractFromRS(player, ri, count,
                                         localLedger, usingSharedLedger);
                                 if (!extracted.isEmpty()) {
                                     catalystToPlace = extracted;
                                 }
                             }
-                        } else if (val instanceof net.minecraft.world.item.crafting.Ingredient ri) {
+                        } else if (val instanceof Ingredient ri) {
                             // Plain Ingredient path (SpiritFocusingRecipe)
                             ItemStack extracted = extractFromRS(player, ri, 1,
                                     localLedger, usingSharedLedger);
@@ -642,7 +649,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         if (invCatalyst.getStackInSlot(0).isEmpty() && catalystToPlace.isEmpty()) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.no_catalyst"));
             return false;
         }
@@ -650,7 +657,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         List<ItemStack> spiritStacks = reserveSpiritStacks(player, localLedger, usingSharedLedger);
         if (spiritStacks == null) {
             clearUncommittedPlacements();
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.missing_materials", recipe.getId().toString()));
             return false;
         }
@@ -665,7 +672,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (!usingSharedLedger) {
             if (!localLedger.commit(this.network, player)) {
                 clearUncommittedPlacements();
-                player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Ledger commit failed"));
                 return false;
             }
@@ -696,11 +703,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             for (Object swc : spirits) {
                 int count = Reflect.getIntField(swc, "count").orElse(1);
                 Object itemObj = Reflect.invoke(swc, "getItem").orElse(null);
-                if (!(itemObj instanceof net.minecraft.world.item.Item item) || count <= 0) {
+                if (!(itemObj instanceof Item item) || count <= 0) {
                     return null;
                 }
                 ItemStack extracted = extractFromRS(player,
-                        net.minecraft.world.item.crafting.Ingredient.of(item), count,
+                        Ingredient.of(item), count,
                         ledger, useShared);
                 if (extracted.isEmpty() || extracted.getCount() < count) return null;
                 reserved.add(extracted);
@@ -777,7 +784,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     static boolean refreshRecipeSelection(Object crucible, Recipe<?> expected) {
         if (crucible == null || expected == null) return false;
         try {
-            java.lang.reflect.Method init = findNoArgMethod(crucible.getClass(), "init");
+            Method init = findNoArgMethod(crucible.getClass(), "init");
             if (init == null) return false;
             init.setAccessible(true);
             init.invoke(crucible);
@@ -794,8 +801,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             // types. Only override that ambiguous choice after Malum's own
             // target-recipe predicates confirm the placed inputs.
             if (!matchesPlacedInputs(crucible, expected)) return false;
-            Object selected = java.util.Optional.class.isAssignableFrom(recipeField.getType())
-                    ? java.util.Optional.of(expected) : expected;
+            Object selected = Optional.class.isAssignableFrom(recipeField.getType())
+                    ? Optional.of(expected) : expected;
             recipeField.set(crucible, selected);
             return sameRecipe(unwrapOptional(recipeField.get(crucible)), expected);
         } catch (ReflectiveOperationException | RuntimeException e) {
@@ -809,9 +816,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         IItemHandler spirits = readHandlerDirect(crucible, "spiritInventory");
         if (catalyst == null || spirits == null || catalyst.getSlots() == 0) return false;
 
-        java.lang.reflect.Method inputMatch = findCompatibleMethod(
+        Method inputMatch = findCompatibleMethod(
                 expected.getClass(), "doesInputMatch", ItemStack.class);
-        java.lang.reflect.Method spiritMatch = findCompatibleMethod(
+        Method spiritMatch = findCompatibleMethod(
                 expected.getClass(), "doSpiritsMatch", List.class);
         if (inputMatch == null || spiritMatch == null) return false;
 
@@ -843,7 +850,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Nullable
     private static Object unwrapOptional(@Nullable Object value) {
-        return value instanceof java.util.Optional<?> optional ? optional.orElse(null) : value;
+        return value instanceof Optional<?> optional ? optional.orElse(null) : value;
     }
 
     @Nullable
@@ -860,11 +867,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Nullable
-    private static java.lang.reflect.Method findCompatibleMethod(
+    private static Method findCompatibleMethod(
             Class<?> type, String name, Class<?> argumentType) {
         for (Class<?> current = type; current != null && current != Object.class;
              current = current.getSuperclass()) {
-            for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+            for (Method method : current.getDeclaredMethods()) {
                 if (method.getName().equals(name) && method.getParameterCount() == 1
                         && method.getParameterTypes()[0].isAssignableFrom(argumentType)) {
                     return method;
@@ -874,10 +881,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return null;
     }
 
-    private static java.lang.reflect.Method findNoArgMethod(Class<?> type, String name) {
+    private static Method findNoArgMethod(Class<?> type, String name) {
         for (Class<?> current = type; current != null && current != Object.class;
              current = current.getSuperclass()) {
-            for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+            for (Method method : current.getDeclaredMethods()) {
                 if (method.getName().equals(name) && method.getParameterCount() == 0) return method;
             }
         }
@@ -887,7 +894,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private void logRejectedState(BlockEntity be) {
         Object active = Reflect.getField(be, "recipe").orElse(null);
         String activeDescription;
-        if (active instanceof java.util.Optional<?> optional) active = optional.orElse(null);
+        if (active instanceof Optional<?> optional) active = optional.orElse(null);
         if (active instanceof Recipe<?> activeRecipe) {
             activeDescription = activeRecipe.getId().toString();
         } else {
@@ -912,10 +919,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     static boolean refreshAccelerators(Object crucible, Object level, Object pos) {
         if (crucible == null || level == null || pos == null) return false;
         try {
-            java.lang.reflect.Method recalibrate = null;
+            Method recalibrate = null;
             // getMethods() includes public default methods declared by Malum's
             // ICatalyzerAccelerationTarget interface.
-            for (java.lang.reflect.Method method : crucible.getClass().getMethods()) {
+            for (Method method : crucible.getClass().getMethods()) {
                 Class<?>[] parameters = method.getParameterTypes();
                 if (method.getName().equals("recalibrateAccelerators")
                         && parameters.length == 2
@@ -928,7 +935,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             for (Class<?> current = crucible.getClass();
                  current != null && current != Object.class && recalibrate == null;
                  current = current.getSuperclass()) {
-                for (java.lang.reflect.Method method : current.getDeclaredMethods()) {
+                for (Method method : current.getDeclaredMethods()) {
                     Class<?>[] parameters = method.getParameterTypes();
                     if (method.getName().equals("recalibrateAccelerators")
                             && parameters.length == 2
@@ -983,9 +990,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             BlockPos pos = be.getBlockPos();
             List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class,
                     new AABB(pos).inflate(4),
-                    e -> net.minecraft.world.item.ItemStack.isSameItemSameTags(
+                    e -> ItemStack.isSameItemSameTags(
                             e.getItem(), scanTarget)
-                            || net.minecraft.world.item.ItemStack.isSameItem(
+                            || ItemStack.isSameItem(
                                     e.getItem(), scanTarget));
             if (!entities.isEmpty()) return true;
         }
@@ -1012,8 +1019,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     if (!e.isAlive()) return false;
                     ItemStack ei = e.getItem();
                     if (scanTarget.isEmpty()) return !ei.isEmpty();
-                    return net.minecraft.world.item.ItemStack.isSameItemSameTags(ei, scanTarget)
-                            || net.minecraft.world.item.ItemStack.isSameItem(ei, scanTarget);
+                    return ItemStack.isSameItemSameTags(ei, scanTarget)
+                            || ItemStack.isSameItem(ei, scanTarget);
                 });
 
         if (!entities.isEmpty()) {
@@ -1035,8 +1042,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             List<ItemStack> slots = new ArrayList<>(player.getInventory().items);
             slots.addAll(player.getInventory().offhand);
             for (ItemStack slot : slots) {
-                if (net.minecraft.world.item.ItemStack.isSameItemSameTags(slot, target)
-                        || net.minecraft.world.item.ItemStack.isSameItem(slot, target)) {
+                if (ItemStack.isSameItemSameTags(slot, target)
+                        || ItemStack.isSameItem(slot, target)) {
                     int amount = Math.min(slot.getCount(), target.getCount());
                     ItemStack result = slot.split(amount);
                     if (!result.isEmpty()) return result;
@@ -1168,7 +1175,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 }
             }
         }
-        if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) be.setChanged();
+        if (crucibleBE instanceof BlockEntity be) be.setChanged();
     }
 
     private void clearAllSlots() {
@@ -1198,7 +1205,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         } else {
             for (ItemStack stack : recovered) returnCrucibleItem(stack);
         }
-        if (crucibleBE instanceof net.minecraft.world.level.block.entity.BlockEntity be) {
+        if (crucibleBE instanceof BlockEntity be) {
             be.setChanged();
         }
     }
@@ -1257,7 +1264,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return false;
     }
 
-    private ItemStack extractFromRS(ServerPlayer player, net.minecraft.world.item.crafting.Ingredient ingredient,
+    private ItemStack extractFromRS(ServerPlayer player, Ingredient ingredient,
                                     int count, ExtractionLedger ledger, boolean useShared) {
         if (storageEndpoint() != null) {
             return ledger.reserveFromEndpoint(ingredient, count, storageEndpoint(), player);
@@ -1282,7 +1289,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // Spirit requirements
         List<?> spirits = null;
         try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("spirits");
+            Field f = recipe.getClass().getDeclaredField("spirits");
             f.setAccessible(true);
             spirits = (List<?>) f.get(recipe);
         } catch (Exception e) { /* no spirit field */ }
@@ -1304,7 +1311,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirit probe failed", e); }
             }
             if (!names.isEmpty()) {
-                warnings.add(net.minecraft.network.chat.Component.translatable(
+                warnings.add(Component.translatable(
                         "rsi.malum_crucible.warn.spirit_required",
                         String.join(", ", names)));
             }
@@ -1314,9 +1321,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (pos != null && MalumReflection.crucibleBEClass != null) {
             ServerLevel level = null;
             if (dim != null) {
-                net.minecraft.resources.ResourceKey<Level> key =
-                        net.minecraft.resources.ResourceKey.create(
-                                net.minecraft.core.registries.Registries.DIMENSION, dim);
+                ResourceKey<Level> key =
+                        ResourceKey.create(
+                                Registries.DIMENSION, dim);
                 level = player.getServer().getLevel(key);
             } else {
                 level = player.serverLevel();
@@ -1326,7 +1333,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 if (be != null && MalumReflection.crucibleBEClass.isInstance(be)) {
                     IItemHandler spiritInv = readHandler(be, "spiritInventory");
                     if (spiritInv != null && spirits != null && spirits.size() > spiritInv.getSlots()) {
-                        warnings.add(net.minecraft.network.chat.Component.translatable(
+                        warnings.add(Component.translatable(
                                 "rsi.malum_crucible.warn.spirit_slots_insufficient",
                                 spiritInv.getSlots(), spirits.size()));
                     }

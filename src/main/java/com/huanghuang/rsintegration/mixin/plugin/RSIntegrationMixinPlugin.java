@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mixin.plugin;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.ClassReader;

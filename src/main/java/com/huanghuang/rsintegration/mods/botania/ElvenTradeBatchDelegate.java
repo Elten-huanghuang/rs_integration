@@ -23,6 +23,9 @@ import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.ElvenTradeRecipe;
 import vazkii.botania.common.block.block_entity.AlfheimPortalBlockEntity;
 import vazkii.botania.xplat.XplatAbstractions;
+import java.util.HashSet;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -46,7 +49,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     private int requestedBatch = 1;
     private long startTick;
     private Set<UUID> entitiesBefore = Set.of();
-    private final Set<UUID> inputEntityIds = new java.util.HashSet<>();
+    private final Set<UUID> inputEntityIds = new HashSet<>();
     private List<ItemStack> immediateStartRecovery = List.of();
 
     @Override
@@ -57,7 +60,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
         machineDim = dimension;
         machineServer = player.getServer();
         level = dimension == null ? player.serverLevel() : player.getServer().getLevel(
-                ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimension));
+                ResourceKey.create(Registries.DIMENSION, dimension));
         if (level == null || !(level.getBlockEntity(pos) instanceof AlfheimPortalBlockEntity portal)
                 || !portalQueueEmpty(portal)) return false;
         var found = level.getRecipeManager().byKey(recipeId).orElse(null);
@@ -231,7 +234,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
 
         @Override
         public int hashCode() {
-            int itemHash = net.minecraft.core.registries.BuiltInRegistries.ITEM
+            int itemHash = BuiltInRegistries.ITEM
                     .getKey(stack.getItem()).hashCode();
             return 31 * itemHash + (stack.hasTag() ? stack.getTag().hashCode() : 0);
         }

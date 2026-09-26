@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.goety;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -6,6 +7,10 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -34,9 +39,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
@@ -1056,8 +1059,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         BlockPos pos = be.getBlockPos();
         if (pos != null && level.isLoaded(pos)) {
             var entities = level.getEntitiesOfClass(
-                    net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(pos).inflate(3),
+                    ItemEntity.class,
+                    new AABB(pos).inflate(3),
                     e -> matchesExpectedRitualResult(e.getItem(), expected));
             if (!entities.isEmpty()) return true;
         }
@@ -1188,8 +1191,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ServerLevel machineLevel = resolveMachineLevel(player);
         if (myPos != null && machineLevel != null && machineLevel.isLoaded(myPos)) {
             var entities = machineLevel.getEntitiesOfClass(
-                    net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    ItemEntity.class,
+                    new AABB(myPos).inflate(3),
                     e -> matchesExpectedRitualResult(e.getItem(), expected));
             for (var entity : entities) {
                 ItemStack collected = entity.getItem().copy();
@@ -1209,7 +1212,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         all.addAll(inv.items);
         all.addAll(inv.offhand);
         all.addAll(inv.armor);
-        all.addAll(com.huanghuang.rsintegration.util.CuriosAccess.stacks(player));
+        all.addAll(CuriosAccess.stacks(player));
 
         for (ItemStack stack : all) {
             if (matchesExpectedRitualResult(stack, expected)) {
@@ -1235,8 +1238,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ServerLevel brazierLevel = resolveMachineLevel(player);
         if (myPos != null && brazierLevel != null && brazierLevel.isLoaded(myPos)) {
             var entities = brazierLevel.getEntitiesOfClass(
-                    net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    ItemEntity.class,
+                    new AABB(myPos).inflate(3),
                     e -> IBatchDelegate.matchesProducedItem(e.getItem(), expected));
             for (var entity : entities) {
                 ItemStack collected = entity.getItem().copy();
@@ -1425,8 +1428,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
-        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
+    public AABB getOutputCaptureRegion() {
+        return myPos == null ? null : new AABB(myPos).inflate(3);
     }
 
     @Override
@@ -1732,8 +1735,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (!remainder.isEmpty()) {
             ServerLevel level = resolveMachineLevel((ServerLevel) null);
             if (level != null && myPos != null) {
-                net.minecraft.world.entity.item.ItemEntity entity =
-                        new net.minecraft.world.entity.item.ItemEntity(
+                ItemEntity entity =
+                        new ItemEntity(
                                 level, myPos.getX() + 0.5D, myPos.getY() + 1.0D,
                                 myPos.getZ() + 0.5D, remainder.copy());
                 level.addFreshEntity(entity);
@@ -2157,14 +2160,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                   @Nullable ResourceLocation dim,
-                                                  @Nullable net.minecraft.core.BlockPos pos) {
+                                                  @Nullable BlockPos pos) {
         return checkPlanPrerequisites(player, recipe, dim, pos).warnings();
     }
 
     public static PlanPrerequisiteCheck checkPlanPrerequisites(
             ServerPlayer player, Recipe<?> recipe,
             @Nullable ResourceLocation dim,
-            @Nullable net.minecraft.core.BlockPos pos) {
+            @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
         boolean blocked = false;
 
@@ -2433,12 +2436,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
             if (ns != null) {
                 Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(ns, scrollPath));
-                if (item != null && item != net.minecraft.world.item.Items.AIR)
+                if (item != null && item != Items.AIR)
                     return item.getDefaultInstance().getDisplayName();
             }
 
             Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(ModIds.GOETY, scrollPath));
-            if (item != null && item != net.minecraft.world.item.Items.AIR)
+            if (item != null && item != Items.AIR)
                 return item.getDefaultInstance().getDisplayName();
 
             for (var entry : BuiltInRegistries.ITEM.entrySet()) {

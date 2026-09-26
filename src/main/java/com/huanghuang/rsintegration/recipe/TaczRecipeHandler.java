@@ -7,6 +7,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -111,7 +112,7 @@ public final class TaczRecipeHandler extends AbstractRecipeHandler {
             for (Field f : scan.getDeclaredFields()) {
                 if (f.getType() != ItemStack.class) continue;
 
-                String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+                String name = f.getName().toLowerCase(Locale.ROOT);
                 // Absolutely skip input-side fields — TACZ names them
                 // input, ingredient, attachment_in, etc.
                 if (name.contains("input") || name.contains("ingredient") || name.equals("in")) {

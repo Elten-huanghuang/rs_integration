@@ -14,6 +14,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.registries.ForgeRegistries;
 
 /** One-line, non-modal hint for the only two terminal binding actions. */
 @OnlyIn(Dist.CLIENT)
@@ -43,7 +44,7 @@ public final class BindingHintOverlay {
         if (blockEntity != null
                 && "dev.shadowsoffire.apotheosis.spawn.spawner.ApothSpawnerTile"
                 .equals(blockEntity.getClass().getName())) {
-            var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
+            var itemId = ForgeRegistries.ITEMS.getKey(held.getItem());
             boolean bdTerminal = itemId != null
                     && "beyonddimensions".equals(itemId.getNamespace())
                     && "net_terminal_item".equals(itemId.getPath());
@@ -74,7 +75,7 @@ public final class BindingHintOverlay {
                 if (target.equals(storedTarget)) { bound = true; break; }
             }
         }
-        var itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
+        var itemId = ForgeRegistries.ITEMS.getKey(held.getItem());
         boolean bdTerminal = itemId != null
                 && "beyonddimensions".equals(itemId.getNamespace())
                 && "net_terminal_item".equals(itemId.getPath());

@@ -1,6 +1,13 @@
 package com.huanghuang.rsintegration.sidepanel;
 
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
+import java.util.Collections;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.UUID;
 
@@ -77,7 +84,7 @@ public final class PanelStack {
     public String getModName() {
         if (cachedModName == null) {
             String modId = getModId();
-            cachedModName = net.minecraftforge.fml.ModList.get()
+            cachedModName = ModList.get()
                     .getModContainerById(modId)
                     .map(c -> c.getModInfo().getDisplayName())
                     .orElse(modId);
@@ -87,7 +94,7 @@ public final class PanelStack {
 
     public String searchKey() {
         if (cachedSearchKey == null) {
-            var rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
             String base = rl != null ? rl.toString() : "";
             String nbt = stableNbtString(stack.getTag());
             if (!nbt.isEmpty()) base += "|" + nbt;
@@ -98,23 +105,23 @@ public final class PanelStack {
 
     /** Produce a deterministic string from a CompoundTag by sorting keys at each level.
      *  Avoids the non-deterministic {@code CompoundTag.toString()} from HashMap iteration. */
-    public static String stableNbtString(net.minecraft.nbt.CompoundTag tag) {
+    public static String stableNbtString(CompoundTag tag) {
         if (tag == null || tag.isEmpty()) return "";
-        var keys = new java.util.ArrayList<>(tag.getAllKeys());
-        java.util.Collections.sort(keys);
+        var keys = new ArrayList<>(tag.getAllKeys());
+        Collections.sort(keys);
         StringBuilder sb = new StringBuilder();
         for (String key : keys) {
             if (!sb.isEmpty()) sb.append(',');
             sb.append(key).append('=');
-            net.minecraft.nbt.Tag val = tag.get(key);
-            if (val instanceof net.minecraft.nbt.CompoundTag child) {
+            Tag val = tag.get(key);
+            if (val instanceof CompoundTag child) {
                 sb.append('{').append(stableNbtString(child)).append('}');
-            } else if (val instanceof net.minecraft.nbt.ListTag list) {
+            } else if (val instanceof ListTag list) {
                 sb.append('[');
                 for (int i = 0; i < list.size(); i++) {
                     if (i > 0) sb.append(',');
-                    net.minecraft.nbt.Tag elem = list.get(i);
-                    if (elem instanceof net.minecraft.nbt.CompoundTag c) {
+                    Tag elem = list.get(i);
+                    if (elem instanceof CompoundTag c) {
                         sb.append('{').append(stableNbtString(c)).append('}');
                     } else {
                         sb.append(elem);

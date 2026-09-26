@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
 import com.huanghuang.rsintegration.mods.apotheosis.client.ApotheosisLibraryClientEvents;
+import java.util.Optional;
+import net.minecraftforge.network.NetworkDirection;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -135,43 +137,43 @@ public final class ApotheosisRSModule implements IModIntegration {
                 ApotheosisLibraryLevelPacket::encode,
                 ApotheosisLibraryLevelPacket::decode,
                 ApotheosisLibraryLevelPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_LIBRARY_SCAN_REQUEST,
                 ApotheosisLibraryScanRequestPacket.class,
                 ApotheosisLibraryScanRequestPacket::encode,
                 ApotheosisLibraryScanRequestPacket::decode,
                 ApotheosisLibraryScanRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_LIBRARY_SCAN_RESPONSE,
                 ApotheosisLibraryScanResponsePacket.class,
                 ApotheosisLibraryScanResponsePacket::encode,
                 ApotheosisLibraryScanResponsePacket::decode,
                 ApotheosisLibraryScanResponsePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_LIBRARY_IMPORT_REQUEST,
                 ApotheosisLibraryImportRequestPacket.class,
                 ApotheosisLibraryImportRequestPacket::encode,
                 ApotheosisLibraryImportRequestPacket::decode,
                 ApotheosisLibraryImportRequestPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_LIBRARY_IMPORT_RESULT,
                 ApotheosisLibraryImportResultPacket.class,
                 ApotheosisLibraryImportResultPacket::encode,
                 ApotheosisLibraryImportResultPacket::decode,
                 ApotheosisLibraryImportResultPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_STATE,
                 ApothSpawnerStatePacket.class, ApothSpawnerStatePacket::encode,
                 ApothSpawnerStatePacket::decode, ApothSpawnerStatePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_EXECUTE,
                 ApothSpawnerExecutePacket.class, ApothSpawnerExecutePacket::encode,
                 ApothSpawnerExecutePacket::decode, ApothSpawnerExecutePacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         channel.registerMessage(NetworkPacketIds.APOTHEOSIS_SPAWNER_REFRESH,
                 ApothSpawnerRefreshPacket.class, ApothSpawnerRefreshPacket::encode,
                 ApothSpawnerRefreshPacket::decode, ApothSpawnerRefreshPacket::handle,
-                java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     @Override

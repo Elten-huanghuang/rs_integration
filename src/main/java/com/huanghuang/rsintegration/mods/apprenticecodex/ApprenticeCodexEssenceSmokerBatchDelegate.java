@@ -23,6 +23,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
+import java.util.Arrays;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -252,7 +253,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
         if (spec == null || spec.isEmpty()) return ItemStack.EMPTY;
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }

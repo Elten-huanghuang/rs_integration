@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.malum;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -25,6 +26,7 @@ import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -324,12 +326,12 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     private static IItemHandler resolveHandler(BlockEntity be) {
         LazyOptional<IItemHandler> cap = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null);
+                ForgeCapabilities.ITEM_HANDLER, null);
         if (cap.isPresent()) return cap.orElse(null);
 
         // Fallback: reflection on inventory field
         try {
-            java.lang.reflect.Field f = be.getClass().getSuperclass().getDeclaredField("inventory");
+            Field f = be.getClass().getSuperclass().getDeclaredField("inventory");
             f.setAccessible(true);
             Object inv = f.get(be);
             if (inv instanceof IItemHandler handler) return handler;

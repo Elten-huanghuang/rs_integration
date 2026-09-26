@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.jei;
 
 import com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen;
+import java.lang.reflect.Modifier;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
@@ -156,7 +157,7 @@ public final class JeiMarqueeSelector {
     private static boolean canStartDrag(Screen screen, int mx, int my) {
         // JEI only renders overlays on inventory screens. Full-screen mod GUIs
         // (FTB Quests, FTB Chunks, world maps, etc.) must not be hijacked.
-        if (!(screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen)) {
+        if (!(screen instanceof AbstractContainerScreen)) {
             return false;
         }
 
@@ -924,7 +925,7 @@ public final class JeiMarqueeSelector {
         if (named != null) return named;
         for (Class<?> scan = overlay.getClass(); scan != null; scan = scan.getSuperclass()) {
             for (Field field : scan.getDeclaredFields()) {
-                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                if (Modifier.isStatic(field.getModifiers())) continue;
                 try {
                     field.setAccessible(true);
                 } catch (RuntimeException ignored) {
@@ -1003,7 +1004,7 @@ public final class JeiMarqueeSelector {
                         JeiMarqueeSelector.class.getClassLoader());
                 for (Method method : type.getMethods()) {
                     if (!"create".equals(method.getName()) || method.getParameterCount() != 2
-                            || !java.lang.reflect.Modifier.isStatic(method.getModifiers())) continue;
+                            || !Modifier.isStatic(method.getModifiers())) continue;
                     Class<?>[] parameters = method.getParameterTypes();
                     if (!parameters[0].isAssignableFrom(ITypedIngredient.class)
                             || !parameters[1].isAssignableFrom(IIngredientManager.class)) continue;

@@ -9,6 +9,8 @@ import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 
 import java.util.Map;
 
@@ -82,8 +84,8 @@ public final class PlanPreviewClient {
 
         // Send preview request to server via the batch-craft channel.
         // preview=true → server computes and returns a PlanResponse without executing.
-        long requestId = com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds.next();
-        com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker.start(
+        long requestId = PlanningRequestIds.next();
+        PlanningProgressTracker.start(
                 requestId, recipeId);
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 new GenericCraftPacket(recipeId, true,

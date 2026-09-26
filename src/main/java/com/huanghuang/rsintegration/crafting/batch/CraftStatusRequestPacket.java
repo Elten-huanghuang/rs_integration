@@ -7,6 +7,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
+import java.util.List;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -69,7 +70,7 @@ public final class CraftStatusRequestPacket {
                 sendStatus(player, chain);
                 return;
             }
-            java.util.List<AsyncCraftChain> active = manager.activeCraftsFor(player.getUUID());
+            List<AsyncCraftChain> active = manager.activeCraftsFor(player.getUUID());
             for (AsyncCraftChain chain : active) sendStatus(player, chain);
             sendSync(player, CraftStatusSyncPacket.full(
                     active.stream().map(AsyncCraftChain::getCraftId).toList()));

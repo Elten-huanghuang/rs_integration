@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 
 import java.util.*;
 
@@ -40,7 +41,7 @@ public final class TickSimulator {
                 ResonanceStorageView.SlotMutationResult result =
                         disk.reconcileSlotView(originalSlot, before, after);
                 if (result != ResonanceStorageView.SlotMutationResult.SUCCESS) {
-                    com.huanghuang.rsintegration.RSIntegrationMod.LOGGER.warn(
+                    RSIntegrationMod.LOGGER.warn(
                             "[RSI-Passive] Rejected mutation for {} in slot {}: {}",
                             entry.itemId, originalSlot, result);
                 }

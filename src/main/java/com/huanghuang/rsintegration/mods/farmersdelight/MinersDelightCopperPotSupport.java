@@ -19,6 +19,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -78,8 +81,8 @@ public final class MinersDelightCopperPotSupport {
                 .stream().anyMatch(machine -> dim.equals(machine.dim()) && pos.equals(machine.pos()));
         if (boundAtPosition) return true;
 
-        ServerLevel level = player.getServer().getLevel(net.minecraft.resources.ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, dim));
+        ServerLevel level = player.getServer().getLevel(ResourceKey.create(
+                Registries.DIMENSION, dim));
         return level != null && level.hasChunkAt(pos) && isCopperPot(level.getBlockEntity(pos));
     }
 
@@ -147,7 +150,7 @@ public final class MinersDelightCopperPotSupport {
                     !spec.isEmpty() && spec.count() >= required.getCount()
                             && spec.ingredient().test(required));
             if (!alreadyPresent) adapted.add(new IngredientSpec(
-                    net.minecraft.world.item.crafting.Ingredient.of(required.copyWithCount(1)),
+                    Ingredient.of(required.copyWithCount(1)),
                     required.getCount()));
             return List.copyOf(adapted);
         }
@@ -160,7 +163,7 @@ public final class MinersDelightCopperPotSupport {
             }
         }
         adapted.add(new IngredientSpec(
-                net.minecraft.world.item.crafting.Ingredient.of(required.copyWithCount(1)),
+                Ingredient.of(required.copyWithCount(1)),
                 required.getCount()));
         return List.copyOf(adapted);
     }

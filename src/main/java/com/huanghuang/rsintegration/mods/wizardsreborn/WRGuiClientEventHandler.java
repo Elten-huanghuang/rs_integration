@@ -9,6 +9,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.event.entity.player.ItemTooltipEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 
 import java.util.Set;
 
@@ -27,7 +28,7 @@ public final class WRGuiClientEventHandler {
     @SubscribeEvent
     public static void onItemTooltip(ItemTooltipEvent event) {
         if (!RSIntegrationConfig.ENABLE_WIZARDS_REBORN.get()) return;
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.WIZARDS_REBORN)) return;
+        if (!ModList.get().isLoaded(ModIds.WIZARDS_REBORN)) return;
 
         if (event.getItemStack().getItem() instanceof BlockItem bi) {
             String className = bi.getBlock().getClass().getName();

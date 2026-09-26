@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -128,7 +131,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void setMachineServer(@Nonnull net.minecraft.server.MinecraftServer server) {
+    public void setMachineServer(@Nonnull MinecraftServer server) {
         super.setMachineServer(server);
         configureChild();
     }
@@ -253,7 +256,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Nonnull
     @Override
-    public List<com.huanghuang.rsintegration.crafting.batch.OutputAccounting.CollectedOutput>
+    public List<OutputAccounting.CollectedOutput>
     collectStructuredResults(@Nonnull ServerPlayer player) {
         return active().collectStructuredResults(player);
     }
@@ -302,7 +305,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Nullable
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         return active().getOutputCaptureRegion();
     }
 }

@@ -7,6 +7,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.fml.ModList;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.function.Supplier;
 
@@ -34,7 +36,7 @@ public final class StoreAllPacket {
             ctx.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             ctx.setPacketHandled(true);
             return;
         }
@@ -48,7 +50,7 @@ public final class StoreAllPacket {
 
             AbstractContainerMenu menu = player.containerMenu;
             if (menu == null) return;
-            if (menu instanceof net.minecraft.world.inventory.InventoryMenu) return;
+            if (menu instanceof InventoryMenu) return;
 
             ContainerTransferLogic.transferAll(player, menu, pkt.mode);
         });

@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.storage.StorageThreadGuard;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.storage.StorageSession;
 
 import java.util.Objects;
 
@@ -81,7 +82,7 @@ public final class RefinedStorageBackend implements StorageBackend {
     }
 
     /** Adapts an already resolved native handle without another coordinate lookup. */
-    public com.huanghuang.rsintegration.storage.StorageSession openSession(INetwork network) {
+    public StorageSession openSession(INetwork network) {
         StorageReference reference = RefinedStorageReference.fromNetwork(network);
         return new RefinedStorageSession(
                 new NativeRefinedStorageDriver(network), reference, insertObserver);

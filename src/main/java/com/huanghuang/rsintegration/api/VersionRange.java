@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.api;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraftforge.fml.ModList;

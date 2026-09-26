@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.ironfurnaces;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceBindingUpdater;
 import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;

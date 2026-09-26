@@ -12,6 +12,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraft.world.inventory.ClickType;
 
 import javax.annotation.Nullable;
 
@@ -188,12 +189,12 @@ public final class LeverBinder {
                 mc.gameMode.handleInventoryMouseClick(
                         mc.player.containerMenu.containerId, i,
                         mc.player.getInventory().selected,
-                        net.minecraft.world.inventory.ClickType.SWAP, mc.player);
+                        ClickType.SWAP, mc.player);
                 sendUseOnBlock(mc, anvilPos);
                 mc.gameMode.handleInventoryMouseClick(
                         mc.player.containerMenu.containerId, i,
                         mc.player.getInventory().selected,
-                        net.minecraft.world.inventory.ClickType.SWAP, mc.player);
+                        ClickType.SWAP, mc.player);
                 return;
             }
         }

@@ -18,6 +18,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.entity.Entity;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.InvocationTargetException;
@@ -83,7 +84,7 @@ final class ArcaneStoveSupport {
     static boolean placeFood(BlockEntity blockEntity, Player player, ItemStack input, int cookTicks) {
         try {
             Method method = blockEntity.getClass().getMethod("placeFood",
-                    net.minecraft.world.entity.Entity.class, ItemStack.class, int.class);
+                    Entity.class, ItemStack.class, int.class);
             return Boolean.TRUE.equals(method.invoke(blockEntity, player, input, cookTicks));
         } catch (ReflectiveOperationException | RuntimeException e) {
             RSIntegrationMod.LOGGER.debug("[RSI-ArcaneStove] placeFood probe failed", e);

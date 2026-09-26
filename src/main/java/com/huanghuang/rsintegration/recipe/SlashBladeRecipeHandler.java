@@ -16,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -201,8 +203,8 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
             // enchantments — vanilla ItemStack enchantment list (not bladeState)
             if (req.has("enchantments")) {
                 JsonArray reqEnchs = req.getAsJsonArray("enchantments");
-                net.minecraft.nbt.ListTag stackEnchs = fullTag.getList("Enchantments",
-                        net.minecraft.nbt.Tag.TAG_COMPOUND);
+                ListTag stackEnchs = fullTag.getList("Enchantments",
+                        Tag.TAG_COMPOUND);
                 for (JsonElement e : reqEnchs) {
                     if (!e.isJsonObject()) continue;
                     JsonObject ench = e.getAsJsonObject();

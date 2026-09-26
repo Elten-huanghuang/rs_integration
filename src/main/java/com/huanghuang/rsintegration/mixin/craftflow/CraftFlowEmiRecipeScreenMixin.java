@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.craftflow;
+import java.lang.reflect.Method;
 
 import net.minecraft.client.gui.GuiGraphics;
 import org.spongepowered.asm.mixin.Mixin;

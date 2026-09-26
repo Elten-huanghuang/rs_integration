@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.apotheosis;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +44,7 @@ public final class ApotheosisLibraryModels {
         private void validate() {
             if (id == null || translationKey == null || translationKey.isBlank()
                     || translationKey.length() > MAX_TRANSLATION_KEY_LENGTH || level <= 0 || level > 255) {
-                throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis enchantment info");
+                throw new DecoderException("Invalid Apotheosis enchantment info");
             }
         }
     }
@@ -71,7 +72,7 @@ public final class ApotheosisLibraryModels {
             EntryStatus status = buf.readEnum(EntryStatus.class);
             int enchantmentCount = buf.readVarInt();
             if (enchantmentCount < 0 || enchantmentCount > MAX_ENCHANTMENTS_PER_ENTRY) {
-                throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis enchantment count");
+                throw new DecoderException("Invalid Apotheosis enchantment count");
             }
             List<EnchantmentInfo> enchantments = new ArrayList<>(enchantmentCount);
             for (int i = 0; i < enchantmentCount; i++) enchantments.add(EnchantmentInfo.decode(buf));
@@ -84,7 +85,7 @@ public final class ApotheosisLibraryModels {
             if (id < 0 || id >= MAX_ENTRIES || stack == null || stack.isEmpty()
                     || count <= 0 || count > MAX_ENTRY_COUNT || status == null
                     || enchantments == null || enchantments.size() > MAX_ENCHANTMENTS_PER_ENTRY) {
-                throw new io.netty.handler.codec.DecoderException("Invalid Apotheosis library entry");
+                throw new DecoderException("Invalid Apotheosis library entry");
             }
         }
     }

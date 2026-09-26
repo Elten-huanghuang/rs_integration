@@ -9,6 +9,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
+import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess;
+import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData;
 
 public final class ResonanceDiskAbilityService {
 
@@ -42,11 +44,11 @@ public final class ResonanceDiskAbilityService {
     public static UnlockResult unlockDiskStack(ServerLevel level, ItemStack stack, int ability) {
         // BD resonance disks have their own UUID-owned persistence and do not
         // depend on Refined Storage's StorageDiskItem hierarchy.
-        if (com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess.isDisk(stack)) {
-            var diskId = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess
+        if (BDResonanceDiskAccess.isDisk(stack)) {
+            var diskId = BDResonanceDiskAccess
                     .getDiskId(stack);
             if (diskId == null) return UnlockResult.NO_RESONANCE_DISK;
-            var data = com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData
+            var data = BDResonanceDiskData
                     .get(level.getServer());
             return data.unlock(diskId, ability)
                     ? UnlockResult.UNLOCKED : UnlockResult.ALREADY_UNLOCKED;

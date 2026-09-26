@@ -12,6 +12,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.registries.ForgeRegistries;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -52,7 +53,7 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
     /** CrockPot registers the normal pot at level 0 and the portable pot at level 1. */
     static int machinePotLevelFromBindingKey(@Nullable String blockKey) {
         if (blockKey == null) return -1;
-        String lower = blockKey.toLowerCase(java.util.Locale.ROOT);
+        String lower = blockKey.toLowerCase(Locale.ROOT);
         if (lower.contains("portable_crock_pot")) return 1;
         if (lower.contains("crock_pot")) return 0;
         return -1;

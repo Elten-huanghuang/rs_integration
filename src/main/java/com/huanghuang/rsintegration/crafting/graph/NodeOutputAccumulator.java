@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting.graph;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -54,7 +56,7 @@ public final class NodeOutputAccumulator {
             String expected = declarations.stream()
                     .map(declaration -> BuiltInRegistries.ITEM.getKey(declaration.material().item())
                             + " tag=" + declaration.material().tag())
-                    .collect(java.util.stream.Collectors.joining("; "));
+                    .collect(Collectors.joining("; "));
             LOGGER.debug(
                     "[RSI-GraphOutput] unmatched actual={} tag={} declarations=[{}]",
                     BuiltInRegistries.ITEM.getKey(actualStack.getItem()), actualStack.getTag(), expected);
@@ -90,13 +92,13 @@ public final class NodeOutputAccumulator {
 
     public String describeShortages() {
         return shortages().stream()
-                .map(shortage -> shortage.kind().name().toLowerCase(java.util.Locale.ROOT)
-                        + " " + net.minecraft.core.registries.BuiltInRegistries.ITEM
+                .map(shortage -> shortage.kind().name().toLowerCase(Locale.ROOT)
+                        + " " + BuiltInRegistries.ITEM
                         .getKey(shortage.material().item())
                         + " expected=" + shortage.expected()
                         + " published=" + shortage.published()
                         + " missing=" + shortage.missing())
-                .collect(java.util.stream.Collectors.joining(", "));
+                .collect(Collectors.joining(", "));
     }
 
     public List<ItemStack> drainSurplus() {

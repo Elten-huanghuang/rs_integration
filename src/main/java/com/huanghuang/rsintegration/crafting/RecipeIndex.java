@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -6,11 +8,13 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -32,6 +36,16 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.stream.Collectors;
+import net.minecraft.core.Registry;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.level.block.Block;
+import net.minecraftforge.fml.ModList;
 
 import java.lang.reflect.Method;
 import java.util.*;
@@ -98,7 +112,7 @@ public final class RecipeIndex {
 
     /** Rebuilds once when late spell-config synchronization changes ink mappings. */
     public static void refreshDynamicRuntimeIfNeeded(Level level) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return;
+        if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return;
         // Config publication can invalidate an in-flight generation after its
         // revision was captured. Retry on subsequent ticks until it is rebuilt;
         // warmUp's in-flight guard keeps this to one worker at a time.
@@ -177,7 +191,7 @@ public final class RecipeIndex {
             // A complete server generation must always start from the server's
             // final rarity/level mappings instead of reusing that client cache.
             if (!isReady(level)
-                    && net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+                    && ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
                 IronSpellBooksRecipeCatalog.invalidate();
             }
             buildSynchronously(level);
@@ -255,8 +269,7 @@ public final class RecipeIndex {
             // ── Distant Worlds Firon Lithum Altar definitions ─────────
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
             int pmmoSalvageIndexed = indexPmmoSalvage(idx, seen);
-            int brewingIndexed = com.huanghuang.rsintegration.mods.vanilla.brewing
-                    .VanillaBrewingCatalog.index(level, idx, seen, projected);
+            int brewingIndexed = VanillaBrewingCatalog.index(level, idx, seen, projected);
 
             Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
             Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> publishedSpellScrollIndex =
@@ -268,12 +281,12 @@ public final class RecipeIndex {
             reusableCatalystRoutes = freezeCatalystRoutes(catalystRoutes);
             Set<ResourceLocation> projectedOutputIds = graph.recipesByOutput().keySet().stream()
                     .map(ImmutableRecipeGraph.MaterialRef::itemId)
-                    .collect(java.util.stream.Collectors.toSet());
+                    .collect(Collectors.toSet());
             pureIncompatibleOutputIds = publishedIndex.keySet().stream()
                     .map(ForgeRegistries.ITEMS::getKey)
                     .filter(Objects::nonNull)
                     .filter(id -> !projectedOutputIds.contains(id))
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    .collect(Collectors.toUnmodifiableSet());
             index = publishedIndex;
             spellScrollIndex = publishedSpellScrollIndex;
             source = rm;
@@ -347,7 +360,7 @@ public final class RecipeIndex {
 
         Entry entry = new Entry(recipe, type, typeId);
         target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.MINERS_DELIGHT)
+        if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)
                 && MinersDelightCopperPotSupport.isCompatibleRecipe(recipe)) {
             ModType copperPotType = ModType.findById(ModIds.ID_MD_COPPER_POT);
             if (copperPotType != null) {
@@ -393,11 +406,11 @@ public final class RecipeIndex {
                         recipe.getId(), ForgeRegistries.ITEMS.getKey(result.getItem()),
                         result.getCount(), node != null);
             }
-            if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
+            if (recipe instanceof SmithingTransformRecipe
                     && typedSpecs != null && typedSpecs.size() == 3) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RecipeCatalog] smithing transform recipe={} base={} output={} projected={}",
-                        recipe.getId(), java.util.Arrays.toString(typedSpecs.get(1).ingredient().getItems()),
+                        recipe.getId(), Arrays.toString(typedSpecs.get(1).ingredient().getItems()),
                         ForgeRegistries.ITEMS.getKey(result.getItem()), node != null);
             }
             timing.graphNanos += System.nanoTime() - graphStarted;
@@ -447,7 +460,7 @@ public final class RecipeIndex {
 
     private static Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> buildSpellScrollIndex(
             Level level, Map<Item, List<Entry>> publishedIndex) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return Map.of();
+        if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return Map.of();
         Item scroll = ForgeRegistries.ITEMS.getValue(
                 new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
         List<Entry> entries = scroll == null ? null : publishedIndex.get(scroll);
@@ -545,7 +558,7 @@ public final class RecipeIndex {
         String summary = sorted.stream().limit(limit)
                 .map(entry -> entry.getKey() + "=" + entry.getValue().count
                         + " samples=" + entry.getValue().samples)
-                .collect(java.util.stream.Collectors.joining("; "));
+                .collect(Collectors.joining("; "));
         int omitted = Math.max(0, sorted.size() - limit);
         return omitted == 0 ? summary : summary + "; ... " + omitted + " more types";
     }
@@ -562,7 +575,7 @@ public final class RecipeIndex {
 
     private static int indexPmmoSalvage(Map<Item, List<Entry>> idx,
                                         Set<ResourceLocation> seen) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)
+        if (!ModList.get().isLoaded(ModIds.PMMO)
                 || RSIntegrationConfig.ENABLE_PMMO == null
                 || !RSIntegrationConfig.ENABLE_PMMO.get()) return 0;
         int count = 0;
@@ -579,7 +592,7 @@ public final class RecipeIndex {
     }
 
     private static int indexGemCutting(Level level, Map<Item, List<Entry>> idx, Set<ResourceLocation> seen) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded("apotheosis")) return 0;
+        if (!ModList.get().isLoaded("apotheosis")) return 0;
         int count = 0;
         for (var recipe : ApotheosisGemCuttingCatalog.allRecipes()) {
             if (!seen.add(recipe.getId())) continue;
@@ -594,9 +607,9 @@ public final class RecipeIndex {
 
     private static int indexIronSpellBooks(Level level, Map<Item, List<Entry>> idx,
                                            Set<ResourceLocation> seen) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+        if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
                 || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
-        java.util.Collection<com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe> recipes;
+        Collection<IronSpellBooksRecipe> recipes;
         try {
             recipes = IronSpellBooksRecipeCatalog.allRecipes();
         } catch (RuntimeException | LinkageError failure) {
@@ -610,11 +623,11 @@ public final class RecipeIndex {
             ItemStack output = recipe.getResultItem(level.registryAccess());
             if (output.isEmpty()) continue;
             String typeId = recipe.machine()
-                    == com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe.Machine.SCROLL_FORGE
+                    == IronSpellBooksRecipe.Machine.SCROLL_FORGE
                     ? "irons_spellbooks_scroll_forge" : "irons_spellbooks_arcane_anvil";
             idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
                     recipe, ModType.byId(typeId), new ResourceLocation("irons_spellbooks",
-                    recipe.machine() == com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe.Machine.SCROLL_FORGE
+                    recipe.machine() == IronSpellBooksRecipe.Machine.SCROLL_FORGE
                             ? "scroll_forge" : "arcane_anvil"), true));
             count++;
         }
@@ -637,7 +650,7 @@ public final class RecipeIndex {
         try {
             Class<?> faRegistries = Class.forName(
                     "com.stal111.forbidden_arcanus.core.registry.FARegistries");
-            java.lang.reflect.Field f = faRegistries.getField("RITUAL");
+            Field f = faRegistries.getField("RITUAL");
             f.setAccessible(true);
             faRitualKey = (ResourceKey<?>) f.get(null);
             faCreateItemResultClass = Class.forName(
@@ -656,7 +669,7 @@ public final class RecipeIndex {
     private static ItemStack rsi$makeFaUpgradeOutput(int upgradedTier) {
         try {
             if (faForgeBlockItem == null) {
-                net.minecraft.world.level.block.Block block = ForgeRegistries.BLOCKS.getValue(
+                Block block = ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation(ModIds.FORBIDDEN_ARCANUS, "hephaestus_forge"));
                 if (block == null) return ItemStack.EMPTY;
                 faForgeBlockItem = block.asItem();
@@ -683,11 +696,11 @@ public final class RecipeIndex {
             var m = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
             if (m == null) return ItemStack.EMPTY;
             Object main = m.invoke(ritual);
-            if (main instanceof net.minecraft.world.item.crafting.Ingredient ing && !ing.isEmpty()) {
+            if (main instanceof Ingredient ing && !ing.isEmpty()) {
                 ItemStack[] items = ing.getItems();
                 if (items.length > 0 && !items[0].isEmpty()) {
                     RSIntegrationMod.LOGGER.debug("[RecipeIndex] FA fallback output for {}: {}",
-                            id, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(items[0]));
+                            id, ItemStackUtils.registryId(items[0]));
                     return items[0].copy();
                 }
             }
@@ -708,10 +721,10 @@ public final class RecipeIndex {
         if (!faAvailable || faRitualKey == null) return 0;
         int count = 0;
         try {
-            net.minecraft.core.Registry<Object> faRegistry =
-                    (net.minecraft.core.Registry<Object>)
+            Registry<Object> faRegistry =
+                    (Registry<Object>)
                     level.registryAccess().registryOrThrow(
-                            (ResourceKey<? extends net.minecraft.core.Registry<Object>>)
+                            (ResourceKey<? extends Registry<Object>>)
                             (Object) faRitualKey);
 
             for (var entry : faRegistry.entrySet()) {
@@ -788,7 +801,7 @@ public final class RecipeIndex {
         try {
             Class<?> registryClass = Class.forName(
                     "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
-            java.lang.reflect.Field instField = registryClass.getField("INSTANCE");
+            Field instField = registryClass.getField("INSTANCE");
             marketRegistryInst = instField.get(null);
             marketAvailable = marketRegistryInst != null;
             if (!marketAvailable) {
@@ -812,7 +825,7 @@ public final class RecipeIndex {
             // methods are handled by the instance fallback below.
             Class<?> registryClass = Class.forName(
                     "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
-            java.lang.reflect.Method getEntries = Reflect.findMethod(registryClass,
+            Method getEntries = Reflect.findMethod(registryClass,
                     "getEntries", new Class<?>[0]);
             if (getEntries == null) {
                 RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry.getEntries() method not found");
@@ -820,7 +833,7 @@ public final class RecipeIndex {
             }
             @SuppressWarnings("unchecked")
             Object entriesValue = getEntries.invoke(
-                    java.lang.reflect.Modifier.isStatic(getEntries.getModifiers())
+                    Modifier.isStatic(getEntries.getModifiers())
                             ? null : marketRegistryInst);
             Collection<Object> entries = (Collection<Object>) entriesValue;
             if (entries == null || entries.isEmpty()) {
@@ -834,9 +847,9 @@ public final class RecipeIndex {
             }
 
             Class<?> entryClass = null;
-            java.lang.reflect.Method getOutput = null;
-            java.lang.reflect.Method getCost = null;
-            java.lang.reflect.Method getEntryId = null;
+            Method getOutput = null;
+            Method getCost = null;
+            Method getEntryId = null;
 
             for (Object entry : entries) {
                 if (entry == null) continue;
@@ -885,7 +898,7 @@ public final class RecipeIndex {
 
     private static int indexDistantWorldsFiron(Map<Item, List<Entry>> idx,
                                                 Set<ResourceLocation> seen) {
-        if (!net.minecraftforge.fml.ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) return 0;
+        if (!ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) return 0;
         ModType type = ModType.byId(LithumAltarRecipeResolver.TYPE_ID);
         if (type == ModType.GENERIC) return 0;
         int count = 0;
@@ -919,7 +932,7 @@ public final class RecipeIndex {
         // compress-with-NBT, etc.) — not a trivial identity recipe.
         if (result.hasTag()) return false;
         Item resultItem = result.getItem();
-        List<net.minecraft.world.item.crafting.Ingredient> ingredients;
+        List<Ingredient> ingredients;
         if (handler != null) {
             var specs = handler.getIngredients(recipe);
             if (specs == null) return false;
@@ -960,19 +973,19 @@ public final class RecipeIndex {
             lastDriftCheckTick = Long.MIN_VALUE;
             generationBuildFailed = false;
         }
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+        if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
             IronSpellBooksRecipeCatalog.invalidate();
         }
-        com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.clearCache();
-        com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket.clearPlanCache();
+        ImmutableRecipeGraphProjector.clearCache();
+        GenericCraftPacket.clearPlanCache();
     }
 
     // ── result-item extraction (formerly in ModRecipeIndex) ─────
 
     private static final Map<Class<?>, Method> resultMethodCache = new ConcurrentHashMap<>();
     /** Caches the output ItemStack field (positive) or NEGATIVE sentinel per recipe class. */
-    private static final Map<Class<?>, java.lang.reflect.Field> outputFieldCache = new ConcurrentHashMap<>();
-    private static final java.lang.reflect.Field NO_OUTPUT_FIELD;
+    private static final Map<Class<?>, Field> outputFieldCache = new ConcurrentHashMap<>();
+    private static final Field NO_OUTPUT_FIELD;
     static {
         try { NO_OUTPUT_FIELD = RecipeIndex.class.getDeclaredField("index"); }
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
@@ -1066,7 +1079,7 @@ public final class RecipeIndex {
 
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
         Class<?> clazz = recipe.getClass();
-        java.lang.reflect.Field cached = outputFieldCache.get(clazz);
+        Field cached = outputFieldCache.get(clazz);
         if (cached != null) {
             if (cached == NO_OUTPUT_FIELD) return ItemStack.EMPTY;
             try {
@@ -1079,7 +1092,7 @@ public final class RecipeIndex {
         }
         Class<?> scan = clazz;
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+            for (Field field : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(field.getType())) continue;
                 String name = field.getName().toLowerCase(Locale.ROOT);
                 if (name.contains("output") || name.contains("result") || name.contains("assembled")) {
@@ -1196,7 +1209,7 @@ public final class RecipeIndex {
     private static void trySecondaryOutputFields(Recipe<?> recipe, List<ItemStack> results) {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field field : scan.getDeclaredFields()) {
+            for (Field field : scan.getDeclaredFields()) {
                 String name = field.getName().toLowerCase(Locale.ROOT);
                 if (!name.contains("byproduct") && !name.contains("secondary")
                         && !name.contains("extra") && !name.contains("bonus")

@@ -1,7 +1,13 @@
 package com.huanghuang.rsintegration.mods.malum;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import java.util.Arrays;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -697,7 +703,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             if (stack == null || stack.isEmpty()) {
                 result.append("empty");
             } else {
-                ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+                ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
                 result.append(id == null ? "unknown" : id).append(" x").append(stack.getCount());
             }
         }
@@ -736,7 +742,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }
@@ -852,8 +858,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             final ItemStack expectedOutput = expected;
             BlockPos pos = be.getBlockPos();
             var entities = level.getEntitiesOfClass(
-                    net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(pos).inflate(3),
+                    ItemEntity.class,
+                    new AABB(pos).inflate(3),
                     e -> ItemStack.isSameItemSameTags(e.getItem(), expectedOutput)
                             || ItemStack.isSameItem(e.getItem(), expectedOutput));
             if (!entities.isEmpty()) return true;
@@ -871,8 +877,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // 1. Scan for ItemEntity spawned by altar's craft() method
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
             var entities = resolveMachineLevel(player).getEntitiesOfClass(
-                    net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(myPos).inflate(3),
+                    ItemEntity.class,
+                    new AABB(myPos).inflate(3),
                     e -> ItemStack.isSameItemSameTags(e.getItem(), expected)
                             || ItemStack.isSameItem(e.getItem(), expected));
             for (var entity : entities) {
@@ -1046,7 +1052,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
             try {
-                java.lang.reflect.Field field = scan.getDeclaredField("output");
+                Field field = scan.getDeclaredField("output");
                 field.setAccessible(true);
                 Object value = field.get(recipe);
                 return value instanceof ItemStack stack ? stack.copy() : ItemStack.EMPTY;
@@ -1063,7 +1069,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
             try {
-                java.lang.reflect.Field field = scan.getDeclaredField("useNbtFromInput");
+                Field field = scan.getDeclaredField("useNbtFromInput");
                 field.setAccessible(true);
                 return field.getBoolean(recipe);
             } catch (NoSuchFieldException ignored) {
@@ -1076,12 +1082,12 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
+    public AABB getOutputCaptureRegion() {
         // Malum may spawn the result on one of the nearby pedestals rather than
         // at the altar block. Cover the complete altar/pedestal ring so magnets
         // cannot steal it before RSI captures it. Capture leases still permit
         // overlapping zones when their expected outputs are different.
-        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(3);
+        return myPos == null ? null : new AABB(myPos).inflate(3);
     }
 
     // ── Pedestal helpers ─────────────────────────────────────────
@@ -1204,7 +1210,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f.get(obj);
             } catch (NoSuchFieldException e) {
@@ -1221,7 +1227,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 f.set(obj, value);
                 return;
@@ -1247,7 +1253,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // Check for spirit requirements on the recipe
         List<?> spirits = null;
         try {
-            java.lang.reflect.Field f = recipe.getClass().getDeclaredField("spirits");
+            Field f = recipe.getClass().getDeclaredField("spirits");
             f.setAccessible(true);
             spirits = (List<?>) f.get(recipe);
         } catch (Exception e) { /* recipe has no spirit requirements */ }
@@ -1256,13 +1262,13 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         List<String> spiritNames = new ArrayList<>();
         for (Object swc : spirits) {
             try {
-                java.lang.reflect.Field typeF = swc.getClass().getDeclaredField("type");
+                Field typeF = swc.getClass().getDeclaredField("type");
                 typeF.setAccessible(true);
                 Object type = typeF.get(swc);
-                java.lang.reflect.Field countF = swc.getClass().getDeclaredField("count");
+                Field countF = swc.getClass().getDeclaredField("count");
                 countF.setAccessible(true);
                 int count = countF.getInt(swc);
-                java.lang.reflect.Field idF = type.getClass().getDeclaredField("identifier");
+                Field idF = type.getClass().getDeclaredField("identifier");
                 idF.setAccessible(true);
                 String id = (String) idF.get(type);
                 spiritNames.add(count + "x " + id);
@@ -1303,7 +1309,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         Class<?> clazz = obj.getClass();
         while (clazz != null && clazz != Object.class) {
             try {
-                java.lang.reflect.Field f = clazz.getDeclaredField(name);
+                Field f = clazz.getDeclaredField(name);
                 f.setAccessible(true);
                 return f.get(obj);
             } catch (NoSuchFieldException e) {

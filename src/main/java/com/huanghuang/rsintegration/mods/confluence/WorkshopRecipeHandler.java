@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.confluence;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -52,7 +53,7 @@ public final class WorkshopRecipeHandler implements ModRecipeHandler {
         try {
             Class<?> clazz = ing.getClass();
             if (isAmountIngredientClassName(clazz.getName())) {
-                java.lang.reflect.Method m = clazz.getMethod("getCount");
+                Method m = clazz.getMethod("getCount");
                 Object val = m.invoke(ing);
                 if (val instanceof Integer count && count > 0) return count;
             }

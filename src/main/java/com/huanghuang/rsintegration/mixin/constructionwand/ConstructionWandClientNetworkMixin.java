@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.constructionwand;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.client.JeiNetworkItemCache;
 import net.minecraft.world.entity.player.Player;

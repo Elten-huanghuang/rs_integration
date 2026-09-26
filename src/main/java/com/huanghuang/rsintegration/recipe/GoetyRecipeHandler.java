@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -11,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -32,7 +34,7 @@ public final class GoetyRecipeHandler extends AbstractRecipeHandler {
 
     public static GoetyRecipeHandler brazier() {
         return new GoetyRecipeHandler(
-                com.huanghuang.rsintegration.mods.goety.GoetyRSModule.BRAZIER_TYPE_ID,
+                GoetyRSModule.BRAZIER_TYPE_ID,
                 BRAZIER_CLASS);
     }
 

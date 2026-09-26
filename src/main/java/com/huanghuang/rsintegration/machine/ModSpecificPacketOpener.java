@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.machine;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -9,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.network.NetworkHooks;
+import net.minecraft.world.MenuProvider;
 
 /**
  * GUI opener for mod blocks whose {@code openScreen} call needs extra data
@@ -74,7 +76,7 @@ public enum ModSpecificPacketOpener implements IMachineGuiOpener {
             RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] No custom openScreen on {}", className, e);
         }
 
-        if (machine instanceof net.minecraft.world.MenuProvider provider) {
+        if (machine instanceof MenuProvider provider) {
             NetworkHooks.openScreen(player, provider, pos);
         } else {
             RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] Cannot open GUI for {} — not a MenuProvider",

@@ -2,6 +2,11 @@ package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
+import java.util.HashSet;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -62,7 +67,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     private int campfireSlot = -1;
     private Object campfireBE;
     private int arcaneSlot = -1;
-    private final Set<UUID> arcaneEntitiesBefore = new java.util.HashSet<>();
+    private final Set<UUID> arcaneEntitiesBefore = new HashSet<>();
     private long arcaneStartTick;
 
     private static volatile Class<?> campfireClass;
@@ -239,8 +244,8 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                     }
                 })) return false;
         arcaneEntitiesBefore.clear();
-        for (var entity : myLevel.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
-                new net.minecraft.world.phys.AABB(myPos).inflate(1.5))) {
+        for (var entity : myLevel.getEntitiesOfClass(ItemEntity.class,
+                new AABB(myPos).inflate(1.5))) {
             arcaneEntitiesBefore.add(entity.getUUID());
         }
         if (!ArcaneStoveSupport.placeFood(be, player, input,
@@ -281,9 +286,9 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             // use addItemToCook(ItemStack, CampfireCookingRecipe).
             Method addItem;
             if (hasMethod(be.getClass(), "addItemToCook",
-                    ItemStack.class, net.minecraft.world.entity.player.Player.class)) {
+                    ItemStack.class, Player.class)) {
                 addItem = be.getClass().getMethod("addItemToCook",
-                        ItemStack.class, net.minecraft.world.entity.player.Player.class);
+                        ItemStack.class, Player.class);
                 addItem.invoke(be, input, player);
             } else {
                 addItem = be.getClass().getMethod("addItemToCook",
@@ -321,7 +326,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 ? ccr.getCookingTime() : 600;
 
         try {
-            var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
+            var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
             for (int i = 0; i < items.size(); i++) {
                 if (items.get(i).isEmpty()) {
                     items.set(i, input.copy());
@@ -357,8 +362,8 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         if (isArcaneStove) {
             ItemStack expected = getExpectedOutput();
             if (expected == null || expected.isEmpty()) return false;
-            return level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
-                    new net.minecraft.world.phys.AABB(myPos).inflate(1.5), entity ->
+            return level.getEntitiesOfClass(ItemEntity.class,
+                    new AABB(myPos).inflate(1.5), entity ->
                             entity.isAlive() && level.getGameTime() >= arcaneStartTick
                                     && !arcaneEntitiesBefore.contains(entity.getUUID())
                                     && ItemStack.isSameItemSameTags(entity.getItem(), expected)).stream()
@@ -416,7 +421,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         if (isCampfireBE(be) && CAMPFIRE_ITEMS != null) {
             try {
                 @SuppressWarnings("unchecked")
-                var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
+                var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
                 return campfireSlot >= 0 && campfireSlot < items.size()
                         && items.get(campfireSlot).isEmpty();
             } catch (Exception e) {
@@ -462,7 +467,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             // Clear the slot
             try {
                 @SuppressWarnings("unchecked")
-                var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
+                var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
                 items.set(campfireSlot, ItemStack.EMPTY);
                 int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(be);
                 prog[campfireSlot] = 0;
@@ -573,8 +578,8 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public net.minecraft.world.phys.AABB getOutputCaptureRegion() {
-        return myPos == null ? null : new net.minecraft.world.phys.AABB(myPos).inflate(1.5);
+    public AABB getOutputCaptureRegion() {
+        return myPos == null ? null : new AABB(myPos).inflate(1.5);
     }
 
     // ── plan helpers ──
@@ -649,7 +654,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack recovered = ItemStack.EMPTY;
         try {
-            var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
+            var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
             ItemStack leftover = items.get(campfireSlot);
             if (!leftover.isEmpty()
                     && !PhysicalInputRecovery.recoveredExpected(leftover, placedInput)) {

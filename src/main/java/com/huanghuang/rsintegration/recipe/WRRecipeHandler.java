@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -13,6 +15,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
+import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -44,7 +47,7 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
         return recipe != null && isArcaneWorkbenchRecipeId(recipe.getId());
     }
 
-    public static boolean isArcaneWorkbenchRecipeId(net.minecraft.resources.ResourceLocation id) {
+    public static boolean isArcaneWorkbenchRecipeId(ResourceLocation id) {
         return id != null && "wizards_reborn".equals(id.getNamespace())
                 && id.getPath().startsWith("arcane_workbench/");
     }
@@ -95,7 +98,7 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
         // some recipes (e.g. ArcaneIteratorRecipe) only expose output
         // through it.
         for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem", "getResultItem"}) {
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+            for (Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
                 if (m.getParameterCount() == 1) {
@@ -126,7 +129,7 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
     private static ItemStack scanOutputField(Object recipe) {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+            for (Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
                 String fn = f.getName();
                 if (fn.equals("output") || fn.equals("result") || fn.equals("resultItem")) {
@@ -243,13 +246,13 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
     }
 
     private static boolean invokeBool(Object target, String method) throws Exception {
-        java.lang.reflect.Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
+        Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
         return m != null && (boolean) m.invoke(target);
     }
 
     @Nullable
     private static Object invoke(Object target, String method) throws Exception {
-        java.lang.reflect.Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
+        Method m = Reflect.findMethod(target.getClass(), method, new Class<?>[0]);
         return m != null ? m.invoke(target) : null;
     }
 

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.ironsspellbooks;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import org.spongepowered.asm.mixin.Mixin;

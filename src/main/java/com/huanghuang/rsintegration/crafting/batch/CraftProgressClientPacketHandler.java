@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
 
 import java.util.List;
 import java.util.UUID;
@@ -18,13 +19,13 @@ final class CraftProgressClientPacketHandler {
 
     static void onProgress(CraftProgressSnapshot snapshot) {
         if (CraftProgressTracker.onProgress(snapshot)) {
-            com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.notifyFailure(snapshot.craftId());
+            CraftFailureClientCommands.notifyFailure(snapshot.craftId());
         }
     }
 
     static void onDelta(CraftProgressDeltaPacket packet) {
         if (CraftProgressTracker.onDelta(packet)) {
-            com.huanghuang.rsintegration.crafting.CraftFailureClientCommands.notifyFailure(packet.craftId());
+            CraftFailureClientCommands.notifyFailure(packet.craftId());
         }
     }
 

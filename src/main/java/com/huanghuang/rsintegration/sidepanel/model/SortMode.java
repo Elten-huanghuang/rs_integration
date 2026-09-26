@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.sidepanel.model;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.sidepanel.PanelStack;
 import net.minecraftforge.registries.ForgeRegistries;

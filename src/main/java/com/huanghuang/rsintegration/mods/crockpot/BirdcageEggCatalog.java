@@ -8,6 +8,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -51,7 +52,7 @@ public final class BirdcageEggCatalog {
             Class<?> definition = CrockPotReflection.foodValuesDefinitionClass;
             if (definition == null) return null;
             Method method = definition.getMethod("getFoodValues", ItemStack.class,
-                    net.minecraft.world.level.Level.class);
+                    Level.class);
             return method.invoke(null, input, level);
         } catch (ReflectiveOperationException | LinkageError ignored) {
             return null;
@@ -70,9 +71,9 @@ public final class BirdcageEggCatalog {
             @SuppressWarnings({"unchecked", "rawtypes"})
             Object monster = Enum.valueOf((Class<? extends Enum>) categoryClass.asSubclass(Enum.class), "MONSTER");
             Method matchedItems = definitionClass.getMethod("getMatchedItems", categoryClass,
-                    net.minecraft.world.level.Level.class);
+                    Level.class);
             Method getFoodValues = definitionClass.getMethod("getFoodValues", ItemStack.class,
-                    net.minecraft.world.level.Level.class);
+                    Level.class);
             Method hasCategory = valuesClass.getMethod("has", categoryClass);
             Object raw = matchedItems.invoke(null, meat, level);
             if (!(raw instanceof Collection<?> items)) return result;

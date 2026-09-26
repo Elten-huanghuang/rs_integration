@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
@@ -7,6 +8,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -84,7 +86,7 @@ public final class CraftProgressPacket {
                     CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
             String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
             String modTypeId = buf.readUtf(MAX_MOD_TYPE_ID_LENGTH);
-            net.minecraft.world.item.ItemStack displayOutput = buf.readItem();
+            ItemStack displayOutput = buf.readItem();
             int completedOperations = readNonNegative(buf, "completedOperations");
             int totalOperations = readNonNegative(buf, "totalOperations");
             int runningOperations = readNonNegative(buf, "runningOperations");

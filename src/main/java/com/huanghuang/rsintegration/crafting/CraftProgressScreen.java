@@ -9,6 +9,7 @@ import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import java.util.Objects;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -65,7 +66,7 @@ public final class CraftProgressScreen extends Screen {
             onClose();
             return;
         }
-        if (!java.util.Objects.equals(previous, selectedCraft)) nodeScroll = 0;
+        if (!Objects.equals(previous, selectedCraft)) nodeScroll = 0;
         updateButtonState();
     }
 

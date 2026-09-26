@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.sidepanel.client;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket;
@@ -15,6 +16,9 @@ import net.minecraftforge.client.settings.KeyConflictContext;
 import net.minecraftforge.client.settings.KeyModifier;
 import net.minecraftforge.common.MinecraftForge;
 import org.lwjgl.glfw.GLFW;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.registries.ForgeRegistries;
 
 public final class RSIKeyBindings {
 
@@ -146,17 +150,17 @@ public final class RSIKeyBindings {
         if (!KEY_BIND_MACHINE.isActiveAndMatches(mouseKey)) return;
         if (!(minecraft.hitResult instanceof BlockHitResult hit)
                 || hit.getType() != HitResult.Type.BLOCK) return;
-        net.minecraft.world.InteractionHand hand = isBindableConnector(minecraft.player.getMainHandItem())
-                ? net.minecraft.world.InteractionHand.MAIN_HAND : net.minecraft.world.InteractionHand.OFF_HAND;
+        InteractionHand hand = isBindableConnector(minecraft.player.getMainHandItem())
+                ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
         if (!isBindableConnector(minecraft.player.getItemInHand(hand))) return;
-        com.huanghuang.rsintegration.network.packet.NetworkHandler.CHANNEL.sendToServer(
+        NetworkHandler.CHANNEL.sendToServer(
                 new ExplicitMachineBindingPacket(hit.getBlockPos(),
                         hand));
     }
 
-    private static boolean isBindableConnector(net.minecraft.world.item.ItemStack stack) {
+    private static boolean isBindableConnector(ItemStack stack) {
         if (stack.isEmpty()) return false;
-        var id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         if (id == null) return false;
         if ("beyonddimensions".equals(id.getNamespace())
                 && "net_terminal_item".equals(id.getPath())) return true;

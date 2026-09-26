@@ -33,6 +33,12 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.network.PacketDistributor;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Items;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -57,7 +63,7 @@ public final class ApothSpawnerUpgradeService {
         CraftStorageEndpoint endpoint = storageEndpoint(player);
         INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (context == null || endpoint == null) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            player.sendSystemMessage(Component.translatable(
                     "rsi.apotheosis.spawner.context_changed"));
             return;
         }
@@ -83,13 +89,13 @@ public final class ApothSpawnerUpgradeService {
                 .map(PlanGraphView.NodeView::asPlanStep)
                 .toList();
         boolean ok = graph == null || graph.unresolvedDemands().isEmpty();
-        ItemStack target = new ItemStack(net.minecraft.world.item.Items.SPAWNER);
+        ItemStack target = new ItemStack(Items.SPAWNER);
         PlanResponse response = new PlanResponse(ok, target.getHoverName().getString(), target,
                 steps, Map.of(), missing, ApothSpawnerPlanTarget.ID.toString(), null,
                 dimension.toString(), pos.getX(), pos.getY(), pos.getZ(), List.of(), 1,
                 null, null, null, 0L, false, false, false, null, Set.of(),
                 Map.<IngredientKey, Integer>of(), null, graphView);
-        com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler.CHANNEL.send(
+        BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(response));
     }
 
@@ -325,16 +331,16 @@ public final class ApothSpawnerUpgradeService {
 
     @Nullable
     private static CraftStorageEndpoint storageEndpoint(ServerPlayer player) {
-        CraftStorageEndpoint endpoint = com.huanghuang.rsintegration.storage.StorageRestockSupport
+        CraftStorageEndpoint endpoint = StorageRestockSupport
                 .resolve(player).orElse(null);
         if (endpoint == null || !endpoint.session().hasPermission(player,
-                com.huanghuang.rsintegration.storage.StoragePermission.EXTRACT)) return null;
+                StoragePermission.EXTRACT)) return null;
         return endpoint;
     }
 
     @Nullable
     private static Context context(ServerPlayer player, ResourceLocation dimension, BlockPos pos) {
-        ResourceKey<Level> key = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimension);
+        ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dimension);
         ServerLevel level = player.server.getLevel(key);
         if (level == null || !level.hasChunkAt(pos) || player.level() != level
                 || player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > MAX_DISTANCE_SQR) return null;

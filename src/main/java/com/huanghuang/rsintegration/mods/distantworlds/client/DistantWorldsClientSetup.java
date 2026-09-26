@@ -13,6 +13,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.BlockHitResult;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarStatusRequestPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
 
 public final class DistantWorldsClientSetup {
     private static int requestTicks;
@@ -32,7 +33,7 @@ public final class DistantWorldsClientSetup {
                 || mc.level == null || mc.player == null
                 || !(mc.hitResult instanceof BlockHitResult hit)) return;
         var block = mc.level.getBlockState(hit.getBlockPos()).getBlock();
-        var coreClass = com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection.lithumCoreBlockClass;
+        var coreClass = DistantWorldsReflection.lithumCoreBlockClass;
         if (coreClass == null || !coreClass.isInstance(block)) return;
         NetworkHandler.CHANNEL.sendToServer(new LithumAltarStatusRequestPacket(
                 mc.level.dimension().location(), hit.getBlockPos()));

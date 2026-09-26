@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;

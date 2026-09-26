@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.terraequipment;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
 import com.inolia_zaicek.terra_equipment.config.TEConfig;

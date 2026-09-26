@@ -103,7 +103,7 @@ public final class BDResonanceDiskData extends SavedData {
 
     public synchronized boolean bind(UUID diskId, UUID owner, int networkId) {
         DiskRecord disk = getOrCreate(diskId);
-        if (disk.boundNetId == networkId && java.util.Objects.equals(disk.owner, owner)) return false;
+        if (disk.boundNetId == networkId && Objects.equals(disk.owner, owner)) return false;
         disk.bind(owner, networkId);
         disk.revision++;
         setDirty();

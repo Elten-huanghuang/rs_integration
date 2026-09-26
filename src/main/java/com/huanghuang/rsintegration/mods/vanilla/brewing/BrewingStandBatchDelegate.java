@@ -17,6 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
 import org.jetbrains.annotations.NotNull;
+import net.minecraft.world.item.Items;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -76,7 +77,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         ItemStack input = ledger.reserve(recipe.getIngredients().get(0), 3, network, player,
                 level.dimension(), pos);
         ItemStack reagent = ledger.reserveExact(recipe.reagent(), 1, network, player, level.dimension(), pos);
-        ItemStack fuel = ledger.reserveExact(new ItemStack(net.minecraft.world.item.Items.BLAZE_POWDER),
+        ItemStack fuel = ledger.reserveExact(new ItemStack(Items.BLAZE_POWDER),
                 1, network, player, level.dimension(), pos);
         if (input.isEmpty() || reagent.isEmpty() || fuel.isEmpty() || !ledger.commit(network, player)) return false;
         return place(List.of(input, reagent, fuel));
@@ -97,7 +98,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         ItemStack fuel = materials.get(2).copyWithCount(1);
         if (input.getCount() < 3 || !matchesInput(input)
                 || !ItemStack.isSameItemSameTags(reagent, recipe.reagent())
-                || !fuel.is(net.minecraft.world.item.Items.BLAZE_POWDER)) return false;
+                || !fuel.is(Items.BLAZE_POWDER)) return false;
         if (!isEmpty(stand)) return false;
         stand.setItem(0, input.copyWithCount(1));
         stand.setItem(1, input.copyWithCount(1));

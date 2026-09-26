@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.mods.aether;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import java.util.Arrays;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.ItemHandlerHelper;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -17,7 +20,6 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -369,7 +371,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // the tick-based auto-eject in the incubator's serverTick or recipe completion)
         // Since incubation produces entities, the RS result is always EMPTY.
         IItemHandler handler = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
+                ForgeCapabilities.ITEM_HANDLER, null)
                 .orElse(null);
         if (handler == null) return true; // can't check, assume done
 
@@ -441,7 +443,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     private void refundToRSNetwork(ItemStack stack) {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (!leftover.isEmpty() && player != null) {
-            net.minecraftforge.items.ItemHandlerHelper.giveItemToPlayer(player, leftover);
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
         }
     }
 
@@ -585,7 +587,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private static IItemHandler getInventory(BlockEntity be) {
         return be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, null)
+                ForgeCapabilities.ITEM_HANDLER, null)
                 .resolve().orElse(null);
     }
 
@@ -646,7 +648,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }

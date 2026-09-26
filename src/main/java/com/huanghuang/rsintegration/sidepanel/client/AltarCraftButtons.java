@@ -1,7 +1,15 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
+import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
+
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler;
+import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
+import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
 
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
@@ -176,21 +184,20 @@ public final class AltarCraftButtons {
     public static boolean isVisible(ResourceLocation recipeId, @Nullable ModType type) {
         if (type == null) return true;
         if ("lychee_item_inside_virtual".equals(type.id())) {
-            int required = com.huanghuang.rsintegration.mods.lychee.LycheeVirtualRecipeHandler
+            int required = LycheeVirtualRecipeHandler
                     .requiredCatalystMask(recipeId);
-            return required != 0 && com.huanghuang.rsintegration.resonance.bridge.ClientDiskData
+            return required != 0 && ClientDiskData
                     .hasLycheeCatalyst(required);
         }
-        if (com.huanghuang.rsintegration.mods.immortalersdelight
-                .ImmortalersDelightRSModule.HOT_SPRING_TYPE_ID.equals(type.id())) {
-            return com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.hasCatalyst(
-                    com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts
+        if (ImmortalersDelightRSModule.HOT_SPRING_TYPE_ID.equals(type.id())) {
+            return ClientDiskData.hasCatalyst(
+                    LycheeVirtualCatalysts
                             .HOT_SPRING_BUCKET);
         }
-        if (com.huanghuang.rsintegration.mods.malum.MalumRSModule.VOID_FAVOR_TYPE_ID
+        if (MalumRSModule.VOID_FAVOR_TYPE_ID
                 .equals(type.id())) {
-            return com.huanghuang.rsintegration.resonance.bridge.ClientDiskData.hasAbility(
-                    com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities
+            return ClientDiskData.hasAbility(
+                    ResonanceDiskAbilities
                             .MALUM_VOID_FAVOR);
         }
         return true;

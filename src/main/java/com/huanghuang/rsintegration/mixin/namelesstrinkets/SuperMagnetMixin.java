@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.namelesstrinkets;
+import java.lang.reflect.Method;
 
 import com.cozary.nameless_trinkets.items.trinkets.SuperMagnet;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;

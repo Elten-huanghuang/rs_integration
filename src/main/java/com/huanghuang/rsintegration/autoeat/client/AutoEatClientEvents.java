@@ -22,6 +22,7 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -360,7 +361,7 @@ public final class AutoEatClientEvents {
             // The mapped parameter type differs between Forge/Mojmap builds
             // (RenderableWidget vs GuiEventListener). Find the actual method
             // instead of requiring one exact erased signature.
-            for (java.lang.reflect.Method method : Screen.class.getDeclaredMethods()) {
+            for (Method method : Screen.class.getDeclaredMethods()) {
                 // addRenderableWidget is the development mapping; m_142416_
                 // is the name in the Forge runtime jar used by players.
                 if (!("addRenderableWidget".equals(method.getName())
@@ -383,7 +384,7 @@ public final class AutoEatClientEvents {
         try {
             // This method belongs to BD itself and therefore remains named
             // rebuildImageHeight after re-obfuscation of Minecraft classes.
-            java.lang.reflect.Method method = findMethod(screen.getClass(), "rebuildImageHeight");
+            Method method = findMethod(screen.getClass(), "rebuildImageHeight");
             if (method == null) throw new NoSuchMethodException("rebuildImageHeight");
             method.setAccessible(true);
             Object value = method.invoke(screen);
@@ -402,7 +403,7 @@ public final class AutoEatClientEvents {
                 menuField.setAccessible(true);
                 Object menu = menuField.get(screen);
                 if (menu != null) {
-                    java.lang.reflect.Method method = menu.getClass().getMethod("getLines");
+                    Method method = menu.getClass().getMethod("getLines");
                     Object value = method.invoke(menu);
                     if (value instanceof Number number) return number.intValue();
                 }
@@ -427,7 +428,7 @@ public final class AutoEatClientEvents {
         return null;
     }
 
-    private static java.lang.reflect.Method findMethod(Class<?> type, String name) {
+    private static Method findMethod(Class<?> type, String name) {
         while (type != null) {
             try {
                 return type.getDeclaredMethod(name);

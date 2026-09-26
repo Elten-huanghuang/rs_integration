@@ -21,6 +21,10 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
+import java.util.ArrayDeque;
+import java.util.function.Supplier;
+import net.minecraft.nbt.TagParser;
+import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -193,7 +197,7 @@ public final class ImmutableRecipeGraphProjector {
 
         private ImmutableRecipeGraph getOrBuild(
                 ResourceLocation recipeId,
-                java.util.function.Supplier<ImmutableRecipeGraph> builder) {
+                Supplier<ImmutableRecipeGraph> builder) {
             synchronized (this) {
                 DependencyEntry cached = entries.get(recipeId);
                 if (cached != null) return cached.graph();
@@ -228,7 +232,7 @@ public final class ImmutableRecipeGraphProjector {
     private record DependencyEntry(ImmutableRecipeGraph graph, GraphIndexes indexes) {}
 
     public static Map<MaterialRef, Integer> projectAvailability(Map<StackKey, Integer> available) {
-        Map<MaterialRef, Integer> projected = new java.util.HashMap<>();
+        Map<MaterialRef, Integer> projected = new HashMap<>();
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
             PlanningThreadContext.throwIfCancelled();
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
@@ -273,7 +277,7 @@ public final class ImmutableRecipeGraphProjector {
 
         Set<ResourceLocation> neededItems = new LinkedHashSet<>();
         Set<ResourceLocation> visitedRecipes = new LinkedHashSet<>();
-        java.util.ArrayDeque<ResourceLocation> pendingItems = new java.util.ArrayDeque<>();
+        ArrayDeque<ResourceLocation> pendingItems = new ArrayDeque<>();
         visitedRecipes.add(target.recipeId());
         for (IngredientRef input : target.inputs()) {
             for (MaterialRef alternative : input.alternatives()) {
@@ -310,15 +314,15 @@ public final class ImmutableRecipeGraphProjector {
     private static ImmutableRecipeGraph bindAvailabilityInScope(
             ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
         graph = bindSmithingStates(graph, available);
-        Map<ResourceLocation, List<MaterialRef>> availableByItem = new java.util.HashMap<>();
+        Map<ResourceLocation, List<MaterialRef>> availableByItem = new HashMap<>();
         for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
             availableByItem.computeIfAbsent(entry.getKey().itemId(), ignored -> new ArrayList<>())
                     .add(entry.getKey());
         }
-        Map<IngredientRef, IngredientRef> boundIngredients = new java.util.HashMap<>();
-        Map<MaterialRef, List<RecipeNode>> projected = new java.util.LinkedHashMap<>();
-        Map<ResourceLocation, RecipeNode> indexed = new java.util.HashMap<>();
+        Map<IngredientRef, IngredientRef> boundIngredients = new HashMap<>();
+        Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
+        Map<ResourceLocation, RecipeNode> indexed = new HashMap<>();
         for (Map.Entry<MaterialRef, List<RecipeNode>> entry : graph.recipesByOutput().entrySet()) {
             List<RecipeNode> recipes = new ArrayList<>(entry.getValue().size());
             for (RecipeNode recipe : entry.getValue()) {
@@ -366,7 +370,7 @@ public final class ImmutableRecipeGraphProjector {
             ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
             @Nullable Set<ResourceLocation> relevantItems) {
         if (relevantItems != null && relevantItems.isEmpty()) return graph;
-        Map<ResourceLocation, List<RecipeNode>> upgrades = new java.util.HashMap<>();
+        Map<ResourceLocation, List<RecipeNode>> upgrades = new HashMap<>();
         for (RecipeNode recipe : graph.recipesById().values()) {
             if (!"smithing".equals(recipe.modTypeId()) || recipe.inputs().size() != 3) continue;
             if (relevantItems != null && !relevantItems.contains(recipe.output().itemId())) continue;
@@ -385,8 +389,8 @@ public final class ImmutableRecipeGraphProjector {
                 seen.add(material);
             }
         });
-        java.util.ArrayDeque<MaterialRef> pending = new java.util.ArrayDeque<>(seen);
-        Map<MaterialRef, List<RecipeNode>> additions = new java.util.LinkedHashMap<>();
+        ArrayDeque<MaterialRef> pending = new ArrayDeque<>(seen);
+        Map<MaterialRef, List<RecipeNode>> additions = new LinkedHashMap<>();
         while (!pending.isEmpty()) {
             PlanningThreadContext.throwIfCancelled();
             MaterialRef actualBase = pending.removeFirst();
@@ -407,7 +411,7 @@ public final class ImmutableRecipeGraphProjector {
             }
         }
         if (additions.isEmpty()) return graph;
-        Map<MaterialRef, List<RecipeNode>> projected = new java.util.LinkedHashMap<>(graph.recipesByOutput());
+        Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>(graph.recipesByOutput());
         additions.forEach((output, variants) -> {
             List<RecipeNode> combined = new ArrayList<>(projected.getOrDefault(output, List.of()));
             combined.addAll(variants);
@@ -421,7 +425,7 @@ public final class ImmutableRecipeGraphProjector {
         Set<ResourceLocation> visitedItems = new LinkedHashSet<>();
         Set<ResourceLocation> visitedRecipes = new LinkedHashSet<>();
         Set<ResourceLocation> statefulDemands = new LinkedHashSet<>();
-        java.util.ArrayDeque<IngredientRef> pending = new java.util.ArrayDeque<>(roots);
+        ArrayDeque<IngredientRef> pending = new ArrayDeque<>(roots);
         while (!pending.isEmpty()) {
             PlanningThreadContext.throwIfCancelled();
             IngredientRef demand = pending.removeFirst();
@@ -450,8 +454,8 @@ public final class ImmutableRecipeGraphProjector {
             }
         }
         Set<ResourceLocation> relevant = new LinkedHashSet<>(statefulDemands);
-        java.util.ArrayDeque<ResourceLocation> pendingOutputs =
-                new java.util.ArrayDeque<>(statefulDemands);
+        ArrayDeque<ResourceLocation> pendingOutputs =
+                new ArrayDeque<>(statefulDemands);
         while (!pendingOutputs.isEmpty()) {
             PlanningThreadContext.throwIfCancelled();
             ResourceLocation output = pendingOutputs.removeFirst();
@@ -466,7 +470,7 @@ public final class ImmutableRecipeGraphProjector {
 
     static IngredientRef bindIngredient(IngredientRef ingredient,
                                         Map<MaterialRef, Integer> available) {
-        Map<ResourceLocation, List<MaterialRef>> availableByItem = new java.util.HashMap<>();
+        Map<ResourceLocation, List<MaterialRef>> availableByItem = new HashMap<>();
         for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
             availableByItem.computeIfAbsent(entry.getKey().itemId(), ignored -> new ArrayList<>())
@@ -526,8 +530,8 @@ public final class ImmutableRecipeGraphProjector {
         if (!"enigmaticlegacy".equals(actual.itemId().getNamespace())
                 || !"earth_heart".equals(actual.itemId().getPath())) return false;
         try {
-            var expectedTag = net.minecraft.nbt.TagParser.parseTag(expected.nbt());
-            var actualTag = net.minecraft.nbt.TagParser.parseTag(actual.nbt());
+            var expectedTag = TagParser.parseTag(expected.nbt());
+            var actualTag = TagParser.parseTag(actual.nbt());
             return expectedTag.getBoolean("isTainted") && actualTag.getBoolean("isTainted");
         } catch (Exception ignored) {
             return false;
@@ -607,7 +611,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static boolean isPartialNbtIngredient(Ingredient ingredient) {
-        if (ingredient instanceof net.minecraftforge.common.crafting.PartialNBTIngredient) return true;
+        if (ingredient instanceof PartialNBTIngredient) return true;
         for (Class<?> type = ingredient.getClass(); type != null; type = type.getSuperclass()) {
             if (isPartialNbtIngredientClass(type.getName())) return true;
         }

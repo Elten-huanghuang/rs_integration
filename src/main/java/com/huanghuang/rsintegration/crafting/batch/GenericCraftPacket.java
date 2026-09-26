@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
@@ -15,6 +16,33 @@ import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
+import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
+import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
+import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
+import com.huanghuang.rsintegration.crafting.SessionCraftStorageEndpoint;
+import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.mods.farmersdelight.CosmopolitanTisaneRecipeResolver;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import io.netty.handler.codec.DecoderException;
+import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.fml.ModList;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -62,7 +90,6 @@ import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
@@ -240,7 +267,7 @@ public final class GenericCraftPacket {
     }
 
     private static boolean hasRefinedStorage() {
-        return net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE);
+        return ModList.get().isLoaded(ModIds.REFINED_STORAGE);
     }
     private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
     private static final int MAX_DEFERRED_EXECUTION_REQUESTS = 64;
@@ -279,7 +306,7 @@ public final class GenericCraftPacket {
     private final Map<String, String> forcedRecipes;
     private Map<String, ItemStack> materialLocks = Map.of();
     private final ResourceLocation dim;
-    private final net.minecraft.core.BlockPos pos;
+    private final BlockPos pos;
     private final int repeatCount;
     private final boolean inferMode;
     /** JEI-provided base item for FA ApplyModifierRecipe prefill */
@@ -317,7 +344,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos) {
+                              @Nullable BlockPos pos) {
         this(recipeId, preview, forcedRecipes, dim, pos, 1);
     }
 
@@ -325,7 +352,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount) {
         this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, false);
     }
@@ -334,7 +361,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode) {
         this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode, null);
     }
@@ -343,7 +370,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem) {
         this(recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode, baseItem, null);
@@ -353,7 +380,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem,
                               @Nullable ItemStack targetOutput) {
@@ -374,7 +401,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem,
                               @Nullable ItemStack targetOutput,
@@ -391,7 +418,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem,
                               @Nullable ItemStack targetOutput,
@@ -405,7 +432,7 @@ public final class GenericCraftPacket {
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               Map<String, String> forcedRecipes,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem,
                               @Nullable ItemStack targetOutput,
@@ -419,7 +446,7 @@ public final class GenericCraftPacket {
     public static GenericCraftPacket maxPreview(ResourceLocation recipeId,
                                                  Map<String, String> forcedRecipes,
                                                  @Nullable ResourceLocation dim,
-                                                 @Nullable net.minecraft.core.BlockPos pos,
+                                                 @Nullable BlockPos pos,
                                                  @Nullable ItemStack baseItem,
                                                  @Nullable ItemStack targetOutput,
                                                  long requestId) {
@@ -438,14 +465,14 @@ public final class GenericCraftPacket {
     /** JEI-initiated preview for a mod recipe with known machine location. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos) {
+                              @Nullable BlockPos pos) {
         this(recipeId, preview, Collections.emptyMap(), dim, pos, 1);
     }
 
     /** JEI-initiated preview with repeat, inferMode, and specific base item. */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem) {
         this(recipeId, preview, Collections.emptyMap(), dim, pos, repeatCount, inferMode, baseItem);
@@ -454,7 +481,7 @@ public final class GenericCraftPacket {
     /** JEI-initiated preview carrying the clicked ghost output (NBT-variant target). */
     public GenericCraftPacket(ResourceLocation recipeId, boolean preview,
                               @Nullable ResourceLocation dim,
-                              @Nullable net.minecraft.core.BlockPos pos,
+                              @Nullable BlockPos pos,
                               int repeatCount, boolean inferMode,
                               @Nullable ItemStack baseItem,
                               @Nullable ItemStack targetOutput) {
@@ -506,7 +533,7 @@ public final class GenericCraftPacket {
         // leave the remaining declared pairs in the buffer, desyncing every
         // subsequent read (dim/pos) for a malicious or corrupt packet.
         if (forcedCount < 0 || forcedCount > 128) {
-            throw new io.netty.handler.codec.DecoderException(
+            throw new DecoderException(
                     "GenericCraftPacket forcedCount out of range: " + forcedCount);
         }
         Map<String, String> forced = new HashMap<>();
@@ -520,9 +547,9 @@ public final class GenericCraftPacket {
             }
         }
         ResourceLocation dim = buf.readBoolean() ? buf.readResourceLocation() : null;
-        net.minecraft.core.BlockPos pos = null;
+        BlockPos pos = null;
         if (buf.readBoolean()) {
-            net.minecraft.core.BlockPos raw = buf.readBlockPos();
+            BlockPos raw = buf.readBlockPos();
             if (raw.getX() >= -30000000 && raw.getX() <= 30000000
                     && raw.getY() >= -64 && raw.getY() <= 2048
                     && raw.getZ() >= -30000000 && raw.getZ() <= 30000000) {
@@ -544,7 +571,7 @@ public final class GenericCraftPacket {
         if (buf.isReadable() && buf.readBoolean()) {
             requestId = buf.readVarLong();
             if (requestId < 0 || requestId > 0x7FFF_FFFF_FFFF_FFFFL) {
-                throw new io.netty.handler.codec.DecoderException("GenericCraftPacket requestId out of range");
+                throw new DecoderException("GenericCraftPacket requestId out of range");
             }
         }
         OutputDestination outputDestination = buf.isReadable()
@@ -553,12 +580,12 @@ public final class GenericCraftPacket {
         StorageReference storageReference = null;
         if (buf.isReadable() && buf.readBoolean()) {
             storageReference = StorageReferenceCodec.decode(buf.readNbt())
-                    .orElseThrow(() -> new io.netty.handler.codec.DecoderException(
+                    .orElseThrow(() -> new DecoderException(
                             "invalid GenericCraftPacket storage reference"));
         }
         boolean maximize = buf.readBoolean();
         if (maximize && !preview) {
-            throw new io.netty.handler.codec.DecoderException("maximize requires preview mode");
+            throw new DecoderException("maximize requires preview mode");
         }
         MachineSelectionMode machineSelectionMode = buf.isReadable()
                 ? MachineSelectionMode.read(buf) : MachineSelectionMode.AUTO;
@@ -566,7 +593,7 @@ public final class GenericCraftPacket {
         if (buf.isReadable()) {
             int materialLockCount = buf.readVarInt();
             if (materialLockCount < 0 || materialLockCount > MaterialLocks.MAX_LOCKS) {
-                throw new io.netty.handler.codec.DecoderException(
+                throw new DecoderException(
                         "GenericCraftPacket materialLockCount out of range: " + materialLockCount);
             }
             for (int i = 0; i < materialLockCount; i++) {
@@ -579,7 +606,7 @@ public final class GenericCraftPacket {
         }
         boolean partialPreparation = buf.isReadable() && buf.readBoolean();
         if (buf.isReadable()) {
-            throw new io.netty.handler.codec.DecoderException("trailing GenericCraftPacket data");
+            throw new DecoderException("trailing GenericCraftPacket data");
         }
         GenericCraftPacket packet = new GenericCraftPacket(recipeId, preview, forced, dim, pos,
                 repeatCount, inferMode, baseItem, targetOutput, requestId, outputDestination,
@@ -667,7 +694,7 @@ public final class GenericCraftPacket {
             context.setPacketHandled(true);
             return;
         }
-        if (player instanceof net.minecraftforge.common.util.FakePlayer) {
+        if (player instanceof FakePlayer) {
             RSIntegrationMod.LOGGER.warn("[RSI-Generic] handle() DROP: FakePlayer, recipeId={}", packet.recipeId);
             context.setPacketHandled(true);
             return;
@@ -919,7 +946,7 @@ public final class GenericCraftPacket {
     private static BindingAwareGraph bindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
         Map<ResourceLocation, Optional<Recipe<?>>> recipes = new HashMap<>();
-        java.util.function.Function<ResourceLocation, Recipe<?>> resolve = recipeId ->
+        Function<ResourceLocation, Recipe<?>> resolve = recipeId ->
                 recipes.computeIfAbsent(recipeId,
                         id -> Optional.ofNullable(resolveRecipe(player.serverLevel(), id)))
                         .orElse(null);
@@ -974,7 +1001,7 @@ public final class GenericCraftPacket {
     private static PlanCache.Entry findValidatedExecutionPlan(
             ServerPlayer player, ResourceLocation recipeId, Map<String, String> forcedRecipes,
             int repeatCount, @Nullable ItemStack targetOutput, @Nullable ModType modType,
-            @Nullable ResourceLocation dimension, @Nullable net.minecraft.core.BlockPos position,
+            @Nullable ResourceLocation dimension, @Nullable BlockPos position,
             @Nullable StorageReference storageReference,
             Map<String, ItemStack> materialLocks) {
         PlanCache.Key exactKey = planCacheKey(player.getUUID(), recipeId,
@@ -989,11 +1016,11 @@ public final class GenericCraftPacket {
             if (entry == null) entry = PLAN_CACHE.get(fallbackKey, System.nanoTime());
         }
         if (entry == null || !entry.plan().success()) return null;
-        net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> levelKey = dimension != null
-                ? net.minecraft.resources.ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, dimension)
+        ResourceKey<Level> levelKey = dimension != null
+                ? ResourceKey.create(
+                Registries.DIMENSION, dimension)
                 : player.serverLevel().dimension();
-        net.minecraft.core.BlockPos lookupPos = position != null ? position : player.blockPosition();
+        BlockPos lookupPos = position != null ? position : player.blockPosition();
         if (!PlanningStateValidator.revalidateForExecution(player, entry.snapshot(), entry.plan(),
                 levelKey, lookupPos, storageReference)) {
             RSIntegrationMod.debug("[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply",
@@ -1006,7 +1033,7 @@ public final class GenericCraftPacket {
     private static boolean tryExecuteCachedCraftingPlan(
             ServerPlayer player, Recipe<?> recipe, ResourceLocation recipeId,
             Map<String, String> forcedRecipes, @Nullable ResourceLocation dim,
-            @Nullable net.minecraft.core.BlockPos pos, int repeatCount, boolean inferMode,
+            @Nullable BlockPos pos, int repeatCount, boolean inferMode,
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable INetwork network, @Nullable CraftStorageEndpoint storageEndpoint,
@@ -1102,7 +1129,7 @@ public final class GenericCraftPacket {
     private static boolean queuePureExecutionPlan(
             ServerPlayer player, CraftingRecipe recipe, ResourceLocation recipeId,
             Map<String, String> forcedRecipes, @Nullable ResourceLocation dim,
-            @Nullable net.minecraft.core.BlockPos pos, int repeatCount, boolean inferMode,
+            @Nullable BlockPos pos, int repeatCount, boolean inferMode,
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -1136,15 +1163,15 @@ public final class GenericCraftPacket {
                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
         ResourceLocation effectiveDim = dim != null
                 ? dim : player.serverLevel().dimension().location();
-        net.minecraft.core.BlockPos effectivePos = pos != null
+        BlockPos effectivePos = pos != null
                 ? pos : player.blockPosition();
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
                 player.getUUID(), 0L, recipeId, available, Map.of(), recipeGraph,
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
-                        net.minecraft.resources.ResourceKey.create(
-                                net.minecraft.core.registries.Registries.DIMENSION, effectiveDim),
+                        ResourceKey.create(
+                                Registries.DIMENSION, effectiveDim),
                         effectivePos), bindingGraph.blockedOutputIds(), false);
 
         PLAN_REQUESTS.submitRouted(snapshot, routeInputs, repeatCount, player.getServer()::execute,
@@ -1190,8 +1217,8 @@ public final class GenericCraftPacket {
                         return;
                     }
                     if (!PlanningStateValidator.revalidateForExecution(player, snapshot,
-                            net.minecraft.resources.ResourceKey.create(
-                                    net.minecraft.core.registries.Registries.DIMENSION, effectiveDim),
+                            ResourceKey.create(
+                                    Registries.DIMENSION, effectiveDim),
                             effectivePos, selectedReference)) {
                         player.sendSystemMessage(Component.translatable(
                                 "rsi.plan.failure.missing_materials"));
@@ -1209,7 +1236,7 @@ public final class GenericCraftPacket {
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode);
                 }, failure -> {
-                    if (!(failure instanceof java.util.concurrent.CancellationException)) {
+                    if (!(failure instanceof CancellationException)) {
                         RSIntegrationMod.LOGGER.warn(
                                 "[RSI-exec] async pure planning failed recipe={} directReservationAttempted=true failure={}",
                                 recipeId, failure.toString(), failure);
@@ -1233,7 +1260,7 @@ public final class GenericCraftPacket {
     private static boolean queuePureExecutionPlanForPhysicalRecipe(
             ServerPlayer player, Recipe<?> recipe, ResourceLocation recipeId,
             Map<String, String> forcedRecipes, @Nullable ResourceLocation dim,
-            @Nullable net.minecraft.core.BlockPos pos, int repeatCount, boolean inferMode,
+            @Nullable BlockPos pos, int repeatCount, boolean inferMode,
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -1284,7 +1311,7 @@ public final class GenericCraftPacket {
                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
         ResourceLocation effectiveDim = dim != null
                 ? dim : player.serverLevel().dimension().location();
-        net.minecraft.core.BlockPos effectivePos = pos != null ? pos : player.blockPosition();
+        BlockPos effectivePos = pos != null ? pos : player.blockPosition();
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
                 player.getUUID(), 0L, recipeId, available, Map.of(), planningGraph,
@@ -1473,7 +1500,7 @@ public final class GenericCraftPacket {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             String message = current.getMessage();
             if (message == null) continue;
-            String normalized = message.toLowerCase(java.util.Locale.ROOT);
+            String normalized = message.toLowerCase(Locale.ROOT);
             if (normalized.contains("network is null")
                     || (normalized.contains("getitemstoragetracker") && normalized.contains("null"))) {
                 return true;
@@ -1506,15 +1533,14 @@ public final class GenericCraftPacket {
         recipe = BirdcageEggCatalog.resolve(level, recipeId);
         if (recipe != null) return recipe;
 
-        recipe = com.huanghuang.rsintegration.mods.farmersdelight
-                .CosmopolitanTisaneRecipeResolver.resolve(recipeId);
+        recipe = CosmopolitanTisaneRecipeResolver.resolve(recipeId);
         if (recipe != null) return recipe;
 
         if ("rs_integration".equals(recipeId.getNamespace())
                 && recipeId.getPath().startsWith("vanilla_brewing/")) {
-            com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+            VanillaBrewingCatalog
                     .ensureBuilt(level);
-            recipe = com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog
+            recipe = VanillaBrewingCatalog
                     .byId(recipeId);
             if (recipe != null) return recipe;
         }
@@ -1542,12 +1568,12 @@ public final class GenericCraftPacket {
         if (recipe != null) return recipe;
         recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
         if (recipe != null) return recipe;
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
-            recipe = com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog.byId(recipeId);
+        if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+            recipe = IronSpellBooksRecipeCatalog.byId(recipeId);
             if (recipe != null) return recipe;
         }
-        if (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.PMMO)) {
-            recipe = com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog.byId(recipeId);
+        if (ModList.get().isLoaded(ModIds.PMMO)) {
+            recipe = PmmoSalvageCatalog.byId(recipeId);
             if (recipe != null) return recipe;
         }
         recipe = CrabTrapRecipeResolver.resolveRecipe(level, recipeId);
@@ -1603,7 +1629,7 @@ public final class GenericCraftPacket {
 
     /** Strip JEI pagination prefix from pseudo-IDs like {@code mod:jei.real_path/page}. */
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
-        return com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer.normalize(id);
+        return JeiRecipeIdNormalizer.normalize(id);
     }
 
     /**
@@ -1617,7 +1643,7 @@ public final class GenericCraftPacket {
             LegacyExecutionMetrics.Reason legacyReason,
             CraftStorageEndpoint storageEndpoint, int repeatCount,
             ResourceLocation recipeId, Map<String, String> forcedRecipes,
-            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             boolean inferMode, @Nullable ItemStack baseItem,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             MachineSelectionMode machineSelectionMode) {
@@ -1641,7 +1667,7 @@ public final class GenericCraftPacket {
                                           ResourceLocation recipeId,
                                           Map<String, String> forcedRecipes,
                                           @Nullable ResourceLocation dim,
-                                          @Nullable net.minecraft.core.BlockPos pos,
+                                          @Nullable BlockPos pos,
                                           boolean inferMode, @Nullable ItemStack baseItem,
                                           @Nullable ItemStack targetOutput,
                                           OutputDestination outputDestination,
@@ -1657,7 +1683,7 @@ public final class GenericCraftPacket {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             @Nullable INetwork network, CraftStorageEndpoint storageEndpoint,
             MachineSelectionMode machineSelectionMode,
-            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             Map<String, ItemStack> materialLocks) {
         Map<StackKey, Integer> available = listAvailable(player, network, storageEndpoint);
         List<String> missing = new ArrayList<>();
@@ -1756,7 +1782,7 @@ public final class GenericCraftPacket {
         List<CraftNode> nodes = graph.nodes().stream()
                 .filter(node -> retained.contains(node.id()))
                 .toList();
-        List<com.huanghuang.rsintegration.crafting.graph.MaterialAllocation> allocations =
+        List<MaterialAllocation> allocations =
                 graph.allocations().stream()
                         .filter(allocation -> retained.contains(allocation.consumer().nodeId()))
                         .filter(allocation -> !(allocation.source()
@@ -1871,7 +1897,7 @@ public final class GenericCraftPacket {
             ServerPlayer player, CraftPlanGraph graph, ResourceLocation recipeId,
             @Nullable INetwork network, CraftStorageEndpoint storageEndpoint,
             @Nullable ResourceLocation dim,
-            @Nullable net.minecraft.core.BlockPos pos, MachineSelectionMode machineSelectionMode,
+            @Nullable BlockPos pos, MachineSelectionMode machineSelectionMode,
             Component products, Component stillMissing) {
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
                 storageEndpoint, graph);
@@ -1901,7 +1927,7 @@ public final class GenericCraftPacket {
                                           ResourceLocation recipeId,
                                           Map<String, String> forcedRecipes,
                                           @Nullable ResourceLocation dim,
-                                          @Nullable net.minecraft.core.BlockPos pos,
+                                          @Nullable BlockPos pos,
                                           boolean inferMode, @Nullable ItemStack baseItem,
                                           @Nullable ItemStack targetOutput,
                                           OutputDestination outputDestination,
@@ -1933,7 +1959,7 @@ public final class GenericCraftPacket {
                                                int repeatCount, ResourceLocation recipeId,
                                                Map<String, String> forcedRecipes,
                                                @Nullable ResourceLocation dim,
-                                               @Nullable net.minecraft.core.BlockPos pos,
+                                               @Nullable BlockPos pos,
                                                boolean inferMode, @Nullable ItemStack baseItem,
                                                @Nullable ItemStack targetOutput,
                                                OutputDestination outputDestination,
@@ -1949,7 +1975,7 @@ public final class GenericCraftPacket {
                                                int repeatCount, ResourceLocation recipeId,
                                                Map<String, String> forcedRecipes,
                                                @Nullable ResourceLocation dim,
-                                               @Nullable net.minecraft.core.BlockPos pos,
+                                               @Nullable BlockPos pos,
                                                boolean inferMode, @Nullable ItemStack baseItem,
                                                @Nullable ItemStack targetOutput,
                                                OutputDestination outputDestination,
@@ -2171,7 +2197,7 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   @Nullable BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
@@ -2184,7 +2210,7 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   @Nullable BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
@@ -2199,7 +2225,7 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   @Nullable BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
@@ -2216,7 +2242,7 @@ public final class GenericCraftPacket {
                                    ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   @Nullable BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
@@ -2232,7 +2258,7 @@ public final class GenericCraftPacket {
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
                                    Map<String, String> forcedRecipes,
                                    @Nullable ResourceLocation dim,
-                                   @Nullable net.minecraft.core.BlockPos pos,
+                                   @Nullable BlockPos pos,
                                    int repeatCount, boolean inferMode,
                                    @Nullable ItemStack baseItem,
                                    @Nullable ItemStack targetOutput,
@@ -2251,7 +2277,7 @@ public final class GenericCraftPacket {
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
                 if (itemKey == null || forcedId == null
                         || (!CraftingResolver.isStackPreferenceKey(itemKey)
-                        && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
+                        && !BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.invalid_forced_recipe",
@@ -2336,7 +2362,7 @@ public final class GenericCraftPacket {
         }
 
         if (repeatCount > 1
-                && com.huanghuang.rsintegration.recipe.GoetyRecipeHandler
+                && GoetyRecipeHandler
                 .requiresManualConfirmation(recipe)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.goety.error.manual_single_only"));
@@ -2404,7 +2430,7 @@ public final class GenericCraftPacket {
             // is absent from the packet. The registry resolver still applies
             // backend order and permissions; it does not blindly select BD.
             var fallback = contextEndpoint != null
-                    ? java.util.Optional.of(contextEndpoint)
+                    ? Optional.of(contextEndpoint)
                     : CraftStorageEndpoints.resolveDefault(player);
             if (fallback.isPresent()) {
                 storageEndpoint = fallback.orElseThrow();
@@ -2433,7 +2459,7 @@ public final class GenericCraftPacket {
         // through to the grouped-extraction fallback which bypasses the
         // machine entirely and may fail or give results for free.
         ResourceLocation effectiveDim = dim;
-        net.minecraft.core.BlockPos effectivePos = pos;
+        BlockPos effectivePos = pos;
         if ((effectiveDim == null || effectivePos == null) && modType != null && modType.isVirtual()) {
             effectiveDim = player.level().dimension().location();
             effectivePos = player.blockPosition();
@@ -3235,7 +3261,7 @@ public final class GenericCraftPacket {
     }
 
     static INetwork resolveNetworkForRecipe(ServerPlayer player,
-            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             @Nullable ModType modType) {
         // 1. Try primary machine (from packet/JEI).
         // Validate that the player has a binding to this position before
@@ -3303,7 +3329,7 @@ public final class GenericCraftPacket {
      */
     private static String clickedOutputCacheToken(@Nullable ItemStack clicked) {
         if (clicked == null || clicked.isEmpty()) return "0";
-        String key = net.minecraft.core.registries.BuiltInRegistries.ITEM
+        String key = BuiltInRegistries.ITEM
                 .getKey(clicked.getItem()).toString();
         CompoundTag tag = clicked.getTag();
         return tag != null ? key + "#" + tag : key;
@@ -3398,8 +3424,8 @@ public final class GenericCraftPacket {
         default void notice(Component message) {}
     }
 
-    private static final java.util.concurrent.ConcurrentMap<PlanResultKey, PlanResultGate> PLAN_RESULT_GATES =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentMap<PlanResultKey, PlanResultGate> PLAN_RESULT_GATES =
+            new ConcurrentHashMap<>();
     private static final long PLAN_RESULT_GATE_TTL_NANOS = 60_000_000_000L;
 
     private static PlanResultSink networkSink(ServerPlayer player, long requestId,
@@ -3464,7 +3490,7 @@ public final class GenericCraftPacket {
         return !player.hasDisconnected() && !player.isRemoved()
                 && snapshot.requestGeneration() == previewGeneration
                 && PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)
-                && com.huanghuang.rsintegration.crafting.CraftPlanningRevision
+                && CraftPlanningRevision
                 .isCurrent(snapshot.recipeRevision());
     }
 
@@ -3586,7 +3612,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      @Nullable BlockPos pos,
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId,
@@ -3599,7 +3625,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      @Nullable BlockPos pos,
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId,
@@ -3613,7 +3639,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      @Nullable BlockPos pos,
                                       int repeatCount, @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId,
                                       long previewGeneration,
@@ -3627,7 +3653,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      @Nullable BlockPos pos,
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId,
@@ -3647,7 +3673,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos,
+                                      @Nullable BlockPos pos,
                                       int repeatCount,
                                       @Nullable ItemStack baseItem,
                                       @Nullable ItemStack clickedOutput, long requestId,
@@ -3669,7 +3695,7 @@ public final class GenericCraftPacket {
     private static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
-                                      @Nullable net.minecraft.core.BlockPos pos, int repeatCount,
+                                      @Nullable BlockPos pos, int repeatCount,
                                       @Nullable ItemStack baseItem, @Nullable ItemStack clickedOutput,
                                       long requestId, long previewGeneration,
                                       @Nullable PureRecipePlanner.Result precomputedPlan,
@@ -3681,7 +3707,7 @@ public final class GenericCraftPacket {
                                       Map<String, ItemStack> materialLocks,
                                       @Nullable AsyncPurePlanningService.RoutedPlan routedPlan) {
         long planStartNanos = System.nanoTime();
-        if (com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds
+        if (QuestSubmissionTargetIds
                 .isQuestSubmission(recipeId)) {
             // FTB quest targets are synthetic JEI entries. Their dedicated
             // request already built the plan; never send them through the
@@ -3758,8 +3784,8 @@ public final class GenericCraftPacket {
         if (faRecipe) {
             // Build ingredient specs from FA recipe: template + baseItem + addition
             try {
-                java.lang.reflect.Method getTemplate = recipe.getClass().getMethod("getTemplate");
-                java.lang.reflect.Method getAddition = recipe.getClass().getMethod("getAddition");
+                Method getTemplate = recipe.getClass().getMethod("getTemplate");
+                Method getAddition = recipe.getClass().getMethod("getAddition");
                 Ingredient template = (Ingredient) getTemplate.invoke(recipe);
                 Ingredient addition = (Ingredient) getAddition.invoke(recipe);
 
@@ -3782,13 +3808,13 @@ public final class GenericCraftPacket {
                 // not the unmodified base material.
                 targetOutput = baseItem.copy();
                 try {
-                    java.lang.reflect.Method getModifier = recipe.getClass().getMethod("getModifier");
+                    Method getModifier = recipe.getClass().getMethod("getModifier");
                     Object modifier = getModifier.invoke(recipe);
                     if (modifier != null) {
                         Class<?> helperClass = Class.forName(
                                 "com.stal111.forbidden_arcanus.common.item.modifier.ModifierHelper");
-                        java.lang.reflect.Method setModifier = null;
-                        for (java.lang.reflect.Method m : helperClass.getMethods()) {
+                        Method setModifier = null;
+                        for (Method m : helperClass.getMethods()) {
                             if (m.getName().equals("setModifier")
                                     && m.getParameterCount() == 2
                                     && m.getParameterTypes()[0].isAssignableFrom(ItemStack.class)) {
@@ -3845,7 +3871,7 @@ public final class GenericCraftPacket {
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
             List<IngredientSpec> extractedSpecs = extractPlanIngredientSpecs(cr);
-            if (cr instanceof net.minecraft.world.item.crafting.ShapedRecipe) {
+            if (cr instanceof ShapedRecipe) {
                 // Preserve empty slots for the shaped-grid renderer.
                 displayIngredients = raw;
                 displayInputRoles = alignInputRoles(raw, extractedSpecs);
@@ -3875,17 +3901,17 @@ public final class GenericCraftPacket {
                 // the food-value-aware selection so the plan preview shows
                 // exactly the items the batch delegate will place — both
                 // specific MustContain ingredients and filler items.
-                net.minecraft.resources.ResourceKey<Level> cpDim = dim != null
-                        ? net.minecraft.resources.ResourceKey.create(Registries.DIMENSION, dim)
+                ResourceKey<Level> cpDim = dim != null
+                        ? ResourceKey.create(Registries.DIMENSION, dim)
                         : player.serverLevel().dimension();
-                net.minecraft.core.BlockPos cpPos = pos != null ? pos : player.blockPosition();
+                BlockPos cpPos = pos != null ? pos : player.blockPosition();
                 CraftStorageEndpoint cpEndpoint = storageReference != null
                         ? CraftStorageEndpoints.resolve(storageReference, player).orElse(null)
                         : CraftStorageEndpoints.resolveDefault(player).orElse(null);
                 INetwork cpNetwork = cpEndpoint == null
                         && (storageReference == null
                         || "refinedstorage".equals(storageReference.backendId().value()))
-                        && net.minecraftforge.fml.ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                        && ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                         ? CraftPacketUtils.resolveNetworkForCraft(player, cpDim, cpPos)
                         : null;
                 specs = cpEndpoint != null
@@ -3917,7 +3943,7 @@ public final class GenericCraftPacket {
                     recipeId,
                     recipe.getClass().getSimpleName(),
                     targetOutput.isEmpty() ? "EMPTY"
-                            : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(targetOutput.getItem()),
+                            : BuiltInRegistries.ITEM.getKey(targetOutput.getItem()),
                     targetOutput.getCount(), targetOutput.isEmpty(),
                     recipeModType != null ? recipeModType.id() : "null");
             if (targetOutput.isEmpty() && recipeModType != null
@@ -3979,7 +4005,7 @@ public final class GenericCraftPacket {
                 ResourceLocation forcedId = ResourceLocation.tryParse(e.getValue());
                 if (itemKey == null || forcedId == null
                         || (!CraftingResolver.isStackPreferenceKey(itemKey)
-                        && !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(itemKey))
+                        && !BuiltInRegistries.ITEM.containsKey(itemKey))
                         || resolveRecipe(player.serverLevel(), forcedId) == null) {
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.invalid_forced_recipe",
@@ -3992,11 +4018,11 @@ public final class GenericCraftPacket {
 
         final PlanCache.Key cacheKey = planCacheKey(player.getUUID(), recipeId,
                 forcedRecipes, repeatCount, clickedOutput, recipeModType, materialLocks);
-        net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> planDimKey = dim != null
-                ? net.minecraft.resources.ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, dim)
+        ResourceKey<Level> planDimKey = dim != null
+                ? ResourceKey.create(
+                        Registries.DIMENSION, dim)
                 : player.serverLevel().dimension();
-        net.minecraft.core.BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
+        BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
         // Resolve an explicit backend-qualified target first. With no explicit
         // target, preserve RS terminal discovery for existing installations,
         // then fall back to the first registered optional backend (BD-only).
@@ -4035,11 +4061,11 @@ public final class GenericCraftPacket {
             selectedStorageReference = planningEndpoint.session().reference();
         } else {
             var defaults = contextEndpoint != null
-                    ? java.util.List.of(contextEndpoint.session())
+                    ? List.of(contextEndpoint.session())
                     : RSIntegrationMod.STORAGE_BACKENDS.registry()
                     .resolveDefaultSessionsForPlayer(player);
             if (!defaults.isEmpty()) {
-                planningEndpoint = new com.huanghuang.rsintegration.crafting.SessionCraftStorageEndpoint(defaults.get(0));
+                planningEndpoint = new SessionCraftStorageEndpoint(defaults.get(0));
                 selectedStorageReference = defaults.get(0).reference();
             } else {
                 // A backend may expose accessible networks without having a
@@ -4169,7 +4195,7 @@ public final class GenericCraftPacket {
         // performs thousands of main-thread inventory probes. Build the exact
         // same terminal plan arithmetically in constant time. If payment is not
         // directly available, retain the generic path so it can craft the cost.
-        if (recipe instanceof com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper market
+        if (recipe instanceof MarketRecipeWrapper market
                 && effectiveOverrides.isEmpty()
                 && tryBuildDirectMarketPlan(player, market, recipeId, repeatCount,
                 planTargetOutput, dim, pos, available, planningSnapshot, cacheKey,
@@ -4288,9 +4314,9 @@ public final class GenericCraftPacket {
                 demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst);
         var synchronousFallbackReason = pendingFallbackReason != null
-                ? java.util.Optional.of(pendingFallbackReason)
+                ? Optional.of(pendingFallbackReason)
                 : asyncAttempted && (routedPlan == null || routedPlan.plan() != null)
-                        ? java.util.Optional.<SynchronousFallbackReason>empty()
+                        ? Optional.<SynchronousFallbackReason>empty()
                         : SynchronousFallbackReason.whenPureRouteUnavailable(
                                 planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
                                 demandTree.backgroundCompatible(), demandTree.catalystRouteAvailable());
@@ -4685,7 +4711,7 @@ public final class GenericCraftPacket {
                 List<Ingredient> craftingIngredients = scr.getIngredients();
                 List<DemandRole> craftingRoles = alignInputRoles(
                         craftingIngredients, extractPlanIngredientSpecs(scr));
-                if (scr instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
+                if (scr instanceof ShapedRecipe shaped) {
                     recipeW = shaped.getWidth();
                     recipeH = shaped.getHeight();
                     // Preserve grid positions — include empty slots as ItemStack.EMPTY
@@ -4804,12 +4830,12 @@ public final class GenericCraftPacket {
             for (PlanStep s : steps) {
                 StringBuilder sb = new StringBuilder("  ").append(s.recipeId())
                         .append(" -> ")
-                        .append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.output().getItem()))
+                        .append(BuiltInRegistries.ITEM.getKey(s.output().getItem()))
                         .append(" x").append(s.totalOutputCount())
                         .append(" [");
                 for (ItemStack in : s.inputs()) {
                     if (in.isEmpty()) sb.append("EMPTY ");
-                    else sb.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(in.getItem())).append(" ");
+                    else sb.append(BuiltInRegistries.ITEM.getKey(in.getItem())).append(" ");
                 }
                 sb.append("]");
                 RSIntegrationMod.LOGGER.debug(sb.toString());
@@ -4892,7 +4918,7 @@ public final class GenericCraftPacket {
                     targetInputs.add(display);
                     targetInputRoles.add(displayInputRoles.get(inputIndex));
                 }
-            } else if (recipe instanceof net.minecraft.world.item.crafting.ShapedRecipe shaped) {
+            } else if (recipe instanceof ShapedRecipe shaped) {
                 targetW = shaped.getWidth();
                 targetH = shaped.getHeight();
                 for (int inputIndex = 0; inputIndex < displayIngredients.size(); inputIndex++) {
@@ -5044,11 +5070,11 @@ public final class GenericCraftPacket {
             if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
                 StringBuilder sb = new StringBuilder("[RSI-Generic] Target step: ")
                         .append(recipeId).append(" -> ")
-                        .append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(planTargetOutput.getItem()))
+                        .append(BuiltInRegistries.ITEM.getKey(planTargetOutput.getItem()))
                         .append(" [");
                 for (ItemStack in : targetInputs) {
                     if (in.isEmpty()) sb.append("EMPTY ");
-                    else sb.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(in.getItem())).append(" ");
+                    else sb.append(BuiltInRegistries.ITEM.getKey(in.getItem())).append(" ");
                 }
                 sb.append("] grid=").append(targetW).append("x").append(targetH);
                 RSIntegrationMod.LOGGER.debug(sb.toString());
@@ -5209,7 +5235,7 @@ public final class GenericCraftPacket {
         // name for every step that references it, producing an unreadable wall.
         List<String> dedupedMissing = missing.stream().distinct().toList();
 
-        String targetName = com.huanghuang.rsintegration.util.ItemStackUtils.registryId(planTargetOutput);
+        String targetName = ItemStackUtils.registryId(planTargetOutput);
 
         // ── Embers Alchemy: lookup cached codes from prior inference ──
         EmbersPlanInfo embersInfo = EmbersPlanInfo.build(
@@ -5264,7 +5290,7 @@ public final class GenericCraftPacket {
         }
 
         // v3.4 availability passport: collect modTypes the player has bound machines for.
-        Set<String> boundMachineTypes = new java.util.LinkedHashSet<>();
+        Set<String> boundMachineTypes = new LinkedHashSet<>();
         // Vanilla furnace/blast/smoker/stonecutter recipes (all classified as
         // vanilla_furnace, classifyRecipe → null) need no bound machine — they're
         // always usable. Seed the passport so their alternatives render as normal
@@ -5324,7 +5350,7 @@ public final class GenericCraftPacket {
             }
         }
         if (totalBotaniaMana > 0) {
-            modWarnings.add(net.minecraft.network.chat.Component.translatable(
+            modWarnings.add(Component.translatable(
                     "rsi.botania.warn.total_mana_required", totalBotaniaMana));
         }
 
@@ -5383,7 +5409,7 @@ public final class GenericCraftPacket {
 
         List<MachineCandidateView> machineCandidates = recipeModType != null
                 && ModIds.GOETY.equals(recipeModType.id())
-                ? com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate
+                ? GoetyBatchDelegate
                 .getPlanMachineCandidates(player, recipe)
                 : List.of();
         if (!machineCandidates.isEmpty()
@@ -5694,7 +5720,7 @@ public final class GenericCraftPacket {
     }
 
     static MarketTradeAvailability marketTradeAvailability(
-            com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper recipe,
+            MarketRecipeWrapper recipe,
             Map<StackKey, Integer> available, int repeatCount) {
         ItemStack cost = recipe.costItem();
         Ingredient costIngredient = Ingredient.of(cost);
@@ -5715,9 +5741,9 @@ public final class GenericCraftPacket {
 
     private static boolean tryBuildDirectMarketPlan(
             ServerPlayer player,
-            com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper recipe,
+            MarketRecipeWrapper recipe,
             ResourceLocation recipeId, int repeatCount, ItemStack targetOutput,
-            @Nullable ResourceLocation dim, @Nullable net.minecraft.core.BlockPos pos,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             Map<StackKey, Integer> available, PlanningSnapshot snapshot,
             PlanCache.Key cacheKey, long planStartNanos, PlanResultSink sink) {
         MarketTradeAvailability trade = marketTradeAvailability(recipe, available, repeatCount);
@@ -5740,7 +5766,7 @@ public final class GenericCraftPacket {
         Set<String> boundTypes = Set.of("vanilla_furnace", modType.id());
         PlanResponse response = new PlanResponseDraft(
                 true,
-                com.huanghuang.rsintegration.util.ItemStackUtils.registryId(targetOutput),
+                ItemStackUtils.registryId(targetOutput),
                 targetOutput,
                 steps,
                 materials,
@@ -5789,7 +5815,7 @@ public final class GenericCraftPacket {
      * Strips BlockEntityTag/BlockId to avoid purple-black block entity rendering.
      */
     private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {
-        return matchBestAvailable(ingredient, itemAvailable, java.util.Collections.emptySet());
+        return matchBestAvailable(ingredient, itemAvailable, Collections.emptySet());
     }
 
     /**
@@ -5800,12 +5826,12 @@ public final class GenericCraftPacket {
      * instead of dark_oak_log while the tree below builds oak_log.
      */
     private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable,
-                                                java.util.Set<Item> preferred) {
+                                                Set<Item> preferred) {
         ItemStack best = null;
         int bestCount = -1;
         int bestPreference = Integer.MAX_VALUE;
         var variantPreferences =
-                com.huanghuang.rsintegration.crafting.MaterialVariantPreferences.snapshot();
+                MaterialVariantPreferences.snapshot();
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
             int count = itemAvailable.getOrDefault(stack.getItem(), 0);
@@ -5867,11 +5893,11 @@ public final class GenericCraftPacket {
      * spread across different valid items instead of always picking the same one.
      */
     private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available) {
-        return matchAndConsume(ingredient, available, java.util.Collections.emptySet());
+        return matchAndConsume(ingredient, available, Collections.emptySet());
     }
 
     private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available,
-                                             java.util.Set<Item> preferred) {
+                                             Set<Item> preferred) {
         ItemStack matched = matchBestAvailable(ingredient, available, preferred);
         if (matched != null) {
             available.merge(matched.getItem(), -1, Integer::sum);
@@ -5889,12 +5915,12 @@ public final class GenericCraftPacket {
     static Map<Item, Integer> consumeIngredientCount(Ingredient ingredient, int amount,
                                                        Map<Item, Integer> available) {
         return consumeIngredientCount(ingredient, amount, available,
-                java.util.Collections.emptySet());
+                Collections.emptySet());
     }
 
     private static Map<Item, Integer> consumeIngredientCount(Ingredient ingredient, int amount,
                                                                Map<Item, Integer> available,
-                                                               java.util.Set<Item> preferred) {
+                                                               Set<Item> preferred) {
         if (ingredient == null || ingredient.isEmpty() || amount <= 0) return Map.of();
 
         List<Item> candidates = new ArrayList<>();
@@ -5991,7 +6017,7 @@ public final class GenericCraftPacket {
     static List<ResolutionStep> attachIndexedAlternatives(
             List<ResolutionStep> steps,
             Map<Item, List<RecipeIndex.Entry>> recipeIndex,
-            net.minecraft.core.RegistryAccess access) {
+            RegistryAccess access) {
         if (steps.isEmpty() || recipeIndex.isEmpty()) return steps;
 
         Map<ResourceLocation, RecipeIndex.Entry> entriesById = new LinkedHashMap<>();
@@ -6037,8 +6063,8 @@ public final class GenericCraftPacket {
 
     private static boolean sameRecipeOutput(ItemStack left, ItemStack right) {
         return MaterialMatcher.equivalentRuntimeFragment(left, right)
-                || (net.minecraftforge.fml.ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
-                && com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+                || (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+                && IronSpellBooksRecipeCatalog
                 .sameSpellScroll(left, right));
     }
 
@@ -6072,7 +6098,7 @@ public final class GenericCraftPacket {
 
     static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                                     @Nullable ResourceLocation dim,
-                                                    @Nullable net.minecraft.core.BlockPos pos) {
+                                                    @Nullable BlockPos pos) {
         if (MinersDelightCopperPotSupport.isRequestedCopperPot(player, recipe, dim, pos)) {
             ModType copperPot = ModType.findById(ModIds.ID_MD_COPPER_POT);
             if (copperPot != null) return copperPot;
@@ -6096,7 +6122,7 @@ public final class GenericCraftPacket {
     private static void logBindingRejection(String phase, ServerPlayer player, Recipe<?> recipe,
                                             @Nullable ModType executionType,
                                             @Nullable ResourceLocation dim,
-                                            @Nullable net.minecraft.core.BlockPos pos) {
+                                            @Nullable BlockPos pos) {
         ResourceLocation recipeTypeId = recipe.getType() == null
                 ? null : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType());
         ResourceLocation serializerId = recipe.getSerializer() == null
@@ -6134,7 +6160,7 @@ public final class GenericCraftPacket {
     }
 
     static boolean isSelfAmplifyingRecipe(Recipe<?> recipe,
-                                          net.minecraft.core.RegistryAccess access) {
+                                          RegistryAccess access) {
         ItemStack output = RecipeIndex.tryGetResultItem(recipe, access);
         if (output.isEmpty()) return false;
         List<IngredientSpec> specs = recipe instanceof CraftingRecipe crafting
@@ -6182,7 +6208,7 @@ public final class GenericCraftPacket {
     /** Applies server-configured planner resource limits by replacing the bounded executor. */
     public static synchronized void reloadPlanningConfig() {
         clearPlanResultGates(null);
-        com.huanghuang.rsintegration.crafting.MaterialVariantPreferences.refresh();
+        MaterialVariantPreferences.refresh();
         PLAN_CACHE.clear();
         PlanRequestService previous = PLAN_REQUESTS;
         PLAN_REQUESTS = newPlanRequestService();

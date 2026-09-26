@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.rs.recentsearch;
+import java.lang.reflect.Field;
 
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.widget.SearchWidget;

@@ -9,6 +9,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraft.world.level.material.Fluids;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -72,7 +73,7 @@ public final class FarmersRespiteRecipeHandler extends AbstractRecipeHandler {
 
     public static boolean isWater(FluidStack fluid) {
         return fluid != null && !fluid.isEmpty()
-                && (fluid.getFluid() == net.minecraft.world.level.material.Fluids.WATER
-                || fluid.getFluid() == net.minecraft.world.level.material.Fluids.FLOWING_WATER);
+                && (fluid.getFluid() == Fluids.WATER
+                || fluid.getFluid() == Fluids.FLOWING_WATER);
     }
 }

@@ -6,6 +6,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.tags.TagKey;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -63,8 +66,8 @@ public record VoidUpgradeRule(Type type, String value, CompoundTag itemNbt) {
                     matchEnchantments);
             case TAG -> {
                 ResourceLocation id = ResourceLocation.tryParse(value);
-                yield id != null && stack.is(net.minecraft.tags.TagKey.create(
-                        net.minecraft.core.registries.Registries.ITEM, id));
+                yield id != null && stack.is(TagKey.create(
+                        Registries.ITEM, id));
             }
             case MOD -> value.equals(itemId.getNamespace());
             case NAME -> stack.getHoverName().getString().toLowerCase(Locale.ROOT).contains(value);
@@ -89,8 +92,8 @@ public record VoidUpgradeRule(Type type, String value, CompoundTag itemNbt) {
 
     private static boolean enchantmentsEqual(CompoundTag expected, CompoundTag actual,
                                              String key) {
-        net.minecraft.nbt.ListTag left = list(expected, key);
-        net.minecraft.nbt.ListTag right = list(actual, key);
+        ListTag left = list(expected, key);
+        ListTag right = list(actual, key);
         if (left.size() != right.size()) return false;
         boolean[] matched = new boolean[right.size()];
         for (int i = 0; i < left.size(); i++) {
@@ -107,9 +110,9 @@ public record VoidUpgradeRule(Type type, String value, CompoundTag itemNbt) {
         return true;
     }
 
-    private static net.minecraft.nbt.ListTag list(CompoundTag tag, String key) {
-        if (tag != null && tag.get(key) instanceof net.minecraft.nbt.ListTag list) return list;
-        return new net.minecraft.nbt.ListTag();
+    private static ListTag list(CompoundTag tag, String key) {
+        if (tag != null && tag.get(key) instanceof ListTag list) return list;
+        return new ListTag();
     }
 
     private static boolean ordinaryNbtEquals(CompoundTag expected, CompoundTag actual) {

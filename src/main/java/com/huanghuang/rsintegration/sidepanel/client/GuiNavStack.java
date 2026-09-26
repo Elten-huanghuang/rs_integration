@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.sidepanel.client;
+import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraftforge.event.TickEvent;
 
 import com.huanghuang.rsintegration.config.GuiTimingConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
@@ -165,7 +168,7 @@ public final class GuiNavStack {
     }
 
     public static void onScreenChanged(Screen newScreen) {
-        if (newScreen instanceof net.minecraft.client.gui.screens.PauseScreen) {
+        if (newScreen instanceof PauseScreen) {
             clearPending();
         }
     }
@@ -177,7 +180,7 @@ public final class GuiNavStack {
     }
 
     @SubscribeEvent
-    public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
         long now = System.currentTimeMillis();
         if (pendingRestores > 0 && hasPushTimedOut(now, pushTimestamp, configuredPushTimeoutMs())) {
             RSIntegrationMod.LOGGER.debug("[RSI-GuiNav] Push timeout ({}ms) — clearing stale state",

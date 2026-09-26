@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.common.util.FakePlayer;
 
 import java.util.function.Supplier;
 
@@ -26,7 +27,7 @@ public final class RSBindingSyncRequestPacket {
                               Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player != null && !(player instanceof net.minecraftforge.common.util.FakePlayer)) {
+        if (player != null && !(player instanceof FakePlayer)) {
             context.enqueueWork(() -> {
                 if (RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
                     RSSidePanelNetworkHandler.sendBindingSync(player);

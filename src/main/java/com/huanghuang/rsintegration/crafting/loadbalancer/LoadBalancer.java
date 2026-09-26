@@ -11,6 +11,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -128,7 +129,7 @@ public final class LoadBalancer {
         for (BoundMachine m : machines) {
             BlockPos pos = m.pos();
             var dimKey = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, m.dim());
+                    Registries.DIMENSION, m.dim());
             ServerLevel level = server.getLevel(dimKey);
             if (level == null) continue;
             if (!level.isLoaded(pos)) continue;

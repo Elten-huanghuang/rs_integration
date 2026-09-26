@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.resources.ResourceLocation;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
@@ -68,7 +69,7 @@ public final class LegacyExecutionMetrics {
     public static String summary() {
         String reasons = Arrays.stream(Reason.values())
                 .filter(reason -> count(reason) > 0)
-                .map(reason -> reason.name().toLowerCase(java.util.Locale.ROOT)
+                .map(reason -> reason.name().toLowerCase(Locale.ROOT)
                         + ":" + count(reason))
                 .collect(Collectors.joining(","));
         String types = BY_MOD_TYPE.entrySet().stream()

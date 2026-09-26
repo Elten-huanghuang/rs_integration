@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -96,7 +97,7 @@ public final class MachineStatusReader {
     private static MachineStatus readIronFurnace(BlockEntity be) {
         try {
             if ((boolean) be.getClass().getMethod("isFactory").invoke(be)) {
-                net.minecraft.world.Container container = (net.minecraft.world.Container) be;
+                Container container = (Container) be;
                 ItemStack input = ItemStack.EMPTY;
                 ItemStack output = ItemStack.EMPTY;
                 int progress = 0;
@@ -120,9 +121,9 @@ public final class MachineStatusReader {
             }
             boolean ordinary = (boolean) be.getClass().getMethod("isFurnace").invoke(be);
             if (!ordinary) return MachineStatus.UNKNOWN;
-            ItemStack input = ((net.minecraft.world.Container) be).getItem(0).copy();
-            ItemStack fuel = ((net.minecraft.world.Container) be).getItem(1).copy();
-            ItemStack output = ((net.minecraft.world.Container) be).getItem(2).copy();
+            ItemStack input = ((Container) be).getItem(0).copy();
+            ItemStack fuel = ((Container) be).getItem(1).copy();
+            ItemStack output = ((Container) be).getItem(2).copy();
             int progress = be.getClass().getField("cookTime").getInt(be);
             int total = be.getClass().getField("totalCookTime").getInt(be);
             boolean burning = (boolean) be.getClass().getMethod("isBurning").invoke(be);

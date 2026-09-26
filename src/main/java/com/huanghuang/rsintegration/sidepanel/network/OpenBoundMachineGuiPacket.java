@@ -1,7 +1,16 @@
 package com.huanghuang.rsintegration.sidepanel.network;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.vanilla.BrickFurnaceCompat;
 import com.huanghuang.rsintegration.mods.vanilla.CookingMachineFamily;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
+import net.minecraftforge.common.util.FakePlayer;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
@@ -12,7 +21,6 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryBinding;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
@@ -59,12 +67,12 @@ import java.util.function.Supplier;
 public final class OpenBoundMachineGuiPacket {
 
     // Cached litTime field with SRG fallback — vanilla fields are remapped at runtime
-    private static final java.lang.reflect.Field LIT_TIME = resolveLitTimeField();
+    private static final Field LIT_TIME = resolveLitTimeField();
 
-    private static java.lang.reflect.Field resolveLitTimeField() {
+    private static Field resolveLitTimeField() {
         for (String name : new String[]{"litTime", "f_58315_"}) {
             try {
-                java.lang.reflect.Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
+                Field f = AbstractFurnaceBlockEntity.class.getDeclaredField(name);
                 f.setAccessible(true);
                 return f;
             } catch (NoSuchFieldException ignored) {}
@@ -123,12 +131,12 @@ public final class OpenBoundMachineGuiPacket {
     public static void handle(OpenBoundMachineGuiPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
-            if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) return;
+            if (player == null || player instanceof FakePlayer) return;
 
             if (GuiOpenRateLimiter.isRateLimited(player.getUUID())) return;
 
             ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                Registries.DIMENSION, packet.dim);
 
             if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
                 player.sendSystemMessage(
@@ -167,7 +175,7 @@ public final class OpenBoundMachineGuiPacket {
             }
 
             // Determine machine type for pre-fill strategy
-            net.minecraft.server.level.ServerLevel level = player.server.getLevel(dimKey);
+            ServerLevel level = player.server.getLevel(dimKey);
             if (level == null) {
                 player.sendSystemMessage(Component.translatable("rsi.error.dim_not_loaded"));
                 return;
@@ -337,8 +345,8 @@ public final class OpenBoundMachineGuiPacket {
         for (var entry : stacks) {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) {
-                ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            if (IngredientMatcher.test(ingredient, stack)) {
+                ItemStack extracted = CraftStorageEndpoints
                         .extractExactLegacy(network, player, stack.copyWithCount(1), 1, false);
                 if (!extracted.isEmpty()) return extracted;
             }
@@ -357,10 +365,10 @@ public final class OpenBoundMachineGuiPacket {
             if (burn <= 0 || needed > existing.getMaxStackSize()) return;
             if (existing.getCount() >= needed) return;
             int topUp = needed - existing.getCount();
-            ItemStack extra = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            ItemStack extra = CraftStorageEndpoints
                     .extractExactLegacy(network, player, existing.copyWithCount(1), topUp, false);
             if (extra.getCount() < topUp) {
-                if (!extra.isEmpty()) com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                if (!extra.isEmpty()) CraftStorageEndpoints
                         .insertLegacy(network, player, extra, false);
                 return;
             }
@@ -380,11 +388,11 @@ public final class OpenBoundMachineGuiPacket {
                 stack -> BrickFurnaceCompat.effectiveBurnTicks(
                         furnace, stack, recipeTypeFor(furnace, recipe)));
         if (selection == null) return;
-        ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+        ItemStack extracted = CraftStorageEndpoints
                 .extractExactLegacy(network, player, selection.fuel().copyWithCount(1),
                         selection.amount(), false);
         if (extracted.getCount() < selection.amount()) {
-            if (!extracted.isEmpty()) com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+            if (!extracted.isEmpty()) CraftStorageEndpoints
                     .insertLegacy(network, player, extracted, false);
             return;
         }
@@ -395,13 +403,13 @@ public final class OpenBoundMachineGuiPacket {
         }
     }
 
-    private static net.minecraft.world.item.crafting.RecipeType<?> recipeTypeFor(
+    private static RecipeType<?> recipeTypeFor(
             AbstractFurnaceBlockEntity furnace, Recipe<?> recipe) {
         return switch (CookingMachineFamily.fromBlock(
                 furnace.getBlockState().getBlock())) {
-            case BLAST_FURNACE -> net.minecraft.world.item.crafting.RecipeType.BLASTING;
-            case SMOKER -> net.minecraft.world.item.crafting.RecipeType.SMOKING;
-            default -> net.minecraft.world.item.crafting.RecipeType.SMELTING;
+            case BLAST_FURNACE -> RecipeType.BLASTING;
+            case SMOKER -> RecipeType.SMOKING;
+            default -> RecipeType.SMELTING;
         };
     }
 
@@ -499,8 +507,8 @@ public final class OpenBoundMachineGuiPacket {
         List<Ingredient> ingredients = recipe.getIngredients();
         RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing ingredients count={}", ingredients.size());
         // SmithingRecipe (1.20 abstract base) doesn't override getIngredients() — use reflection
-        if (ingredients.isEmpty() && (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe
-                || recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe)) {
+        if (ingredients.isEmpty() && (recipe instanceof SmithingTransformRecipe
+                || recipe instanceof SmithingTrimRecipe)) {
             ingredients = extractSmithingIngredients(recipe);
             RSIntegrationMod.LOGGER.debug("[RSI-Prefill] Smithing reflection ingredients count={}", ingredients.size());
         }
@@ -550,9 +558,9 @@ public final class OpenBoundMachineGuiPacket {
                                                 INetwork network, SmithingMenu menu,
                                                 @Nullable ItemStack baseItem) {
         try {
-            java.lang.reflect.Method getTemplate = recipe.getClass().getMethod("getTemplate");
-            java.lang.reflect.Method getAddition = recipe.getClass().getMethod("getAddition");
-            java.lang.reflect.Method getModifier = recipe.getClass().getMethod("getModifier");
+            Method getTemplate = recipe.getClass().getMethod("getTemplate");
+            Method getAddition = recipe.getClass().getMethod("getAddition");
+            Method getModifier = recipe.getClass().getMethod("getModifier");
             Ingredient template = (Ingredient) getTemplate.invoke(recipe);
             Ingredient addition = (Ingredient) getAddition.invoke(recipe);
             Object modifier = getModifier.invoke(recipe);
@@ -572,7 +580,7 @@ public final class OpenBoundMachineGuiPacket {
             // container slot 1 = base
             if (menu.getSlot(1).getItem().isEmpty()) {
                 if (baseItem != null && !baseItem.isEmpty()) {
-                    ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    ItemStack extracted = CraftStorageEndpoints
                             .extractExactLegacy(network, player, baseItem.copyWithCount(1), 1, false);
                     if (!extracted.isEmpty()) {
                         menu.getSlot(1).set(extracted.copy());
@@ -612,9 +620,9 @@ public final class OpenBoundMachineGuiPacket {
             if (remaining <= 0) break;
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
-            if (com.huanghuang.rsintegration.crafting.IngredientMatcher.test(ingredient, stack)) {
+            if (IngredientMatcher.test(ingredient, stack)) {
                 int toExtract = Math.min(remaining, stack.getCount());
-                    ItemStack extracted = com.huanghuang.rsintegration.crafting.CraftStorageEndpoints
+                    ItemStack extracted = CraftStorageEndpoints
                             .extractExactLegacy(network, player, stack.copyWithCount(1), toExtract, false);
                 if (!extracted.isEmpty()) {
                     if (result.isEmpty()) {
@@ -664,7 +672,7 @@ public final class OpenBoundMachineGuiPacket {
 
         var m = machines.get(0);
         ResourceKey<Level> dimKey = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, m.dim());
+                Registries.DIMENSION, m.dim());
         ServerLevel level = player.getServer().getLevel(dimKey);
         if (level == null) return;
 

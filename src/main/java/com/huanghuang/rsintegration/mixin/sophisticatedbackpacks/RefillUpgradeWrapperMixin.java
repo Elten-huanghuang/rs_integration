@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
@@ -26,6 +28,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Map;
 import java.util.function.Consumer;
@@ -42,7 +45,7 @@ public abstract class RefillUpgradeWrapperMixin
     @Unique
     private static volatile boolean rsi$bcLoaded;
     @Unique
-    private static volatile java.lang.reflect.Method rsi$isTwoHandedMethod;
+    private static volatile Method rsi$isTwoHandedMethod;
     @Unique
     private static volatile boolean rsi$tsReflectionFailed;
 
@@ -81,17 +84,17 @@ public abstract class RefillUpgradeWrapperMixin
     }
 
     @Unique
-    private static volatile java.lang.reflect.Field rsi$tsMcgField;
+    private static volatile Field rsi$tsMcgField;
     @Unique
-    private static volatile java.lang.reflect.Field rsi$tsFillerField;
+    private static volatile Field rsi$tsFillerField;
     @Unique
-    private static volatile java.lang.reflect.Method rsi$mcgMethod;
+    private static volatile Method rsi$mcgMethod;
     @Unique
-    private static volatile java.lang.reflect.Method rsi$fillerMethod;
+    private static volatile Method rsi$fillerMethod;
 
     @Unique
     private void rsi$rsRefill(Player player, IItemHandler playerInv) {
-        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) return;
+        if (!(player instanceof ServerPlayer serverPlayer)) return;
         StorageSession session = StorageBackpackUtils.resolve(serverPlayer, this.rsi$storageReference);
         if (session == null) return;
         StorageSnapshotResult snapshotResult = session.snapshotItems(serverPlayer);

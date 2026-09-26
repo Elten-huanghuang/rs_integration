@@ -27,6 +27,16 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -79,7 +89,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
-        ResourceLocation machineId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+        ResourceLocation machineId = BuiltInRegistries.BLOCK
                 .getKey(level.getBlockState(pos).getBlock());
         this.machineNamespace = YoukaiRegistryIds.isSupportedNamespace(machineId.getNamespace())
                 ? machineId.getNamespace()
@@ -97,7 +107,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
-        ResourceLocation blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+        ResourceLocation blockId = BuiltInRegistries.BLOCK
                 .getKey(level.getBlockState(pos).getBlock());
         if (!YoukaiRegistryIds.isSupportedNamespace(blockId.getNamespace())) return false;
         return CookingPotCompletionPolicy.isIdleBowl(
@@ -203,7 +213,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // setLastPlayer is needed for recipe matching in tryAddItem
         try {
             Method setPlayer = be.getClass().getMethod("setLastPlayer",
-                    net.minecraft.world.entity.player.Player.class);
+                    Player.class);
             setPlayer.invoke(be, player);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] setLastPlayer reflection failed", e);
@@ -263,7 +273,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             // If the block here is not air and not a cooking pot, it's the result.
             var state = level.getBlockState(pos);
             if (!state.isAir()) {
-                String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                String key = BuiltInRegistries.BLOCK
                         .getKey(state.getBlock()).toString();
                 // Make sure it's not one of the bowl/pot blocks (some pots
                 // auto-convert back to bowl after cooking).
@@ -312,13 +322,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             // PotFoodBlock is handled transactionally above. This guard prevents
             // future serving regressions from returning the entire pot as an item.
             if (stateAtPot.getBlock() instanceof PotFoodBlock) return ItemStack.EMPTY;
-            String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+            String key = BuiltInRegistries.BLOCK
                     .getKey(stateAtPot.getBlock()).toString();
             boolean isPot = key.contains("cooking_") || key.contains("iron_pot")
                     || key.contains("stockpot");
             if (!isPot) {
                 var blockItem = stateAtPot.getBlock().asItem();
-                if (blockItem != net.minecraft.world.item.Items.AIR) {
+                if (blockItem != Items.AIR) {
                     myLevel.removeBlock(myPos, false);
                     return new ItemStack(blockItem);
                 }
@@ -327,8 +337,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         // Case 2: Non-block result dropped as entity at pos.above().
         var entities = myLevel.getEntitiesOfClass(
-                net.minecraft.world.entity.item.ItemEntity.class,
-                new net.minecraft.world.phys.AABB(above).inflate(0.5));
+                ItemEntity.class,
+                new AABB(above).inflate(0.5));
         for (var itemEntity : entities) {
             if (!itemEntity.isAlive()) continue;
             ItemStack s = itemEntity.getItem();
@@ -343,7 +353,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         var stateAbove = myLevel.getBlockState(above);
         if (!stateAbove.isAir()) {
             var blockItem = stateAbove.getBlock().asItem();
-            if (blockItem != net.minecraft.world.item.Items.AIR) {
+            if (blockItem != Items.AIR) {
                 myLevel.removeBlock(above, false);
                 return new ItemStack(blockItem);
             }
@@ -403,19 +413,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Nullable
-    private net.minecraft.world.level.block.state.BlockState emptyPotState(
-            PotFoodBlock potFood, net.minecraft.world.level.block.state.BlockState foodState) {
+    private BlockState emptyPotState(
+            PotFoodBlock potFood, BlockState foodState) {
         ItemStack potItem = new ItemStack(potFood.asItem());
         if (!potItem.hasCraftingRemainingItem()) return null;
         ItemStack remainder = potItem.getCraftingRemainingItem();
-        if (!(remainder.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)) return null;
-        ResourceLocation key = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+        if (!(remainder.getItem() instanceof BlockItem blockItem)) return null;
+        ResourceLocation key = BuiltInRegistries.BLOCK
                 .getKey(blockItem.getBlock());
         if (!machineNamespace.equals(key.getNamespace())
                 || !BOWL_PATHS[potIndex].equals(key.getPath())) return null;
 
         var emptyState = blockItem.getBlock().defaultBlockState();
-        var facing = net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING;
+        var facing = BlockStateProperties.FACING;
         if (foodState.hasProperty(facing) && emptyState.hasProperty(facing)) {
             emptyState = emptyState.setValue(facing, foodState.getValue(facing));
         }
@@ -425,14 +435,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private static boolean isPotFoodRecipe(Recipe<?> recipe) {
         ItemStack result = getRecipeResult(recipe);
         return !result.isEmpty()
-                && result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem
+                && result.getItem() instanceof BlockItem blockItem
                 && blockItem.getBlock() instanceof PotFoodBlock;
     }
 
     /** Compute one serving container per food returned by PotFoodBlock.asBowls(). */
     private static ItemStack computeServeBowls(Recipe<?> recipe) {
         ItemStack result = getRecipeResult(recipe);
-        if (result.isEmpty() || !(result.getItem() instanceof net.minecraft.world.item.BlockItem blockItem)
+        if (result.isEmpty() || !(result.getItem() instanceof BlockItem blockItem)
                 || !(blockItem.getBlock() instanceof PotFoodBlock potFood)) {
             return ItemStack.EMPTY;
         }
@@ -524,19 +534,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // Only convert the bowl matching this delegate's pot type.
         var state = myLevel.getBlockState(myPos);
         var block = state.getBlock();
-        if (!(block instanceof net.minecraft.world.level.block.EntityBlock)) {
-            ResourceLocation blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+        if (!(block instanceof EntityBlock)) {
+            ResourceLocation blockId = BuiltInRegistries.BLOCK
                     .getKey(block);
             if (machineNamespace.equals(blockId.getNamespace())
                     && BOWL_PATHS[potIndex].equals(blockId.getPath())) {
-                var potBlock = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                var potBlock = BuiltInRegistries.BLOCK
                         .get(cookingKey(machineNamespace, potIndex));
                 if (potBlock != null) {
                     var cookingState = potBlock.defaultBlockState();
-                    if (state.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING)) {
+                    if (state.hasProperty(BlockStateProperties.FACING)) {
                         cookingState = cookingState.setValue(
-                                net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING,
-                                state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.FACING));
+                                BlockStateProperties.FACING,
+                                state.getValue(BlockStateProperties.FACING));
                     }
                     myLevel.setBlock(myPos, cookingState, 3);
                     RSIntegrationMod.LOGGER.info("[RSI-CookPot] Activated bowl -> {} at {}",
@@ -552,7 +562,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 myPos,
                 block.getDescriptionId(),
                 block.getClass().getName(),
-                block instanceof net.minecraft.world.level.block.EntityBlock,
+                block instanceof EntityBlock,
                 myLevel.isLoaded(myPos));
         return null;
     }
@@ -737,7 +747,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         // Fallback: capability
         IItemHandler handler = be.getCapability(
-                net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
         if (handler != null) {
             for (int i = 0; i < handler.getSlots(); i++) {
@@ -753,7 +763,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         Container container = getItemsContainer(be);
         if (container == null) {
             IItemHandler handler = be.getCapability(
-                    net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                    ForgeCapabilities.ITEM_HANDLER)
                     .resolve().orElse(null);
             if (handler == null) return true;
             boolean drained = true;

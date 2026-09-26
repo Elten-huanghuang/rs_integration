@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 
 import javax.annotation.Nullable;
 import java.util.Objects;
@@ -52,7 +53,7 @@ public final class MaterialMatcher {
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (!new ResourceLocation("irons_spellbooks", "scroll").equals(itemId)) return false;
         try {
-            return com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog
+            return IronSpellBooksRecipeCatalog
                     .sameSpellScroll(declared.toStack(1), stack);
         } catch (LinkageError ignored) {
             return false;

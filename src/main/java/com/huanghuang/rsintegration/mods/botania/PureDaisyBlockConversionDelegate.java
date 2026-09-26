@@ -21,6 +21,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.PureDaisyRecipe;
 import vazkii.botania.common.block.flower.PureDaisyBlockEntity;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -57,8 +59,8 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         machineDim = dim;
         machineServer = player.getServer();
         level = dim == null ? player.serverLevel() : player.getServer().getLevel(
-                net.minecraft.resources.ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, dim));
+                ResourceKey.create(
+                        Registries.DIMENSION, dim));
         if (level == null || !(level.getBlockEntity(pos) instanceof PureDaisyBlockEntity)) return false;
         var found = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (!(found instanceof PureDaisyRecipe pureDaisyRecipe)) return false;

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.distantworlds;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayList;
 
 import java.util.List;
 
@@ -21,7 +22,7 @@ public record LithumAltarRecipeDefinition(
     }
 
     public List<IngredientSpec> allMaterials() {
-        java.util.ArrayList<IngredientSpec> result = new java.util.ArrayList<>();
+        ArrayList<IngredientSpec> result = new ArrayList<>();
         if (coreInput != null && !coreInput.isEmpty()) result.add(coreInput);
         result.addAll(pedestalInputs);
         return List.copyOf(result);

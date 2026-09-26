@@ -12,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -28,7 +29,7 @@ public final class AsyncCraftManager {
     private final ActiveCraftRegistry<UUID, AsyncCraftChain> activeChains = new ActiveCraftRegistry<>();
     private OperationServices operationServices = new OperationServices();
     private int roundRobinCursor;
-    private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> completionQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Runnable> completionQueue = new ConcurrentLinkedQueue<>();
 
     void enqueueCompletion(Runnable callback) {
         if (callback != null) completionQueue.add(callback);
@@ -240,20 +241,20 @@ public final class AsyncCraftManager {
 
     private static int configuredPerChainVanillaLimit() {
         try {
-            return Math.max(1, com.huanghuang.rsintegration.config.RSIntegrationConfig
+            return Math.max(1, RSIntegrationConfig
                     .CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
         } catch (Exception ignored) {
-            return com.huanghuang.rsintegration.config.RSIntegrationConfig
+            return RSIntegrationConfig
                     .DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK;
         }
     }
 
     private static int configuredGlobalVanillaLimit() {
         try {
-            return Math.max(1, com.huanghuang.rsintegration.config.RSIntegrationConfig
+            return Math.max(1, RSIntegrationConfig
                     .CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK.get());
         } catch (Exception ignored) {
-            return com.huanghuang.rsintegration.config.RSIntegrationConfig
+            return RSIntegrationConfig
                     .DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
         }
     }

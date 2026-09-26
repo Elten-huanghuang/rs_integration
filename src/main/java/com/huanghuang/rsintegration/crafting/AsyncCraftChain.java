@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
@@ -6,6 +8,17 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.util.LogSampler;
+import com.huanghuang.rsintegration.util.CuriosAccess;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import com.huanghuang.rsintegration.util.ModIds;
+import java.util.Arrays;
+import java.util.function.IntFunction;
+import java.util.function.IntUnaryOperator;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.stream.Collectors;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -392,7 +405,7 @@ public final class AsyncCraftChain {
 
     private void initialiseGraphMaterialFlow(CraftPlanGraph plan) {
         for (CraftNode node : plan.nodes()) graphNodes.put(node.id(), node);
-        Map<InitialLotKey, Integer> initial = new java.util.LinkedHashMap<>();
+        Map<InitialLotKey, Integer> initial = new LinkedHashMap<>();
         for (MaterialAllocation allocation : plan.allocations()) {
             graphRequests.computeIfAbsent(allocation.consumer().nodeId(), ignored -> new ArrayList<>())
                     .add(new MaterialBroker.Request(allocation.source(), allocation.material(),
@@ -1409,7 +1422,7 @@ public final class AsyncCraftChain {
             boolean retained = false;
             try {
                 ResourceKey<Level> dimKey = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                        Registries.DIMENSION, machine.dim());
                 ServerLevel machineLevel = server.getLevel(dimKey);
                 if (machineLevel == null
                         || !ProtectionChecker.canInteract(online, machineLevel, machine.pos())) {
@@ -1847,7 +1860,7 @@ public final class AsyncCraftChain {
             return;
         }
         ResourceKey<Level> dimension = ResourceKey.create(
-                net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                Registries.DIMENSION, machine.dim());
         CraftOutputInterceptor.CaptureHandle handle = CraftOutputInterceptor.arm(
                 dimension, region, expected,
                 delegate.allowsOverlappingOutputCaptureOrigins());
@@ -2015,7 +2028,7 @@ public final class AsyncCraftChain {
         if (node == null || graphMaterials == null) return false;
 
         List<ItemStack> remaining = copyStacks(actualOutputs);
-        Map<OutputDeclaration, List<ItemStack>> matched = new java.util.LinkedHashMap<>();
+        Map<OutputDeclaration, List<ItemStack>> matched = new LinkedHashMap<>();
         List<String> checks = new ArrayList<>();
         for (OutputDeclaration output : node.outputs()) {
             List<ItemStack> fragments = removeMatchingFragments(
@@ -2384,7 +2397,7 @@ public final class AsyncCraftChain {
 
     private static String describeStackForLogging(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "empty";
-        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem())
+        return BuiltInRegistries.ITEM.getKey(stack.getItem())
                 + " x" + stack.getCount() + (stack.hasTag() ? " tag=" + stack.getTag() : "");
     }
 
@@ -2462,7 +2475,7 @@ public final class AsyncCraftChain {
     }
 
     private static String describeMaterialForLogging(MaterialKey material) {
-        ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM
+        ResourceLocation id = BuiltInRegistries.ITEM
                 .getKey(material.item());
         return id + (material.tag() == null ? "" : " tag=" + material.tag());
     }
@@ -2685,7 +2698,7 @@ public final class AsyncCraftChain {
 
     static CraftProgressSnapshot.Reason progressReasonForDetail(String detail) {
         if (detail == null || detail.isEmpty()) return CraftProgressSnapshot.Reason.NONE;
-        String normalized = detail.toLowerCase(java.util.Locale.ROOT);
+        String normalized = detail.toLowerCase(Locale.ROOT);
         // Classify the observed failure, not a guessed cause of a timeout.
         if (normalized.contains("timeout") || normalized.contains("exceeded global")) {
             return CraftProgressSnapshot.Reason.TIMEOUT;
@@ -2837,7 +2850,7 @@ public final class AsyncCraftChain {
 
     private static boolean hasEquippedCursedRing(ServerPlayer player) {
         try {
-            for (ItemStack stack : com.huanghuang.rsintegration.util.CuriosAccess
+            for (ItemStack stack : CuriosAccess
                     .equippedStacks(player)) {
                 if (new ResourceLocation("enigmaticlegacy", "cursed_ring")
                         .equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return true;
@@ -3146,13 +3159,13 @@ public final class AsyncCraftChain {
                 machines,
                 machine -> {
                     ResourceKey<Level> dimKey = ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                            Registries.DIMENSION, machine.dim());
                     ServerLevel machineLevel = server.getLevel(dimKey);
                     return machineLevel != null && machineLevel.hasChunkAt(machine.pos());
                 },
                 machine -> {
                     ResourceKey<Level> dimKey = ResourceKey.create(
-                            net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                            Registries.DIMENSION, machine.dim());
                     ServerLevel machineLevel = server.getLevel(dimKey);
                     return machineLevel != null
                             && ProtectionChecker.canInteract(online, machineLevel, machine.pos());
@@ -3616,7 +3629,7 @@ public final class AsyncCraftChain {
         for (BoundMachine machine : available) {
             try {
                 ResourceKey<Level> dimKey = ResourceKey.create(
-                        net.minecraft.core.registries.Registries.DIMENSION, machine.dim());
+                        Registries.DIMENSION, machine.dim());
                 ServerLevel machineLevel = server.getLevel(dimKey);
                 if (machineLevel != null
                         && ProtectionChecker.canInteract(online, machineLevel, machine.pos())) {
@@ -3880,8 +3893,8 @@ public final class AsyncCraftChain {
     record FlatMaterialBatch(int executions, List<ItemStack> materials) {}
 
     static FlatMaterialBatch reserveFlatMaterialBatch(
-            int preparedBatch, java.util.function.IntUnaryOperator prepare,
-            java.util.function.IntFunction<List<ItemStack>> reserve) {
+            int preparedBatch, IntUnaryOperator prepare,
+            IntFunction<List<ItemStack>> reserve) {
         MaterialReservationPlanner.FlatMaterialBatch result =
                 MaterialReservationPlanner.reserveFlatMaterialBatch(preparedBatch, prepare, reserve);
         return new FlatMaterialBatch(result.executions(), result.materials());
@@ -3973,10 +3986,10 @@ public final class AsyncCraftChain {
             }
 
             if (needed > 0) {
-                String ingredient = java.util.Arrays.stream(spec.ingredient().getItems())
+                String ingredient = Arrays.stream(spec.ingredient().getItems())
                         .filter(stack -> !stack.isEmpty()).limit(8)
                         .map(stack -> String.valueOf(ForgeRegistries.ITEMS.getKey(stack.getItem())))
-                        .collect(java.util.stream.Collectors.joining(","));
+                        .collect(Collectors.joining(","));
                 materialReservationFailureDetail = "Material reservation failed before machine start: recipe="
                         + steps.get(currentStepIdx).recipeId() + " inputCandidates(first8)=" + ingredient
                         + " spec=" + (materials.size() + 1) + "/" + specs.size()
@@ -4046,7 +4059,7 @@ public final class AsyncCraftChain {
 
         ResourceLocation dimLoc = (delegate instanceof AbstractBatchDelegate abd) ? abd.getMachineDim() : null;
         ResourceKey<Level> dim = dimLoc != null
-                ? ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimLoc)
+                ? ResourceKey.create(Registries.DIMENSION, dimLoc)
                 : online.level().dimension();
 
         if (captureHandle == null) {
@@ -4192,7 +4205,7 @@ public final class AsyncCraftChain {
                 .filter(port -> !port.complete())
                 .map(port -> port.port().portId() + " expected=" + port.expected()
                         + " actual=" + port.actual())
-                .collect(java.util.stream.Collectors.joining(", "));
+                .collect(Collectors.joining(", "));
     }
 
     private static int expectedStructuredOutputCount(OutputAccounting.Settlement settlement) {
@@ -4394,14 +4407,14 @@ public final class AsyncCraftChain {
         }
         if (dropThrottleTripped) {
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped -discarding {} x{} for player {}",
-                    com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), playerId);
+                    ItemStackUtils.registryId(stack), stack.getCount(), playerId);
             return false;
         }
         dropsThisChain++;
         if (dropsThisChain > MAX_DROPS_PER_CHAIN) {
             dropThrottleTripped = true;
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped ({} drops) -discarding {} x{} and all future drops for player {}. Chain will abort.",
-                    MAX_DROPS_PER_CHAIN, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount(), playerId);
+                    MAX_DROPS_PER_CHAIN, ItemStackUtils.registryId(stack), stack.getCount(), playerId);
             return false;
         }
         if (server != null) {
@@ -4412,7 +4425,7 @@ public final class AsyncCraftChain {
                 new ItemEntity(spawnLevel,
                     spawnPos.getX() + 0.5, spawnPos.getY() + 0.5, spawnPos.getZ() + 0.5, stack.copy()));
             RSIntegrationMod.LOGGER.warn("[RSI] Item dropped at world spawn (player {} offline): {} x{}",
-                playerId, com.huanghuang.rsintegration.util.ItemStackUtils.registryId(stack), stack.getCount());
+                playerId, ItemStackUtils.registryId(stack), stack.getCount());
         }
         return true;
     }
@@ -5000,7 +5013,7 @@ public final class AsyncCraftChain {
                 new CraftStartedPacket(craftId, total, useGraphExecution,
                         targetOutput == null ? ItemStack.EMPTY : targetOutput),
                 online.connection.connection,
-                net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
+                NetworkDirection.PLAY_TO_CLIENT);
     }
 
     static boolean shouldRefundFlatCommitted(
@@ -5034,7 +5047,7 @@ public final class AsyncCraftChain {
     private IBatchDelegate createStepDelegate(CraftingResolver.ResolutionStep step) {
         boolean codeKnown = false;
         if (step.inferMode()
-                && com.huanghuang.rsintegration.util.ModIds.ID_EMBERS_ALCHEMY
+                && ModIds.ID_EMBERS_ALCHEMY
                 .equals(step.modType().id())) {
             ServerPlayer player = resolvePlayer();
             ServerLevel dataLevel = player != null ? player.serverLevel() : server.overworld();
@@ -5100,8 +5113,8 @@ public final class AsyncCraftChain {
         sb.append(stepId).append(" -options: ");
         for (ItemStack stack : ing.getItems()) {
             if (!stack.isEmpty()) {
-                net.minecraft.resources.ResourceLocation rl =
-                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+                ResourceLocation rl =
+                        BuiltInRegistries.ITEM.getKey(stack.getItem());
                 if (rl != null) sb.append(rl).append(" ");
             }
         }
@@ -5114,8 +5127,8 @@ public final class AsyncCraftChain {
         sb.append(context).append(" (size=").append(virtualInventory.size()).append("):");
         for (ItemStack vi : virtualInventory) {
             if (vi.isEmpty()) continue;
-            net.minecraft.resources.ResourceLocation rl =
-                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(vi.getItem());
+            ResourceLocation rl =
+                    BuiltInRegistries.ITEM.getKey(vi.getItem());
             sb.append(" [").append(rl).append(" x").append(vi.getCount());
             if (vi.hasTag()) sb.append(" +nbt");
             sb.append("]");

@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.transfer;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -16,8 +18,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.InputEvent;
@@ -28,8 +28,12 @@ import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.registries.ForgeRegistries;
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.Optional;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.events.ContainerEventHandler;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.fml.ModList;
@@ -60,16 +64,16 @@ public final class ContainerTransferClient {
     // EMI's search-focus probe, resolved once. Reflecting on every keypress
     // would spam ClassNotFoundException when EMI is absent (the common case).
     // State: null = not yet resolved, present = usable, absent = EMI not present.
-    private static java.util.Optional<java.lang.reflect.Method> emiSearchFocusedMethod;
+    private static Optional<Method> emiSearchFocusedMethod;
 
-    private static java.lang.reflect.Method resolveEmiSearchFocused() {
+    private static Method resolveEmiSearchFocused() {
         if (emiSearchFocusedMethod == null) {
             try {
                 Class<?> emiApi = Class.forName("dev.emi.emi.api.EmiApi");
                 emiSearchFocusedMethod =
-                        java.util.Optional.of(emiApi.getMethod("isSearchFocused"));
+                        Optional.of(emiApi.getMethod("isSearchFocused"));
             } catch (ReflectiveOperationException | LinkageError e) {
-                emiSearchFocusedMethod = java.util.Optional.empty();
+                emiSearchFocusedMethod = Optional.empty();
             }
         }
         return emiSearchFocusedMethod.orElse(null);
@@ -264,7 +268,7 @@ public final class ContainerTransferClient {
     }
 
     private static byte[] availableModes() {
-        java.util.ArrayList<Byte> modes = new java.util.ArrayList<>(3);
+        ArrayList<Byte> modes = new ArrayList<>(3);
         if (isRsAvailable()) modes.add(MODE_RS);
         if (isBackpackAvailable()) modes.add(MODE_BACKPACK);
         if (isBdAvailable()) modes.add(MODE_BD);
@@ -305,7 +309,7 @@ public final class ContainerTransferClient {
         if (widget == null) return false;
         if (isTextInputWidget(widget)) return true;
         // Recurse into children of container widgets
-        if (widget instanceof net.minecraft.client.gui.components.events.ContainerEventHandler ceh) {
+        if (widget instanceof ContainerEventHandler ceh) {
             for (var child : ceh.children()) {
                 if (isTextInputInTree(child)) return true;
             }
@@ -314,7 +318,7 @@ public final class ContainerTransferClient {
     }
 
     private static boolean isTextInputWidget(Object widget) {
-        if (widget instanceof net.minecraft.client.gui.components.EditBox box && box.isFocused())
+        if (widget instanceof EditBox box && box.isFocused())
             return true;
         // Fallback: check class name for custom text-input widgets from
         // mods like Sophisticated Backpacks, JEI, EMI, REI, etc.
@@ -334,7 +338,7 @@ public final class ContainerTransferClient {
                 // isFocused() comes from GuiEventListener; call it directly —
                 // reflecting on it fails under runtime SRG remapping and would
                 // spam NoSuchMethodException on every keypress.
-                if (widget instanceof net.minecraft.client.gui.components.events.GuiEventListener listener
+                if (widget instanceof GuiEventListener listener
                         && listener.isFocused()) {
                     return true;
                 }
@@ -368,7 +372,7 @@ public final class ContainerTransferClient {
         }
 
         // --- EMI ---
-        java.lang.reflect.Method emiSearchFocused = resolveEmiSearchFocused();
+        Method emiSearchFocused = resolveEmiSearchFocused();
         if (emiSearchFocused != null) {
             try {
                 if (Boolean.TRUE.equals(emiSearchFocused.invoke(null))) return true;
@@ -443,7 +447,7 @@ public final class ContainerTransferClient {
             return true;
         }
 
-        String className = screen.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        String className = screen.getClass().getName().toLowerCase(Locale.ROOT);
         int separator = Math.max(className.lastIndexOf('.'), className.lastIndexOf('$'));
         String simpleName = separator >= 0 ? className.substring(separator + 1) : className;
         return simpleName.equals("gridscreen")

@@ -17,6 +17,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -88,7 +89,7 @@ final class FlatCraftExecutor {
             }
 
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-            if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            if (recipe instanceof SmithingTransformRecipe smithing) {
                 specs = SmithingRecipeHandler.requireDemandedOutputTag(
                         smithing, specs, step.syntheticOutput());
             }
@@ -129,7 +130,7 @@ final class FlatCraftExecutor {
                 if (!captured) consumedInputs.add(reserved.copyWithCount(1));
             }
 
-            ItemStack result = recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing
+            ItemStack result = recipe instanceof SmithingTransformRecipe smithing
                     ? SmithingRecipeHandler.assembleTransform(smithing, consumedInputs, registryAccess)
                     : ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
             if (!result.isEmpty()) {

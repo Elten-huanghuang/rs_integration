@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -10,6 +11,8 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.Container;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -79,11 +82,11 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
         }
 
         try {
-            java.lang.reflect.Method assemble = Reflect.findMethod(recipe.getClass(),
-                    "assemble", new Class<?>[]{net.minecraft.world.Container.class, RegistryAccess.class});
+            Method assemble = Reflect.findMethod(recipe.getClass(),
+                    "assemble", new Class<?>[]{Container.class, RegistryAccess.class});
             if (assemble == null) {
                 assemble = Reflect.findMethod(recipe.getClass(),
-                        "m_5874_", new Class<?>[]{net.minecraft.world.Container.class, RegistryAccess.class});
+                        "m_5874_", new Class<?>[]{Container.class, RegistryAccess.class});
             }
             if (assemble != null) {
                 Object assembled = assemble.invoke(recipe, container, access);
@@ -145,13 +148,13 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
         // interface in 1.20.1, must reflect the concrete class)
         if (specs.isEmpty() && recipe.getClass().getName().startsWith("com.stal111.forbidden_arcanus.")) {
             try {
-                java.lang.reflect.Method getTemplate = Reflect.findMethod(
+                Method getTemplate = Reflect.findMethod(
                         recipe.getClass(), "getTemplate", new Class<?>[0]);
                 if (getTemplate != null) {
                     Ingredient tmpl = (Ingredient) getTemplate.invoke(recipe);
                     if (tmpl != null && !tmpl.isEmpty()) specs.add(new IngredientSpec(tmpl, 1));
                 }
-                java.lang.reflect.Method getAddition = Reflect.findMethod(
+                Method getAddition = Reflect.findMethod(
                         recipe.getClass(), "getAddition", new Class<?>[0]);
                 if (getAddition != null) {
                     Ingredient add = (Ingredient) getAddition.invoke(recipe);
@@ -180,13 +183,13 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
      */
     private static ItemStack buildModifierPreview(Recipe<?> recipe) {
         try {
-            java.lang.reflect.Method getModifier = Reflect.findMethod(
+            Method getModifier = Reflect.findMethod(
                     recipe.getClass(), "getModifier", new Class<?>[0]);
             if (getModifier == null) return ItemStack.EMPTY;
             Object modifier = getModifier.invoke(recipe);
             if (modifier == null) return ItemStack.EMPTY;
 
-            java.lang.reflect.Method getValidItems = Reflect.findMethod(
+            Method getValidItems = Reflect.findMethod(
                     modifier.getClass(), "getValidItems", new Class<?>[0]);
             if (getValidItems == null) return ItemStack.EMPTY;
             @SuppressWarnings("unchecked")
@@ -199,7 +202,7 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
             for (ItemStack v : valid) {
                 if (v.isEmpty()) continue;
                 if (preview == null) preview = v;
-                if (net.minecraft.core.registries.BuiltInRegistries.ITEM
+                if (BuiltInRegistries.ITEM
                         .getKey(v.getItem()).getNamespace().equals("minecraft")) {
                     preview = v;
                     break;
@@ -214,8 +217,8 @@ public final class FaRecipeHandler extends AbstractRecipeHandler {
             // NoSuchMethodException from getMethod() exact-type matching.
             Class<?> helperClass = Class.forName(
                     "com.stal111.forbidden_arcanus.common.item.modifier.ModifierHelper");
-            java.lang.reflect.Method setModifier = null;
-            for (java.lang.reflect.Method m : helperClass.getMethods()) {
+            Method setModifier = null;
+            for (Method m : helperClass.getMethods()) {
                 if (m.getName().equals("setModifier")
                         && m.getParameterCount() == 2
                         && m.getParameterTypes()[0].isAssignableFrom(ItemStack.class)) {

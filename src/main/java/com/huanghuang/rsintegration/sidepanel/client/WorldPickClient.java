@@ -10,6 +10,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraft.network.chat.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,7 +62,7 @@ public final class WorldPickClient {
                 != RecipeBrowserBridge.FavoriteResult.UNAVAILABLE;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
-            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+            minecraft.player.displayClientMessage(Component.translatable(
                     bookmarked ? "rsi.world_pick.bookmarked" : "rsi.world_pick.bookmark_unavailable",
                     target.getHoverName()), true);
         }

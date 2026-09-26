@@ -19,6 +19,10 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraft.core.registries.Registries;
+import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.function.Supplier;
 
@@ -50,10 +54,10 @@ public final class ReturnToRSPacket {
     public static void handle(ReturnToRSPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer player = ctx.get().getSender();
-            if (player == null || player instanceof net.minecraftforge.common.util.FakePlayer) return;
+            if (player == null || player instanceof FakePlayer) return;
 
             ResourceKey<Level> dimKey = ResourceKey.create(
-                    net.minecraft.core.registries.Registries.DIMENSION, packet.dim);
+                    Registries.DIMENSION, packet.dim);
 
             var server = player.getServer();
             if (server == null) return;
@@ -90,10 +94,10 @@ public final class ReturnToRSPacket {
                     || grid.getNode() == null || grid.getNode().getNetwork() == null) return;
             if (!(be instanceof MenuProvider provider)) return;
 
-            String blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS
+            String blockId = ForgeRegistries.BLOCKS
                     .getKey(level.getBlockState(packet.pos).getBlock()).toString();
             RemoteGuiAuth.authorize(player, dimKey, packet.pos, blockId);
-            net.minecraftforge.network.NetworkHooks.openScreen(player, provider, packet.pos);
+            NetworkHooks.openScreen(player, provider, packet.pos);
             if (!RemoteGuiAuth.bindOpenedMenu(player)) {
                 player.closeContainer();
             }

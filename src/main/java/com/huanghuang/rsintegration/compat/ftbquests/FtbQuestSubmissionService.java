@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import java.util.Map;
+import java.util.Set;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -60,7 +62,7 @@ public final class FtbQuestSubmissionService {
                 QuestSubmissionTargetIds.of(questId).toString(),
                 "ftb_quest_submission", null, 0, 0, 0,
                 List.of(), Math.max(1, Math.min(repeatCount, 1024)), null, null, null, 0L,
-                false, false, false, null, java.util.Set.of(), java.util.Map.of(),
+                false, false, false, null, Set.of(), Map.of(),
                 null, questPlan.graphView());
         BatchCraftNetworkHandler.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(plan));
@@ -174,7 +176,7 @@ public final class FtbQuestSubmissionService {
     /** Return a terminal response so the client cannot remain in a pending preview state. */
     private static void sendPlanningTimeout(ServerPlayer player, int repeatCount) {
         PlanResponse failure = new PlanResponse(false, "", ItemStack.EMPTY,
-                List.of(), java.util.Map.of(), List.of(), "", null, null,
+                List.of(), Map.of(), List.of(), "", null, null,
                 0, 0, 0,
                 List.of(Component.translatable("rsi.plan.failure.planning_timeout")),
                 Math.max(1, Math.min(repeatCount, 1024)));

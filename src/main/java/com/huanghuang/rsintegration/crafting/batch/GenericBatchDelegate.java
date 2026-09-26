@@ -3,6 +3,14 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
+import java.util.Arrays;
+import java.util.stream.Collectors;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.SmithingRecipe;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.item.crafting.SmithingTrimRecipe;
+import net.minecraft.world.SimpleContainer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -127,7 +135,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
         // Non-crafting secondaries do not depend on a crafting grid. Crafting
         // remainders are captured after the actual NBT-bearing inputs exist.
-        if (!(recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe)) {
+        if (!(recipe instanceof CraftingRecipe)) {
             this.pendingSecondary.addAll(
                     ModRecipeHandlers.tryGetSecondaryOutputs(
                             recipe, player.serverLevel().registryAccess()));
@@ -160,7 +168,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         // items.  getResultItem() (used in the Phase-1 pre-check above) returns
         // a bare template — any NBT from inputs (backpack contents, blade stats,
         // enchantments) would be silently discarded.
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+        if (recipe instanceof SmithingTransformRecipe smithing) {
             // SmithingTransformRecipe is not a CraftingRecipe, but its output
             // carries the base tool's NBT (durability, enchantments, custom
             // data).  The indexed result is only a bare template, so assemble
@@ -174,7 +182,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             this.pendingResult = assembled;
-        } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingRecipe smithing) {
+        } else if (recipe instanceof SmithingRecipe smithing) {
             // Re-Avaritia's ExtremeSmithingRecipe is a SmithingRecipe, not a
             // SmithingTransformRecipe. Its five-slot contract is template,
             // base, and three additions; assemble from the extracted stacks
@@ -188,7 +196,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             this.pendingResult = assembled;
-        } else if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+        } else if (recipe instanceof CraftingRecipe cr) {
             captureActualCraftingOutputs(cr, templates, player);
         }
 
@@ -207,10 +215,10 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (!indexed.isEmpty()) return indexed;
         // Vanilla smithing recipes expose a stable registry-aware result even
         // when a third-party result cache has recorded a transient empty value.
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+        if (recipe instanceof SmithingTransformRecipe smithing) {
             return smithing.getResultItem(player.serverLevel().registryAccess()).copy();
         }
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTrimRecipe smithing) {
+        if (recipe instanceof SmithingTrimRecipe smithing) {
             return smithing.getResultItem(player.serverLevel().registryAccess()).copy();
         }
         return ItemStack.EMPTY;
@@ -218,16 +226,16 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     /** Assemble vanilla three-slot and Re-Avaritia five-slot smithing recipes. */
     private static ItemStack assembleSmithingRecipe(
-            net.minecraft.world.item.crafting.SmithingRecipe recipe,
+            SmithingRecipe recipe,
             List<ItemStack> materials, RegistryAccess access) {
         int slotCount = materials.size() >= 5 ? 5 : 3;
         ItemStack[] slots = new ItemStack[slotCount];
-        java.util.Arrays.fill(slots, ItemStack.EMPTY);
+        Arrays.fill(slots, ItemStack.EMPTY);
         for (int i = 0; i < slotCount && i < materials.size(); i++) {
             ItemStack material = materials.get(i);
             if (material != null && !material.isEmpty()) slots[i] = material.copyWithCount(1);
         }
-        return recipe.assemble(new net.minecraft.world.SimpleContainer(slots), access);
+        return recipe.assemble(new SimpleContainer(slots), access);
     }
 
     // ── shared-ledger path for AsyncCraftChain ───────────────────────
@@ -236,7 +244,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-        if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+        if (recipe instanceof SmithingTransformRecipe smithing) {
             specs = SmithingRecipeHandler.requireDemandedOutputTag(smithing, specs, targetOutput);
         }
         return GoetySoulTotemCrafting.requireBatchCharge(specs, preparedGraphExecutions);
@@ -272,9 +280,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         // Materials are in exact spec order, including empty shaped slots.
         // Use them for NBT-dependent assembly and durability/reuse remainders.
         if (player != null) {
-            if (recipe instanceof net.minecraft.world.item.crafting.CraftingRecipe cr) {
+            if (recipe instanceof CraftingRecipe cr) {
                 if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
-            } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingTransformRecipe smithing) {
+            } else if (recipe instanceof SmithingTransformRecipe smithing) {
                 List<ItemStack> operationMaterials = new ArrayList<>();
                 List<IngredientSpec> specs = getRequiredMaterials();
                 for (int i = 0; i < specs.size() && i < materials.size(); i++) {
@@ -293,7 +301,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 pendingResult = assembled;
                 this.pendingSecondary.addAll(ModRecipeHandlers.tryGetSecondaryOutputs(
                         recipe, player.serverLevel().registryAccess()));
-            } else if (recipe instanceof net.minecraft.world.item.crafting.SmithingRecipe smithing) {
+            } else if (recipe instanceof SmithingRecipe smithing) {
                 List<ItemStack> operationMaterials = new ArrayList<>();
                 List<IngredientSpec> specs = getRequiredMaterials();
                 for (int i = 0; i < specs.size() && i < materials.size(); i++) {
@@ -343,7 +351,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
      * the first result from the aggregated grid.
      */
     private boolean captureRepeatedCraftingOutputs(
-            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         return captureRepeatedCraftingOutputs(
@@ -352,7 +360,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     boolean captureRepeatedCraftingOutputs(
-            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            CraftingRecipe craftingRecipe,
             List<IngredientSpec> specs,
             List<MaterialReservationScope> scopes,
             List<ItemStack> materials,
@@ -365,7 +373,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         RepeatedCraftingOutputAccumulator outputs = new RepeatedCraftingOutputAccumulator();
         List<ItemStack> reusableState = materials.stream()
                 .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                .collect(Collectors.toCollection(ArrayList::new));
         for (int operation = 0; operation < executions; operation++) {
             List<ItemStack> operationMaterials = new ArrayList<>(materials.size());
             for (int i = 0; i < specs.size(); i++) {
@@ -458,7 +466,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
      * as a failure rather than reusing the stale {@code pendingResult}.
      */
     private boolean captureActualCraftingOutputs(
-            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
         return captureActualCraftingOutputs(
                 craftingRecipe, materials, getRequiredMaterials(), true,
@@ -466,7 +474,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean captureActualCraftingOutputs(
-            net.minecraft.world.item.crafting.CraftingRecipe craftingRecipe,
+            CraftingRecipe craftingRecipe,
             List<ItemStack> materials,
             List<IngredientSpec> specs,
             boolean captureReusableRemainders,
@@ -516,7 +524,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 pendingResult = recovered;
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-Generic] Recovered missing collected output recipe={} output={}x{}",
-                        recipe.getId(), com.huanghuang.rsintegration.util.ItemStackUtils.registryId(recovered), recovered.getCount());
+                        recipe.getId(), ItemStackUtils.registryId(recovered), recovered.getCount());
             }
         }
         List<ItemStack> results = new ArrayList<>(pendingSecondary.size() + 1);
@@ -577,7 +585,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                     PlayerUtils.safeGiveToPlayer(player, leftover, null);
                 }
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",
-                        pendingResult.getCount(), com.huanghuang.rsintegration.util.ItemStackUtils.registryId(pendingResult));
+                        pendingResult.getCount(), ItemStackUtils.registryId(pendingResult));
             } else {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Batch failed after commit. "
                         + "{} items may have been lost for recipe {}.",

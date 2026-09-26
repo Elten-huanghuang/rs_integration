@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -7,6 +9,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -27,7 +30,7 @@ public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
             try {
-                java.lang.reflect.Field field = scan.getDeclaredField("copyInput");
+                Field field = scan.getDeclaredField("copyInput");
                 field.setAccessible(true);
                 Object value = field.get(recipe);
                 return value instanceof Ingredient ingredient && !ingredient.isEmpty();
@@ -46,7 +49,7 @@ public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
         // fall back to getResultItem last — some recipes only expose
         // output through getResultItem.
         for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem", "getResultItem"}) {
-            for (java.lang.reflect.Method m : recipe.getClass().getMethods()) {
+            for (Method m : recipe.getClass().getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
                 if (m.getParameterCount() == 1) {
@@ -79,12 +82,12 @@ public final class TlmAltarRecipeHandler extends AbstractRecipeHandler {
     private static ItemStack tryGetOutputField(Recipe<?> recipe) {
         Class<?> scan = recipe.getClass();
         while (scan != null && scan != Object.class) {
-            for (java.lang.reflect.Field f : scan.getDeclaredFields()) {
+            for (Field f : scan.getDeclaredFields()) {
                 if (!ItemStack.class.isAssignableFrom(f.getType())) continue;
                 // Only accept fields whose name looks like an output — otherwise an
                 // unrelated ItemStack field declared first (icon, cached input,
                 // container) would be mis-read as the recipe product.
-                String fn = f.getName().toLowerCase(java.util.Locale.ROOT);
+                String fn = f.getName().toLowerCase(Locale.ROOT);
                 if (!fn.contains("output") && !fn.contains("result") && !fn.contains("assembled")) continue;
                 f.setAccessible(true);
                 try {

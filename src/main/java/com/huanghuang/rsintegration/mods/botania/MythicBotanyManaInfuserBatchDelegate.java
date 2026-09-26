@@ -21,6 +21,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
+import java.util.Optional;
+import net.minecraft.core.registries.Registries;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -71,7 +73,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         this.machineServer = player.getServer();
 
         ServerLevel resolved = dim == null ? player.serverLevel() : player.getServer().getLevel(
-                ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dim));
+                ResourceKey.create(Registries.DIMENSION, dim));
         if (resolved == null || !resolved.isLoaded(pos)) {
             return PreparationResult.retry("Mana Infuser dimension or chunk is unavailable");
         }
@@ -134,7 +136,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     }
 
     private static boolean hasValidPlatform(BlockEntity blockEntity, ServerLevel level, BlockPos pos) {
-        java.util.Optional<Boolean> nativeResult = Reflect.invoke(blockEntity, "hasValidPlatform");
+        Optional<Boolean> nativeResult = Reflect.invoke(blockEntity, "hasValidPlatform");
         if (nativeResult.isPresent()) return nativeResult.get();
 
         BlockPos base = pos.below();

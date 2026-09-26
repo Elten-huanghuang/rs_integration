@@ -12,6 +12,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Optional;
 
@@ -27,7 +30,7 @@ public final class BeyondDimensionsBindingHook implements IBindingHook {
 
     @Override
     public boolean matches(ItemStack held) {
-        ResourceLocation id = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(held.getItem());
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(held.getItem());
         return TERMINAL.equals(id);
     }
 
@@ -35,7 +38,7 @@ public final class BeyondDimensionsBindingHook implements IBindingHook {
     public Optional<AltarBinding> createBinding(ItemStack held) {
         int networkId = readNetworkId(held);
         if (networkId < 0) return Optional.empty();
-        var data = new net.minecraft.nbt.CompoundTag();
+        var data = new CompoundTag();
         data.putInt(KEY_NETWORK_ID, networkId);
         return Optional.of(new AltarBinding(AltarBinding.BD_NETWORK,
                 Component.translatable("rsi.binding.bd_network", networkId), data));
@@ -66,7 +69,7 @@ public final class BeyondDimensionsBindingHook implements IBindingHook {
 
     private static int readNetworkId(ItemStack stack) {
         if (!stack.hasTag() || stack.getTag() == null) return -1;
-        return stack.getTag().contains("NetId", net.minecraft.nbt.Tag.TAG_INT)
+        return stack.getTag().contains("NetId", Tag.TAG_INT)
                 ? stack.getTag().getInt("NetId") : -1;
     }
 }

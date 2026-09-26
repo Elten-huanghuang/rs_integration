@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.apotheosis;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import io.netty.handler.codec.DecoderException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +44,7 @@ public final class ApothSpawnerModels {
 
     public static List<Entry> readEntries(FriendlyByteBuf buf) {
         int size = buf.readVarInt();
-        if (size < 0 || size > MAX_ENTRIES) throw new io.netty.handler.codec.DecoderException("Invalid upgrade count");
+        if (size < 0 || size > MAX_ENTRIES) throw new DecoderException("Invalid upgrade count");
         List<Entry> entries = new ArrayList<>(size);
         for (int i = 0; i < size; i++) entries.add(Entry.decode(buf));
         return entries;

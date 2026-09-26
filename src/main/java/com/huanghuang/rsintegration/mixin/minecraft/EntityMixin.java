@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import net.minecraft.world.entity.Entity;

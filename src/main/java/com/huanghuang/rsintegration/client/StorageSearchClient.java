@@ -19,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.common.MinecraftForge;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -39,7 +40,7 @@ public final class StorageSearchClient {
     public static void register() {
         if (registered) return;
         registered = true;
-        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+        MinecraftForge.EVENT_BUS.addListener(
                 EventPriority.HIGH, StorageSearchClient::onKeyPressed);
     }
 

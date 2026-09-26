@@ -6,6 +6,8 @@ import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import net.minecraft.client.renderer.Rect2i;
+import java.util.ArrayList;
+import java.util.List;
 
 /** RS-only JEI hooks. This class must only be loaded when RS is present. */
 public final class RSJeiOptionalHooks {
@@ -15,11 +17,11 @@ public final class RSJeiOptionalHooks {
         registration.addGuiContainerHandler(GridScreen.class,
                 new IGuiContainerHandler<GridScreen>() {
                     @Override
-                    public java.util.List<Rect2i> getGuiExtraAreas(GridScreen screen) {
-                        java.util.List<Rect2i> areas = new java.util.ArrayList<>();
+                    public List<Rect2i> getGuiExtraAreas(GridScreen screen) {
+                        List<Rect2i> areas = new ArrayList<>();
                         areas.addAll(MachineFavoritesClient.getJeiExtraAreas(screen));
                         areas.addAll(AutoEatClientEvents.getGuiExtraAreas(screen));
-                        return java.util.List.copyOf(areas);
+                        return List.copyOf(areas);
                     }
                 });
     }

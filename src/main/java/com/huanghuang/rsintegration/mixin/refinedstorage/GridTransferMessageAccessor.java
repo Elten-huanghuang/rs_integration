@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+import java.lang.reflect.Field;
 
 import com.refinedmods.refinedstorage.network.grid.GridTransferMessage;
 import net.minecraft.world.item.ItemStack;

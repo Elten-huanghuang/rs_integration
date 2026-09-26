@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import java.util.Arrays;
+import java.lang.reflect.Modifier;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -482,7 +486,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     private static ItemStack ingredientPrototype(IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
-        return java.util.Arrays.stream(spec.ingredient().getItems())
+        return Arrays.stream(spec.ingredient().getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
     }
@@ -679,7 +683,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             }
         }
         // Last resort: capability
-        return be.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
     }
 
@@ -691,7 +695,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                 return (boolean) isHeatedMethod.invoke(be);
             } else if (paramCount == 2) {
                 return (boolean) isHeatedMethod.invoke(
-                        java.lang.reflect.Modifier.isStatic(isHeatedMethod.getModifiers()) ? null : be,
+                        Modifier.isStatic(isHeatedMethod.getModifiers()) ? null : be,
                         myLevel, myPos);
             }
         } catch (Exception e) {
@@ -735,7 +739,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return true; // assume water present if uncheckable
     }
 
-    private void setWaterProperty(net.minecraft.world.level.block.state.BlockState state, boolean value) {
+    private void setWaterProperty(BlockState state, boolean value) {
         if (waterPropertyField != null) {
             try {
                 Object prop = waterPropertyField.get(null);

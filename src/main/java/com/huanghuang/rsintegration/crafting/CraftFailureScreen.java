@@ -9,6 +9,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
+import java.nio.file.Files;
+import java.util.stream.Stream;
+import net.minecraft.Util;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -67,9 +70,9 @@ public final class CraftFailureScreen extends Screen {
         addRenderableWidget(Button.builder(Component.translatable("rsi.diagnostic.export"), button -> exportReport())
                 .bounds(left, buttonY, buttonWidth, 20).build());
         Button openDirectory = addRenderableWidget(Button.builder(Component.translatable("rsi.diagnostic.open_directory"),
-                button -> net.minecraft.Util.getPlatform().openFile(exportDirectory.toFile()))
+                button -> Util.getPlatform().openFile(exportDirectory.toFile()))
                 .bounds(left + buttonWidth + 4, buttonY, buttonWidth, 20).build());
-        openDirectory.active = java.nio.file.Files.isDirectory(exportDirectory);
+        openDirectory.active = Files.isDirectory(exportDirectory);
         addRenderableWidget(Button.builder(Component.translatable("rsi.diagnostic.dismiss"), button -> {
             CraftProgressTracker.dismissFailure(snapshot.craftId());
             onClose();
@@ -87,7 +90,7 @@ public final class CraftFailureScreen extends Screen {
         lines.add(Component.empty());
         lines.addAll(report.subList(1, report.size()));
         wrapped = lines.stream().flatMap(line -> line.getString().isEmpty()
-                ? java.util.stream.Stream.of(FormattedCharSequence.EMPTY)
+                ? Stream.of(FormattedCharSequence.EMPTY)
                 : font.split(line, bodyWidth - 16).stream()).toList();
     }
 

@@ -20,9 +20,13 @@ import vazkii.botania.common.block.block_entity.PetalApothecaryBlockEntity;
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 public final class PetalApothecaryBatchDelegate extends AbstractBatchDelegate {
- private ServerLevel level; private BlockPos pos; private PetalApothecaryRecipe recipe; private INetwork network; private ItemStack expected=ItemStack.EMPTY; private boolean started; private long startTick; private java.util.Set<java.util.UUID> entitiesBefore=java.util.Set.of();
- @Override public boolean validateAndInit(@Nonnull ServerPlayer p,@Nonnull ResourceLocation id,ResourceLocation dim,@Nonnull BlockPos at){pos=at;machineDim=dim;machineServer=p.getServer();level=dim==null?p.serverLevel():p.getServer().getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,dim));if(level==null||!(level.getBlockEntity(pos) instanceof PetalApothecaryBlockEntity))return false;var r=level.getRecipeManager().byKey(id).orElse(null);if(!(r instanceof PetalApothecaryRecipe rr))return false;recipe=rr;expected=rr.getResultItem(level.registryAccess()).copy();if(storageEndpoint()==null)network=CraftPacketUtils.resolveNetworkForCraft(p,level.dimension(),pos);return (network!=null||hasStorageAccess())&&!expected.isEmpty();}
+ private ServerLevel level; private BlockPos pos; private PetalApothecaryRecipe recipe; private INetwork network; private ItemStack expected=ItemStack.EMPTY; private boolean started; private long startTick; private Set<UUID> entitiesBefore=Set.of();
+ @Override public boolean validateAndInit(@Nonnull ServerPlayer p,@Nonnull ResourceLocation id,ResourceLocation dim,@Nonnull BlockPos at){pos=at;machineDim=dim;machineServer=p.getServer();level=dim==null?p.serverLevel():p.getServer().getLevel(ResourceKey.create(Registries.DIMENSION,dim));if(level==null||!(level.getBlockEntity(pos) instanceof PetalApothecaryBlockEntity))return false;var r=level.getRecipeManager().byKey(id).orElse(null);if(!(r instanceof PetalApothecaryRecipe rr))return false;recipe=rr;expected=rr.getResultItem(level.registryAccess()).copy();if(storageEndpoint()==null)network=CraftPacketUtils.resolveNetworkForCraft(p,level.dimension(),pos);return (network!=null||hasStorageAccess())&&!expected.isEmpty();}
  @Override public List<IngredientSpec> getRequiredMaterials(){if(recipe==null)return null;List<IngredientSpec>s=new ArrayList<>();for(Ingredient i:recipe.getIngredients())if(!i.isEmpty())s.add(new IngredientSpec(i,1));if(!recipe.getReagent().isEmpty())s.add(new IngredientSpec(recipe.getReagent(),1));return s;}
  @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer p){List<ItemStack> m=storageEndpoint()!=null?BotaniaDelegateSupport.extractAtomically(storageEndpoint(),p,getRequiredMaterials()):BotaniaDelegateSupport.extractAtomically(network,getRequiredMaterials());return !m.isEmpty()&&start(m);}
  @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}
