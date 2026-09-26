@@ -95,10 +95,33 @@ public final class GoetySoulTotemCrafting {
         }
         try {
             Object value = recipe.getClass().getMethod("getSoulCost").invoke(recipe);
-            return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+            int perTick = value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+
+            // 黑暗祭坛每刻都会消耗一次 getSoulCost()，所以持续时间也必须计入
+            // 能量需求；只读取单次消耗会低估长时间仪式的总消耗。
+            if (hasNamedSuperclass(recipe.getClass(),
+                    "com.Polarice3.Goety.common.crafting.RitualRecipe")) {
+                try {
+                    Object durationValue = recipe.getClass().getMethod("getDuration").invoke(recipe);
+                    if (durationValue instanceof Number durationNumber) {
+                        int duration = durationNumber.intValue();
+                        if (duration > 0) return saturatingMultiply(perTick, duration);
+                    }
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                    // 兼容没有暴露持续时间访问器的旧版 Goety。
+                }
+            }
+            // BrazierRecipe 没有持续时间访问器，其 getSoulCost() 本身就是机器
+            // 会抽取的灵魂总量。
+            return perTick;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return 0;
         }
+    }
+
+    static int saturatingMultiply(int left, int right) {
+        long result = (long) Math.max(0, left) * Math.max(0, right);
+        return result > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
     }
 
     private static boolean hasNamedSuperclass(Class<?> type, String expectedName) {

@@ -201,8 +201,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.ritualIdleSinceGameTime = -1L;
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [5/9] recipe verified as RitualRecipe");
 
-        this.soulCost = Reflect.<Integer>invoke(ritualRecipe, GoetyReflection.M_GET_SOUL_COST).orElse(0);
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [6/9] soulCost={}", soulCost);
+        this.soulCost = GoetySoulTotemCrafting.ritualSoulCost(ritualRecipe);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [6/9] totalSoulCost={}", soulCost);
         // Machine selection probes every bound altar before reserving materials.
         // Reject an altar whose own cage cannot fund the ritual here, otherwise
         // the graph can choose it and discover the shortage only after commit.
