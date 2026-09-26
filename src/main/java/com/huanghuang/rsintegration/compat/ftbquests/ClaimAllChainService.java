@@ -84,6 +84,7 @@ public final class ClaimAllChainService {
                 try (FtbQuestRewardDropContext.Scope ignored = FtbQuestRewardDropContext.activate()) {
                     data.claimReward(player, reward, true);
                 }
+                StorageQuestScanService.schedulePlayerItemScan(player);
                 claimed[0]++;
             }
         }));

@@ -294,7 +294,8 @@ public final class StorageQuestScanService {
         List<QuestScanItems.Entry> items = QuestScanItems.fromPlayer(player, curios);
         file.withPlayerContext(player, () -> {
             for (Task task : file.getSubmitTasks()) {
-                if (!(task instanceof ItemTask itemTask) || !isAvailable(data, itemTask)) continue;
+                if (!(task instanceof ItemTask itemTask)
+                        || !isAvailableAfterRewardClaim(data, itemTask)) continue;
                 long available = countMatching(items, itemTask);
                 long current = data.getProgress(itemTask);
                 long target = Math.min(itemTask.getMaxProgress(), available);
@@ -406,6 +407,14 @@ public final class StorageQuestScanService {
         return isStructurallyEligible(task)
                 && !data.isCompleted(task)
                 && task.getQuest().isVisible(data)
+                && data.canStartTasks(task.getQuest())
+                && ((ItemTaskSequenceAccessor) (Object) task).rsi$checkTaskSequence(data);
+    }
+
+    /** 奖励领取后的实物检测不要求任务线当前可见，但仍遵守任务前置条件。 */
+    private static boolean isAvailableAfterRewardClaim(TeamData data, ItemTask task) {
+        return isStructurallyEligible(task)
+                && !data.isCompleted(task)
                 && data.canStartTasks(task.getQuest())
                 && ((ItemTaskSequenceAccessor) (Object) task).rsi$checkTaskSequence(data);
     }
