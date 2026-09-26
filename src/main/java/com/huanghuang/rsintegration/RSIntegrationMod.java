@@ -54,6 +54,7 @@ import com.huanghuang.rsintegration.client.StorageClientBootstrap;
 import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmService;
 import com.huanghuang.rsintegration.compat.ftbquests.ClaimAllChainService;
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestCuriosScanEvents;
 import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
@@ -336,6 +337,9 @@ public final class RSIntegrationMod {
                     ClaimAllChainService.class);
             MinecraftForge.EVENT_BUS.register(
                     StorageQuestScanService.class);
+            if (ModList.get().isLoaded(ModIds.CURIOS)) {
+                MinecraftForge.EVENT_BUS.register(FtbQuestCuriosScanEvents.class);
+            }
         }
     }
 

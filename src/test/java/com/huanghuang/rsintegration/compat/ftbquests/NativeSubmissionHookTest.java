@@ -45,6 +45,10 @@ class NativeSubmissionHookTest {
             "rsintegration", "compat", "ftbquests", "QuestSubmissionEscrow.java");
     private static final Path CHECKMARK_SERVICE = Path.of("src", "main", "java", "com", "huanghuang",
             "rsintegration", "compat", "ftbquests", "CheckmarkConfirmService.java");
+    private static final Path REWARD_MIXIN = Path.of("src", "main", "java", "com", "huanghuang",
+            "rsintegration", "mixin", "ftbquests", "ItemRewardMixin.java");
+    private static final Path CURIOS_EVENTS = Path.of("src", "main", "java", "com", "huanghuang",
+            "rsintegration", "compat", "ftbquests", "FtbQuestCuriosScanEvents.java");
 
     @Test
     void rsFallbackIsScopedToExplicitSubmitPackets() throws IOException {
@@ -110,6 +114,21 @@ class NativeSubmissionHookTest {
         String service = Files.readString(CHECKMARK_SERVICE, StandardCharsets.UTF_8);
         assertTrue(service.contains("quest.getChapter().isVisible(data)"),
                 "hidden chapters must not be completed by bulk checkmark confirmation");
+    }
+
+    @Test
+    void rewardAndCuriosChangesSchedulePlayerItemRescan() throws IOException {
+        String rewardMixin = Files.readString(REWARD_MIXIN, StandardCharsets.UTF_8);
+        String curiosEvents = Files.readString(CURIOS_EVENTS, StandardCharsets.UTF_8);
+        String scanService = Files.readString(Path.of("src", "main", "java", "com", "huanghuang",
+                "rsintegration", "compat", "ftbquests", "StorageQuestScanService.java"),
+                StandardCharsets.UTF_8);
+
+        assertTrue(rewardMixin.contains("StorageQuestScanService.schedulePlayerItemScan(player)"));
+        assertTrue(curiosEvents.contains("getMethod(\"getTo\")"));
+        assertTrue(curiosEvents.contains("StorageQuestScanService.schedulePlayerItemScan(player)"));
+        assertTrue(scanService.contains("QuestScanItems.fromPlayer(player, curios)"));
+        assertTrue(scanService.contains("PENDING_PLAYER_ITEM_SCANS"));
     }
 
     @Test

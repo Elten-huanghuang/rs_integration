@@ -41,12 +41,17 @@ public final class StorageQuestScanService {
     private static final long AUTOMATIC_SCAN_RETRY_TICKS = 20L;
     private static final long AUTOMATIC_SCAN_TIMEOUT_TICKS = 200L;
     private static final int AUTOMATIC_SCANS_PER_TICK = 2;
+    private static final long PLAYER_ITEM_SCAN_DELAY_TICKS = 2L;
+    private static final long PLAYER_ITEM_SCAN_TIMEOUT_TICKS = 100L;
+    private static final int PLAYER_ITEM_SCANS_PER_TICK = 8;
     private static final Map<UUID, Long> LAST_TEAM_REQUEST = new HashMap<>();
     private static final Map<UUID, ScanJob> ACTIVE_JOBS = new HashMap<>();
     // Quest completion callbacks can enqueue a follow-up while the server tick
     // dispatcher is still draining this table. A plain HashMap can fail inside
     // compute() when those callbacks interleave with dispatch.
     private static final Map<UUID, PendingAutomaticScan> PENDING_AUTOMATIC_SCANS =
+            new ConcurrentHashMap<>();
+    private static final Map<UUID, PendingPlayerItemScan> PENDING_PLAYER_ITEM_SCANS =
             new ConcurrentHashMap<>();
 
     private StorageQuestScanService() {
@@ -129,6 +134,27 @@ public final class StorageQuestScanService {
         }
     }
 
+    /**
+     * 在奖励物品或 Curios 槽位变更后，重新检查玩家当前实际持有的物品。
+     *
+     * <p>FTB Quests 原生监听只观察玩家背包，Curios 的强制替换不会触发它；
+     * 延迟几个 tick 可以等命令奖励和 Curios 替换都完成后再取快照。</p>
+     */
+    public static void schedulePlayerItemScan(ServerPlayer player) {
+        if (!ExternalItemProgressBridge.isEnabled() || player == null) return;
+        long now = player.server.getTickCount();
+        PENDING_PLAYER_ITEM_SCANS.compute(player.getUUID(), (playerId, pending) -> {
+            if (pending == null) {
+                return new PendingPlayerItemScan(now + PLAYER_ITEM_SCAN_DELAY_TICKS,
+                        now + PLAYER_ITEM_SCAN_TIMEOUT_TICKS);
+            }
+            pending.dueTick = Math.min(pending.dueTick, now + PLAYER_ITEM_SCAN_DELAY_TICKS);
+            pending.deadlineTick = Math.max(pending.deadlineTick,
+                    now + PLAYER_ITEM_SCAN_TIMEOUT_TICKS);
+            return pending;
+        });
+    }
+
     private static ScanRequest beginRequest(ServerPlayer player) {
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
@@ -180,6 +206,7 @@ public final class StorageQuestScanService {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         MinecraftServer server = event.getServer();
+        dispatchPlayerItemScans(server);
         dispatchAutomaticScans(server);
         if (ACTIVE_JOBS.isEmpty()) return;
         int remainingServerBudget = TASKS_PER_SERVER_PER_TICK;
@@ -222,6 +249,58 @@ public final class StorageQuestScanService {
         ACTIVE_JOBS.clear();
         LAST_TEAM_REQUEST.clear();
         PENDING_AUTOMATIC_SCANS.clear();
+        PENDING_PLAYER_ITEM_SCANS.clear();
+    }
+
+    private static void dispatchPlayerItemScans(MinecraftServer server) {
+        if (!ExternalItemProgressBridge.isEnabled()) {
+            PENDING_PLAYER_ITEM_SCANS.clear();
+            return;
+        }
+        long now = server.getTickCount();
+        int started = 0;
+        Iterator<Map.Entry<UUID, PendingPlayerItemScan>> iterator =
+                PENDING_PLAYER_ITEM_SCANS.entrySet().iterator();
+        while (iterator.hasNext() && started < PLAYER_ITEM_SCANS_PER_TICK) {
+            Map.Entry<UUID, PendingPlayerItemScan> entry = iterator.next();
+            PendingPlayerItemScan pending = entry.getValue();
+            if (now > pending.deadlineTick) {
+                iterator.remove();
+                continue;
+            }
+            if (pending.dueTick > now) continue;
+
+            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+            if (player == null) {
+                iterator.remove();
+                continue;
+            }
+            ServerQuestFile file = ServerQuestFile.INSTANCE;
+            TeamData data = TeamData.get(player);
+            if (file == null || file.isLoading() || data == null || data.isLocked()) {
+                pending.retryAt(now);
+                continue;
+            }
+
+            iterator.remove();
+            scanPlayerItems(player, file, data);
+            started++;
+        }
+    }
+
+    private static void scanPlayerItems(ServerPlayer player, ServerQuestFile file, TeamData data) {
+        List<ItemStack> curios = CuriosAccess.isPresent()
+                ? CuriosAccess.stacks(player) : List.of();
+        List<QuestScanItems.Entry> items = QuestScanItems.fromPlayer(player, curios);
+        file.withPlayerContext(player, () -> {
+            for (Task task : file.getSubmitTasks()) {
+                if (!(task instanceof ItemTask itemTask) || !isAvailable(data, itemTask)) continue;
+                long available = countMatching(items, itemTask);
+                long current = data.getProgress(itemTask);
+                long target = Math.min(itemTask.getMaxProgress(), available);
+                if (target > current) data.setProgress(itemTask, target);
+            }
+        });
     }
 
     private static void dispatchAutomaticScans(MinecraftServer server) {
@@ -429,6 +508,20 @@ public final class StorageQuestScanService {
             this.dueTick = dueTick;
             this.deadlineTick = deadlineTick;
             this.taskIds = new LinkedHashSet<>(taskIds);
+        }
+
+        private void retryAt(long now) {
+            dueTick = Math.min(deadlineTick, now + AUTOMATIC_SCAN_RETRY_TICKS);
+        }
+    }
+
+    private static final class PendingPlayerItemScan {
+        private long dueTick;
+        private long deadlineTick;
+
+        private PendingPlayerItemScan(long dueTick, long deadlineTick) {
+            this.dueTick = dueTick;
+            this.deadlineTick = deadlineTick;
         }
 
         private void retryAt(long now) {
