@@ -50,6 +50,7 @@ public final class ModIds {
     public static final String ISS_CSW = "iss_csw";
     public static final String PMMO = "pmmo";
     public static final String WISHING_FOUNTAIN = "wishing_fountain";
+    public static final String SRFIX = "srfix";
     public static final String TETRA = "tetra";
     public static final String HISTORY_STAGES = "historystages";
 
@@ -66,6 +67,7 @@ public final class ModIds {
     public static final String ID_MD_COPPER_POT = "miners_delight_copper_pot";
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
     public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
+    public static final String ID_SUMMONING_RITUALS = "summoning_rituals";
 
     // Ars Nouveau (one mod -> three automatable machine types)
     public static final String ID_ARS_IMBUEMENT = "ars_nouveau_imbuement";

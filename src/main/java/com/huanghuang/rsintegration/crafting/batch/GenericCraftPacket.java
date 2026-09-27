@@ -84,6 +84,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
+import com.huanghuang.rsintegration.mods.summoningrituals.SummoningRitualAltarBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
@@ -2476,6 +2477,19 @@ public final class GenericCraftPacket {
                                     && machine.pos().getY() == ready.y()
                                     && machine.pos().getZ() == ready.z() ? 0 : 1));
                 }
+            } else if (ModIds.ID_SUMMONING_RITUALS.equals(modType.id())) {
+                List<MachineCandidateView> candidates =
+                        SummoningRitualAltarBatchDelegate.getPlanMachineCandidates(player, recipe);
+                MachineCandidateView ready = candidates.stream()
+                        .filter(candidate -> candidate.state() == MachineCandidateView.State.READY)
+                        .findFirst().orElse(null);
+                if (ready != null) {
+                    boundMachines.sort(Comparator.comparingInt(machine ->
+                            machine.dim().toString().equals(ready.dimension())
+                                    && machine.pos().getX() == ready.x()
+                                    && machine.pos().getY() == ready.y()
+                                    && machine.pos().getZ() == ready.z() ? 0 : 1));
+                }
             }
             for (var m : boundMachines) {
                 if (reqKeyword != null && m.blockKey() != null && !m.blockKey().contains(reqKeyword))
@@ -2588,6 +2602,10 @@ public final class GenericCraftPacket {
                 ModRecipeHandler graphHandler = ModRecipeHandlers.handlerFor(recipe);
                 if (graphHandler != null) {
                     graphSpecs = graphHandler.getRecursiveIngredients(recipe, graphSpecs);
+                }
+                if (ModIds.ID_SUMMONING_RITUALS.equals(modType.id())) {
+                    graphSpecs = SummoningRitualAltarBatchDelegate.planningMaterials(
+                            player, recipe, effectiveDim, effectivePos, graphSpecs);
                 }
                 Map<StackKey, Integer> avail = listAvailable(player, network, storageEndpoint);
                 logExecutionAvailability(recipeId, avail);
@@ -3955,6 +3973,7 @@ public final class GenericCraftPacket {
                     && !ModIds.ID_YHK_KETTLE.equals(recipeModType.id())
                     && !ModIds.ID_YHK_FERMENT.equals(recipeModType.id())
                     && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())
+                    && !ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
                     && !manualGoetyRitual) {
                 sink.error(Component.translatable(
                         "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
@@ -5405,10 +5424,12 @@ public final class GenericCraftPacket {
             }
         }
 
-        List<MachineCandidateView> machineCandidates = recipeModType != null
-                && ModIds.GOETY.equals(recipeModType.id())
-                ? GoetyBatchDelegate
-                .getPlanMachineCandidates(player, recipe)
+        List<MachineCandidateView> machineCandidates = recipeModType == null
+                ? List.of()
+                : ModIds.GOETY.equals(recipeModType.id())
+                ? GoetyBatchDelegate.getPlanMachineCandidates(player, recipe)
+                : ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
+                ? SummoningRitualAltarBatchDelegate.getPlanMachineCandidates(player, recipe)
                 : List.of();
         if (!machineCandidates.isEmpty()
                 && machineCandidates.stream().noneMatch(candidate ->

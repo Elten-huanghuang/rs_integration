@@ -267,6 +267,17 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Optional exact material requirements for one prepared flat batch.
+     * Returning a list means its counts already cover {@code executions}; the
+     * chain must not scale them a second time. Returning null preserves the
+     * legacy per-operation material contract.
+     */
+    @Nullable
+    default List<IngredientSpec> getFlatBatchRequiredMaterials(int executions) {
+        return null;
+    }
+
+    /**
      * Stable material declaration for new planning and start paths. Legacy
      * delegates are projected as graph-owned ordered entries until they opt in
      * with explicit allocation and physical slot identities.

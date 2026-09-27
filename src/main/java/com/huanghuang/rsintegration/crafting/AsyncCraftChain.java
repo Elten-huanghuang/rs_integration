@@ -3270,7 +3270,10 @@ public final class AsyncCraftChain {
                 return null;
             }
             machineCount = flatBatch;
-            List<IngredientSpec> specs = startedDelegate.getRequiredMaterials();
+            List<IngredientSpec> flatBatchSpecs =
+                    startedDelegate.getFlatBatchRequiredMaterials(flatBatch);
+            List<IngredientSpec> specs = flatBatchSpecs != null
+                    ? flatBatchSpecs : startedDelegate.getRequiredMaterials();
             if (specs != null && !specs.isEmpty()) {
                 if (startedDelegate instanceof AbstractBatchDelegate abstractDelegate) {
                     abstractDelegate.setStorageEndpoint(storageEndpoint);
@@ -3278,10 +3281,17 @@ public final class AsyncCraftChain {
                 startedDelegate.configureMaterialReservation(ledger, online);
                 FlatMaterialBatch reservation = reserveFlatMaterialBatch(flatBatch,
                         startedDelegate::prepareFlatBatch,
-                        executions -> preReserveStepMaterials(scaleGraphSpecsForExecutions(
-                                startedDelegate.getRequiredMaterials(),
-                                startedDelegate.getMaterialReservationScopes(), executions),
-                                online, null, executions == 1));
+                        executions -> {
+                            List<IngredientSpec> exactBatchSpecs =
+                                    startedDelegate.getFlatBatchRequiredMaterials(executions);
+                            List<IngredientSpec> reservationSpecs = exactBatchSpecs != null
+                                    ? exactBatchSpecs
+                                    : scaleGraphSpecsForExecutions(
+                                            startedDelegate.getRequiredMaterials(),
+                                            startedDelegate.getMaterialReservationScopes(), executions);
+                            return preReserveStepMaterials(reservationSpecs, online, null,
+                                    executions == 1);
+                        });
                 List<ItemStack> materials = reservation.materials();
                 if (materials == null) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
