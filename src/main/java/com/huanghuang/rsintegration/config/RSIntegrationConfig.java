@@ -199,6 +199,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
     public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
     public static ForgeConfigSpec.BooleanValue ENABLE_WISHING_FOUNTAIN;
+    public static ForgeConfigSpec.BooleanValue ENABLE_SRFIX;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> FTB_QUEST_CHECKMARK_BLACKLIST;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> LYCHEE_RECIPE_ALLOWLIST;
     public static ForgeConfigSpec.BooleanValue ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS;
@@ -429,6 +430,10 @@ public final class RSIntegrationConfig {
         ENABLE_TOUHOU_LITTLE_MAID = c
                 .comment("Enable RS integration with Touhou Little Maid (Maid Altar remote crafting).")
                 .define("enableTouhouLittleMaid", true);
+        ENABLE_SRFIX = c
+                .comment("Enable Better Summoning Rituals altar preparation through remote storage.",
+                        "RSI only prepares and recovers altar items; it does not start rituals or collect world drops.")
+                .define("enableBetterSummoningRituals", true);
         ENABLE_SLASHBLADE = c
                 .comment("Enable RS integration with SlashBlade (crafting table recipes with NBT requirements).")
                 .define("enableSlashblade", true);

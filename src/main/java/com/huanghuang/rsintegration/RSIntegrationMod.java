@@ -31,6 +31,7 @@ import com.huanghuang.rsintegration.mods.lychee.LycheeRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.botania.BotaniaRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
+import com.huanghuang.rsintegration.mods.summoningrituals.SummoningRitualsRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmRSModule;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WizardsRebornRSModule;
@@ -213,6 +214,8 @@ public final class RSIntegrationMod {
                     () -> WizardsRebornRSModule.INSTANCE),
             new ModuleEntry(ModIds.TOUHOU_LITTLE_MAID, RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID,
                     () -> TlmRSModule.INSTANCE),
+            new ModuleEntry(ModIds.SRFIX, RSIntegrationConfig.ENABLE_SRFIX,
+                    () -> SummoningRitualsRSModule.INSTANCE),
             new ModuleEntry(ModIds.EMBERS, RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY,
                     () -> EreAlchemyRSModule.INSTANCE),
             new ModuleEntry(ModIds.AETHERWORKS, RSIntegrationConfig.ENABLE_AETHERWORKS,

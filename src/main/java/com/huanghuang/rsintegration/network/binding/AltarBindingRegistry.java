@@ -918,6 +918,10 @@ public final class AltarBindingRegistry {
         if ("malum_runic_workbench".equals(type.id())) {
             return null;
         }
+        // Better Summoning Rituals 只有一种可绑定祭坛；配方路径只是内容分组。
+        if (ModIds.ID_SUMMONING_RITUALS.equals(type.id())) {
+            return null;
+        }
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".
         if (ModType.byId(ModIds.ID_AETHERWORKS_ANVIL) == type && "aetherium_anvil".equals(hint)) {
