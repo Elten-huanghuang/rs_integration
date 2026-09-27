@@ -22,9 +22,8 @@ public final class ClibanoInventoryLogic {
 
     public static int chooseInputSlot(ItemStack first, ItemStack second,
                                       int firstProgress, int secondProgress) {
-        if (firstProgress > 0 || secondProgress > 0) return -1;
-        if (first == null || first.isEmpty()) return FIRST_INPUT_SLOT;
-        if (second == null || second.isEmpty()) return SECOND_INPUT_SLOT;
+        if (firstProgress <= 0 && (first == null || first.isEmpty())) return FIRST_INPUT_SLOT;
+        if (secondProgress <= 0 && (second == null || second.isEmpty())) return SECOND_INPUT_SLOT;
         return -1;
     }
 

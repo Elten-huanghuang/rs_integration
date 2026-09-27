@@ -15,7 +15,9 @@ class ClibanoInventoryLogicTest extends BootstrapTest {
     void choosesOnlyIdleInputLane() {
         assertEquals(3, ClibanoInventoryLogic.chooseInputSlot(ItemStack.EMPTY, ItemStack.EMPTY, 0, 0));
         assertEquals(4, ClibanoInventoryLogic.chooseInputSlot(new ItemStack(Items.STONE), ItemStack.EMPTY, 0, 0));
-        assertEquals(-1, ClibanoInventoryLogic.chooseInputSlot(ItemStack.EMPTY, ItemStack.EMPTY, 1, 0));
+        assertEquals(4, ClibanoInventoryLogic.chooseInputSlot(ItemStack.EMPTY, ItemStack.EMPTY, 1, 0));
+        assertEquals(3, ClibanoInventoryLogic.chooseInputSlot(ItemStack.EMPTY, ItemStack.EMPTY, 0, 1));
+        assertEquals(-1, ClibanoInventoryLogic.chooseInputSlot(ItemStack.EMPTY, ItemStack.EMPTY, 1, 1));
         assertEquals(-1, ClibanoInventoryLogic.chooseInputSlot(
                 new ItemStack(Items.STONE), new ItemStack(Items.DIRT), 0, 0));
     }
