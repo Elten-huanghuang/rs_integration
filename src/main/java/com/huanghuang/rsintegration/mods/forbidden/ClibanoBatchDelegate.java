@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.forbidden;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -15,7 +16,6 @@ import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccess
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoFireType;
@@ -74,7 +74,10 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                                    @Nullable ResourceLocation dim, @Nonnull BlockPos pos) {
+        // 异步链会在准备机器前选定 RS/BD 后端，重置本地状态时不能丢掉它。
+        CraftStorageEndpoint selectedStorage = storageEndpoint();
         resetState();
+        setStorageEndpoint(selectedStorage);
         resetOperationState();
         ServerLevel resolved = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (resolved == null) return false;
@@ -484,7 +487,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 safeRestoreOutput(inventory, slot, extracted);
                 return false;
             }
-            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, extracted);
+            ItemStack remainder = insertIntoStorage(player, extracted, false);
             if (!remainder.isEmpty()) {
                 safeRestoreOutput(inventory, slot, remainder);
                 return false;
@@ -693,9 +696,6 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         ItemStack remainder = stack.copy();
         if (storageEndpoint() != null) {
             remainder = insertIntoStorage(player, remainder, false);
-            if (remainder.isEmpty()) return;
-        } else if (network != null) {
-            remainder = TrackedNetworkInsertion.insert(network, player, remainder);
             if (remainder.isEmpty()) return;
         }
         if (player != null && !player.hasDisconnected()) {
