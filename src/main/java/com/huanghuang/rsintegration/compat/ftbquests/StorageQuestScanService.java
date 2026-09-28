@@ -41,11 +41,14 @@ public final class StorageQuestScanService {
     private static final long AUTOMATIC_SCAN_DELAY_TICKS = 2L;
     private static final long AUTOMATIC_SCAN_RETRY_TICKS = 20L;
     private static final long AUTOMATIC_SCAN_TIMEOUT_TICKS = 200L;
+    /** 连续解锁任务时，避免每个任务都重新读取一次完整存储网络。 */
+    private static final long AUTOMATIC_SCAN_MIN_INTERVAL_TICKS = 20L;
     private static final int AUTOMATIC_SCANS_PER_TICK = 2;
     private static final long PLAYER_ITEM_SCAN_DELAY_TICKS = 2L;
     private static final long PLAYER_ITEM_SCAN_TIMEOUT_TICKS = 100L;
     private static final int PLAYER_ITEM_SCANS_PER_TICK = 8;
     private static final Map<UUID, Long> LAST_TEAM_REQUEST = new HashMap<>();
+    private static final Map<UUID, Long> LAST_AUTOMATIC_SCAN = new HashMap<>();
     private static final Map<UUID, ScanJob> ACTIVE_JOBS = new HashMap<>();
     // Quest completion callbacks can enqueue a follow-up while the server tick
     // dispatcher is still draining this table. A plain HashMap can fail inside
@@ -208,6 +211,16 @@ public final class StorageQuestScanService {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         MinecraftServer server = event.getServer();
+        long now = server.getTickCount();
+        LAST_AUTOMATIC_SCAN.entrySet().removeIf(entry -> now < entry.getValue()
+                || now - entry.getValue() > 1_200L);
+        if (!ExternalItemProgressBridge.isEnabled()) {
+            PENDING_AUTOMATIC_SCANS.clear();
+            PENDING_PLAYER_ITEM_SCANS.clear();
+            LAST_AUTOMATIC_SCAN.clear();
+        }
+        if (ACTIVE_JOBS.isEmpty() && PENDING_AUTOMATIC_SCANS.isEmpty()
+                && PENDING_PLAYER_ITEM_SCANS.isEmpty()) return;
         dispatchPlayerItemScans(server);
         dispatchAutomaticScans(server);
         if (ACTIVE_JOBS.isEmpty()) return;
@@ -250,6 +263,7 @@ public final class StorageQuestScanService {
     public static void onServerStopped(ServerStoppedEvent event) {
         ACTIVE_JOBS.clear();
         LAST_TEAM_REQUEST.clear();
+        LAST_AUTOMATIC_SCAN.clear();
         PENDING_AUTOMATIC_SCANS.clear();
         PENDING_PLAYER_ITEM_SCANS.clear();
     }
@@ -324,6 +338,15 @@ public final class StorageQuestScanService {
             }
             if (pending.dueTick > now) continue;
 
+            Long lastScan = LAST_AUTOMATIC_SCAN.get(entry.getKey());
+            if (lastScan != null) {
+                long nextAllowed = lastScan + AUTOMATIC_SCAN_MIN_INTERVAL_TICKS;
+                if (now < nextAllowed) {
+                    pending.deferUntil(nextAllowed);
+                    continue;
+                }
+            }
+
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null) {
                 iterator.remove();
@@ -341,6 +364,7 @@ public final class StorageQuestScanService {
             }
 
             iterator.remove();
+            LAST_AUTOMATIC_SCAN.put(entry.getKey(), now);
             startAutomaticScan(player, new ScanRequest(file, data.getTeamId()), pending.taskIds);
             started++;
         }
@@ -523,6 +547,10 @@ public final class StorageQuestScanService {
 
         private void retryAt(long now) {
             dueTick = Math.min(deadlineTick, now + AUTOMATIC_SCAN_RETRY_TICKS);
+        }
+
+        private void deferUntil(long tick) {
+            dueTick = Math.min(deadlineTick, Math.max(dueTick, tick));
         }
     }
 
