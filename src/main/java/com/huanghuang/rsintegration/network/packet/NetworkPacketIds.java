@@ -127,4 +127,10 @@ public final class NetworkPacketIds {
     public static final int JEI_NETWORK_INVENTORY = 141;
     public static final int JEI_NETWORK_INVENTORY_RESYNC = 142;
     public static final int JEI_STORAGE_PULL = 143;
+    public static final int SMITHING_MODE = 144;
+    public static final int SMITHING_JEI_TRANSFER = 145;
+    public static final int CRAFTING_STATION_MODE = 146;
+    public static final int STONECUTTER_RECIPE_SELECT = 147;
+    public static final int CRAFTING_STATION_JEI_TRANSFER = 148;
+    public static final int ANVIL_NAME = 149;
 }

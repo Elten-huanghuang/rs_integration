@@ -182,6 +182,10 @@ public final class RSJeiPlugin implements IModPlugin {
         if (RSIntegrationConfig.ENABLE_GOETY.get() && ModList.get().isLoaded(ModIds.GOETY)) {
             GoetyRSModule.INSTANCE.registerRecipeTransferHandlers(registration);
         }
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            registration.addUniversalRecipeTransferHandler(
+                    new SmithingJeiTransferHandler(registration.getTransferHelper()));
+        }
         if (RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get()
                 && ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             registration.addUniversalRecipeTransferHandler(

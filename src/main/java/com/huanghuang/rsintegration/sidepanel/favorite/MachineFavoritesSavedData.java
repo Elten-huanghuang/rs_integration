@@ -18,7 +18,7 @@ import java.util.UUID;
 
 public final class MachineFavoritesSavedData extends SavedData {
     static final String NAME = "rsi_machine_favorites";
-    public static final int MAX_FAVORITES = 8;
+    public static final int MAX_FAVORITES = 64;
 
     private final Map<UUID, List<MachineFavoriteKey>> byPlayer = new LinkedHashMap<>();
 

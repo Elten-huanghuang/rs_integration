@@ -248,6 +248,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue DEPOSIT_UPGRADE_RS;
     public static ForgeConfigSpec.BooleanValue ENABLE_MAJ_ACCESSORY_COMPRESSION;
     public static ForgeConfigSpec.BooleanValue ENABLE_MACHINE_GUI_TABS;
+    public static ForgeConfigSpec.BooleanValue REQUIRE_MACHINE_BINDING_FOR_GUI;
+    public static ForgeConfigSpec.BooleanValue REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION;
     //  auto-eat
     public static ForgeConfigSpec.BooleanValue ENABLE_AUTO_EAT;
     public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_REQUIRED_EFFECT;
@@ -738,9 +740,20 @@ public final class RSIntegrationConfig {
 
         c.push("remoteMachineGui");
         ENABLE_MACHINE_GUI_TABS = c
-                .comment("Enable remote machine shortcut tabs on RS GridScreen.",
-                        "When disabled, players cannot open remote machine GUIs from terminals.")
+                .comment("Enable RSI virtual machine interfaces in the Machine Center and RS terminals.",
+                        "When disabled, no virtual machine interface is shown and remote machine GUI requests are rejected.",
+                        "This is the virtual-interface switch; it is independent from whether a machine must be bound.")
                 .define("enableMachineGuiTabs", true);
+        REQUIRE_MACHINE_BINDING_FOR_GUI = c
+                .comment("Require the target machine itself to be bound before opening its GUI remotely.",
+                        "When enabled, remote GUI requests for unbound machines are rejected.",
+                        "When disabled, a valid machine position may be opened without an RSI binding.")
+                .define("requireMachineBindingForGui", true);
+        REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = c
+                .comment("Require a bound real machine before using its matching virtual RS station interface.",
+                        "Applies to the virtual stonecutter, smithing table, and anvil modes in RS terminals.",
+                        "The native 3x3 crafting mode is not affected.")
+                .define("requireBoundMachineForVirtualStation", false);
         CUSTOM_GUI_MACHINE_MODS = c
                 .comment("Mod IDs to register as GUI-type machines without writing any Java code.",
                         "Machines from these mods appear in the Machine Hub, can be remotely opened,",

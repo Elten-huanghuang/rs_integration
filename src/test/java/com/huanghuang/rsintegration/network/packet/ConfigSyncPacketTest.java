@@ -31,7 +31,7 @@ class ConfigSyncPacketTest {
     }
 
     private static ConfigSyncPacket packetWithRepeatLimit(int repeatLimit) {
-        return new ConfigSyncPacket(true, 5, true, true, true, true, true, true, true,
+        return new ConfigSyncPacket(true, false, 5, true, true, true, true, true, true, true,
                 true, true, false, true, true, 8, repeatLimit);
     }
 }

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.machine;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
@@ -44,9 +45,11 @@ public final class BeyondDimensionsOpenBoundMachineGuiPacket {
     }
 
     private static void open(ServerPlayer player, BeyondDimensionsOpenBoundMachineGuiPacket packet) {
+        if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) return;
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION,
                 packet.dim);
-        if (!AltarBindingRegistry.isBound(dimension, packet.pos, player)) return;
+        if (RSIntegrationConfig.REQUIRE_MACHINE_BINDING_FOR_GUI.get()
+                && !AltarBindingRegistry.isBound(dimension, packet.pos, player)) return;
         var level = player.getServer().getLevel(dimension);
         if (level == null || !level.hasChunkAt(packet.pos)
                 || !ProtectionChecker.canInteract(player, level, packet.pos)) return;

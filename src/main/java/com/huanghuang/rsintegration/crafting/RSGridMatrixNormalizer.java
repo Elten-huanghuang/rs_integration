@@ -9,7 +9,6 @@ import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 
@@ -25,10 +24,6 @@ public final class RSGridMatrixNormalizer {
      * @return true when the matrix is empty or was returned in full
      */
     public static boolean returnToNetwork(ServerPlayer player, @Nullable INetwork network) {
-        // Vanilla RS keeps the matrix/result lifecycle compatible with RSI's
-        // existing execution path. This bridge is only needed for the custom
-        // transfer and menu behavior supplied by RS Crafting Stations.
-        if (!ModList.get().isLoaded("rs_crafting_stations")) return true;
         if (player == null || !(player.containerMenu instanceof GridContainerMenu gridMenu)) {
             return true;
         }

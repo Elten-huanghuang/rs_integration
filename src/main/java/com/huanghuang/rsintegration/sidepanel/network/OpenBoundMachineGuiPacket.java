@@ -135,22 +135,26 @@ public final class OpenBoundMachineGuiPacket {
 
             if (GuiOpenRateLimiter.isRateLimited(player.getUUID())) return;
 
-            ResourceKey<Level> dimKey = ResourceKey.create(
-                Registries.DIMENSION, packet.dim);
-
-            if (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)) {
-                player.sendSystemMessage(
-                    Component.translatable("rsi.error.not_bound"));
+            // 这是 RSI 的虚拟机器界面总开关。即使客户端仍持有旧的快捷按钮，
+            // 服务端也必须拒绝绕过开关直接发来的打开请求。
+            if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
+                player.sendSystemMessage(Component.translatable("rsi.generic.machine_gui_failed"));
                 return;
             }
 
+            ResourceKey<Level> dimKey = ResourceKey.create(
+                Registries.DIMENSION, packet.dim);
+
             var bindingEntry = AltarBindingRegistry.findBindingEntry(player, packet.dim, packet.pos);
-            if (bindingEntry == null) {
+            if (RSIntegrationConfig.REQUIRE_MACHINE_BINDING_FOR_GUI.get()
+                    && (!AltarBindingRegistry.isBound(dimKey, packet.pos, player)
+                    || bindingEntry == null)) {
                 player.sendSystemMessage(Component.translatable("rsi.error.not_bound"));
                 return;
             }
 
-            ResourceLocation requestedBlock = bindingEntry.blockRegKey() != null
+            ResourceLocation requestedBlock = bindingEntry == null ? null
+                    : bindingEntry.blockRegKey() != null
                     ? ResourceLocation.tryParse(bindingEntry.blockRegKey())
                     : blockIdFromBindingKey(bindingEntry.blockKey());
             if (requestedBlock != null
@@ -194,7 +198,8 @@ public final class OpenBoundMachineGuiPacket {
             if (level != null) {
                 ResourceLocation currentBlock = ForgeRegistries.BLOCKS.getKey(
                         level.getBlockState(packet.pos).getBlock());
-                if (ApotheosisLibraryBinding.isLibrary(bindingEntry.blockRegKey())
+                if (bindingEntry != null
+                        && ApotheosisLibraryBinding.isLibrary(bindingEntry.blockRegKey())
                         && !ApotheosisLibraryBinding.matchesSavedBlock(
                                 bindingEntry.blockRegKey(), currentBlock)) {
                     player.sendSystemMessage(Component.translatable(
@@ -661,6 +666,10 @@ public final class OpenBoundMachineGuiPacket {
      *  If baseItem is provided (from JEI), it is used for slot 1. */
     public static void openSmithingForFaModifier(ServerPlayer player, ResourceLocation recipeId,
                                                   @Nullable ItemStack baseItem) {
+        if (!RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.machine_gui_failed"));
+            return;
+        }
         ModType smithing = ModType.byId("smithing");
 
         List<AltarBindingRegistry.BoundMachine> machines =

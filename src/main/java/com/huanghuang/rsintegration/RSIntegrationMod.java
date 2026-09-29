@@ -61,6 +61,12 @@ import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.craftingstation.SmithingModePacket;
+import com.huanghuang.rsintegration.craftingstation.SmithingJeiTransferPacket;
+import com.huanghuang.rsintegration.craftingstation.CraftingStationModePacket;
+import com.huanghuang.rsintegration.craftingstation.StonecutterRecipeSelectPacket;
+import com.huanghuang.rsintegration.craftingstation.CraftingStationJeiTransferPacket;
+import com.huanghuang.rsintegration.craftingstation.AnvilNamePacket;
 import com.huanghuang.rsintegration.enchanting.EnchantingRestockNetworkHandler;
 import com.huanghuang.rsintegration.enchanting.client.EnchantingRestockClient;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineNetworkHandler;
@@ -690,6 +696,14 @@ public final class RSIntegrationMod {
         }
         // Crafting
         BatchCraftNetworkHandler.register();
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            SmithingModePacket.register();
+            SmithingJeiTransferPacket.register();
+            CraftingStationModePacket.register();
+            StonecutterRecipeSelectPacket.register();
+            CraftingStationJeiTransferPacket.register();
+            AnvilNamePacket.register();
+        }
         // Resonance storage is shared by RS and Beyond Dimensions. Register
         // its sync packet independently of either optional storage backend.
         ResonanceNetworkHandler.register();
