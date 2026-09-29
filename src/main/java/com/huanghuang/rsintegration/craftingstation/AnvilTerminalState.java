@@ -27,6 +27,11 @@ public final class AnvilTerminalState implements CraftingStationState {
     public AnvilTerminalState(GridContainerMenu menu) {
         this.menu = menu;
         this.anvilMenu = new AnvilMenu(menu.containerId, menu.getPlayer().getInventory());
+        // AnvilMenu 的 itemName 在部分 1.20.1/Forge 组合及其它模组注入后
+        // 可能保持为 null。输入槽第一次变更会触发 AnvilUpdateEvent，事件
+        // 会把该值直接传给第三方监听器；先走原版重命名入口初始化为空串，
+        // 避免神秘遗物扩展等监听器调用 getName().isEmpty() 时崩溃。
+        this.anvilMenu.setItemName("");
         this.inputs = anvilMenu.getSlot(0).container;
     }
 
