@@ -1,5 +1,4 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
-import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
 import dev.ftb.mods.ftbquests.client.FTBQuestsNetClient;
@@ -27,7 +26,7 @@ public abstract class FTBQuestsNetClientMixin {
             "editObject"
     }, at = @At("RETURN"))
     private static void rsi$requestQuestRecipeRefresh(CallbackInfo ci) {
+        // JEI 条目需要同步；任务界面由 FTB 原生逻辑按需刷新，不能随进度包重建。
         FtbQuestJeiRuntime.requestRefresh();
-        FtbQuestJeiRuntime.requestQuestScreenRefresh();
     }
 }
