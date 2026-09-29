@@ -80,7 +80,8 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
         for (int slotNumber = 0; slotNumber < menu.slots.size(); slotNumber++) {
             Slot old = menu.slots.get(slotNumber);
             if (old instanceof CraftingGridSlot && old.getSlotIndex() < 9) {
-                int index = old.getSlotIndex();
+                int index = old instanceof CraftingStationInputSlot stationInput
+                        ? stationInput.stationIndex() : old.getSlotIndex();
                 int top = menu.getScreenInfoProvider().getTopHeight()
                         + menu.getScreenInfoProvider().getVisibleRows() * 18;
                 Slot replacement = rsi$stationMode == CraftingStationMode.CRAFTING

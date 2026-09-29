@@ -7,165 +7,108 @@ import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.CraftingContainer;
-import net.minecraft.world.inventory.ResultContainer;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.inventory.TransientCraftingContainer;
+import net.minecraft.world.inventory.SmithingMenu;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.item.crafting.SmithingRecipe;
-import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.util.List;
 
-/** RS 终端内嵌锻造台的服务端/客户端共享状态。 */
+/** 以原版 SmithingMenu 作为后端，RSI 只代理其三个输入槽和结果槽。 */
 public final class SmithingTerminalState implements CraftingStationState {
     private final GridContainerMenu menu;
-    private final Level level;
-    private final TransientCraftingContainer inputs;
-    private final ResultContainer result = new ResultContainer();
-    private final List<SmithingRecipe> recipes;
-    @Nullable
-    private SmithingRecipe recipe;
+    private final SmithingMenu smithingMenu;
+    private final Container inputs;
     private boolean returned;
 
     public SmithingTerminalState(GridContainerMenu menu) {
         this.menu = menu;
-        this.level = menu.getPlayer().level();
-        this.inputs = new TransientCraftingContainer((AbstractContainerMenu) menu, 3, 1);
-        this.recipes = level.getRecipeManager().getAllRecipesFor(RecipeType.SMITHING);
+        this.smithingMenu = new SmithingMenu(menu.containerId, menu.getPlayer().getInventory());
+        this.inputs = smithingMenu.getSlot(0).container;
     }
 
     @Override
-    public Container inputs() {
-        return inputs;
-    }
+    public Container inputs() { return inputs; }
 
     @Override
-    public int inputCount() {
-        return 3;
-    }
+    public int inputCount() { return 3; }
 
     @Override
-    public ItemStack result() {
-        return result.getItem(0);
-    }
+    public ItemStack result() { return smithingMenu.getSlot(3).getItem(); }
 
     @Override
     public void setInput(int index, ItemStack stack) {
-        if (index < 0 || index >= 3) return;
-        inputs.setItem(index, stack);
-        if (!stack.isEmpty()) returned = false;
-        recompute();
+        if (index < 0 || index >= inputCount()) return;
+        smithingMenu.getSlot(index).set(stack);
+        returned = false;
+        // RSI 代理槽不会调用 SmithingMenu.slotsChanged，主动走原版结果计算。
+        smithingMenu.createResult();
     }
 
     @Override
     public void setSyncedResult(ItemStack stack) {
-        if (level.isClientSide) result.setItem(0, stack);
+        if (menu.getPlayer().level().isClientSide) smithingMenu.getSlot(3).set(stack);
     }
 
-    /** 原版 SmithingMenu 的模板/基底/附加材料槽语义。 */
+    /** 完全复用 SmithingMenu 的模板、基底和附加材料判断。 */
     @Override
     public boolean acceptsInput(int index, ItemStack stack) {
-        if (index < 0 || index >= 3 || stack == null || stack.isEmpty()) return false;
-        return recipes.stream().anyMatch(recipe -> switch (index) {
-            case 0 -> recipe.isTemplateIngredient(stack);
-            case 1 -> recipe.isBaseIngredient(stack);
-            case 2 -> recipe.isAdditionIngredient(stack);
-            default -> false;
-        });
+        return index >= 0 && index < inputCount()
+                && stack != null && !stack.isEmpty()
+                && smithingMenu.getSlot(index).mayPlace(stack);
     }
 
     @Override
-    public void recompute() {
-        recipe = null;
-        result.setItem(0, ItemStack.EMPTY);
-        List<SmithingRecipe> matches = level.getRecipeManager()
-                .getRecipesFor(RecipeType.SMITHING, inputs, level);
-        if (!matches.isEmpty()) {
-            SmithingRecipe candidate = matches.get(0);
-            ItemStack assembled = candidate.assemble(inputs, level.registryAccess());
-            if (!assembled.isEmpty() && assembled.isItemEnabled(level.enabledFeatures())) {
-                recipe = candidate;
-                result.setRecipeUsed(candidate);
-                result.setItem(0, assembled);
-            }
-        }
-    }
+    public void recompute() { smithingMenu.createResult(); }
 
     @Override
     public boolean canTakeResult(Player player) {
-        return recipe != null && recipe.matches(inputs, level);
+        return smithingMenu.getSlot(3).mayPickup(player);
     }
 
     @Override
     public void takeResult(Player player) {
         if (!canTakeResult(player)) return;
-        ItemStack crafted = result.getItem(0);
-        crafted.onCraftedBy(player.level(), player, crafted.getCount());
-        result.awardUsedRecipes(player, List.of(inputs.getItem(0), inputs.getItem(1), inputs.getItem(2)));
-        for (int i = 0; i < 3; i++) {
-            ItemStack stack = inputs.getItem(i);
-            if (!stack.isEmpty()) {
-                stack.shrink(1);
-                inputs.setItem(i, stack);
-            }
-        }
-        recompute();
+        Slot output = smithingMenu.getSlot(3);
+        ItemStack taken = output.remove(output.getItem().getCount());
+        output.onTake(player, taken);
         menu.broadcastChanges();
     }
 
-    /** 锻造材料优先回到终端所属的 RS 网络，网络不可用时交还玩家。 */
     @Override
     public void returnInputs(Player player) {
         if (returned) return;
         returned = true;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < inputCount(); i++) {
             ItemStack stack = inputs.removeItemNoUpdate(i);
             if (!stack.isEmpty()) returnToNetworkOrPlayer(player, stack);
         }
-        result.setItem(0, ItemStack.EMPTY);
-        recipe = null;
+        smithingMenu.getSlot(3).set(ItemStack.EMPTY);
     }
 
     @Override
     public void clearInputs() {
-        for (int i = 0; i < 3; i++) inputs.removeItemNoUpdate(i);
-        result.setItem(0, ItemStack.EMPTY);
-        recipe = null;
+        inputs.clearContent();
+        smithingMenu.getSlot(3).set(ItemStack.EMPTY);
         returned = true;
     }
 
-    /**
-     * 切换到锻造模式前清理 RS 原生 3x3 矩阵。
-     * GridContainerMenu.initSlots() 只重建 Slot 列表，不会替我们归还矩阵中的物品；
-     * 若直接切换，旧矩阵内容会失去可见槽位并在关闭终端时消失。
-     */
     @Override
     public void returnCraftingMatrix(Player player) {
         if (player.level().isClientSide || menu.getGrid() == null
-                || menu.getGrid().getCraftingMatrix() == null) {
-            return;
-        }
-        CraftingContainer matrix = menu.getGrid().getCraftingMatrix();
-        for (int i = 0; i < matrix.getContainerSize(); i++) {
-            ItemStack stack = matrix.removeItemNoUpdate(i);
-            if (!stack.isEmpty()) {
-                returnToNetworkOrPlayer(player, stack);
-            }
+                || menu.getGrid().getCraftingMatrix() == null) return;
+        for (int i = 0; i < menu.getGrid().getCraftingMatrix().getContainerSize(); i++) {
+            ItemStack stack = menu.getGrid().getCraftingMatrix().removeItemNoUpdate(i);
+            if (!stack.isEmpty()) returnToNetworkOrPlayer(player, stack);
         }
     }
 
-    /** JEI 一键填充：服务端按候选顺序从网络优先、玩家库存其次提取。 */
+    /** JEI 一键填充：候选物品仍由服务端提取，放入时使用原版槽位语义。 */
     @Override
     public void fillFromJei(Player player, List<List<ItemStack>> options) {
         if (player.level().isClientSide || options == null) return;
         returned = false;
-        for (int i = 0; i < 3; i++) {
-            SmithingInputSlot slot = findInputSlot(i);
-            if (slot == null) continue;
+        for (int i = 0; i < inputCount(); i++) {
             ItemStack previous = inputs.removeItemNoUpdate(i);
             if (!previous.isEmpty()) returnToNetworkOrPlayer(player, previous);
             if (i >= options.size()) continue;
@@ -189,62 +132,47 @@ public final class SmithingTerminalState implements CraftingStationState {
 
     private ItemStack extract(Player player, ItemStack prototype, int count) {
         INetwork network = network();
-        ItemStack fromNetwork = network == null ? ItemStack.EMPTY
+        ItemStack result = network == null ? ItemStack.EMPTY
                 : network.extractItem(prototype, count, IComparer.COMPARE_NBT, Action.PERFORM);
-        int remaining = count - fromNetwork.getCount();
-        ItemStack result = fromNetwork;
-        if (remaining > 0) {
-            ItemStack fromPlayer = extractFromPlayerInventory(player, prototype, remaining);
-            if (result.isEmpty()) result = fromPlayer;
-            else if (!fromPlayer.isEmpty()) result.grow(fromPlayer.getCount());
-        }
+        int remaining = count - result.getCount();
+        if (remaining <= 0) return result;
+        ItemStack fromPlayer = extractFromPlayerInventory(player, prototype, remaining);
+        if (result.isEmpty()) return fromPlayer;
+        if (!fromPlayer.isEmpty()) result.grow(fromPlayer.getCount());
         return result;
     }
 
     private static ItemStack extractFromPlayerInventory(Player player, ItemStack prototype, int count) {
         ItemStack result = ItemStack.EMPTY;
-        for (int i = 0; i < player.getInventory().items.size() && count > 0; i++) {
-            ItemStack current = player.getInventory().items.get(i);
-            if (!ItemStack.isSameItemSameTags(current, prototype)) continue;
-            int taken = Math.min(count, current.getCount());
-            ItemStack part = current.split(taken);
+        for (ItemStack current : player.getInventory().items) {
+            if (count <= 0 || !ItemStack.isSameItemSameTags(current, prototype)) continue;
+            ItemStack part = current.split(Math.min(count, current.getCount()));
             if (result.isEmpty()) result = part;
             else result.grow(part.getCount());
-            count -= taken;
+            count -= part.getCount();
         }
         for (ItemStack current : player.getInventory().offhand) {
             if (count <= 0 || !ItemStack.isSameItemSameTags(current, prototype)) continue;
-            int taken = Math.min(count, current.getCount());
-            ItemStack part = current.split(taken);
+            ItemStack part = current.split(Math.min(count, current.getCount()));
             if (result.isEmpty()) result = part;
             else result.grow(part.getCount());
-            count -= taken;
+            count -= part.getCount();
         }
         return result;
     }
 
     private void returnToNetworkOrPlayer(Player player, ItemStack stack) {
         INetwork network = network();
-        if (network != null) {
-            ItemStack remaining = network.insertItem(stack, stack.getCount(), Action.PERFORM);
-            if (!remaining.isEmpty()) player.getInventory().placeItemBackInInventory(remaining);
-        } else {
+        if (network == null) {
             player.getInventory().placeItemBackInInventory(stack);
+            return;
         }
-    }
-
-    @Nullable
-    private SmithingInputSlot findInputSlot(int index) {
-        for (Slot slot : menu.slots) {
-            if (slot instanceof SmithingInputSlot input && input.isActive()
-                    && input.getSlotIndex() == index) return input;
-        }
-        return null;
+        ItemStack remaining = network.insertItem(stack, stack.getCount(), Action.PERFORM);
+        if (!remaining.isEmpty()) player.getInventory().placeItemBackInInventory(remaining);
     }
 
     @Nullable
     private INetwork network() {
         return menu.getGrid() instanceof INetworkAwareGrid aware ? aware.getNetwork() : null;
     }
-
 }

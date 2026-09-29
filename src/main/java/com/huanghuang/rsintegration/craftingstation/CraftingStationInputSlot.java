@@ -58,4 +58,9 @@ public class CraftingStationInputSlot extends CraftingGridSlot {
     public CraftingStationState stationState() {
         return state;
     }
+
+    /** 返回该代理槽对应的 RS 原始合成槽编号。 */
+    public int stationIndex() {
+        return stationIndex;
+    }
 }

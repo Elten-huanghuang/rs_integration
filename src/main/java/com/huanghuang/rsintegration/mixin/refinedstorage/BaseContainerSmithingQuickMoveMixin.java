@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.craftingstation.CraftingStationAccess;
 import com.huanghuang.rsintegration.craftingstation.CraftingStationInputSlot;
 import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
 import com.huanghuang.rsintegration.craftingstation.CraftingStationResultSlot;
+import com.huanghuang.rsintegration.craftingstation.StonecutterTerminalState;
 import com.refinedmods.refinedstorage.container.BaseContainerMenu;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.world.entity.player.Player;
@@ -39,21 +40,25 @@ public abstract class BaseContainerSmithingQuickMoveMixin {
             CraftingStationAccess.access(menu).rsi$getCraftingStationState().takeResult(player);
             cir.setReturnValue(output);
         } else if (source instanceof CraftingStationInputSlot input) {
-            ItemStack stack = input.getItem();
-            if (stack.isEmpty()) {
+            ItemStack moving = input.remove(input.getItem().getCount());
+            if (moving.isEmpty()) {
                 cir.setReturnValue(ItemStack.EMPTY);
                 return;
             }
-            ItemStack original = stack.copy();
-            ItemStack moving = stack.copy();
-            player.getInventory().add(moving);
-            input.set(moving);
-            cir.setReturnValue(moving.getCount() == original.getCount() ? ItemStack.EMPTY : original);
+            ItemStack remaining = moving.copy();
+            player.getInventory().add(remaining);
+            if (!remaining.isEmpty()) input.set(remaining);
+            cir.setReturnValue(moving);
         } else if (source.container == player.getInventory() && source.hasItem()) {
             ItemStack stack = source.getItem();
             ItemStack original = stack.copy();
             int inputCount = CraftingStationAccess.access(menu).rsi$getCraftingStationState().inputCount();
             for (int index = 0; index < inputCount && !stack.isEmpty(); index++) {
+                if (CraftingStationAccess.access(menu).rsi$getCraftingStationMode()
+                        == CraftingStationMode.STONECUTTER
+                        && CraftingStationAccess.access(menu).rsi$getCraftingStationState()
+                        instanceof StonecutterTerminalState stonecutter
+                        && !stonecutter.canQuickMoveInput(stack)) continue;
                 Slot target = rsi$stationInput(menu, index);
                 if (target == null || !target.mayPlace(stack)) continue;
                 int before = stack.getCount();
