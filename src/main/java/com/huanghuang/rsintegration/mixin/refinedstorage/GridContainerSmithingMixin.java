@@ -71,37 +71,50 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
     @Inject(method = "initSlots", at = @At("TAIL"), remap = false)
     private void rsi$replaceCraftingSlotsAfterInit(CallbackInfo ci) {
         if (rsi$stationMode == CraftingStationMode.CRAFTING) return;
+        rsi$refreshCraftingStationSlots();
+    }
+
+    @Override
+    public void rsi$refreshCraftingStationSlots() {
         GridContainerMenu menu = (GridContainerMenu) (Object) this;
         for (int slotNumber = 0; slotNumber < menu.slots.size(); slotNumber++) {
             Slot old = menu.slots.get(slotNumber);
-            if (old instanceof SmithingInputSlot || old instanceof StonecutterInputSlot
-                    || old instanceof CraftingStationInputSlot
-                    || old instanceof SmithingResultSlot || old instanceof CraftingStationResultSlot) continue;
             if (old instanceof CraftingGridSlot && old.getSlotIndex() < 9) {
                 int index = old.getSlotIndex();
-                Slot replacement = rsi$stationMode == CraftingStationMode.SMITHING
+                int top = menu.getScreenInfoProvider().getTopHeight()
+                        + menu.getScreenInfoProvider().getVisibleRows() * 18;
+                Slot replacement = rsi$stationMode == CraftingStationMode.CRAFTING
+                        ? new CraftingGridSlot(menu.getGrid().getCraftingMatrix(), index,
+                        26 + index % 3 * 18, top + 4 + index / 3 * 18)
+                        : rsi$stationMode == CraftingStationMode.SMITHING
                         ? new SmithingInputSlot(menu, index,
                         index < 3 ? 26 + index * 18 : -1000,
-                        index < 3 ? old.y + 18 : -1000)
+                        index < 3 ? top + 22 : -1000)
                         : rsi$stationMode == CraftingStationMode.STONECUTTER
                         ? new StonecutterInputSlot(menu, index,
                         index == 0 ? RSI_STONECUTTER_INPUT_X : -1000,
-                        index == 0 ? old.y + RSI_STONECUTTER_INPUT_Y_OFFSET : -1000)
+                        index == 0 ? top + 4 + RSI_STONECUTTER_INPUT_Y_OFFSET : -1000)
                         : new CraftingStationInputSlot(rsi$getAnvilState(), index,
                         index < 2 ? 27 + index * 49 : -1000,
-                        index < 2 ? old.y + 43 : -1000, index < 2);
+                        index < 2 ? top + 47 : -1000, index < 2);
                 replacement.index = old.index;
                 menu.slots.set(slotNumber, replacement);
             } else if (old instanceof ResultCraftingGridSlot) {
-                ResultCraftingGridSlot replacement = rsi$stationMode == CraftingStationMode.SMITHING
+                int top = menu.getScreenInfoProvider().getTopHeight()
+                        + menu.getScreenInfoProvider().getVisibleRows() * 18;
+                ResultCraftingGridSlot replacement = rsi$stationMode == CraftingStationMode.CRAFTING
+                        ? new ResultCraftingGridSlot(menu.getPlayer(), menu.getGrid(),
+                        old.getSlotIndex(), 134, top + 22)
+                        : rsi$stationMode == CraftingStationMode.SMITHING
                         ? new SmithingResultSlot(menu, menu.getPlayer(), menu.getGrid(),
-                        old.getSlotIndex(), old.x - 18, old.y)
+                        old.getSlotIndex(), 116, top + 22)
                         : new CraftingStationResultSlot(menu, menu.getPlayer(), menu.getGrid(),
                         old.getSlotIndex(),
                         rsi$stationMode == CraftingStationMode.STONECUTTER
-                                ? old.x + RSI_STONECUTTER_RESULT_X_OFFSET : old.x,
+                                ? 143 : 134,
                         rsi$stationMode == CraftingStationMode.STONECUTTER
-                                ? old.y + RSI_STONECUTTER_RESULT_Y_OFFSET : old.y + 25);
+                                ? top + 29 : rsi$stationMode == CraftingStationMode.ANVIL
+                                ? top + 47 : top + 22);
                 replacement.index = old.index;
                 menu.slots.set(slotNumber, replacement);
                 craftingResultSlot = replacement;

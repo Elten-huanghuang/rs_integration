@@ -330,7 +330,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         }
         // 服务端包负责权威状态；客户端先同步本地容器，避免等待槽位包时界面仍显示旧合成区。
         access.rsi$setCraftingStationMode(mode);
-        menu.initSlots();
+        access.rsi$refreshCraftingStationSlots();
         rsi$slotBackgrounds = null;
         rsi$stonecutterStartIndex = 0;
         NetworkHandler.CHANNEL.sendToServer(new CraftingStationModePacket(mode));
