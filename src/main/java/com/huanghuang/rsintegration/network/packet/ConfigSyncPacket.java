@@ -18,6 +18,7 @@ public class ConfigSyncPacket {
     private static boolean registered;
 
     public final boolean enableMachineGuiTabs;
+    public final boolean requireBoundMachineForVirtualStation;
     public final int machineTabThreshold;
     public final boolean enableAutoEat;
     public final boolean enableJei;
@@ -36,7 +37,8 @@ public class ConfigSyncPacket {
     public final int recipeTreeMaxCandidates;
     public final int repeatCountMax;
 
-    public ConfigSyncPacket(boolean enableMachineGuiTabs, int machineTabThreshold,
+    public ConfigSyncPacket(boolean enableMachineGuiTabs, boolean requireBoundMachineForVirtualStation,
+                            int machineTabThreshold,
                             boolean enableAutoEat, boolean enableJei, boolean enableJeiNetworkOverlay,
                             boolean enableJeiCraftingShortageOverlay, boolean enableJeiMarquee,
                             boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
@@ -45,6 +47,7 @@ public class ConfigSyncPacket {
                             boolean enableFtbQuestStorageScanButton, int recipeTreeMaxCandidates,
                             int repeatCountMax) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
+        this.requireBoundMachineForVirtualStation = requireBoundMachineForVirtualStation;
         this.machineTabThreshold = machineTabThreshold;
         this.enableAutoEat = enableAutoEat;
         this.enableJei = enableJei;
@@ -65,6 +68,7 @@ public class ConfigSyncPacket {
     public static ConfigSyncPacket fromServerConfig() {
         return new ConfigSyncPacket(
                 RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get(),
+                RSIntegrationConfig.REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION.get(),
                 RSIntegrationConfig.MACHINE_TAB_THRESHOLD.get(),
                 RSIntegrationConfig.ENABLE_AUTO_EAT.get(),
                 RSIntegrationConfig.ENABLE_JEI.get(),
@@ -84,6 +88,7 @@ public class ConfigSyncPacket {
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
         buf.writeBoolean(packet.enableMachineGuiTabs);
+        buf.writeBoolean(packet.requireBoundMachineForVirtualStation);
         buf.writeVarInt(packet.machineTabThreshold);
         buf.writeBoolean(packet.enableAutoEat);
         buf.writeBoolean(packet.enableJei);
@@ -102,7 +107,8 @@ public class ConfigSyncPacket {
     }
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
-        return new ConfigSyncPacket(buf.readBoolean(), Math.max(0, Math.min(buf.readVarInt(), 4096)), buf.readBoolean(),
+        return new ConfigSyncPacket(buf.readBoolean(), buf.readBoolean(),
+                Math.max(0, Math.min(buf.readVarInt(), 4096)), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 // Clamp to the config's own declared range (2-32).

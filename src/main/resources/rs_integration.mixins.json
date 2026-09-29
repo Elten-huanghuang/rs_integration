@@ -42,6 +42,9 @@
     "refinedstorage.NetworkNodeVoidUpgradeMixin",
     "refinedstorage.NetworkVoidUpgradeMixin",
     "refinedstorage.StackUtilsMixin",
+    "refinedstorage.GridContainerSmithingMixin",
+    "minecraft.AnvilMenuAccessor",
+    "refinedstorage.BaseContainerSmithingQuickMoveMixin",
     "minecraft.AbstractFurnaceAccessor",
     "ironfurnaces.BlockIronFurnaceTileBaseMixin",
     "ironsspellbooks.SpellConfigManagerMixin",
@@ -128,7 +131,10 @@
     "refinedstorage.GridViewImplSearchMixin",
     "refinedstorage.TooltipGridFilterMixin",
     "refinedstorage.TagGridFilterMixin",
-    "refinedstorage.ModGridFilterMixin"
+    "refinedstorage.ModGridFilterMixin",
+    "refinedstorage.GridScreenSmithingMixin",
+    "refinedstorage.BaseScreenStonecutterTooltipMixin",
+    "refinedstorage.GridRecipeTransferSmithingMixin"
   ],
   "injectors": {
     "defaultRequire": 0

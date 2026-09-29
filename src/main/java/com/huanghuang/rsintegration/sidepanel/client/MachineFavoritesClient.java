@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
+import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -29,14 +30,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class MachineFavoritesClient {
-    private static final int BUTTON_SIZE = 24;
+    private static final int BUTTON_SIZE = 18;
     private static final int GAP = 2;
-    private static final int GUI_X_OFFSET = -BUTTON_SIZE;
+    // 收藏按钮与终端右边缘对齐，避免和 RS 内部的清空按钮重叠。
+    private static final int GUI_X_OFFSET = -18;
     private static final int GUI_Y_GAP = 4;
     private static final int SCREEN_MARGIN = 4;
-    private static final int BORDER = 0xFF373737;
-    private static final int BACKGROUND = 0xFFC6C6C6;
-    private static final int HOVER_BACKGROUND = 0xFFE2E2E2;
+    private static final int BUTTON_U = 238;
+    private static final int BUTTON_NORMAL_V = 16;
+    private static final int BUTTON_HIGHLIGHT_V = 35;
+    // 物品渲染器会在当前 Pose 上再抬高一层；基础层放到 200，才能让
+    // 外框和机器方块物品一起落在 RS 原生 Tooltip（约 400）下面。
+    private static final float FAVORITE_Z = 200.0F;
 
     private static List<MachineFavoriteKey> favorites = List.of();
     private static boolean initialized;
@@ -104,19 +109,17 @@ public final class MachineFavoritesClient {
 
         GuiGraphics graphics = event.getGuiGraphics();
         graphics.pose().pushPose();
-        graphics.pose().translate(0, 0, 450);
+        graphics.pose().translate(0, 0, FAVORITE_Z);
         Slot hovered = null;
         try {
             for (Slot slot : layout.slots()) {
                 boolean isHovered = slot.contains(event.getMouseX(), event.getMouseY());
-                graphics.fill(slot.x(), slot.y(), slot.x() + BUTTON_SIZE,
-                        slot.y() + BUTTON_SIZE, BORDER);
-                graphics.fill(slot.x() + 1, slot.y() + 1,
-                        slot.x() + BUTTON_SIZE - 1, slot.y() + BUTTON_SIZE - 1,
-                        isHovered ? HOVER_BACKGROUND : BACKGROUND);
+                graphics.blit(BaseScreen.ICONS_TEXTURE, slot.x(), slot.y(), BUTTON_U,
+                        isHovered ? BUTTON_HIGHLIGHT_V : BUTTON_NORMAL_V,
+                        BUTTON_SIZE, BUTTON_SIZE, 256, 256);
                 ItemStack icon = MachineTabRenderer.resolveIcon(slot.info());
                 if (icon.isEmpty()) icon = new ItemStack(Items.BARRIER);
-                graphics.renderItem(icon, slot.x() + 4, slot.y() + 4);
+                graphics.renderItem(icon, slot.x() + 1, slot.y() + 1);
                 if (isHovered) hovered = slot;
             }
 
