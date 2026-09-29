@@ -68,7 +68,7 @@ public final class CraftingStationModePacket {
                 return;
             }
             access.rsi$setCraftingStationMode(mode);
-            menu.initSlots();
+            access.rsi$refreshCraftingStationSlots();
             menu.broadcastFullState();
         });
         context.setPacketHandled(true);

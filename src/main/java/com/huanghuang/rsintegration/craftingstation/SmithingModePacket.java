@@ -56,7 +56,7 @@ public final class SmithingModePacket {
                 return;
             }
             access.rsi$setSmithingMode(enabled);
-            menu.initSlots();
+            access.rsi$refreshCraftingStationSlots();
             menu.broadcastFullState();
         });
         context.setPacketHandled(true);
