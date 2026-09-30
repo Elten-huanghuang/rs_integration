@@ -1,6 +1,4 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
@@ -10,8 +8,6 @@ import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.RSFeedingPolicy;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
@@ -117,35 +113,15 @@ public abstract class FeedingUpgradeWrapperMixin
                     || extraction.extractedStacks().isEmpty()) continue;
             ItemStack extracted = extraction.extractedStacks().get(0);
 
-            ItemStack previousMainHand = player.getMainHandItem();
             ItemStack food = extracted.copyWithCount(1);
             ItemStack remainder = ItemStack.EMPTY;
-            boolean consumed = false;
             try {
-                player.getInventory().items.set(player.getInventory().selected, extracted);
-                if (food.use(level, player, InteractionHand.MAIN_HAND).getResult() == InteractionResult.CONSUME) {
-                    // From this point the food-use operation owns the item.
-                    // If finishUsingItem throws, food's current count is the
-                    // only safe amount that can still be returned.
-                    consumed = true;
-                    ItemStack consumedSnapshot = food.copy();
-                    ItemStack finished = food.getItem().finishUsingItem(food, level, player);
-                    remainder = ForgeEventFactory.onItemUseFinish(player, consumedSnapshot, 0, finished);
-                }
+                // 直接完成食用，避免调用 use() 模拟右键，从而误触玩家手上的其他物品。
+                ItemStack consumedSnapshot = food.copy();
+                ItemStack finished = food.getItem().finishUsingItem(food, level, player);
+                remainder = ForgeEventFactory.onItemUseFinish(player, consumedSnapshot, 0, finished);
             } catch (RuntimeException ex) {
-                ItemStack recovery = consumed
-                        ? food.copy()
-                        : player.getInventory().items.get(player.getInventory().selected).copy();
-                StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, recovery);
-                continue;
-            } finally {
-                player.getInventory().items.set(player.getInventory().selected, previousMainHand);
-            }
-
-            if (!consumed) {
-                StorageOperationResult returned = session.insert(serverPlayer, extracted.copy(), false);
-                if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
-                    ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
+                StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, food.copy());
                 continue;
             }
 

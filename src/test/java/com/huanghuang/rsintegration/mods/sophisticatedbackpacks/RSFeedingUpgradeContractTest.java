@@ -34,4 +34,14 @@ class RSFeedingUpgradeContractTest {
         assertTrue(source.contains("FEED_IMMEDIATELY_WHEN_HURT"));
         assertTrue(source.contains("FilterLogicControl.Advanced"));
     }
+
+    @Test
+    void networkFeedingDoesNotSimulateAPlayerRightClick() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/huanghuang/rsintegration/mixin/sophisticatedbackpacks/FeedingUpgradeWrapperMixin.java"));
+
+        assertFalse(source.contains("food.use("));
+        assertFalse(source.contains("InteractionHand"));
+        assertTrue(source.contains("finishUsingItem"));
+    }
 }
