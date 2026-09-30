@@ -98,6 +98,24 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void biomancyRecipeFoldersDoNotOverrideConcreteMachineTypes() {
+        String[][] types = {
+                {ModIds.ID_BIOMANCY_DIGESTER, "digesting"},
+                {ModIds.ID_BIOMANCY_BIO_LAB, "bio_brewing"},
+                {ModIds.ID_BIOMANCY_DECOMPOSER, "decomposing"},
+                {ModIds.ID_BIOMANCY_BIO_FORGE, "bio_forging"}
+        };
+        for (String[] mapping : types) {
+            registerLeafType(mapping[0]);
+            ModType type = ModType.byId(mapping[0]);
+            assertNull(AltarBindingRegistry.normalizeSubType(mapping[1], type));
+            assertNull(AltarBindingRegistry.normalizeSubType("third_party", type));
+            Recipe<?> recipe = new BiomancyFolderRecipe(new ResourceLocation("biomancy", mapping[1] + "/test"));
+            assertNull(AltarBindingRegistry.recipeMachineSubType(recipe, type));
+        }
+    }
+
+    @Test
     void eidolonMachineCategoriesDistinguishBrazierAndCrucible() {
         registerLeafType(ModIds.EIDOLON);
         assertEquals("brazier", AltarBindingRegistry.normalizeSubType(
@@ -264,6 +282,16 @@ class AltarBindingRegistryTest {
         if (ModType.byId(id) == ModType.GENERIC) {
             ModType.register(id, new String[0], new String[]{id}, new String[]{id}, () -> null);
         }
+    }
+
+    private record BiomancyFolderRecipe(ResourceLocation id) implements Recipe<Container> {
+        @Override public boolean matches(Container container, Level level) { return false; }
+        @Override public ItemStack assemble(Container container, RegistryAccess access) { return ItemStack.EMPTY; }
+        @Override public boolean canCraftInDimensions(int width, int height) { return false; }
+        @Override public ItemStack getResultItem(RegistryAccess access) { return ItemStack.EMPTY; }
+        @Override public ResourceLocation getId() { return id; }
+        @Override public RecipeSerializer<?> getSerializer() { return RecipeSerializer.SHAPELESS_RECIPE; }
+        @Override public RecipeType<?> getType() { return RecipeType.CRAFTING; }
     }
 
     private static final class CrystalInfusionRecipe implements Recipe<Container> {

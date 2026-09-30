@@ -1,4 +1,8 @@
 {
+  "rsi.batch.mod.biomancy_digester": "消化体",
+  "rsi.batch.mod.biomancy_bio_lab": "生物炼金釜",
+  "rsi.batch.mod.biomancy_decomposer": "分解体",
+  "rsi.batch.mod.biomancy_bio_forge": "生物锻造台",
   "rsi.recipe.materials.unknown": "物品材料：尚未检查或暂时无法判断",
   "rsi.recipe.materials.missing": "物品材料：不足以执行一次配方",
   "rsi.recipe.materials.ready": "物品材料：足够执行一次配方",

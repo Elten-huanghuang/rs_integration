@@ -31,6 +31,7 @@ public final class ModIds {
     public static final String BOTANIA = "botania";
     public static final String ARS_NOUVEAU = "ars_nouveau";
     public static final String LYCHEE = "lychee";
+    public static final String BIOMANCY = "biomancy";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -68,6 +69,10 @@ public final class ModIds {
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";
     public static final String ID_FA_CLIBANO = "forbidden_arcanus_clibano";
     public static final String ID_SUMMONING_RITUALS = "summoning_rituals";
+    public static final String ID_BIOMANCY_DIGESTER = "biomancy_digester";
+    public static final String ID_BIOMANCY_BIO_LAB = "biomancy_bio_lab";
+    public static final String ID_BIOMANCY_DECOMPOSER = "biomancy_decomposer";
+    public static final String ID_BIOMANCY_BIO_FORGE = "biomancy_bio_forge";
 
     // Ars Nouveau (one mod -> three automatable machine types)
     public static final String ID_ARS_IMBUEMENT = "ars_nouveau_imbuement";

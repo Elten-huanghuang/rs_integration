@@ -197,6 +197,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BIOMANCY;
     public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
     public static ForgeConfigSpec.BooleanValue ENABLE_WISHING_FOUNTAIN;
     public static ForgeConfigSpec.BooleanValue ENABLE_SRFIX;
@@ -469,6 +470,9 @@ public final class RSIntegrationConfig {
                 .comment("Enable virtual RS crafting for the supported Lychee item_inside recipes.",
                         "The matching substrate bucket in any Resonance Disk slot is required but never consumed.")
                 .define("enableLychee", true);
+        ENABLE_BIOMANCY = c
+                .comment("Enable RS integration with Biomancy machines.")
+                .define("enableBiomancy", true);
         ENABLE_PMMO = c
                 .comment("Enable recursive PMMO salvage through its configured salvage block.",
                         "The requested count is the number of independent salvage attempts, not a guaranteed output count.")
