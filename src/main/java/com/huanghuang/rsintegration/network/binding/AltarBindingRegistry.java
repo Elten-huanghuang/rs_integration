@@ -845,6 +845,12 @@ public final class AltarBindingRegistry {
         if (type.id().startsWith("vanilla_") || "smithing".equals(type.id())) {
             return null;
         }
+        if (ModIds.ID_BIOMANCY_DIGESTER.equals(type.id())
+                || ModIds.ID_BIOMANCY_BIO_LAB.equals(type.id())
+                || ModIds.ID_BIOMANCY_DECOMPOSER.equals(type.id())
+                || ModIds.ID_BIOMANCY_BIO_FORGE.equals(type.id())) {
+            return null;
+        }
         // Ars recipe IDs may be grouped by content tier rather than machine
         // type. Ars Extensions, for example, uses greater/ and ultimate/ for
         // recipes that still run on the normal Enchanting Apparatus. The

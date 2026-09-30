@@ -74,6 +74,7 @@ import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
+import com.huanghuang.rsintegration.mods.biomancy.BiomancyDigestingRecipeResolver;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
@@ -1528,6 +1529,9 @@ public final class GenericCraftPacket {
         // Strip JEI pagination prefix if present (e.g. mod:jei.real_path -> mod:real_path)
         recipeId = unwrapJeiId(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe != null) return recipe;
+
+        recipe = BiomancyDigestingRecipeResolver.resolve(level, recipeId);
         if (recipe != null) return recipe;
 
         recipe = BirdcageEggCatalog.resolve(level, recipeId);

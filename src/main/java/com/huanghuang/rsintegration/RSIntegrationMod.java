@@ -30,6 +30,7 @@ import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.lychee.LycheeRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.botania.BotaniaRSModule;
+import com.huanghuang.rsintegration.mods.biomancy.BiomancyRSModule;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.mods.summoningrituals.SummoningRitualsRSModule;
 import com.huanghuang.rsintegration.mods.tacz.TaczRSModule;
@@ -262,6 +263,8 @@ public final class RSIntegrationMod {
                     () -> DistantWorldsRSModule.INSTANCE),
             new ModuleEntry(ModIds.LYCHEE, RSIntegrationConfig.ENABLE_LYCHEE,
                     () -> LycheeRSModule.INSTANCE),
+            new ModuleEntry(ModIds.BIOMANCY, RSIntegrationConfig.ENABLE_BIOMANCY,
+                    () -> BiomancyRSModule.INSTANCE),
             new ModuleEntry(ModIds.PMMO, RSIntegrationConfig.ENABLE_PMMO,
                     () -> PmmoRSModule.INSTANCE),
             new ModuleEntry(ModIds.WISHING_FOUNTAIN, RSIntegrationConfig.ENABLE_WISHING_FOUNTAIN,
