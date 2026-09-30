@@ -201,6 +201,9 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
                         && mode != CraftingStationMode.CRAFTING) {
                     rsi$clearCraftingMatrixClient(menu);
                 }
+                // 客户端可能还保留着服务器切换前同步下来的旧合成结果。
+                // 模式切换后该结果不再属于当前工作站，立即丢弃本地预览。
+                rsi$clearCraftingResult(menu);
             } else {
                 if (rsi$stationMode != CraftingStationMode.CRAFTING) {
                     rsi$getCraftingStationState().returnInputs(menu.getPlayer());
@@ -208,10 +211,18 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
                 if (mode != CraftingStationMode.CRAFTING) {
                     rsi$getCraftingStationState(mode).returnCraftingMatrix(menu.getPlayer());
                 }
+                // RS 的结果容器不会因为我们直接移除矩阵物品而自动清空。
+                // 切换工作站前必须清掉旧结果，否则切回/切出时可能重复领取产物。
+                rsi$clearCraftingResult(menu);
             }
         }
         rsi$stationMode = mode;
-        if (mode != CraftingStationMode.CRAFTING) rsi$getCraftingStationState().recompute();
+        if (mode != CraftingStationMode.CRAFTING) {
+            rsi$getCraftingStationState().recompute();
+        } else if (!menu.getPlayer().level().isClientSide && menu.getGrid() != null) {
+            // 切回 3x3 后让 RS 按当前九格矩阵重新计算结果，并同步到客户端。
+            menu.getGrid().onCraftingMatrixChanged();
+        }
     }
 
     @Unique
@@ -219,6 +230,16 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
         if (menu.getGrid() == null || menu.getGrid().getCraftingMatrix() == null) return;
         for (int i = 0; i < menu.getGrid().getCraftingMatrix().getContainerSize(); i++) {
             menu.getGrid().getCraftingMatrix().removeItemNoUpdate(i);
+        }
+        rsi$clearCraftingResult(menu);
+    }
+
+    @Unique
+    private static void rsi$clearCraftingResult(GridContainerMenu menu) {
+        if (menu.getGrid() == null || menu.getGrid().getCraftingResult() == null) return;
+        Container result = menu.getGrid().getCraftingResult();
+        for (int i = 0; i < result.getContainerSize(); i++) {
+            result.removeItemNoUpdate(i);
         }
     }
 
