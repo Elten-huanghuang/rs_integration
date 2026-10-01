@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -273,8 +274,9 @@ public final class RSIntegrationMod {
 
     public RSIntegrationMod() {
         RSIntegrationConfig.register();
+        RSStorageConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
-            if (e.getConfig().getType() == ModConfig.Type.COMMON) {
+            if (e.getConfig().getSpec() == RSIntegrationConfig.COMMON_SPEC) {
                 migrateCommonConfig(e.getConfig());
                 refreshConfigCache();
             }
@@ -284,7 +286,7 @@ public final class RSIntegrationMod {
             }
         });
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
-            if (e.getConfig().getType() == ModConfig.Type.COMMON) {
+            if (e.getConfig().getSpec() == RSIntegrationConfig.COMMON_SPEC) {
                 refreshConfigCache();
                 if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
                     RSSidePanelNetworkHandler

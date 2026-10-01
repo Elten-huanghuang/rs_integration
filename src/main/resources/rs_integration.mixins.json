@@ -7,6 +7,12 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
   "mixins": [
+    "refinedstorage.ConnectionStorageRefreshMixin",
+    "refinedstorage.StorageRefreshDeduplicationMixin",
+    "refinedstorage.VerifiedStorageSaveMixin",
+    "refinedstorage.GridSnapshotRefreshMixin",
+    "refinedstorage.GridSnapshotTransferMixin",
+    "refinedstorage.FluidContainerPreflightMixin",
     "minecraft.ContainerDistanceMixin",
     "minecraft.EntityMixin",
     "minecraft.FurnaceMenuMixin",
