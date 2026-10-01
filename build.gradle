@@ -112,6 +112,9 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // 混合终端视图测试会加载现有搜索缓存的 JEI 接口签名。
+    testRuntimeOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
+    testRuntimeOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
 }
 
 tasks.register('verifyNoForcedChunkLoads') {

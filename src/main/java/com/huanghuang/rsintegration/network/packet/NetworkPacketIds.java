@@ -133,4 +133,6 @@ public final class NetworkPacketIds {
     public static final int STONECUTTER_RECIPE_SELECT = 147;
     public static final int CRAFTING_STATION_JEI_TRANSFER = 148;
     public static final int ANVIL_NAME = 149;
+    public static final int UNIFIED_GRID_UPDATE = 150;
+    public static final int UNIFIED_GRID_ACTION = 151;
 }

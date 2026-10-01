@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBac
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridUpdatePacket;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -708,6 +709,7 @@ public final class RSIntegrationMod {
             StonecutterRecipeSelectPacket.register();
             CraftingStationJeiTransferPacket.register();
             AnvilNamePacket.register();
+            UnifiedGridUpdatePacket.register();
         }
         // Resonance storage is shared by RS and Beyond Dimensions. Register
         // its sync packet independently of either optional storage backend.

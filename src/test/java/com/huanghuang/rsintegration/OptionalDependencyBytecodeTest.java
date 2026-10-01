@@ -52,6 +52,11 @@ class OptionalDependencyBytecodeTest {
             "com/huanghuang/rsintegration/network/binding/RSAltarBindingResolver",
             "com/huanghuang/rsintegration/sidepanel/RSSidePanelNetworkHandler",
             "com/huanghuang/rsintegration/storage/rs/NativeRefinedStorageDriver",
+            // 混合终端只由 RS 存在时注册的包和 RS 目标 Mixin 进入。
+            "com/huanghuang/rsintegration/unifiedgrid/UnifiedGridSession",
+            "com/huanghuang/rsintegration/unifiedgrid/client/UnifiedGridClient",
+            "com/huanghuang/rsintegration/unifiedgrid/client/UnifiedGridJeiTracker",
+            "com/huanghuang/rsintegration/unifiedgrid/client/UnifiedGridView",
             "com/huanghuang/rsintegration/util/TrackedNetworkInsertion");
 
     @Test

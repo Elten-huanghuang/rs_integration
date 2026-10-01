@@ -16,6 +16,7 @@ class RSStorageConfigTest {
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.REFRESH_OPEN_GRIDS));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.EXPAND_GRID_TRANSFER));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
+        assertTrue(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
         assertEquals(100, RSStorageConfig.transferParts());
 
         CommentedConfig config = CommentedConfig.inMemory();
@@ -25,6 +26,7 @@ class RSStorageConfigTest {
         config.set("storage.refreshOpenGrids", false);
         config.set("storage.expandGridTransfer", false);
         config.set("storage.checkFluidContainer", false);
+        config.set("unifiedGrid.enabled", false);
         config.set("storage.gridTransferParts", 32);
         try {
             RSStorageConfig.SPEC.setConfig(config);
@@ -33,6 +35,7 @@ class RSStorageConfigTest {
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.REFRESH_OPEN_GRIDS));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.EXPAND_GRID_TRANSFER));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
+            assertFalse(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
             assertEquals(32, RSStorageConfig.transferParts());
         } finally {
             RSStorageConfig.SPEC.setConfig(null);
