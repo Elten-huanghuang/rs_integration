@@ -22,6 +22,31 @@ class RSStorageInjectionContractTest {
     private static final String RS = "com/refinedmods/refinedstorage/";
 
     @Test
+    void mixedGridLifecycleAndLegacySnapshotHooksMatchDependency() throws IOException {
+        ClassNode menu = read(RS + "container/GridContainerMenu");
+        MethodNode broadcast = menu.methods.stream().filter(candidate ->
+                candidate.name.equals("m_38946_") || candidate.name.equals("broadcastChanges")).findFirst().orElseThrow();
+        int subscriptions = 0;
+        for (AbstractInsnNode instruction : broadcast.instructions)
+            if (instruction instanceof MethodInsnNode invoke && invoke.name.equals("getStorageCache")) subscriptions++;
+        assertEquals(2, subscriptions);
+        assertTrue(menu.methods.stream().anyMatch(candidate -> candidate.name.equals("m_6877_") || candidate.name.equals("removed")));
+        ClassNode screen = read(RS + "screen/grid/GridScreen");
+        assertTrue(screen.methods.stream().anyMatch(candidate -> candidate.name.equals("m_6375_") || candidate.name.equals("mouseClicked")));
+        ClassNode tracker = read(RS + "integration/jei/IngredientTracker");
+        method(tracker, "<init>", "(L" + RS + "container/GridContainerMenu;)V");
+        assertTrue(tracker.fields.stream().anyMatch(field -> field.name.equals("storedItems")
+                && field.desc.equals("Ljava/util/Map;")));
+        for (String kind : List.of("Item", "Fluid")) {
+            ClassNode packet = read(RS + "network/grid/Grid" + kind + "UpdateMessage");
+            MethodNode handler = packet.methods.stream().filter(candidate -> candidate.name.equals("lambda$handle$0"))
+                    .findFirst().orElseThrow();
+            assertTrue(handler.desc.endsWith("L" + RS + "screen/grid/GridScreen;)V"));
+            assertTrue((handler.access & 8) != 0);
+        }
+    }
+
+    @Test
     void queuedActionScopeOccursAfterBothNodeStateCallbacks() throws IOException {
         MethodNode method = method(read(RS + "apiimpl/network/NetworkNodeGraph"), "invalidate",
                 "(L" + RS + "api/util/Action;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V");

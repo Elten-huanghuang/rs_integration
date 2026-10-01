@@ -1271,5 +1271,9 @@
   "gui.rs_integration.tetra_sort.tooltip.dual_priority": "Supports two priority levels",
   "gui.rs_integration.tetra_sort.tooltip.primary": "First checked field: primary priority",
   "gui.rs_integration.tetra_sort.tooltip.secondary": "Second checked field: secondary priority",
-  "gui.rs_integration.tetra_sort.tooltip.controls": "▲ Ascending  ▼ Descending  ☑ Use field"
+  "gui.rs_integration.tetra_sort.tooltip.controls": "▲ Ascending  ▼ Descending  ☑ Use field",
+  "rs_integration.unified_grid.filter.0": "All resources",
+  "rs_integration.unified_grid.filter.1": "Items",
+  "rs_integration.unified_grid.filter.2": "Fluids",
+  "rs_integration.unified_grid.container_hint": "Click to change resource type. Items: extract to cursor, Shift-click to inventory. Containers: left-click fluid to fill, right-click to empty; left-click blank space to store the item. Empty-handed filling needs a bucket in the network."
 }

@@ -1272,5 +1272,9 @@
   "gui.rs_integration.tetra_sort.tooltip.dual_priority": "支持双优先级排序",
   "gui.rs_integration.tetra_sort.tooltip.primary": "先勾选的字段：主要优先级",
   "gui.rs_integration.tetra_sort.tooltip.secondary": "后勾选的字段：次要优先级",
-  "gui.rs_integration.tetra_sort.tooltip.controls": "▲升序  ▼降序  ☑使用字段"
+  "gui.rs_integration.tetra_sort.tooltip.controls": "▲升序  ▼降序  ☑使用字段",
+  "rs_integration.unified_grid.filter.0": "全部资源",
+  "rs_integration.unified_grid.filter.1": "物品",
+  "rs_integration.unified_grid.filter.2": "流体",
+  "rs_integration.unified_grid.container_hint": "点击切换类别。物品：普通提取到鼠标，Shift 提取到背包。容器：左键流体装填，右键排空；左键空白处存放容器物品。空手装填需要网络空桶。"
 }

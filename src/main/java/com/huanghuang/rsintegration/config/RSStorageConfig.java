@@ -13,6 +13,7 @@ public final class RSStorageConfig {
     public static final ForgeConfigSpec.BooleanValue EXPAND_GRID_TRANSFER;
     public static final ForgeConfigSpec.IntValue GRID_TRANSFER_PARTS;
     public static final ForgeConfigSpec.BooleanValue CHECK_FLUID_CONTAINER;
+    public static final ForgeConfigSpec.BooleanValue UNIFIED_GRID;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -30,6 +31,11 @@ public final class RSStorageConfig {
                 .defineInRange("gridTransferParts", 100, 10, 2000);
         CHECK_FLUID_CONTAINER = builder.comment("流体终端扣减库存前，模拟检查一桶流体是否可提取及装桶。")
                 .define("checkFluidContainer", true);
+        builder.pop();
+        builder.comment("联网普通终端和合成终端的物品/流体混合显示。服务端决定是否启用，重新打开菜单生效。")
+                .push("unifiedGrid");
+        UNIFIED_GRID = builder.comment("默认开启。关闭后使用 RS 原版单类型订阅、显示和取放路径。")
+                .define("enabled", true);
         builder.pop();
         SPEC = builder.build();
     }
