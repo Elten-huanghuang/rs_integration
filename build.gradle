@@ -57,6 +57,14 @@ repositories {
     mavenCentral()
 }
 
+// 独立基准源集，不进入生产模组；复用单测中的 Minecraft/RS 运行环境。
+sourceSets {
+    benchmark {
+        compileClasspath += sourceSets.test.runtimeClasspath
+        runtimeClasspath += sourceSets.test.runtimeClasspath
+    }
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.3.22"
 
@@ -115,6 +123,80 @@ dependencies {
     // 混合终端视图测试会加载现有搜索缓存的 JEI 接口签名。
     testRuntimeOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     testRuntimeOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
+
+    benchmarkImplementation 'org.openjdk.jmh:jmh-core:1.37'
+    benchmarkAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+}
+
+compileBenchmarkJava {
+    options.encoding = 'UTF-8'
+}
+
+// 用 manifest 承载长 classpath，避免 Windows 下 JMH fork 超出命令长度。
+tasks.register('benchmarkClasspath', Jar) {
+    dependsOn tasks.named('benchmarkClasses')
+    archiveFileName = 'benchmark-classpath.jar'
+    destinationDirectory = layout.buildDirectory.dir('benchmark')
+    doFirst {
+        manifest.attributes('Class-Path': sourceSets.benchmark.runtimeClasspath.files
+                .collect { it.toURI().toASCIIString() }.join(' '))
+    }
+}
+
+tasks.register('diskBenchmark', JavaExec) {
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    dependsOn tasks.named('benchmarkClasspath')
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'org.openjdk.jmh.Main'
+    maxHeapSize = '3g'
+    args providers.gradleProperty('benchmarkArgs').getOrElse('-l').split(' ').findAll { !it.isEmpty() }
+}
+
+tasks.register('diskLimitCheck', JavaExec) {
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    dependsOn tasks.named('benchmarkClasspath')
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.benchmark.UnifiedDiskLimitCheck'
+    maxHeapSize = '3g'
+    args layout.buildDirectory.dir('benchmark/limits').get().asFile.absolutePath
+}
+
+tasks.register('diskBenchmarkSuite', JavaExec) {
+    dependsOn tasks.named('benchmarkClasspath')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.benchmark.UnifiedDiskBenchmarkSuite'
+    maxHeapSize = '3g'
+    args layout.buildDirectory.dir('benchmark').get().asFile.absolutePath
+}
+
+tasks.register('diskOptimizationSuite', JavaExec) {
+    dependsOn tasks.named('benchmarkClasspath')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.benchmark.UnifiedDiskBenchmarkSuite'
+    maxHeapSize = '3g'
+    // 单独目录保留优化前的原始结果。
+    args layout.buildDirectory.dir('benchmark/optimized').get().asFile.absolutePath, 'optimized'
+}
+
+tasks.register('diskComprehensiveSuite', JavaExec) {
+    dependsOn tasks.named('benchmarkClasspath')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.benchmark.UnifiedDiskBenchmarkSuite'
+    maxHeapSize = '3g'
+    args layout.buildDirectory.dir('benchmark/comprehensive').get().asFile.absolutePath, 'comprehensive'
+}
+
+tasks.register('diskCompatibilityCheck', JavaExec) {
+    dependsOn tasks.named('benchmarkClasspath')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.benchmark.UnifiedDiskCompatibilityCheck'
+    maxHeapSize = '3g'
+    args providers.gradleProperty('legacyDiskManifest').getOrElse(''),
+            layout.buildDirectory.file('benchmark/comprehensive/compatibility.json').get().asFile.absolutePath
 }
 
 tasks.register('verifyNoForcedChunkLoads') {

@@ -1,0 +1,16 @@
+{
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "refinedstorage" },
+    { "type": "rs_integration:unified_disk_enabled" }
+  ],
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["AEA", "IFH", "AEA"],
+  "key": {
+    "A": { "item": "minecraft:amethyst_shard" },
+    "E": { "item": "minecraft:ender_pearl" },
+    "I": { "item": "refinedstorage:64k_storage_part" },
+    "F": { "item": "refinedstorage:4096k_fluid_storage_part" },
+    "H": { "item": "refinedstorage:storage_housing" }
+  },
+  "result": { "item": "rs_integration:unified_storage_disk" }
+}

@@ -17,6 +17,7 @@ class ConfigSyncPacketTest {
         ConfigSyncPacket decoded = ConfigSyncPacket.decode(buffer);
 
         assertEquals(512, decoded.repeatCountMax);
+        assertEquals(false, decoded.enableUnifiedDisk);
     }
 
     @Test
@@ -32,6 +33,6 @@ class ConfigSyncPacketTest {
 
     private static ConfigSyncPacket packetWithRepeatLimit(int repeatLimit) {
         return new ConfigSyncPacket(true, false, 5, true, true, true, true, true, true, true,
-                true, true, false, true, true, 8, repeatLimit);
+                true, true, false, true, true, 8, repeatLimit, false);
     }
 }

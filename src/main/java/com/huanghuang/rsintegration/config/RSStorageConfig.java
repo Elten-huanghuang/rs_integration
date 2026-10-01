@@ -4,7 +4,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 
-/** 原版 RS 存储维护选项，与磁盘物品注册和容量无关。 */
+/** RS 存储维护、混合终端与统一磁盘配置。 */
 public final class RSStorageConfig {
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.BooleanValue MERGE_CONNECTION_REBUILDS;
@@ -14,6 +14,11 @@ public final class RSStorageConfig {
     public static final ForgeConfigSpec.IntValue GRID_TRANSFER_PARTS;
     public static final ForgeConfigSpec.BooleanValue CHECK_FLUID_CONTAINER;
     public static final ForgeConfigSpec.BooleanValue UNIFIED_GRID;
+    public static final ForgeConfigSpec.BooleanValue UNIFIED_DISK;
+    public static final ForgeConfigSpec.IntValue DISK_ITEM_ENTRIES;
+    public static final ForgeConfigSpec.IntValue DISK_FLUID_ENTRIES;
+    public static final ForgeConfigSpec.IntValue DISK_ENTRY_BYTES;
+    public static final ForgeConfigSpec.IntValue DISK_PAYLOAD_BYTES;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -37,6 +42,15 @@ public final class RSStorageConfig {
         UNIFIED_GRID = builder.comment("默认开启。关闭后使用 RS 原版单类型订阅、显示和取放路径。")
                 .define("enabled", true);
         builder.pop();
+        builder.comment("物品/流体统一磁盘。开关需重启，关闭不删除库存；容量设置只影响新建磁盘。")
+                .push("unifiedDisk");
+        UNIFIED_DISK = builder.comment("默认开启。关闭后在创造栏和配方浏览器隐藏并禁用配方，保留旧盘与文件但不挂载和读写库存。需要重启。")
+                .define("enabled", true);
+        DISK_ITEM_ENTRIES = builder.defineInRange("maxItemEntries", 262144, 1, 262144);
+        DISK_FLUID_ENTRIES = builder.defineInRange("maxFluidEntries", 262144, 1, 262144);
+        DISK_ENTRY_BYTES = builder.defineInRange("maxPayloadBytesPerEntry", 1048576, 1024, 1048576);
+        DISK_PAYLOAD_BYTES = builder.defineInRange("maxPayloadBytesPerDisk", 268435456, 1048576, 536870912);
+        builder.pop();
         SPEC = builder.build();
     }
 
@@ -52,5 +66,9 @@ public final class RSStorageConfig {
 
     public static int transferParts() {
         return SPEC.isLoaded() ? GRID_TRANSFER_PARTS.get() : GRID_TRANSFER_PARTS.getDefault();
+    }
+
+    public static int diskLimit(ForgeConfigSpec.IntValue value) {
+        return SPEC.isLoaded() ? value.get() : value.getDefault();
     }
 }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBac
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.disk.UnifiedDiskEnabledCondition;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridUpdatePacket;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -120,6 +121,7 @@ import net.minecraft.world.inventory.MenuType;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.crafting.CraftingHelper;
 import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.AddReloadListenerEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -415,6 +417,7 @@ public final class RSIntegrationMod {
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
+        event.enqueueWork(() -> CraftingHelper.register(new UnifiedDiskEnabledCondition.Serializer()));
         StorageBackendLoadResult rsBackend = STORAGE_BACKENDS.load(
                 StorageBackendDescriptors.REFINED_STORAGE);
         if (rsBackend.loaded()) {

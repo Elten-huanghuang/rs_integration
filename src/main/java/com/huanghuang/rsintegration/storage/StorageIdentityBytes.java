@@ -22,10 +22,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 
 /** Deterministic NBT encoding compatible with vanilla equality for supported values. */
-final class StorageIdentityBytes {
+public final class StorageIdentityBytes {
     private StorageIdentityBytes() {}
 
-    static byte[] exact(CompoundTag identity) {
+    public static byte[] exact(CompoundTag identity) {
         try {
             LimitedByteArrayOutputStream bytes = new LimitedByteArrayOutputStream(
                     StorageItemKey.MAX_BACKEND_PAYLOAD_BYTES);
