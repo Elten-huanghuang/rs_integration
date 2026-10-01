@@ -17,6 +17,12 @@ import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
 import com.huanghuang.rsintegration.voidupgrade.RSVoidUpgradeItem;
 import com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskFactory;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskEvents;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipPackets;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipClient;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +36,7 @@ public final class RSOptionalBootstrap {
     private RSOptionalBootstrap() {}
 
     public static void registerItems(IEventBus modBus) {
+        ModItems.registerOptionalUnifiedDisk(UnifiedDiskItem::new);
         ModItems.registerOptionalResonance(modBus,
                 () -> ResonanceDiskItem.INSTANCE);
         ModItems.registerOptionalVoidUpgrade(modBus,
@@ -42,9 +49,12 @@ public final class RSOptionalBootstrap {
 
     public static void registerCommon() {
         VoidUpgradeNetworkHandler.register();
+        UnifiedDiskTooltipPackets.register();
         ResonanceStorageResolvers.register(RSInventoryBridge::resolveResonanceView);
         API.instance().getStorageDiskRegistry().add(
                 ResonanceDiskWrapper.FACTORY_ID, new ResonanceDiskFactory());
+        API.instance().getStorageDiskRegistry().add(UnifiedDiskRoot.FACTORY_ID, new UnifiedDiskFactory());
+        MinecraftForge.EVENT_BUS.register(UnifiedDiskEvents.class);
         MinecraftForge.EVENT_BUS.register(PassiveEffectEngine.class);
     }
 
@@ -54,6 +64,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerClientEventSubscribers() {
+        MinecraftForge.EVENT_BUS.register(UnifiedDiskTooltipClient.class);
         MinecraftForge.EVENT_BUS.register(
                 RSGridSearchCache.class);
     }

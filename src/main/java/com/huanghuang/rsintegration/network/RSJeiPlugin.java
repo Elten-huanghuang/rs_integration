@@ -15,6 +15,10 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
+import mezz.jei.api.constants.VanillaTypes;
+import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiMarqueeSelector;
@@ -60,6 +64,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Nullable
     private static IJeiRuntime cachedRuntime;
+    private static boolean unifiedDiskRemoved;
 
     @Nullable
     public static IJeiRuntime getRuntime() {
@@ -71,9 +76,23 @@ public final class RSJeiPlugin implements IModPlugin {
         return UID;
     }
 
+    public static void refreshUnifiedDiskVisibility() {
+        if (cachedRuntime == null || ModItems.UNIFIED_STORAGE_DISK == null) return;
+        var stacks = List.of(new ItemStack(ModItems.UNIFIED_STORAGE_DISK.get()));
+        if (!UnifiedDiskVisibility.visible()) {
+            cachedRuntime.getIngredientManager().removeIngredientsAtRuntime(VanillaTypes.ITEM_STACK, stacks);
+            unifiedDiskRemoved = true;
+        } else if (unifiedDiskRemoved) {
+            cachedRuntime.getIngredientManager().addIngredientsAtRuntime(VanillaTypes.ITEM_STACK, stacks);
+            unifiedDiskRemoved = false;
+        }
+    }
+
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
+        unifiedDiskRemoved = false;
+        refreshUnifiedDiskVisibility();
         TetraWorkbenchMaterialState.refreshForJei();
         TetraWorkbenchJeiFilterRefreshRegistry.refresh();
         VillagerTradeLockClient

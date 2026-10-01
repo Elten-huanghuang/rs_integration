@@ -17,6 +17,10 @@ output/
 .DS_Store
 Thumbs.db
 
+# Python 绘图缓存
+__pycache__/
+*.pyc
+
 # Minecraft
 run/
 logs/

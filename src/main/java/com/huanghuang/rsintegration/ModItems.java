@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -32,6 +33,7 @@ public final class ModItems {
     public static RegistryObject<Item> RESONANCE_STORAGE_DISK;
     public static RegistryObject<Item> DIMENSIONAL_RESONANCE_DISK;
     public static RegistryObject<Item> RS_VOID_UPGRADE;
+    public static RegistryObject<Item> UNIFIED_STORAGE_DISK;
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
@@ -48,6 +50,7 @@ public final class ModItems {
                         if (DIMENSIONAL_RESONANCE_DISK != null) {
                             output.accept(DIMENSIONAL_RESONANCE_DISK.get());
                         }
+                        if (UnifiedDiskVisibility.visible()) output.accept(UNIFIED_STORAGE_DISK.get());
                         // Backpack upgrades are only registered when Sophisticated
                         // Backpacks is present. Look them up by registry name so we
                         // never link SophisticatedBackpacksItems (which would throw
@@ -84,6 +87,10 @@ public final class ModItems {
     public static void registerOptionalVoidUpgrade(IEventBus modBus,
                                                     Supplier<? extends Item> supplier) {
         RS_VOID_UPGRADE = ITEMS.register("rs_void_upgrade", supplier);
+    }
+
+    public static void registerOptionalUnifiedDisk(Supplier<? extends Item> supplier) {
+        UNIFIED_STORAGE_DISK = ITEMS.register("unified_storage_disk", supplier);
     }
 
     public static void registerOptionalBeyondDimensions(IEventBus modBus,

@@ -17,6 +17,9 @@ class RSStorageConfigTest {
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.EXPAND_GRID_TRANSFER));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
+        assertTrue(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
+        assertEquals(262144, RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES));
+        assertEquals(262144, RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES));
         assertEquals(100, RSStorageConfig.transferParts());
 
         CommentedConfig config = CommentedConfig.inMemory();
@@ -27,6 +30,8 @@ class RSStorageConfigTest {
         config.set("storage.expandGridTransfer", false);
         config.set("storage.checkFluidContainer", false);
         config.set("unifiedGrid.enabled", false);
+        config.set("unifiedDisk.enabled", false);
+        config.set("unifiedDisk.maxItemEntries", 50000);
         config.set("storage.gridTransferParts", 32);
         try {
             RSStorageConfig.SPEC.setConfig(config);
@@ -36,6 +41,8 @@ class RSStorageConfigTest {
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.EXPAND_GRID_TRANSFER));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
+            assertFalse(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
+            assertEquals(50000, RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES));
             assertEquals(32, RSStorageConfig.transferParts());
         } finally {
             RSStorageConfig.SPEC.setConfig(null);

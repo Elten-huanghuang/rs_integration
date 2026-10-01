@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
@@ -60,6 +61,7 @@ public final class ClientEventBootstrap {
     }
 
     private static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        UnifiedDiskVisibility.disconnect();
         RecipeAvailabilityClient.clear();
         JeiNetworkItemCache.INSTANCE.clear();
         JeiCraftingPlanContext.INSTANCE.clear();

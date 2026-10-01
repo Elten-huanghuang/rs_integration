@@ -5,6 +5,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.config.RSStorageConfig;
 import java.util.Optional;
 import net.minecraftforge.network.NetworkDirection;
 
@@ -36,6 +37,7 @@ public class ConfigSyncPacket {
     public final boolean enableFtbQuestStorageScanButton;
     public final int recipeTreeMaxCandidates;
     public final int repeatCountMax;
+    public final boolean enableUnifiedDisk;
 
     public ConfigSyncPacket(boolean enableMachineGuiTabs, boolean requireBoundMachineForVirtualStation,
                             int machineTabThreshold,
@@ -45,7 +47,7 @@ public class ConfigSyncPacket {
                             boolean enableApotheosis, boolean enableDistantWorlds,
                             boolean enableEmbersAlchemyCalc, boolean enableFtbQuestCheckmarkButton,
                             boolean enableFtbQuestStorageScanButton, int recipeTreeMaxCandidates,
-                            int repeatCountMax) {
+                            int repeatCountMax, boolean enableUnifiedDisk) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.requireBoundMachineForVirtualStation = requireBoundMachineForVirtualStation;
         this.machineTabThreshold = machineTabThreshold;
@@ -63,6 +65,7 @@ public class ConfigSyncPacket {
         this.enableFtbQuestStorageScanButton = enableFtbQuestStorageScanButton;
         this.recipeTreeMaxCandidates = recipeTreeMaxCandidates;
         this.repeatCountMax = repeatCountMax;
+        this.enableUnifiedDisk = enableUnifiedDisk;
     }
 
     public static ConfigSyncPacket fromServerConfig() {
@@ -83,7 +86,8 @@ public class ConfigSyncPacket {
                 RSIntegrationConfig.ENABLE_FTB_QUEST_CHECKMARK_BUTTON.get(),
                 RSIntegrationConfig.ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON.get(),
                 RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
-                RSIntegrationConfig.REPEAT_COUNT_MAX.get());
+                RSIntegrationConfig.REPEAT_COUNT_MAX.get(),
+                RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
     }
 
     public static void encode(ConfigSyncPacket packet, FriendlyByteBuf buf) {
@@ -104,6 +108,7 @@ public class ConfigSyncPacket {
         buf.writeBoolean(packet.enableFtbQuestStorageScanButton);
         buf.writeVarInt(packet.recipeTreeMaxCandidates);
         buf.writeVarInt(packet.repeatCountMax);
+        buf.writeBoolean(packet.enableUnifiedDisk);
     }
 
     public static ConfigSyncPacket decode(FriendlyByteBuf buf) {
@@ -115,7 +120,7 @@ public class ConfigSyncPacket {
                 Math.max(2, Math.min(buf.readVarInt(), 32)),
                 // Server-authoritative crafting request limit.
                 Math.max(1, Math.min(buf.readVarInt(),
-                        RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)));
+                        RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)), buf.readBoolean());
     }
 
     public static void register() {
