@@ -9,6 +9,7 @@ import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,6 +28,14 @@ public final class UnifiedMountCoordinator {
         finally { if (old == null) CALLER.remove(); else CALLER.set(old); }
     }
     public static NetworkNode caller() { return CALLER.get(); }
+
+    private static BlockEntity loadedBlockEntity(NetworkNode node) {
+        if (!(node.getLevel() instanceof ServerLevel level)) return null;
+        LevelChunk chunk = level.getChunkSource().getChunkNow(node.getPos().getX() >> 4, node.getPos().getZ() >> 4);
+        // 节点 read() 可能发生在区块恢复中，不能同步请求区块或触发方块实体的 NBT 恢复。
+        return chunk == null ? null : chunk.getBlockEntities().get(node.getPos());
+    }
+
     public static final class Lease {
         public final UnifiedDiskRoot root;
         public final NetworkNode node;
@@ -34,32 +43,29 @@ public final class UnifiedMountCoordinator {
         private final IStorageDisk<?>[] items, fluids;
         private final ItemStack physical;
         private boolean active = true;
-        private boolean attached;
         Lease(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
               IStorageDisk<?>[] fluids, ItemStack physical) {
             this.root = root; this.node = node; this.slot = slot;
             this.items = items; this.fluids = fluids; this.physical = physical;
         }
         public boolean valid() {
-            if (!active || !root.manager().enabled() || !(node.getLevel() instanceof ServerLevel level)
-                    || !level.hasChunkAt(node.getPos())) return false;
+            if (!active || !root.manager().enabled()) return false;
             if (!(physical.getItem() instanceof UnifiedDiskItem item) || physical.getCount() != 1
                     || !root.id().equals(item.getId(physical)) || !root.worldId().equals(item.worldId(physical))) return false;
             ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
                     : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
             if (current != physical) return false;
-            BlockEntity block = level.getBlockEntity(node.getPos());
+            BlockEntity block = loadedBlockEntity(node);
             boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
-            if (same) attached = true;
             // 节点 read() 会先恢复槽位再进入方块实体；尚未附着期间不可读写。
             return same;
         }
         boolean stale() {
-            if (!active || !(node.getLevel() instanceof ServerLevel level) || !level.hasChunkAt(node.getPos())) return true;
+            if (!active) return true;
             ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
                     : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
             if (current != physical) return true;
-            BlockEntity block = level.getBlockEntity(node.getPos());
+            BlockEntity block = loadedBlockEntity(node);
             return !(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != node;
         }
         void revoke() { active = false; items[slot] = null; fluids[slot] = null; }
@@ -101,10 +107,7 @@ public final class UnifiedMountCoordinator {
             lease.revoke(); changed.put(lease.node, true); return true;
         });
         for (Candidate candidate : List.copyOf(waiting)) {
-            if (!(candidate.node.getLevel() instanceof ServerLevel level) || !level.hasChunkAt(candidate.node.getPos())) {
-                waiting.remove(candidate); continue;
-            }
-            BlockEntity block = level.getBlockEntity(candidate.node.getPos());
+            BlockEntity block = loadedBlockEntity(candidate.node);
             if (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node) {
                 waiting.remove(candidate); continue;
             }

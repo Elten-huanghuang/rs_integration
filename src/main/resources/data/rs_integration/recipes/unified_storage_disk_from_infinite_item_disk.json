@@ -1,0 +1,11 @@
+{
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "refinedstorage" },
+    { "type": "rs_integration:unified_disk_enabled" }
+  ],
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "refinedstorage:creative_storage_disk" }
+  ],
+  "result": { "item": "rs_integration:unified_storage_disk", "count": 1 }
+}

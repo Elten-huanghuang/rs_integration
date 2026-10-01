@@ -16,13 +16,16 @@ import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.DiskDriveNetworkNode;
+import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.ItemDriveWrapperStorageDisk;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.fluids.FluidStack;
@@ -32,6 +35,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
@@ -43,6 +48,9 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
     private ServerLevel level;
     private UnifiedDiskManager manager;
     private UnifiedDiskRoot root;
+    private ServerChunkCache chunks;
+    private LevelChunk chunk;
+    private Map<BlockPos, BlockEntity> blocks;
     private DiskDriveNetworkNode node;
     private AtomicReference<ItemStack> current;
     private IStorageDisk<?>[] items, fluids;
@@ -51,7 +59,11 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         server = mock(MinecraftServer.class); when(server.isSameThread()).thenReturn(true);
         when(server.getWorldPath(LevelResource.ROOT)).thenReturn(world);
         level = mock(ServerLevel.class); when(level.getServer()).thenReturn(server);
-        when(level.hasChunkAt(any())).thenReturn(true);
+        chunks = mock(ServerChunkCache.class); when(level.getChunkSource()).thenReturn(chunks);
+        chunk = mock(LevelChunk.class); when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        blocks = new HashMap<>(); when(chunk.getBlockEntities()).thenReturn(blocks);
+        // 这些入口会重新请求区块或恢复方块实体，挂载检查绝不能调用。
+        when(level.getBlockEntity(any())).thenThrow(new AssertionError("不能同步加载磁盘仓所在区块"));
         manager = UnifiedDiskManager.get(level); root = manager.create(UUID.randomUUID());
         node = mock(DiskDriveNetworkNode.class);
         when(node.getLevel()).thenReturn(level); when(node.getPos()).thenReturn(BlockPos.ZERO);
@@ -65,7 +77,7 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         when(inventory.getStackInSlot(0)).thenAnswer(invocation -> current.get());
         BlockEntity block = mock(BlockEntity.class, withSettings().extraInterfaces(INetworkNodeProxy.class));
         when(((INetworkNodeProxy<?>) block).getNode()).thenReturn(node);
-        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(block);
+        blocks.put(BlockPos.ZERO, block);
         items = new IStorageDisk<?>[8]; fluids = new IStorageDisk<?>[8];
     }
 
@@ -73,6 +85,71 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         return manager.mounts().acquire(root, node, 0, items, fluids, current.get(), () -> {});
     }
     @AfterEach void shutdown() { if (server != null) UnifiedDiskManager.stop(server); RSStorageConfig.SPEC.setConfig(null); }
+
+    @Test void loadingChunkReturnsImmediatelyAndSameWrapperRecoversAfterAttachment() throws Exception {
+        setup();
+        var core = manager.entry(root.id()).core;
+        core.insertItem(new ItemStack(Items.DIAMOND), 17, true);
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        var lease = lease();
+        var item = new UnifiedBoundDisk<ItemStack>(lease, core, FrozenKey.Kind.ITEM);
+        // 原卡死调用链：恢复节点槽位时，RS wrapper 构造器立即读取 getStored()。
+        var wrapper = new ItemDriveWrapperStorageDisk(node, item);
+        assertEquals(0, wrapper.getStored());
+        assertFalse(lease.valid());
+        assertEquals(3, item.insert(new ItemStack(Items.DIAMOND), 3, Action.PERFORM).getCount());
+        assertTrue(item.extract(new ItemStack(Items.DIAMOND), 1, 0, Action.PERFORM).isEmpty());
+        assertEquals(17, core.items.total());
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        assertTrue(lease.valid());
+        assertEquals(17, wrapper.getStored());
+        assertTrue(item.insert(new ItemStack(Items.DIAMOND), 3, Action.PERFORM).isEmpty());
+        assertEquals(20, wrapper.getStored());
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void pendingBlockEntityIsNotRestoredAndRemovedBlockRevokesBothViews() throws Exception {
+        setup();
+        BlockEntity block = blocks.remove(BlockPos.ZERO);
+        var lease = lease();
+        var core = manager.entry(root.id()).core;
+        items[0] = new UnifiedBoundDisk<ItemStack>(lease, core, FrozenKey.Kind.ITEM);
+        fluids[0] = new UnifiedBoundDisk<FluidStack>(lease, core, FrozenKey.Kind.FLUID);
+        assertFalse(lease.valid());
+        blocks.put(BlockPos.ZERO, block);
+        assertTrue(lease.valid());
+        blocks.clear();
+        manager.mounts().sweep();
+        assertFalse(lease.valid());
+        assertNull(items[0]); assertNull(fluids[0]);
+        assertFalse(manager.mounts().mounted(root.id()));
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void unloadedLeaseHandsOverToWaitingDiskWithoutRequestingChunks() throws Exception {
+        setup();
+        var first = lease(); assertTrue(first.valid());
+        DiskDriveNetworkNode other = mock(DiskDriveNetworkNode.class);
+        BlockPos otherPos = new BlockPos(16, 0, 0);
+        when(other.getLevel()).thenReturn(level); when(other.getPos()).thenReturn(otherPos);
+        IItemHandler otherInventory = node.getDisks();
+        when(other.getDisks()).thenReturn(otherInventory);
+        LevelChunk otherChunk = mock(LevelChunk.class);
+        BlockEntity otherBlock = mock(BlockEntity.class, withSettings().extraInterfaces(INetworkNodeProxy.class));
+        when(((INetworkNodeProxy<?>) otherBlock).getNode()).thenReturn(other);
+        when(otherChunk.getBlockEntities()).thenReturn(Map.of(otherPos, otherBlock));
+        when(chunks.getChunkNow(1, 0)).thenReturn(otherChunk);
+        IStorageDisk<?>[] otherItems = new IStorageDisk<?>[8], otherFluids = new IStorageDisk<?>[8];
+        AtomicReference<UnifiedMountCoordinator.Lease> replacement = new AtomicReference<>();
+        Runnable retry = () -> replacement.set(manager.mounts().acquire(root, other, 0,
+                otherItems, otherFluids, current.get(), () -> {}));
+        assertNull(manager.mounts().acquire(root, other, 0, otherItems, otherFluids, current.get(), retry));
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        manager.mounts().sweep();
+        assertFalse(first.valid());
+        assertNotNull(replacement.get()); assertTrue(replacement.get().valid());
+        verify(level, never()).getBlockEntity(any());
+    }
 
     @Test void itemAndFluidViewsPreservePermissionsSimulationAndIndependentListeners() throws Exception {
         setup(); var lease = lease(); assertTrue(lease.valid());
