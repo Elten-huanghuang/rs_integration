@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -32,11 +33,11 @@ public final class CraftStartedPacket {
         buf.writeUUID(craftId);
         buf.writeVarInt(totalNodes);
         buf.writeBoolean(graphMode);
-        buf.writeItem(target);
+        InkFluidSupport.writePacket(buf, target);
     }
 
     public static CraftStartedPacket decode(FriendlyByteBuf buf) {
-        return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(), buf.readItem());
+        return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(), InkFluidSupport.readPacket(buf));
     }
 
     public static void handle(CraftStartedPacket packet, Supplier<NetworkEvent.Context> ctx) {

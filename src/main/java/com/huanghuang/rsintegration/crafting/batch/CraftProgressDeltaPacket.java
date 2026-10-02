@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -62,7 +63,7 @@ public final class CraftProgressDeltaPacket {
             buf.writeVarInt(node.state().ordinal());
             buf.writeUtf(node.recipeId(), 256);
             buf.writeUtf(node.modTypeId(), 128);
-            buf.writeItem(node.displayOutput());
+            InkFluidSupport.writePacket(buf, node.displayOutput());
             buf.writeVarInt(node.completedOperations());
             buf.writeVarInt(node.totalOperations());
             buf.writeVarInt(node.runningOperations());
@@ -92,7 +93,7 @@ public final class CraftProgressDeltaPacket {
             var state = CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
             String recipe = buf.readUtf(256);
             String mod = buf.readUtf(128);
-            var output = buf.readItem();
+            var output = InkFluidSupport.readPacket(buf);
             int completedOps = nonNegative(buf, "completedOperations");
             int totalOps = nonNegative(buf, "totalOperations");
             int runningOps = nonNegative(buf, "runningOperations");
