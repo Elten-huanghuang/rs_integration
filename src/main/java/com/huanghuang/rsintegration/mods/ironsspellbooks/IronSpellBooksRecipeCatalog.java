@@ -191,6 +191,7 @@ public final class IronSpellBooksRecipeCatalog {
                 IronSpellBooksRecipeCatalog::findInks).orElse(List.of());
         addScrollForgeRecipes(result, findFocuses(spells, diagnostics), spells, inks, diagnostics);
         addArcaneAnvilRecipes(result, spells, diagnostics);
+        IronAlchemistRecipes.addRecipes(result, spells, inks, diagnostics);
         Map<OutputKey, IronSpellBooksRecipe> byOutput = new HashMap<>();
         for (IronSpellBooksRecipe recipe : result.values()) {
             ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);

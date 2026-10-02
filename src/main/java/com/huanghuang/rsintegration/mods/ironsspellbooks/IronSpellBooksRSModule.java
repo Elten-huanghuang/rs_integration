@@ -16,6 +16,7 @@ public final class IronSpellBooksRSModule implements IModIntegration {
     public static final IronSpellBooksRSModule INSTANCE = new IronSpellBooksRSModule();
     public static final String SCROLL_FORGE_TYPE = "irons_spellbooks_scroll_forge";
     public static final String ARCANE_ANVIL_TYPE = "irons_spellbooks_arcane_anvil";
+    public static final String ALCHEMIST_CAULDRON_TYPE = "irons_spellbooks_alchemist_cauldron";
 
     private IronSpellBooksRSModule() {}
 
@@ -24,6 +25,13 @@ public final class IronSpellBooksRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
+        ModType.register(ALCHEMIST_CAULDRON_TYPE,
+                new String[]{IronSpellBooksRecipe.class.getName()},
+                new String[]{"alchemist_cauldron"}, new String[]{ALCHEMIST_CAULDRON_TYPE},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistBatchDelegate"));
+        ModType.configureJei(ALCHEMIST_CAULDRON_TYPE,
+                new String[][]{{"rs_integration:alchemist_cauldron", ALCHEMIST_CAULDRON_TYPE}},
+                new String[][]{}, "gui.rs_integration.jei.irons_spellbooks_alchemist_cauldron");
         ModType.register(SCROLL_FORGE_TYPE,
                 new String[]{IronSpellBooksRecipe.class.getName()},
                 new String[]{"scroll_forge", "scrollforge"}, new String[]{SCROLL_FORGE_TYPE},
@@ -46,6 +54,10 @@ public final class IronSpellBooksRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "irons_spellbooks", ModType.byId(ALCHEMIST_CAULDRON_TYPE), RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS,
+                List.of("io.redspace.ironsspellbooks.block.alchemist_cauldron.AlchemistCauldronBlock"),
+                List.of("irons_spellbooks:alchemist_cauldron"), ALCHEMIST_CAULDRON_TYPE, false));
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "irons_spellbooks", ModType.byId(SCROLL_FORGE_TYPE), RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS,
                 List.of("io.redspace.ironsspellbooks.block.scroll_forge.ScrollForgeBlock"),

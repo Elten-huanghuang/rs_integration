@@ -17,6 +17,11 @@ public final class RSIntegrationConfig {
     public static final int SERVER_CONFIG_SCHEMA = 6;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
+    public static final List<String> DEFAULT_FREE_WATER_MACHINES = List.of(
+            "farmersrespite_kettle", "youkaishomecoming_kettle", "youkaishomecoming_ferment",
+            "youkaishomecoming_moka", "youkaishomecoming_steamer", "irons_spellbooks_alchemist_cauldron",
+            "eidolon_crucible", "botania_petal_apothecary");
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> FREE_WATER_MACHINES;
     private static final List<String> LEGACY_DEFAULT_PASSIVE_TICK_ITEMS = List.of(
             "reliquary:pyromancer_staff|mutates",
             "enigmaticaddons:artificial_flower|mutates",
@@ -354,6 +359,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_OPERATIONS;
     public static ForgeConfigSpec.IntValue CRAFTING_OPERATION_DISPATCH_PER_CRAFT;
+    public static ForgeConfigSpec.IntValue CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER;
+    public static ForgeConfigSpec.IntValue CRAFTING_PROBABILISTIC_MAX_ATTEMPTS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DISABLED_MODS;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DELEGATE_POLICIES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
@@ -994,6 +1001,15 @@ public final class RSIntegrationConfig {
         s.pop();
 
         s.push("autoCrafting");
+        FREE_WATER_MACHINES = s
+                .comment("允许免费补水的机器类型列表。清空列表可关闭所有免费补水。",
+                        "未列出的机器从 RS 流体存储扣除补入的水；已有的水可以继续使用。",
+                        "Supported: farmersrespite_kettle, youkaishomecoming_kettle, youkaishomecoming_ferment,",
+                        "youkaishomecoming_moka, youkaishomecoming_steamer, irons_spellbooks_alchemist_cauldron,",
+                        "eidolon_crucible, botania_petal_apothecary.",
+                        "摩卡壶、蒸锅和花药台每次从无水变为有水时消耗 1000 mB，其余机器按缺水量扣除。")
+                .defineListAllowEmpty("freeWaterMachines", DEFAULT_FREE_WATER_MACHINES,
+                        value -> value instanceof String name && name.matches("[a-z0-9_]+"));
         ENABLE_CATALYST_RECIPE_PREFERENCE = s
                 .comment("Automatically prefer crafting paths backed by reusable catalysts.",
                         "CraftTweaker inputs using .reuse() are recognized without listing recipe IDs.",
@@ -1234,6 +1250,13 @@ public final class RSIntegrationConfig {
                 .comment("Maximum machine-operation starts during one craft run.",
                         "Retries before delegate start do not consume this budget. Range: 16-65536.")
                 .defineInRange("craftingOperationDispatchPerCraft", 16384, 16, 65536);
+        CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER = s
+                .comment("递归概率材料的最大尝试次数倍数，以最初计划的执行次数为基数。",
+                        "达到上限时终止并保留真实产物，不退还已消耗材料。")
+                .defineInRange("craftingProbabilisticAttemptMultiplier", 16, 1, 1024);
+        CRAFTING_PROBABILISTIC_MAX_ATTEMPTS = s
+                .comment("每个递归概率材料目标的绝对尝试次数上限，同时受全任务操作预算限制。")
+                .defineInRange("craftingProbabilisticMaxAttempts", 4096, 1, 65536);
         CRAFTING_PARALLEL_DISABLED_MODS = s
                 .comment("Mod/delegate type IDs that must always run as exclusive graph nodes.",
                         "This denylist overrides a delegate's concurrency capability declaration.",

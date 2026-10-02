@@ -89,6 +89,7 @@ final class CandidateEngine {
             for (RecipeIndex.Entry entry : recipes) {
                 if (ctx.timedOut()) break;
                 ResourceLocation rid = entry.recipe().getId();
+                if (ctx.excludedRecipes.contains(rid)) continue;
                 CandidateKey candidateKey = CandidateKey.of(entry);
                 if (byId.containsKey(candidateKey)) continue;
                 if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {

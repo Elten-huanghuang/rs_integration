@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import java.util.Arrays;
 import java.lang.reflect.Modifier;
@@ -294,6 +296,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
+        if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         this.usingSharedLedger = true;
         this.craftDone = false;
 
@@ -318,9 +321,10 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        if (!hasWater()) {
-            var state = myLevel.getBlockState(myPos);
-            setWaterProperty(state, true);
+        if (!hasWater() && !MachineWaterSupply.fillProperty("youkaishomecoming_moka", 1000,
+                storageEndpoint(), player, () -> setWaterProperty(myLevel.getBlockState(myPos), true))) {
+            forceChunkLoad(false);
+            return false;
         }
 
         IItemHandler handler = getInventory(be);
@@ -739,13 +743,12 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return true; // assume water present if uncheckable
     }
 
-    private void setWaterProperty(BlockState state, boolean value) {
+    private boolean setWaterProperty(BlockState state, boolean value) {
         if (waterPropertyField != null) {
             try {
                 Object prop = waterPropertyField.get(null);
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp)) {
-                    myLevel.setBlock(myPos, state.setValue(bp, value), 3);
-                    return;
+                    return myLevel.setBlock(myPos, state.setValue(bp, value), 3);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-MokaPot] setWaterProperty reflection failed", e);
@@ -753,10 +756,10 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
         for (var prop : state.getProperties()) {
             if (prop.getName().equalsIgnoreCase("water") && prop instanceof BooleanProperty bp) {
-                myLevel.setBlock(myPos, state.setValue(bp, value), 3);
-                return;
+                return myLevel.setBlock(myPos, state.setValue(bp, value), 3);
             }
         }
+        return false;
     }
 
     private static ItemStack getOutputContainer(Recipe<?> recipe) {

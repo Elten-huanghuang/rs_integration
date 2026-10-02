@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
@@ -104,6 +105,9 @@ public final class MaterialSources {
             if (!stack.isEmpty()) {
                 mergeAvailable(counts, StackKey.of(stack, true), stack.getCount(), "refined_storage");
             }
+        }
+        for (ItemStack token : InkFluidSupport.snapshot(network, null)) {
+            mergeAvailable(counts, StackKey.of(token, true), token.getCount(), "refined_storage_ink");
         }
     }
 

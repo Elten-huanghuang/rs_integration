@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.refinedmods.refinedstorage.RS;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -178,24 +177,7 @@ public final class UnifiedGridSession {
     }
 
     private void applyFluidTransfer(UnifiedGridFluidTransfer.Result result, boolean filling, boolean shift) {
-        if (!result.recovery().isEmpty()) {
-            UnifiedGridFluidRecovery.get(player).retain(player.getUUID(), result.recovery());
-            RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已保存并等待归还网络", result.recovery().getAmount());
-        }
-        menu.setCarried(result.cursor());
-        if (!result.overflow().isEmpty()) player.getInventory().placeItemBackInInventory(result.overflow());
-        else if (filling && shift && result.transferred() > 0 && !result.cursor().isEmpty()) {
-            ItemStack copy = result.cursor().copy();
-            player.getInventory().add(copy);
-            // 未能进入背包的部分留在鼠标上，避免满背包时直接丢弃。
-            menu.setCarried(copy);
-        }
-        if (result.transferred() <= 0) return;
-        network.getFluidStorageTracker().changed(player, result.resource().copy());
-        if (network.getNetworkItemManager() != null) {
-            var config = RS.SERVER_CONFIG.getWirelessFluidGrid();
-            network.getNetworkItemManager().drainEnergy(player, filling ? config.getExtractUsage() : config.getInsertUsage());
-        }
+        UnifiedGridFluidTransfer.apply(player, network, result, filling, shift);
     }
 
     private final class Channel<T> implements IStorageCacheListener<T> {

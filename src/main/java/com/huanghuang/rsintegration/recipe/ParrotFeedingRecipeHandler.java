@@ -63,6 +63,12 @@ public final class ParrotFeedingRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public boolean supportsTargetedProduction(@Nonnull Recipe<?> recipe) {
+        // 肉换蛋还依赖具体鹦鹉颜色，继续使用它已有的索引禁入规则。
+        return !(recipe instanceof BirdcageEggRecipe);
+    }
+
+    @Override
     public boolean indexPrimaryOutput(@Nonnull Recipe<?> recipe) {
         // The actual egg colour is selected by the parrot in the bound cage,
         // and monster meat may produce no egg at all. Neither is a fixed

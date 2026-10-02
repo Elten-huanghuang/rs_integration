@@ -162,13 +162,7 @@ public final class EidolonCraftPacket {
         ResourceKey<Level> altarDim = level.dimension();
 
         // Validate crucible state
-        boolean hasWater;
-        try { Field hwField = be.getClass().getDeclaredField("hasWater"); hwField.setAccessible(true); hasWater = hwField.getBoolean(be); } catch (Exception e) { hasWater = false; }
-
-        boolean boiling = false;
-        try {
-            if (boilingField != null) boiling = boilingField.getBoolean(be);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
+        boolean boiling = EidolonWaterSupply.isHeated(be);
 
         boolean stepsEmpty = true;
         try {
@@ -177,19 +171,6 @@ public final class EidolonCraftPacket {
                 stepsEmpty = steps == null || steps.isEmpty();
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
-
-        if (!hasWater) {
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
-            // Try auto-fill
-            try {
-                be.getClass().getMethod("fill").invoke(be);
-                hasWater = true;
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.info.auto_filled"));
-            } catch (Exception ex) {
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
-                return;
-            }
-        }
 
         if (!boiling) {
             player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_heat"));
@@ -294,6 +275,12 @@ public final class EidolonCraftPacket {
             boolean matches = (boolean) matchesMethod.invoke(recipe, crucibleSteps);
             if (!matches) {
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.match_failed"));
+                return;
+            }
+
+            if (!EidolonWaterSupply.ensureWater(be, EidolonBatchDelegate.readWaterAmountStatic(recipe),
+                    endpoint != null ? endpoint : network != null ? CraftStorageEndpoints.fromLegacyNetwork(network) : null, player)) {
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
                 return;
             }
 

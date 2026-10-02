@@ -321,6 +321,11 @@ public final class RecipePreviewRenderer {
     public boolean drawCategoryIcon(GuiGraphics gfx, ResourceLocation recipeId,
                                     int x, int y, int size) {
         if (isIronSpellBooksRecipe(recipeId)) {
+            if (recipeId.getPath().startsWith("irons_spellbooks/recycle/")
+                    || recipeId.getPath().startsWith("irons_spellbooks/bottle/")) {
+                return renderItemIcon(gfx, ForgeRegistries.ITEMS.getValue(
+                        new ResourceLocation("irons_spellbooks", "alchemist_cauldron")), x, y, size);
+            }
             boolean scrollForge = recipeId.getPath().startsWith("irons_spellbooks/scroll_forge/");
             Item item = scrollForge ? scrollForgeItem : arcaneAnvilItem;
             if (item == null) {
@@ -427,7 +432,9 @@ public final class RecipePreviewRenderer {
         if (recipeId == null || !"rs_integration".equals(recipeId.getNamespace())) return false;
         String path = recipeId.getPath();
         return path.startsWith("irons_spellbooks/scroll_forge/")
-                || path.startsWith("irons_spellbooks/arcane_anvil/");
+                || path.startsWith("irons_spellbooks/arcane_anvil/")
+                || path.startsWith("irons_spellbooks/recycle/")
+                || path.startsWith("irons_spellbooks/bottle/");
     }
 
     private boolean isGoetyRitualRecipe(ResourceLocation recipeId) {
@@ -478,8 +485,11 @@ public final class RecipePreviewRenderer {
      */
     public Optional<Component> categoryTitle(ResourceLocation recipeId) {
         if (isIronSpellBooksRecipe(recipeId)) {
-            String key = recipeId.getPath().startsWith("irons_spellbooks/scroll_forge/")
+            String path = recipeId.getPath();
+            String key = path.startsWith("irons_spellbooks/scroll_forge/")
                     ? "rsi.batch.mod.irons_spellbooks_scroll_forge"
+                    : path.startsWith("irons_spellbooks/recycle/") || path.startsWith("irons_spellbooks/bottle/")
+                    ? "gui.rs_integration.jei.irons_spellbooks_alchemist_cauldron"
                     : "rsi.batch.mod.irons_spellbooks_arcane_anvil";
             return Optional.of(Component.translatable(key));
         }

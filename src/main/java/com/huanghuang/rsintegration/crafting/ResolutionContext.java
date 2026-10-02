@@ -51,6 +51,7 @@ final class ResolutionContext {
 
     final Level level;
     final Map<Item, List<RecipeIndex.Entry>> index;
+    Set<ResourceLocation> excludedRecipes = Set.of();
     final Map<Item, List<RecipeIndex.ReusableCatalystRoute>> reusableCatalystRoutes;
     final Map<CraftingResolver.StackKey, Integer> counts;
     final List<CraftingResolver.ResolutionStep> steps;

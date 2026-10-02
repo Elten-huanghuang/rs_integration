@@ -623,13 +623,15 @@ public final class RecipeIndex {
             if (!seen.add(recipe.getId())) continue;
             ItemStack output = recipe.getResultItem(level.registryAccess());
             if (output.isEmpty()) continue;
-            String typeId = recipe.machine()
-                    == IronSpellBooksRecipe.Machine.SCROLL_FORGE
-                    ? "irons_spellbooks_scroll_forge" : "irons_spellbooks_arcane_anvil";
+            String machinePath = switch (recipe.machine()) {
+                case SCROLL_FORGE -> "scroll_forge";
+                case ARCANE_ANVIL -> "arcane_anvil";
+                case ALCHEMIST_CAULDRON -> "alchemist_cauldron";
+            };
+            String typeId = "irons_spellbooks_" + machinePath;
             idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
                     recipe, ModType.byId(typeId), new ResourceLocation("irons_spellbooks",
-                    recipe.machine() == IronSpellBooksRecipe.Machine.SCROLL_FORGE
-                            ? "scroll_forge" : "arcane_anvil"), true));
+                    machinePath), true));
             count++;
         }
         return count;

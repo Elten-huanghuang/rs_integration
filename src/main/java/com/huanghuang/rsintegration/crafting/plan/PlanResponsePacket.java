@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -90,16 +91,16 @@ public final class PlanResponsePacket {
         // chain structure so the player can see what intermediate steps are
         // required and which leaf materials are missing.
         buf.writeUtf(plan.targetName(), MAX_TARGET_NAME_LENGTH);
-        buf.writeItem(plan.targetResult());
+        InkFluidSupport.writePacket(buf, plan.targetResult());
         // Steps
         buf.writeVarInt(plan.steps().size());
         for (PlanStep step : plan.steps()) {
             buf.writeResourceLocation(step.recipeId());
-            buf.writeItem(step.output());
+            InkFluidSupport.writePacket(buf, step.output());
             buf.writeVarInt(step.batches());
             buf.writeVarInt(step.inputs().size());
             for (ItemStack in : step.inputs()) {
-                buf.writeItem(in);
+                InkFluidSupport.writePacket(buf, in);
             }
             for (DemandRole role : step.inputRoles()) {
                 buf.writeVarInt(role.ordinal());
@@ -167,7 +168,7 @@ public final class PlanResponsePacket {
         buf.writeBoolean(plan.embersCodeFromCache());
         buf.writeBoolean(plan.executionMachineSupportsGui());
         buf.writeBoolean(plan.baseItem() != null);
-        if (plan.baseItem() != null) buf.writeItem(plan.baseItem());
+        if (plan.baseItem() != null) InkFluidSupport.writePacket(buf, plan.baseItem());
         // boundMachineTypes availability passport
         buf.writeVarInt(plan.boundMachineTypes().size());
         for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
@@ -179,7 +180,7 @@ public final class PlanResponsePacket {
         }
         // Clicked ghost-output (NBT-variant target, e.g. WR leveled book) — tail-appended
         buf.writeBoolean(plan.clickedOutput() != null);
-        if (plan.clickedOutput() != null) buf.writeItem(plan.clickedOutput());
+        if (plan.clickedOutput() != null) InkFluidSupport.writePacket(buf, plan.clickedOutput());
         // Server-authored DAG view — protocol v8 tail
         buf.writeBoolean(plan.graph() != null);
         if (plan.graph() != null) writeGraph(buf, plan.graph());
@@ -191,7 +192,7 @@ public final class PlanResponsePacket {
             buf.writeVarInt(candidate.x());
             buf.writeVarInt(candidate.y());
             buf.writeVarInt(candidate.z());
-            buf.writeItem(candidate.icon());
+            InkFluidSupport.writePacket(buf, candidate.icon());
             buf.writeVarInt(candidate.state().ordinal());
             buf.writeComponent(candidate.status());
         }
@@ -230,18 +231,18 @@ public final class PlanResponsePacket {
         // structure even for infeasible plans so the client can render
         // intermediate steps and material shortages.
         String targetName = buf.readUtf(MAX_TARGET_NAME_LENGTH);
-        ItemStack targetResult = buf.readItem();
+        ItemStack targetResult = InkFluidSupport.readPacket(buf);
         // Steps
         int stepCount = readBoundedCount(buf);
         List<PlanStep> steps = new ArrayList<>(stepCount);
         for (int i = 0; i < stepCount; i++) {
             var rid = buf.readResourceLocation();
-            ItemStack output = buf.readItem();
+            ItemStack output = InkFluidSupport.readPacket(buf);
             int batches = buf.readVarInt();
             int inCount = readBoundedCount(buf);
             List<ItemStack> inputs = new ArrayList<>(inCount);
             for (int j = 0; j < inCount; j++) {
-                inputs.add(buf.readItem());
+                inputs.add(InkFluidSupport.readPacket(buf));
             }
             List<DemandRole> inputRoles = new ArrayList<>(inCount);
             DemandRole[] demandRoles = DemandRole.values();
@@ -322,7 +323,7 @@ public final class PlanResponsePacket {
         boolean embersCanInfer = buf.readBoolean();
         boolean embersCodeFromCache = buf.readBoolean();
         boolean executionMachineSupportsGui = buf.readBoolean();
-        ItemStack baseItem = buf.readBoolean() ? buf.readItem() : null;
+        ItemStack baseItem = buf.readBoolean() ? InkFluidSupport.readPacket(buf) : null;
         // boundMachineTypes availability passport
         int boundMtCount = readBoundedCount(buf);
         Set<String> boundMachineTypes = new LinkedHashSet<>();
@@ -335,7 +336,7 @@ public final class PlanResponsePacket {
             leftovers.put(key, buf.readVarInt());
         }
         // Clicked ghost-output — required protocol field.
-        ItemStack clickedOutput = buf.readBoolean() ? buf.readItem() : null;
+        ItemStack clickedOutput = buf.readBoolean() ? InkFluidSupport.readPacket(buf) : null;
         // Server-authored DAG view — required protocol field.
         boolean hasGraph = buf.readBoolean();
         PlanGraphView graph = hasGraph ? readGraph(buf) : null;
@@ -348,7 +349,7 @@ public final class PlanResponsePacket {
             int x = buf.readVarInt();
             int y = buf.readVarInt();
             int z = buf.readVarInt();
-            ItemStack icon = buf.readItem();
+            ItemStack icon = InkFluidSupport.readPacket(buf);
             int stateOrdinal = buf.readVarInt();
             if (stateOrdinal < 0 || stateOrdinal >= machineStates.length) {
                 throw new DecoderException("Invalid machine candidate state: " + stateOrdinal);
@@ -426,7 +427,7 @@ public final class PlanResponsePacket {
             buf.writeResourceLocation(node.recipeId());
             buf.writeUtf(node.modTypeId(), MAX_MOD_TYPE_LENGTH);
             buf.writeVarInt(node.executions());
-            buf.writeItem(node.primaryOutput());
+            InkFluidSupport.writePacket(buf, node.primaryOutput());
             buf.writeVarInt(node.alternativeIds().size());
             for (ResourceLocation alternative : node.alternativeIds()) {
                 buf.writeResourceLocation(alternative);
@@ -438,14 +439,14 @@ public final class PlanResponsePacket {
             buf.writeVarInt(node.inputs().size());
             for (PlanGraphView.InputView input : node.inputs()) {
                 buf.writeVarInt(input.portIndex());
-                buf.writeItem(input.display());
+                InkFluidSupport.writePacket(buf, input.display());
                 buf.writeVarInt(input.quantity());
                 buf.writeVarInt(input.roleOrdinal());
             }
             buf.writeVarInt(node.outputs().size());
             for (PlanGraphView.OutputView output : node.outputs()) {
                 buf.writeVarInt(output.portIndex());
-                buf.writeItem(output.display());
+                InkFluidSupport.writePacket(buf, output.display());
                 buf.writeVarInt(output.quantity());
                 buf.writeVarInt(output.kindOrdinal());
             }
@@ -455,18 +456,18 @@ public final class PlanResponsePacket {
             buf.writeVarInt(edge.consumerNodeId());
             buf.writeVarInt(edge.consumerPortIndex());
             writeSource(buf, edge.source());
-            buf.writeItem(edge.material());
+            InkFluidSupport.writePacket(buf, edge.material());
             buf.writeVarInt(edge.quantity());
         }
         buf.writeVarInt(graph.roots().size());
         for (PlanGraphView.RootView root : graph.roots()) {
-            buf.writeItem(root.display());
+            InkFluidSupport.writePacket(buf, root.display());
             buf.writeVarInt(root.quantity());
             buf.writeVarInt(root.unresolvedQuantity());
             buf.writeVarInt(root.allocations().size());
             for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
                 writeSource(buf, allocation.source());
-                buf.writeItem(allocation.material());
+                InkFluidSupport.writePacket(buf, allocation.material());
                 buf.writeVarInt(allocation.quantity());
             }
         }
@@ -474,7 +475,7 @@ public final class PlanResponsePacket {
         for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
             buf.writeVarInt(unresolved.consumerNodeId());
             buf.writeVarInt(unresolved.consumerPortIndex());
-            buf.writeItem(unresolved.display());
+            InkFluidSupport.writePacket(buf, unresolved.display());
             buf.writeVarInt(unresolved.quantity());
         }
         buf.writeVarInt(graph.topologicalOrder().size());
@@ -493,7 +494,7 @@ public final class PlanResponsePacket {
             ResourceLocation recipe = buf.readResourceLocation();
             String modType = buf.readUtf(MAX_MOD_TYPE_LENGTH);
             int executions = readNonNegativeVarInt(buf, "graph executions");
-            ItemStack primary = buf.readItem();
+            ItemStack primary = InkFluidSupport.readPacket(buf);
             List<ResourceLocation> alternativeIds = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 alternativeIds.add(buf.readResourceLocation());
@@ -505,13 +506,13 @@ public final class PlanResponsePacket {
             List<PlanGraphView.InputView> inputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"),
-                        buf.readItem(), readNonNegativeVarInt(buf, "input quantity"),
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "input quantity"),
                         readNonNegativeVarInt(buf, "input role ordinal")));
             }
             List<PlanGraphView.OutputView> outputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"),
-                        buf.readItem(), readNonNegativeVarInt(buf, "output quantity"),
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "output quantity"),
                         readNonNegativeVarInt(buf, "output kind ordinal")));
             }
             nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
@@ -520,12 +521,12 @@ public final class PlanResponsePacket {
         List<PlanGraphView.EdgeView> edges = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             edges.add(new PlanGraphView.EdgeView(readNonNegativeVarInt(buf, "edge consumer node"),
-                    readNonNegativeVarInt(buf, "edge consumer port"), readSource(buf), buf.readItem(),
+                    readNonNegativeVarInt(buf, "edge consumer port"), readSource(buf), InkFluidSupport.readPacket(buf),
                     readNonNegativeVarInt(buf, "edge quantity")));
         }
         List<PlanGraphView.RootView> roots = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
-            ItemStack display = buf.readItem();
+            ItemStack display = InkFluidSupport.readPacket(buf);
             int quantity = readNonNegativeVarInt(buf, "root quantity");
             int unresolvedQuantity = readNonNegativeVarInt(buf, "root unresolved quantity");
             if (unresolvedQuantity > quantity) {
@@ -534,7 +535,7 @@ public final class PlanResponsePacket {
             List<PlanGraphView.RootEdgeView> allocations = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 allocations.add(new PlanGraphView.RootEdgeView(readSource(buf),
-                        buf.readItem(), readNonNegativeVarInt(buf, "root allocation quantity")));
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "root allocation quantity")));
             }
             roots.add(new PlanGraphView.RootView(display, quantity, unresolvedQuantity, allocations));
         }
@@ -542,7 +543,7 @@ public final class PlanResponsePacket {
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             unresolved.add(new PlanGraphView.UnresolvedView(
                     readNonNegativeVarInt(buf, "unresolved consumer node"),
-                    readNonNegativeVarInt(buf, "unresolved consumer port"), buf.readItem(),
+                    readNonNegativeVarInt(buf, "unresolved consumer port"), InkFluidSupport.readPacket(buf),
                     readNonNegativeVarInt(buf, "unresolved quantity")));
         }
         List<Integer> topological = new ArrayList<>();

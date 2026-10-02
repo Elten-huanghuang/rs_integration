@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersrespite.kettle;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -43,7 +45,7 @@ import java.util.Map;
  * fluid ({@code KettleRecipe}). The output fluid is then bottled into an item
  * via the matching {@code KettlePouringRecipe} (container item + N mB → output).
  * <p>
- * Water is treated as free and is filled directly into the kettle's tank. Other
+ * Water follows the shared machine water supply policy. Other
  * fluids must be supplied as their native bottled item and are routed through
  * Farmer's Respite's container-slot transfer, preserving the kettle's own
  * empty-bottle and fluid-handling behavior.
@@ -205,7 +207,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (isWaterInput()) {
-            // Water is free; only output containers are consumed.
             if (!pourContainer.isEmpty() && bottlesPerCraft > 0) {
                 specs.add(new IngredientSpec(Ingredient.of(pourContainer), bottlesPerCraft));
             }
@@ -447,10 +448,9 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         int filled = 0;
         if (!fluidToFill.isEmpty()) {
-            filled = fluidHandler.fill(fluidToFill.copy(), IFluidHandler.FluidAction.EXECUTE);
+            filled = MachineWaterSupply.fill("farmersrespite_kettle", fluidHandler, fluidToFill.getAmount(),
+                    storageEndpoint(), player);
             if (filled < fluidToFill.getAmount()) {
-                if (filled > 0) fluidHandler.drain(
-                        new FluidStack(fluidToFill.getFluid(), filled), IFluidHandler.FluidAction.EXECUTE);
                 refundAll(materials);
                 forceChunkLoad(false);
                 return false;

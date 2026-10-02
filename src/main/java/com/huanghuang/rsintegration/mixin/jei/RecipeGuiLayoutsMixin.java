@@ -68,6 +68,9 @@ import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
@@ -220,6 +223,15 @@ public class RecipeGuiLayoutsMixin {
                 continue;
             }
 
+            if (IronAlchemistJeiBridge.isNativeRecipe(recipe)) {
+                ItemStack displayed = recipeLayout.getRecipeSlotsView()
+                        .findSlotByName("itemIn").flatMap(IRecipeSlotView::getDisplayedItemStack).orElse(null);
+                recipe = IronAlchemistJeiBridge.resolve(recipe, displayed);
+                if (recipe == null) {
+                    skippedNoRecipe++;
+                    continue;
+                }
+            }
             String recipeClassName = recipe.getClass().getName();
             if (WishingFountainRecipeIdResolver.isWrapper(recipe)
                     && WishingFountainRecipeIdResolver.resolve(recipe) == null) {
@@ -367,7 +379,8 @@ public class RecipeGuiLayoutsMixin {
             // the player clicked from the id alone. Capture the OUTPUT ghost slot
             // (the leveled enchanted book JEI renders) so the server can require the
             // matching (N-1)-level center book and produce level N.
-            ItemStack concreteTargetOutput = ironSpellBooksTarget;
+            ItemStack concreteTargetOutput = recipe instanceof IronSpellBooksRecipe ironRecipe
+                    ? ironRecipe.getResultItem(player.level().registryAccess()) : ironSpellBooksTarget;
             if (ironSpellBooksTarget != null && !ironSpellBooksTarget.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI-Mixin] Iron's Spell Books output capture: recipeId={} output={}",
@@ -759,6 +772,10 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
+        if (recipe instanceof IronSpellBooksRecipe ironRecipe
+                && ironRecipe.machine() == IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON) {
+            return IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE;
+        }
         if (rsi$isBirdcageEggDisplay(recipe)) {
             return "crockpot_birdcage";
         }

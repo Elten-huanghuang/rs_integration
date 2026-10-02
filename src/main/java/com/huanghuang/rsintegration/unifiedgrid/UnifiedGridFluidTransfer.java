@@ -1,7 +1,13 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.refinedmods.refinedstorage.RS;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.fluids.FluidStack;
@@ -19,18 +25,22 @@ public final class UnifiedGridFluidTransfer {
                          FluidStack resource, int transferred) { }
 
     public static Result fill(INetwork network, ItemStack cursor, FluidStack fluid) {
-        return fill(network, cursor, fluid, stack -> FluidUtil.getFluidHandler(stack).orElse(null));
+        return fill(network, cursor, fluid, stack -> {
+            IFluidHandlerItem bottle = InkBottleFluidHandler.create(stack);
+            return bottle != null ? bottle : FluidUtil.getFluidHandler(stack).orElse(null);
+        });
     }
 
     static Result fill(INetwork network, ItemStack cursor, FluidStack fluid,
                        Function<ItemStack, IFluidHandlerItem> containers) {
         boolean borrowed = cursor.isEmpty();
         ItemStack source = cursor;
+        Item emptyContainer = InkFluidSupport.isInk(fluid) ? Items.GLASS_BOTTLE : Items.BUCKET;
         if (borrowed) {
-            // AE2 的空手便利路径只从网络取桶，不搜索玩家背包。
-            if (fluid.getFluid().getBucket() == Items.AIR) return unchanged(cursor);
-            ItemStack bucket = network.extractItem(new ItemStack(Items.BUCKET), 1, Action.SIMULATE);
-            if (bucket == null || !bucket.is(Items.BUCKET) || bucket.getCount() != 1) return unchanged(cursor);
+            // 空手从网络取一个匹配容器，墨水用玻璃瓶，其余流体沿用桶。
+            if (emptyContainer == Items.BUCKET && fluid.getFluid().getBucket() == Items.AIR) return unchanged(cursor);
+            ItemStack bucket = network.extractItem(new ItemStack(emptyContainer), 1, Action.SIMULATE);
+            if (bucket == null || !bucket.is(emptyContainer) || bucket.getCount() != 1) return unchanged(cursor);
             source = bucket;
         }
         IFluidHandlerItem simulated = containers.apply(source.copyWithCount(1));
@@ -42,8 +52,8 @@ public final class UnifiedGridFluidTransfer {
         Prepared filled = prepareFill(source, available, containers);
         if (filled == null) return unchanged(cursor);
         if (borrowed) {
-            ItemStack bucket = network.extractItem(new ItemStack(Items.BUCKET), 1, Action.PERFORM);
-            if (bucket == null || !bucket.is(Items.BUCKET) || bucket.getCount() != 1) {
+            ItemStack bucket = network.extractItem(new ItemStack(emptyContainer), 1, Action.PERFORM);
+            if (bucket == null || !bucket.is(emptyContainer) || bucket.getCount() != 1) {
                 return new Result(bucket == null ? cursor : bucket, ItemStack.EMPTY,
                         FluidStack.EMPTY, FluidStack.EMPTY, 0);
             }
@@ -125,6 +135,29 @@ public final class UnifiedGridFluidTransfer {
         remainder.shrink(1);
         return new Result(remainder.isEmpty() ? converted : remainder,
                 remainder.isEmpty() ? ItemStack.EMPTY : converted, recovery, resource, amount);
+    }
+
+    /** 混合终端与原生流体终端共用结算，异常余量进入持久化恢复队列。 */
+    public static void apply(ServerPlayer player, INetwork network, Result result, boolean filling, boolean shift) {
+        if (!result.recovery().isEmpty()) {
+            UnifiedGridFluidRecovery.get(player).retain(player.getUUID(), result.recovery());
+            RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已保存并等待归还网络", result.recovery().getAmount());
+        }
+        player.containerMenu.setCarried(result.cursor());
+        if (!result.overflow().isEmpty()) player.getInventory().placeItemBackInInventory(result.overflow());
+        else if (filling && shift && result.transferred() > 0 && !result.cursor().isEmpty()) {
+            ItemStack copy = result.cursor().copy();
+            player.getInventory().add(copy);
+            player.containerMenu.setCarried(copy);
+        }
+        if (result.transferred() <= 0) return;
+        FluidStack tracked = result.resource().copy();
+        tracked.setAmount(result.transferred());
+        network.getFluidStorageTracker().changed(player, tracked);
+        if (network.getNetworkItemManager() != null) {
+            var config = RS.SERVER_CONFIG.getWirelessFluidGrid();
+            network.getNetworkItemManager().drainEnergy(player, filling ? config.getExtractUsage() : config.getInsertUsage());
+        }
     }
 
     private static FluidStack refund(INetwork network, FluidStack fluid) {

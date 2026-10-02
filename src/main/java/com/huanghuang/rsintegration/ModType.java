@@ -297,9 +297,11 @@ public final class ModType {
         if (cn.equals("com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe")) {
             try {
                 Object machine = recipe.getClass().getMethod("machine").invoke(recipe);
-                return byId("SCROLL_FORGE".equals(String.valueOf(machine))
-                        ? "irons_spellbooks_scroll_forge"
-                        : "irons_spellbooks_arcane_anvil");
+                return byId(switch (String.valueOf(machine)) {
+                    case "SCROLL_FORGE" -> "irons_spellbooks_scroll_forge";
+                    case "ALCHEMIST_CAULDRON" -> "irons_spellbooks_alchemist_cauldron";
+                    default -> "irons_spellbooks_arcane_anvil";
+                });
             } catch (ReflectiveOperationException e) {
                 RSIntegrationMod.LOGGER.warn("Unable to classify Iron's Spell Books recipe {}",
                         recipe.getId(), e);

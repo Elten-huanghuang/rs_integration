@@ -201,6 +201,8 @@ class UnifiedGridSessionTest extends BootstrapTest {
                 FluidStack.EMPTY, new FluidStack(Fluids.WATER, 1000), 1000);
         try (MockedStatic<UnifiedGridFluidTransfer> transfers = mockStatic(UnifiedGridFluidTransfer.class)) {
             transfers.when(() -> UnifiedGridFluidTransfer.fill(eq(f.network), eq(ItemStack.EMPTY), any())).thenReturn(result);
+            transfers.when(() -> UnifiedGridFluidTransfer.apply(f.player, f.network, result, true, true))
+                    .thenCallRealMethod();
             f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch(),
                     f.entry(GridResourceKind.FLUID).serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
                     IItemGridHandler.EXTRACT_SHIFT));
@@ -211,6 +213,8 @@ class UnifiedGridSessionTest extends BootstrapTest {
         assertEquals(full, !cursor.getValue().isEmpty());
         if (full) assertTrue(cursor.getValue().is(Items.WATER_BUCKET));
         assertEquals(1, result.cursor().getCount(), "背包操作不修改转移结果模板");
+        verify(f.network.getFluidStorageTracker()).changed(eq(f.player),
+                argThat(stack -> stack.getFluid() == Fluids.WATER && stack.getAmount() == 1000));
     }
 
     @Test void fillingRejectsWrongKindOldEpochAndDeletedStoredIdentity() {
