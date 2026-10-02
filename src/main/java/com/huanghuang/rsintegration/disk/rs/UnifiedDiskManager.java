@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -74,6 +75,24 @@ public final class UnifiedDiskManager {
     public UUID worldId() { return worldId; }
     public boolean enabled() { return enabled; }
     public UnifiedMountCoordinator mounts() { return mounts; }
+
+    public List<UUID> savedDiskIds() throws IOException {
+        if (identityError != null) throw new IOException(identityError);
+        return files.savedDiskIds();
+    }
+
+    /** 找回原库存的物理凭据；不创建空库存、不更换 UUID、不复制库存。 */
+    public void restoreIdentity(UUID id, ItemStack replacement) throws IOException {
+        if (!enabled()) throw new IOException("统一盘已关闭或世界身份不可用");
+        if (!(replacement.getItem() instanceof UnifiedDiskItem item) || replacement.getCount() != 1
+                || replacement.hasTag()) throw new IOException("找回必须使用新的空白归墟盘");
+        Entry known = entry(id);
+        if (known.core == null) throw new IOException("原库存不可用：" + known.error);
+        if (!id.equals(known.core.diskId) || !worldId().equals(known.core.worldId)) {
+            throw new IOException("原库存身份不匹配");
+        }
+        item.setIdentity(replacement, id, worldId());
+    }
 
     public boolean allowTooltipRequest(UUID player) {
         int tick = server.getTickCount();

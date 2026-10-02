@@ -42,7 +42,7 @@ public final class UnifiedDiskTooltip {
             tooltip.add(Component.translatable(PREFIX + "tooltip.expand").withStyle(ChatFormatting.DARK_GRAY));
         } else {
             tooltip.add(Component.translatable(PREFIX + "tooltip.rules").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
-            for (int line = 1; line <= 6; line++) {
+            for (int line = 1; line <= 8; line++) {
                 tooltip.add(TextBuilder.of("• ").darkAqua().append(TextBuilder.translate(
                         PREFIX + "tooltip.detail_" + line).gray()).build());
             }

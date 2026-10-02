@@ -92,6 +92,22 @@ public final class DiskFileStore {
         }
     }
 
+    /** 只列出已有检查点的 UUID，不加载库存页面；临时或未知目录不作为可找回磁盘。 */
+    public List<UUID> savedDiskIds() throws IOException {
+        List<UUID> ids = new ArrayList<>();
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(root)) {
+            for (Path directory : directories) {
+                String name = directory.getFileName().toString();
+                UUID id;
+                try { id = UUID.fromString(name); }
+                catch (IllegalArgumentException ignored) { continue; }
+                if (id.toString().equals(name) && Files.isRegularFile(directory.resolve("manifest.bin"))) ids.add(id);
+            }
+        }
+        ids.sort(Comparator.comparing(UUID::toString));
+        return List.copyOf(ids);
+    }
+
     public Saved save(Snapshot snapshot, Manifest previous) throws IOException {
         Path directory = directory(snapshot.disk);
         Files.createDirectories(directory);

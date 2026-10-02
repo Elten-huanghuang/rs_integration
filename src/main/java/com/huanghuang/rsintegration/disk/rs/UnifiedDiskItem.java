@@ -1,13 +1,16 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.disk.UnifiedDiskDropProtection;
 import com.refinedmods.refinedstorage.api.storage.StorageType;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskProvider;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -61,6 +64,15 @@ public final class UnifiedDiskItem extends Item implements IStorageDiskProvider 
     }
 
     @Override public int getEntityLifespan(ItemStack stack, Level level) { return Integer.MAX_VALUE; }
+
+    /** 原版掉落物在扣血前调用此方法，覆盖爆炸、火、岩浆、雷击、仙人掌等伤害。 */
+    @Override public boolean canBeHurtBy(DamageSource source) { return false; }
+
+    @Override public boolean onEntityItemUpdate(ItemStack stack, ItemEntity entity) {
+        UnifiedDiskDropProtection.update(entity);
+        // 继续原版移动、拾取延迟、漏斗和玩家拾取逻辑。
+        return false;
+    }
 
     @Override public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
         if (!RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK)) {

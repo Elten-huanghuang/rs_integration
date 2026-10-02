@@ -17,12 +17,24 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class DiskFileStoreTest extends BootstrapTest {
     @TempDir Path root;
+    @Test void recoveryListsCheckpointIdsWithoutLoadingPagesAndIgnoresTemporaryDirectories() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        files.worldIdentity();
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(8);
+        files.save(Snapshot.freeze(core), null);
+        Files.createDirectories(root.resolve(UUID.randomUUID().toString()));
+        Files.createDirectories(root.resolve("unknown"));
+        Files.write(root.resolve("unknown/manifest.bin"), new byte[] {1});
+        assertEquals(List.of(core.diskId), files.savedDiskIds());
+        assertEquals(0, files.load(core.worldId, core.diskId).items.size());
+    }
     private void acknowledge(UnifiedDiskCore core, Snapshot snapshot) {
         core.items.acknowledge(snapshot.items()); core.fluids.acknowledge(snapshot.fluids());
     }
