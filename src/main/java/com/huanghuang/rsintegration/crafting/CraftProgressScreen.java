@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.ConfirmScreen;
@@ -200,7 +201,7 @@ public final class CraftProgressScreen extends Screen {
             if (selected) graphics.fill(x, y + 5, x + 3, y + rowHeight - 9, accent);
 
             ItemStack target = CraftProgressTracker.target(snapshot.craftId());
-            if (!target.isEmpty()) graphics.renderItem(target, x + 8, y + 6);
+            if (!target.isEmpty()) InkFluidRenderer.render(graphics, target, x + 8, y + 6);
             int textX = x + (target.isEmpty() ? 8 : 29);
             int available = x + width - 7 - textX;
             String name = target.isEmpty()
@@ -233,7 +234,7 @@ public final class CraftProgressScreen extends Screen {
         ItemStack target = CraftProgressTracker.target(snapshot.craftId());
         if (!target.isEmpty()) {
             UIRenderer.slotBg(graphics, x, y, 20, 0xFF42535D);
-            graphics.renderItem(target, x + 2, y + 2);
+            InkFluidRenderer.render(graphics, target, x + 2, y + 2);
         }
         int titleX = x + (target.isEmpty() ? 0 : 29);
         String targetName = target.isEmpty()
@@ -311,7 +312,7 @@ public final class CraftProgressScreen extends Screen {
         ItemStack output = node.displayOutput();
         if (!output.isEmpty()) {
             UIRenderer.slotBg(graphics, x + 9, y + 7, 18, 0xFF3B4A53);
-            graphics.renderItem(output, x + 10, y + 8);
+            InkFluidRenderer.render(graphics, output, x + 10, y + 8);
         }
         int textX = x + (output.isEmpty() ? 10 : 34);
         int badgeWidth = Math.min(94, font.width(CraftProgressPresentation.state(node)) + 12);

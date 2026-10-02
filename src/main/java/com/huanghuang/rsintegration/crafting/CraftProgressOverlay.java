@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.util.UIRenderer;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -85,8 +87,10 @@ public final class CraftProgressOverlay {
         int cy = y + 9;
         if (!target.isEmpty()) {
             UIRenderer.slotBg(graphics, contentX, cy, 20, 0xFF42535D);
-            graphics.renderItem(target, contentX + 2, cy + 2);
-            graphics.renderItemDecorations(font, target, contentX + 2, cy + 2);
+            InkFluidRenderer.render(graphics, target, contentX + 2, cy + 2);
+            if (!InkFluidSupport.isToken(target)) {
+                graphics.renderItemDecorations(font, target, contentX + 2, cy + 2);
+            }
         }
         int textX = contentX + (target.isEmpty() ? 0 : 28);
         String targetName = target.isEmpty()
@@ -159,7 +163,7 @@ public final class CraftProgressOverlay {
         UIRenderer.rounded(graphics, x, y, width, 38, 5f, SURFACE);
         graphics.fill(x, y + 5, x + 3, y + 33, color);
         ItemStack output = node.displayOutput();
-        if (!output.isEmpty()) graphics.renderItem(output, x + 7, y + 5);
+        if (!output.isEmpty()) InkFluidRenderer.render(graphics, output, x + 7, y + 5);
         int textX = x + (output.isEmpty() ? 8 : 28);
         int available = Math.max(24, x + width - 7 - textX);
         graphics.drawString(font, font.plainSubstrByWidth(

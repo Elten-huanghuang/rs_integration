@@ -525,9 +525,20 @@ public final class AsyncCraftChain {
         return ordered;
     }
 
-    @Nullable
     public ItemStack displayTarget() {
-        return targetOutput == null ? null : targetOutput.copy();
+        if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copy();
+        // 只有包含最终工序的图，其根需求才是合成目标；原料图不能用于此兜底。
+        if (graphDeclaresFinalOutput && graph != null) {
+            ItemStack declared = graph.rootDemands().stream()
+                    .flatMap(root -> root.allocations().stream()
+                            .filter(allocation -> allocation.source() instanceof MaterialSource.ProducerOutput)
+                            .map(allocation -> allocation.material().toStack(1)))
+                    .filter(stack -> !stack.isEmpty())
+                    .findFirst().orElse(ItemStack.EMPTY);
+            if (!declared.isEmpty()) return declared;
+        }
+        // 仅补展示信息，不改 targetOutput 的运行时配方选择与产物路由语义。
+        return steps.isEmpty() ? ItemStack.EMPTY : displayOutput(steps.get(steps.size() - 1));
     }
 
     /**
@@ -1155,6 +1166,10 @@ public final class AsyncCraftChain {
         }
         if (recipe == null && "pmmo_salvage".equals(step.modType().id())) {
             recipe = PmmoSalvageCatalog.byId(step.recipeId());
+        }
+        if (recipe == null && "rs_integration".equals(step.recipeId().getNamespace())
+                && step.recipeId().getPath().startsWith("vanilla_brewing/")) {
+            recipe = VanillaBrewingCatalog.byId(step.recipeId());
         }
         return recipe;
     }
@@ -2828,15 +2843,15 @@ public final class AsyncCraftChain {
     }
 
     private ItemStack displayOutput(CraftingResolver.ResolutionStep step) {
+        if (step.productionTarget() != null) {
+            // 展示材料身份即可，避免把整单需求量当作普通物品堆叠数量发送。
+            return step.productionTarget().material().toStack(1);
+        }
         if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
             return step.syntheticOutput().copy();
         }
-        Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
-        if (recipe == null && "rs_integration".equals(step.recipeId().getNamespace())
-                && step.recipeId().getPath().startsWith("vanilla_brewing/")) {
-            recipe = VanillaBrewingCatalog.byId(step.recipeId());
-        }
-        return recipe == null ? ItemStack.EMPTY : ModRecipeHandlers.tryGetResultItem(
+        Recipe<?> recipe = recipeForStep(step);
+        return recipe == null || server.overworld() == null ? ItemStack.EMPTY : ModRecipeHandlers.tryGetResultItem(
                 recipe, server.overworld().registryAccess());
     }
 
@@ -4672,8 +4687,7 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
                 online.getName().getString(), steps.size());
         if (online != null) {
-            ItemStack completedOutput = targetOutput != null ? targetOutput
-                    : steps.isEmpty() ? ItemStack.EMPTY : displayOutput(steps.get(steps.size() - 1));
+            ItemStack completedOutput = displayTarget();
             online.sendSystemMessage(CraftPacketUtils.craftCompletedMessage(
                     completedOutput, totalExecutionsForNotification()));
         }
@@ -5190,8 +5204,7 @@ public final class AsyncCraftChain {
         int total = useGraphExecution && graph != null
                 ? graph.topologicalOrder().size() : steps.size();
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftStartedPacket(craftId, total, useGraphExecution,
-                        targetOutput == null ? ItemStack.EMPTY : targetOutput),
+                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget()),
                 online.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
     }

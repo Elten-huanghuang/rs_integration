@@ -205,12 +205,11 @@ public final class CraftingPlanScreen extends Screen {
     @Nullable
     private Button confirmButton;
     private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
-    // Alternative-recipe dropdown (screen space); open node + row hitboxes.
+    // 候选配方与主视图共用服务器分支选择，右侧面板只负责展示和导航。
     private PlanTreeNode dropdownNode;
-    // Keyboard selection cursor within the open dropdown (-1 = none).
-    private int dropdownCursor = -1;
-    private final List<DropHit> dropHits = new ArrayList<>();
-    private record DropHit(int x, int y, int w, int h, ResourceLocation recipeId) {}
+    private RecipeCandidatePanel recipeCandidatePanel;
+    private int contentLayoutWidth = -1;
+    private ViewMode contentLayoutMode;
     private final Map<String, ItemStack> materialLocks = new LinkedHashMap<>();
     @Nullable
     private PlanTreeNode materialDropdownNode;
@@ -228,10 +227,6 @@ public final class CraftingPlanScreen extends Screen {
     private ResourceLocation hoverPreviewId;
     private long hoverPreviewStart;
 
-    // Card view: the alternative-recipe badge under the mouse this frame. Captured during the
-    // scissored card pass and rendered as a post-scissor overlay so the preview isn't clipped.
-    @Nullable
-    private ResourceLocation cardPreviewId;
 
     /**
      * Screen-space vertical scrollbar: 3px track with a proportional thumb. Geometry is rebuilt
@@ -289,39 +284,16 @@ public final class CraftingPlanScreen extends Screen {
     private int embersModeCalcX, embersModeCalcY, embersModeCalcW, embersModeCalcH;
     private int embersModeInferX, embersModeInferY, embersModeInferW, embersModeInferH;
 
-    // OR-path selection state — equality is by recipeId only, modTypeId is
-    // purely cosmetic (badge color).
-    private static final class AltChoice {
-        final ResourceLocation recipeId;
-        final String modTypeId;
-
-        AltChoice(ResourceLocation recipeId, String modTypeId) {
-            this.recipeId = recipeId;
-            this.modTypeId = modTypeId;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof AltChoice that)) return false;
-            return recipeId.equals(that.recipeId);
-        }
-
-        @Override
-        public int hashCode() { return recipeId.hashCode(); }
-    }
-
+    // 保留服务器预览刷新所需的分支选择，候选面板与树形视图共用。
     private static final Map<String, String> LAST_FORCED = new HashMap<>();
 
     // Card-view step folding (§3.17). Keyed by recipeId string; default: root unfolded, rest folded.
     private final Map<String, Boolean> collapsedSteps = new LinkedHashMap<>();
 
-    private final Map<String, List<AltChoice>> altChoices = new LinkedHashMap<>();
-    private final Map<String, Integer> altSelection = new LinkedHashMap<>();
     private final List<ORHitbox> orHitboxes = new ArrayList<>();
     private final Set<String> orRendered = new HashSet<>();
 
-    private record ORHitbox(int x, int y, int w, int h, String selectionKey, int altIndex) {}
+    private record ORHitbox(int x, int y, int w, int h, String selectionKey) {}
 
     // Deferred tooltip — set during draw, rendered after all scissors disabled
     private ItemStack hoveredItemForTooltip = ItemStack.EMPTY;
@@ -397,9 +369,7 @@ public final class CraftingPlanScreen extends Screen {
         this.dropdownNode = null;
         this.materialScroll = 0;
         rebuildTreeModel(false);
-        this.altChoices.clear();
         this.orHitboxes.clear();
-        this.altSelection.clear();
         closeMaterialDropdown();
         this.clearWidgets();
         this.init();
@@ -470,8 +440,12 @@ public final class CraftingPlanScreen extends Screen {
         super.init();
         currentRepeat = clampRepeatCount(plan.repeatCount());
         lastRefreshCount = currentRepeat;
-        altChoices.clear();
         Font font = minecraft.font;
+        if (recipeCandidatePanel == null) {
+            recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview, this::selectTreeBranch);
+        }
+        closeRecipeCandidates();
+        addWidget(recipeCandidatePanel.searchBox());
         int contentW = width - 40;
 
         // Start card-entry animation (target card + intermediate steps)
@@ -496,51 +470,8 @@ public final class CraftingPlanScreen extends Screen {
         // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
         embersInferMode = !hasEmbers;
 
-        // Compute missing items area — items flow inline with wrapping
-        // The structured material bill is authoritative. Diagnostics may be
-        // empty even when concrete shortages exist.
-        List<MissingMaterialBookmarkList.TextEntry> missingEntries =
-                MissingMaterialBookmarkList.textEntries(plan);
-        int missingCount = missingEntries.size();
-        int modWarnCount = plan.modWarnings() != null ? plan.modWarnings().size() : 0;
-        boolean hasMachineCandidates = plan.machineCandidates() != null
-                && !plan.machineCandidates().isEmpty();
-        if (missingCount + modWarnCount > 0 || hasMachineCandidates) {
-            int lines = 0;
-            int maxLineW = contentW - 24;
-            if (missingCount > 0) {
-                lines++; // header
-                lines += missingTextLineCount(font, missingEntries, maxLineW);
-            }
-            if (modWarnCount > 0) {
-                lines += modWarnCount;
-            }
-            int warningHeight = lines > 0 ? font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4 : 0;
-            int fullMissingHeight = warningHeight + (hasMachineCandidates ? 34 : 0);
-                    missingAreaHeight = viewMode == ViewMode.TREE
-                    ? Math.min(fullMissingHeight, TREE_MISSING_MAX_HEIGHT)
-                            : fullMissingHeight;
-                    missingMaxScroll = viewMode == ViewMode.TREE
-                            ? Math. max(0, fullMissingHeight - missingAreaHeight) : 0;
-                    missingScroll = Math.min(missingScroll, missingMaxScroll);
-        } else {
-            missingAreaHeight = 0;
-            missingMaxScroll = 0;
-            missingScroll = 0;
-        }
-
-        // Compute material grid layout
-        int maxCountW = font.width("0/0");
-        for (var entry : plan.materials().entrySet()) {
-            String s = entry.getValue().available() + "/" + entry.getValue().needed();
-            int w = font.width(s);
-            if (w > maxCountW) maxCountW = w;
-        }
-        int matCols = Math.max(1, contentW / (SLOT_SIZE + maxCountW + 14));
-        int matRows = (int) Math.ceil((double) plan.materials().size() / matCols);
-        int visibleMatRows = Math.min(matRows, MATERIAL_MAX_ROWS);
-        int matGridH = visibleMatRows * (SLOT_SIZE + 8) + 4;
-        materialAreaHeight = (plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + matGridH + 8);
+        contentLayoutWidth = -1;
+        layoutContentSections(font, contentW);
         layoutBottomStack();
         createRepeatCountInput(font);
         createMaterialSearchInput(font);
@@ -601,7 +532,7 @@ public final class CraftingPlanScreen extends Screen {
         addRenderableWidget(Button.builder(viewToggleLabel(), btn -> {
                     viewMode = (viewMode == ViewMode.CARD) ? ViewMode.TREE : ViewMode.CARD;
                     treeCameraInit = false;
-                    dropdownNode = null;
+                    closeRecipeCandidates();
                     closeMaterialDropdown();
                     btn.setMessage(viewToggleLabel());
                 })
@@ -940,6 +871,7 @@ public final class CraftingPlanScreen extends Screen {
         super.tick();
         if (repeatCountBox != null) repeatCountBox.tick();
         if (materialSearchBox != null && materialSearchBox.visible) materialSearchBox.tick();
+        if (recipeCandidatePanel != null) recipeCandidatePanel.tick();
         ticksOpen++;
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
             planRefreshTick = -1;
@@ -998,6 +930,11 @@ public final class CraftingPlanScreen extends Screen {
 
         // Steps area (scrollable)
         int areaTop = stepsTop;
+        if (recipeCandidatePanel != null) {
+            recipeCandidatePanel.layout(width, height, areaTop);
+            contentW = Math.max(1, recipeCandidatePanel.contentRight(width - 20) - left);
+        }
+        layoutContentSections(font, contentW);
         // Recompute the bottom stack for the current view — the material panel is card-view
         // only (design doc §4), so tree view reclaims its band for the tree.
         layoutBottomStack();
@@ -1006,6 +943,9 @@ public final class CraftingPlanScreen extends Screen {
         int areaBottom = bottomReserved - 4;
         if (embersPedestalH == 0 && missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 53;
 
+        boolean dockedCandidates = recipeCandidatePanel != null && recipeCandidatePanel.isOpen();
+        if (dockedCandidates) gfx.enableScissor(0, 0, left + contentW, height);
+        try {
         if (viewMode == ViewMode.TREE) {
             cardBar.active = false; // card list not shown in tree mode
             renderTreeArea(gfx, left, areaTop, contentW, areaBottom, mouseX, mouseY);
@@ -1014,7 +954,6 @@ public final class CraftingPlanScreen extends Screen {
         try {
             orHitboxes.clear();
             orRendered.clear();
-            cardPreviewId = null;
 
             // v3.4: card view only renders steps on the selected green path.
             Set<ResourceLocation> activeIds = treeModel != null
@@ -1107,7 +1046,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // Embers alchemy pedestal layout
         if (embersPedestalH > 0) {
-            renderEmbersPedestalArea(gfx, font, left);
+            renderEmbersPedestalArea(gfx, font, left, contentW);
         }
 
         // Missing items + mod warnings
@@ -1138,17 +1077,21 @@ public final class CraftingPlanScreen extends Screen {
         } else {
             materialBar.active = false;
         }
+        } finally {
+            if (dockedCandidates) {
+                gfx.flush();
+                gfx.disableScissor();
+            }
+        }
 
         // ── Repeat count row ─────────────────────────────────────────
         drawRepeatRow(gfx, font);
 
-        // Card view: JEI recipe preview for a hovered alternative-recipe badge (mirrors the
-        // tree-view dropdown preview). Drawn here, post-scissor, so it's not clipped.
-        renderCardPreview(gfx, font);
 
         renderOutputDestinationSelector(gfx, font, mouseX, mouseY);
         renderPreparationModeSelector(gfx, font, mouseX, mouseY);
         renderMachineCandidateDropdown(gfx, font);
+        renderRecipeCandidates(gfx, mouseX, mouseY);
 
         // Deferred tooltip — rendered AFTER all scissors, so Legendary
         // Tooltips' boundary avoidance works without scissor clipping.
@@ -1243,19 +1186,6 @@ public final class CraftingPlanScreen extends Screen {
         return ModList.get().isLoaded("refinedstorage")
                 || ModList.get().isLoaded("beyonddimensions");
     }
-    /** Card view: JEI recipe preview for the alternative-recipe badge under the mouse. */
-    private void renderCardPreview(GuiGraphics gfx, Font font) {
-        if (viewMode != ViewMode.CARD) return;
-        if (cardPreviewId == null) {
-            resetHoverIntent();
-            return;
-        }
-        if (hoverIntentReady(cardPreviewId)) {
-            recipePreview.renderRecipeTooltip(gfx, font, cardPreviewId,
-                    mouseX, mouseY, width, height, mouseX, mouseY);
-        }
-    }
-
     // ── Repeat count row ─────────────────────────────────────────────
 
     private void drawRepeatRow(GuiGraphics gfx, Font font) {
@@ -1508,66 +1438,19 @@ public final class CraftingPlanScreen extends Screen {
             if (hov) gfx.fill(hitX, hitY, hitX + hitW, hitY + hitH, 0x22FFFFFF);
         }
 
-        // ── OR alternative badges ─────────────────────────────
-        // The target card intentionally passes step == null; only intermediate
-        // cards can expose alternative-recipe badges.
+        // 每个材料只保留一个入口，大量候选在右侧面板中滚动、搜索。
         String selectionKey = step == null ? null : selectionKey(step.output());
         if (orBadgeH > 0 && selectionKey != null && orRendered.add(selectionKey)) {
-            List<AltChoice> choices = altChoices.computeIfAbsent(selectionKey, k -> new ArrayList<>());
-
-            String curModType = step.modType() != null ? step.modType().id() : "generic";
-            AltChoice curChoice = new AltChoice(step.recipeId(), curModType);
-            if (!choices.contains(curChoice)) choices.add(curChoice);
-
-            // Same source as the tree-view dropdown: the server-resolved sibling alternatives
-            // (already filtered for materials + bound machines). Do NOT scan plan.steps() for
-            // same-output steps — that pulled in unrelated recipes and produced bogus choices.
-            for (int i = 0; i < step.alternatives().size() && i < step.alternativeModTypes().size(); i++) {
-                AltChoice ac = new AltChoice(step.alternatives().get(i), step.alternativeModTypes().get(i));
-                if (!choices.contains(ac)) choices.add(ac);
-            }
-
-            int curIdx = altSelection.getOrDefault(selectionKey, 0);
-            String persisted = LAST_FORCED.get(selectionKey);
-            if (persisted != null) {
-                for (int i = 0; i < choices.size(); i++) {
-                    if (choices.get(i).recipeId.toString().equals(persisted)) {
-                        curIdx = i;
-                        altSelection.put(selectionKey, i);
-                        break;
-                    }
-                }
-            }
-            if (curIdx >= choices.size()) curIdx = 0;
-
+            long candidates = step.alternatives().stream().distinct().count();
+            if (!step.alternatives().contains(step.recipeId())) candidates++;
+            String label = Component.translatable("rsi.plan.recipe_picker.button", candidates).getString();
             int badgeY = y + cardH - font.lineHeight - 7;
             int badgeX = x + CARD_PAD;
             int badgeH = font.lineHeight + 4;
-
-            for (int i = 0; i < choices.size(); i++) {
-                AltChoice ac = choices.get(i);
-                String modName = PlanRenderEngine.formatModTypeLabel(ac.modTypeId);
-                String label = modName;
-                int bw = font.width(label) + 10;
-                if (badgeX + bw > x + cardW - CARD_PAD) break;
-
-                boolean isSelected = (i == curIdx);
-                int bg = isSelected ? badgeColor(ac.modTypeId) : 0x88333333;
-                int fg = isSelected ? 0xFFFFFFFF : 0xFF999999;
-
-                // Pill badge with full rounding
-                UIRenderer.pillBadge(gfx, font, badgeX, badgeY, bw, badgeH, bg, fg, label);
-
-                // Recipe preview on hover — deferred to the post-scissor overlay so the JEI
-                // panel renders above every card and isn't clipped by the card scissor.
-                if (mouseX >= badgeX && mouseX <= badgeX + bw
-                        && mouseY >= badgeY && mouseY <= badgeY + badgeH) {
-                    cardPreviewId = ac.recipeId;
-                }
-
-                orHitboxes.add(new ORHitbox(badgeX, badgeY, bw, badgeH, selectionKey, i));
-                badgeX += bw + 4;
-            }
+            int badgeW = Math.min(cardW - CARD_PAD * 2, font.width(label) + 14);
+            UIRenderer.pillBadge(gfx, font, badgeX, badgeY, badgeW, badgeH,
+                    0xCC2C6040, 0xFFE0F2E6, font.plainSubstrByWidth(label, badgeW - 10));
+            orHitboxes.add(new ORHitbox(badgeX, badgeY, badgeW, badgeH, selectionKey));
         }
 
         if (slideX != 0) gfx.pose().popPose();
@@ -1628,47 +1511,12 @@ public final class CraftingPlanScreen extends Screen {
 
     // ── Alternative selection ─────────────────────────────────────
 
-    private void selectAlternative(String selectionKey, int index) {
-        List<AltChoice> choices = altChoices.get(selectionKey);
-        if (choices == null || index < 0 || index >= choices.size()) return;
-        IngredientKey treeKey = findTreeKey(selectionKey);
-        if (treeKey == null) return;
-        int oldIdx = selectedPath.selectedIndex(treeKey);
-        if (oldIdx < 0) oldIdx = 0;
-        int selected = oldIdx == index && index != 0 ? 0 : index;
-        altSelection.put(selectionKey, selected);
-        selectedPath.selectBranch(treeKey, selected, choices.get(selected).recipeId);
-
-        Map<String, String> forced = exportForcedSelections();
-        boolean isTarget = treeModel != null && treeModel.root.key.equals(treeKey);
-        ResourceLocation rid = ResourceLocation.tryParse(plan.recipeId());
-        if (isTarget && selected != 0) {
-            rid = choices.get(selected).recipeId;
-            ResourceLocation pk = CraftingResolver
-                    .preferenceKey(treeKey.stack(1));
-            if (pk != null) forced.remove(pk.toString());
-        }
-        LAST_FORCED.clear();
-        LAST_FORCED.putAll(forced);
-        RSIntegrationMod.debug("[RSI-OR-UI] selectAlternative itemKey={} index={} forced={} root={}",
-                selectionKey, selected, forced, rid);
-        sendCraftPacket(rid, true, forced, currentRepeat, false);
-    }
-
     @Nullable
-    private IngredientKey findTreeKey(String selectionKey) {
-        if (treeModel == null) return null;
-        return findTreeKey(treeModel.root, selectionKey);
-    }
-
-    @Nullable
-    private IngredientKey findTreeKey(PlanTreeNode node, String selectionKey) {
-        if (selectionKey.equals(selectionKey(node.displayStack))) {
-            return node.key;
-        }
+    private PlanTreeNode findCandidateNode(PlanTreeNode node, String key) {
+        if (node.step != null && key.equals(selectionKey(node.displayStack))) return node;
         for (PlanTreeNode child : node.children) {
-            IngredientKey key = findTreeKey(child, selectionKey);
-            if (key != null) return key;
+            PlanTreeNode match = findCandidateNode(child, key);
+            if (match != null) return match;
         }
         return null;
     }
@@ -1730,8 +1578,7 @@ public final class CraftingPlanScreen extends Screen {
 
     // ── Embers alchemy pedestal layout ──────────────────────────────
 
-    private void renderEmbersPedestalArea(GuiGraphics gfx, Font font, int left) {
-        int contentW = width - 40;
+    private void renderEmbersPedestalArea(GuiGraphics gfx, Font font, int left, int contentW) {
         int top = embersPedestalY;
 
         // Background with emerald left accent
@@ -2094,6 +1941,9 @@ public final class CraftingPlanScreen extends Screen {
     private void renderTreeArea(GuiGraphics gfx, int left, int areaTop, int contentW,
                                 int areaBottom, int mouseX, int mouseY) {
         if (areaBottom <= areaTop) return;
+        if (recipeCandidatePanel != null && recipeCandidatePanel.contains(mouseX, mouseY)) {
+            mouseX = mouseY = Integer.MIN_VALUE;
+        }
         treeLayout.ensureLayout(treeModel.root);
 
         // Backdrop over the whole area.
@@ -2101,6 +1951,9 @@ public final class CraftingPlanScreen extends Screen {
 
         // The tree viewport fills the whole area; the total-demand strip is drawn inside
         // the camera layer, anchored above the root — it no longer eats layout height.
+        if (treeCameraInit && treeViewRight > treeViewLeft) {
+            treePanX += (left + contentW - treeViewRight) / 2.0;
+        }
         treeViewLeft = left;
         treeViewTop = areaTop;
         treeViewRight = left + contentW;
@@ -2197,7 +2050,6 @@ public final class CraftingPlanScreen extends Screen {
         gfx.pose().popPose();
 
         // Alternative-recipe dropdown (+ its hover preview), topmost.
-        renderDropdown(gfx, minecraft.font, mouseX, mouseY);
         renderMaterialDropdown(gfx, minecraft.font, mouseX, mouseY);
 
         // Control-help tooltip — shown only when hovering the info icon (replaces the old hint bar).
@@ -2345,7 +2197,7 @@ public final class CraftingPlanScreen extends Screen {
      * root recipe; intermediate switches go into the forced map keyed by item id.
      */
     private void selectTreeBranch(PlanTreeNode node, ResourceLocation recipeId) {
-        dropdownNode = null;
+        closeRecipeCandidates();
         if (node.step == null) return;
 
         int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
@@ -2366,7 +2218,6 @@ public final class CraftingPlanScreen extends Screen {
         sendCraftPacket(rootRid, true, forced, currentRepeat, false);
     }
 
-    /** Render the open alternative-recipe dropdown below its node (screen space). */
     /**
      * Hover-intent gate: returns true only once the mouse has rested on {@code id} for at least
      * {@link #HOVER_INTENT_MS}. Switching to a different target restarts the timer, so sweeping
@@ -2387,17 +2238,6 @@ public final class CraftingPlanScreen extends Screen {
         hoverPreviewId = null;
     }
 
-    /**
-     * Candidate cap. Prefers the server-synced value: this is a SERVER-type
-     * config, so the client's own file holds only its local default and would
-     * disagree with the plan the server actually built.
-     */
-    private static int maxCandidates() {
-        return ClientSyncedConfig.isSynced()
-                ? ClientSyncedConfig.RECIPE_TREE_MAX_CANDIDATES
-                : RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
-    }
-
     /** Embers Calculate mode is a COMMON config; the server's value governs. */
     private static boolean embersCalcEnabled() {
         return ClientSyncedConfig.isSynced()
@@ -2405,116 +2245,31 @@ public final class CraftingPlanScreen extends Screen {
                 : RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get();
     }
 
-    private void renderDropdown(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
-        dropHits.clear();
-        if (dropdownNode == null) return;
-        PlanTreeLayout.Box box = treeLayout.boxFor(dropdownNode);
-        if (box == null) {
-            dropdownNode = null;
+    private void openRecipeCandidates(PlanTreeNode node) {
+        if (node == dropdownNode) {
+            closeRecipeCandidates();
             return;
         }
-        List<ResourceLocation> alts = dropdownNode.step.alternatives();
-        List<String> mods = dropdownNode.step.alternativeModTypes();
-        if (alts.isEmpty()) return;
+        closeMaterialDropdown();
+        unfocusRepeatCountInput();
+        setFocused(null);
+        dropdownNode = node;
+        recipeCandidatePanel.open(node, plan.boundMachineTypes() == null ? Set.of() : plan.boundMachineTypes());
+        resetHoverIntent();
+    }
 
-        int maxShown = Math.min(alts.size(), maxCandidates());
-        boolean truncated = maxShown < alts.size();
+    private void closeRecipeCandidates() {
+        dropdownNode = null;
+        if (recipeCandidatePanel != null) recipeCandidatePanel.close();
+    }
 
-        Set<String> passport = plan.boundMachineTypes() != null
-                ? plan.boundMachineTypes() : Collections.emptySet();
-
-        // Fit-content width: measure every row's label (lock icon + machine title) once and size
-        // the panel to the widest, clamped so it never collapses too small nor runs off-viewport.
-        int rowH = 18;
-        int textLeft = 22;   // 2px pad + 16px icon + 4px gap
-        String[] labels = new String[maxShown];
-        int contentW = 0;
-        for (int i = 0; i < maxShown; i++) {
-            ResourceLocation rid = alts.get(i);
-            String mod = i < mods.size() && mods.get(i) != null ? mods.get(i) : "";
-            boolean machineBound = mod.isEmpty() || passport.contains(mod);
-            String base = recipePreview.categoryTitle(rid).map(Component::getString)
-                    .orElseGet(() -> {
-                        String recipeName = PlanRenderEngine.formatRecipeName(rid);
-                        return mod.isEmpty() ? recipeName
-                                : PlanRenderEngine.formatModTypeLabel(mod) + " · " + recipeName;
-                    });
-            labels[i] = (machineBound ? "" : "🔒") + base;
-            contentW = Math.max(contentW, font.width(labels[i]));
-        }
-        if (truncated) {
-            contentW = Math.max(contentW,
-                    font.width(I18n.get("rsi.plan.candidates_more", alts.size() - maxShown)));
-        }
-
-        int panelW = Math.max(120, Math.min(260, textLeft + contentW + 8));
-        int sx = (int) Math.round(box.x() * treeZoom + treePanX);
-        int sy = (int) Math.round(box.bottom() * treeZoom + treePanY) + 2;
-        sx = Math.max(treeViewLeft, Math.min(sx, treeViewRight - panelW));
-        int panelH = (maxShown + (truncated ? 1 : 0)) * rowH + 2;
-
-        // Suppress the node tooltip while hovering the panel.
-        if (mouseX >= sx && mouseX < sx + panelW && mouseY >= sy && mouseY < sy + panelH) {
+    private void renderRecipeCandidates(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (dropdownNode == null || recipeCandidatePanel == null) return;
+        recipeCandidatePanel.render(graphics, mouseX, mouseY);
+        if (recipeCandidatePanel.contains(mouseX, mouseY)) {
             hoveredItemForTooltip = ItemStack.EMPTY;
-        }
-
-        gfx.fill(sx, sy, sx + panelW, sy + panelH, 0xF00A140E);
-        gfx.fill(sx, sy, sx + panelW, sy + 1, 0xFF1FB6D6);
-
-        int hoverIdx = -1;
-        for (int i = 0; i < maxShown; i++) {
-            ResourceLocation rid = alts.get(i);
-            int ry = sy + 1 + i * rowH;
-            boolean hov = mouseX >= sx && mouseX < sx + panelW && mouseY >= ry && mouseY < ry + rowH;
-            if (hov) hoverIdx = i;
-            boolean active = hov || i == dropdownCursor;   // mouse hover or keyboard cursor
-            boolean sel = rid.equals(dropdownNode.step.recipeId());
-            // v3.4 availability passport: check if machine is bound.
-            String mod = i < mods.size() && mods.get(i) != null ? mods.get(i) : "";
-            boolean machineBound = mod.isEmpty() || passport.contains(mod);
-            int bgColor = active ? 0x33FFFFFF : (!machineBound ? 0x18101010 : 0x00000000);
-            if (bgColor != 0) gfx.fill(sx, ry, sx + panelW, ry + rowH, bgColor);
-            // Per-recipe machine icon so alternatives are visually distinct (all share one output).
-            boolean drewIcon = recipePreview.drawCategoryIcon(gfx, rid, sx + 2, ry + 1, 16);
-            if (!drewIcon) InkFluidRenderer.render(gfx, dropdownNode.displayStack, sx + 2, ry + 1);
-            int textColor = sel ? 0xFF4AE04A
-                    : machineBound ? 0xFFCCCCCC : 0xFF666666;
-            String label = font.plainSubstrByWidth(labels[i], panelW - textLeft - 2);
-            gfx.drawString(font, label, sx + textLeft, ry + (rowH - font.lineHeight) / 2,
-                    textColor, false);
-            dropHits.add(new DropHit(sx, ry, panelW, rowH, rid));
-        }
-
-        // Truncation row: "+N more" when the candidate cap hides alternatives.
-        if (truncated) {
-            int ry = sy + 1 + maxShown * rowH;
-            String more = I18n.get("rsi.plan.candidates_more", alts.size() - maxShown);
-            gfx.drawString(font, more, sx + textLeft, ry + (rowH - font.lineHeight) / 2, 0xFF889988, false);
-        }
-
-        // Preview: draw the active alternative's full JEI recipe layout so switching feels like a
-        // proper picker (mirrors the node-hover preview). The active row is the mouse-hovered one,
-        // or the keyboard cursor when the mouse is elsewhere; the preview anchors to it accordingly.
-        // Falls back to the output item's tooltip when JEI has no layout for that recipe.
-        int activeIdx = hoverIdx >= 0 ? hoverIdx
-                : (dropdownCursor >= 0 && dropdownCursor < maxShown ? dropdownCursor : -1);
-        if (activeIdx < 0) {
-            resetHoverIntent();
-        } else {
-            boolean byMouse = hoverIdx >= 0;
-            // Mouse-hover previews wait out the 150ms hover-intent; keyboard-cursor selection is
-            // deliberate navigation, so its preview shows immediately.
-            boolean ready = !byMouse || hoverIntentReady(alts.get(activeIdx));
-            int anchorX = byMouse ? mouseX : sx + panelW + 6;
-            int anchorY = byMouse ? mouseY : sy + 1 + activeIdx * rowH;
-            boolean shown = ready && recipePreview.renderRecipeTooltip(gfx, font, alts.get(activeIdx),
-                    anchorX, anchorY, width, height, mouseX, mouseY);
-            if (!shown && byMouse) {
-                hoveredItemForTooltip = dropdownNode.displayStack;
-                hoveredTooltipX = mouseX;
-                hoveredTooltipY = mouseY;
-                hoveredTooltipAvail = hoveredTooltipNeeded = 0;
-            }
+            hoveredStepWarnings = List.of();
+            hoveredBookmark = null;
         }
     }
 
@@ -2628,7 +2383,7 @@ public final class CraftingPlanScreen extends Screen {
         unfocusRepeatCountInput();
         materialDropdownNode = node;
         materialDropdownScroll = 0;
-        dropdownNode = null;
+        closeRecipeCandidates();
         if (materialSearchBox != null) {
             materialSearchBox.visible = true;
             materialSearchBox.active = true;
@@ -2654,6 +2409,36 @@ public final class CraftingPlanScreen extends Screen {
         materialSearchBox.active = false;
         materialSearchBox.setFocused(false);
         if (focused) setFocused(null);
+    }
+
+    /** 侧栏开关或视图变化时，按主内容实际宽度重新排材料和缺料提示。 */
+    private void layoutContentSections(Font font, int contentWidth) {
+        if (contentLayoutWidth == contentWidth && contentLayoutMode == viewMode) return;
+        contentLayoutWidth = contentWidth;
+        contentLayoutMode = viewMode;
+        var missingEntries = MissingMaterialBookmarkList.textEntries(plan);
+        int warningCount = plan.modWarnings() == null ? 0 : plan.modWarnings().size();
+        boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
+        if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
+            int lines = warningCount;
+            if (!missingEntries.isEmpty()) {
+                lines += 1 + missingTextLineCount(font, missingEntries, Math.max(1, contentWidth - 24));
+            }
+            int warningHeight = lines > 0 ? font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4 : 0;
+            int fullHeight = warningHeight + (machineCandidates ? 34 : 0);
+            missingAreaHeight = viewMode == ViewMode.TREE ? Math.min(fullHeight, TREE_MISSING_MAX_HEIGHT) : fullHeight;
+            missingMaxScroll = viewMode == ViewMode.TREE ? Math.max(0, fullHeight - missingAreaHeight) : 0;
+            missingScroll = Math.min(missingScroll, missingMaxScroll);
+        } else {
+            missingAreaHeight = missingMaxScroll = missingScroll = 0;
+        }
+        int countWidth = font.width("0/0");
+        for (var material : plan.materials().values()) {
+            countWidth = Math.max(countWidth, font.width(material.available() + "/" + material.needed()));
+        }
+        int columns = Math.max(1, contentWidth / (SLOT_SIZE + countWidth + 14));
+        int rows = Math.min(MATERIAL_MAX_ROWS, (plan.materials().size() + columns - 1) / columns);
+        materialAreaHeight = plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + rows * (SLOT_SIZE + 8) + 12;
     }
 
     /**
@@ -2745,18 +2530,9 @@ public final class CraftingPlanScreen extends Screen {
         return null;
     }
 
-    /** Index of the currently-selected recipe within a node's (capped) alternative list, else 0. */
-    private int selectedAltIndex(PlanTreeNode node) {
-        List<ResourceLocation> alts = node.step.alternatives();
-        int cap = Math.min(alts.size(), maxCandidates());
-        for (int i = 0; i < cap; i++) {
-            if (alts.get(i).equals(node.step.recipeId())) return i;
-        }
-        return 0;
-    }
-
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (recipeCandidatePanel != null && recipeCandidatePanel.mouseScrolled(mouseX, mouseY, delta)) return true;
         if (viewMode == ViewMode.TREE && missingMaxScroll > 0
                 && mouseY >= missingAreaTop && mouseY < missingAreaTop + missingAreaHeight) {
             missingScroll = Math.max(0, Math.min(missingMaxScroll,
@@ -2808,6 +2584,8 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (recipeCandidatePanel != null && (recipeCandidatePanel.contains(mx, my)
+                || recipeCandidatePanel.contains(mx - dx, my - dy))) return true;
         // Scrollbar thumb drag takes precedence — map the cursor to a scroll offset.
         if (draggingBar != null) {
             int s = draggingBar.scrollForThumbTop((int) my - scrollbarGrabDy);
@@ -2829,6 +2607,13 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (recipeCandidatePanel != null && recipeCandidatePanel.mouseClicked(mx, my, button)) {
+            if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
+            return true;
+        }
+        if (dropdownNode != null && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
+            closeRecipeCandidates();
+        }
         if (materialDropdownNode != null && materialPanelW > 0
                 && mx >= materialPanelX && mx < materialPanelX + materialPanelW
                 && my >= materialPanelY && my < materialPanelY + materialPanelH) {
@@ -2989,16 +2774,6 @@ public final class CraftingPlanScreen extends Screen {
                 treeLayout.markDirty();
                 return true;
             }
-            // Dropdown rows first — they may extend outside the tree viewport.
-            if (button == 0 && dropdownNode != null) {
-                for (DropHit dh : dropHits) {
-                    if (mx >= dh.x() && mx < dh.x() + dh.w()
-                            && my >= dh.y() && my < dh.y() + dh.h()) {
-                        selectTreeBranch(dropdownNode, dh.recipeId());
-                        return true;
-                    }
-                }
-            }
             if (button == 0) {
                 for (CostHit ch : costHits) {
                     if (mx >= ch.x() && mx < ch.x() + ch.w()
@@ -3024,10 +2799,7 @@ public final class CraftingPlanScreen extends Screen {
                             && node.materialOptions.size() > 1) {
                         openMaterialDropdown(node);
                     } else if (node != null && node.hasAlternatives()) {
-                        boolean opening = node != dropdownNode;
-                        dropdownNode = opening ? node : null;
-                        dropdownCursor = opening ? selectedAltIndex(node) : -1;
-                        closeMaterialDropdown();
+                        openRecipeCandidates(node);
                     } else if (node != null && node.step != null) {
                         // No alternatives → open recipe in JEI directly.
                         closeMaterialDropdown();
@@ -3046,7 +2818,7 @@ public final class CraftingPlanScreen extends Screen {
                 return true;
             }
             // Clicked elsewhere → dismiss any open dropdown.
-            dropdownNode = null;
+            closeRecipeCandidates();
             closeMaterialDropdown();
         }
         // Card-view fold toggle hitboxes (active in card mode).
@@ -3108,7 +2880,8 @@ public final class CraftingPlanScreen extends Screen {
                 for (ORHitbox hb : orHitboxes) {
                     if (mx >= hb.x && mx <= hb.x + hb.w
                             && my >= hb.y && my <= hb.y + hb.h) {
-                        selectAlternative(hb.selectionKey, hb.altIndex);
+                        PlanTreeNode node = findCandidateNode(treeModel.root, hb.selectionKey);
+                        if (node != null) openRecipeCandidates(node);
                         return true;
                     }
                 }
@@ -3127,6 +2900,10 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (recipeCandidatePanel != null && recipeCandidatePanel.keyPressed(keyCode, scanCode, modifiers)) {
+            if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
+            return true;
+        }
         if (materialSearchBox != null && materialSearchBox.isFocused()) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 closeMaterialDropdown();
@@ -3163,37 +2940,18 @@ public final class CraftingPlanScreen extends Screen {
             }
             return true;
         }
-        // Open dropdown captures navigation keys: Up/Down move, Enter confirms, Esc closes.
-        if (dropdownNode != null && dropdownNode.step != null) {
-            List<ResourceLocation> alts = dropdownNode.step.alternatives();
-            int cap = Math.min(alts.size(), maxCandidates());
-            if (cap > 0) {
-                if (keyCode == GLFW.GLFW_KEY_UP) {
-                    dropdownCursor = dropdownCursor <= 0 ? cap - 1 : dropdownCursor - 1;
-                    return true;
-                }
-                if (keyCode == GLFW.GLFW_KEY_DOWN) {
-                    dropdownCursor = (dropdownCursor + 1) % cap;
-                    return true;
-                }
-                if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-                    int idx = dropdownCursor >= 0 && dropdownCursor < cap ? dropdownCursor : 0;
-                    selectTreeBranch(dropdownNode, alts.get(idx));
-                    return true;
-                }
-                if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                    dropdownNode = null;
-                    dropdownCursor = -1;
-                    return true;
-                }
-            }
-        }
         // Enter — one-click start (§2.5 speedrun): apply branch selections and execute.
         if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
             onConfirm();
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char character, int modifiers) {
+        if (recipeCandidatePanel != null && recipeCandidatePanel.charTyped(character, modifiers)) return true;
+        return super.charTyped(character, modifiers);
     }
 
     private static int repeatCountLimit() {

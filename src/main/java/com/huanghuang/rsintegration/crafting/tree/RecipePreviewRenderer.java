@@ -4,9 +4,17 @@ import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.forge.ForgeTypes;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.recipe.IFocus;
@@ -16,6 +24,8 @@ import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.language.I18n;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -23,6 +33,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
@@ -39,6 +51,7 @@ public final class RecipePreviewRenderer {
     private final Map<ResourceLocation, Optional<IRecipeLayoutDrawable<?>>> cache = new HashMap<>();
     private final Map<ResourceLocation, Optional<IDrawable>> iconCache = new HashMap<>();
     private final Map<ResourceLocation, Optional<Component>> titleCache = new HashMap<>();
+    private final Map<ResourceLocation, CandidateDetails> candidateCache = new HashMap<>();
     private final Minecraft mc;
     @Nullable
     private IJeiRuntime cachedJeiRuntime;
@@ -68,6 +81,7 @@ public final class RecipePreviewRenderer {
         cache.clear();
         iconCache.clear();
         titleCache.clear();
+        candidateCache.clear();
     }
 
     @Nullable
@@ -98,8 +112,7 @@ public final class RecipePreviewRenderer {
             return true;
         }
 
-        Recipe<?> recipe = mc.level != null
-                ? mc.level.getRecipeManager().byKey(recipeId).orElse(null) : null;
+        Recipe<?> recipe = resolveRecipe(recipeId);
         if (recipe != null) {
             renderManualTooltip(gfx, font, recipe, anchorX, anchorY, screenW, screenH);
             return true;
@@ -120,7 +133,7 @@ public final class RecipePreviewRenderer {
         IJeiRuntime jei = RSJeiPlugin.getRuntime();
         if (jei == null || mc.level == null) return Optional.empty();
 
-        Recipe<?> vanilla = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
 
         try {
@@ -289,7 +302,7 @@ public final class RecipePreviewRenderer {
             gfx.fill(cx + cell - 3, cy - 1, cx + cell - 2, cy + cell - 2, 0xFF3A6A3A);
             ItemStack[] items = inputs.get(i).getItems();
             if (items.length > 0) {
-                gfx.renderItem(items[0], cx, cy);
+                InkFluidRenderer.render(gfx, items[0], cx, cy);
             }
         }
 
@@ -303,8 +316,8 @@ public final class RecipePreviewRenderer {
         int outX = inputs.isEmpty() ? px + pad : arrowX + arrowW;
         int outY = gridTop + (rows * cell) / 2 - cell / 2;
         if (!output.isEmpty()) {
-            gfx.renderItem(output, outX + 4, outY + 4);
-            String cnt = "x" + output.getCount();
+            InkFluidRenderer.render(gfx, output, outX + 4, outY + 4);
+            String cnt = InkFluidRenderer.quantity(output, output.getCount());
             gfx.drawString(font, cnt, outX + cell + 2, outY + (cell - font.lineHeight) / 2,
                     0xFFBBCCBB, false);
         }
@@ -412,7 +425,7 @@ public final class RecipePreviewRenderer {
     private Optional<IDrawable> lookupCategoryIcon(ResourceLocation recipeId) {
         IJeiRuntime jei = RSJeiPlugin.getRuntime();
         if (jei == null || mc.level == null) return Optional.empty();
-        Recipe<?> vanilla = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
         try {
             return findHandlingCategory(jei, vanilla)
@@ -506,12 +519,161 @@ public final class RecipePreviewRenderer {
     private Optional<Component> lookupCategoryTitle(ResourceLocation recipeId) {
         IJeiRuntime jei = RSJeiPlugin.getRuntime();
         if (jei == null || mc.level == null) return Optional.empty();
-        Recipe<?> vanilla = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
         try {
             return findHandlingCategory(jei, vanilla).map(IRecipeCategory::getTitle);
         } catch (Exception e) {
             return Optional.empty();
         }
+    }
+
+    /** 原生配方管理器之外的内部配方，也必须能展示具体卷轴与墨水身份。 */
+    @Nullable
+    private Recipe<?> resolveRecipe(ResourceLocation recipeId) {
+        if (mc.level == null) return null;
+        Recipe<?> recipe = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe != null) return recipe;
+        try {
+            if (isIronSpellBooksRecipe(recipeId)) return IronSpellBooksRecipeCatalog.byId(recipeId);
+            if (isPmmoSalvageRecipe(recipeId)) return PmmoSalvageCatalog.byId(recipeId);
+            if (isSyntheticBrewingRecipe(recipeId)) return VanillaBrewingCatalog.byId(recipeId);
+        } catch (RuntimeException | LinkageError ignored) {
+            // 可选模组或客户端目录尚未就绪时，仍保留候选和配方 ID。
+        }
+        return null;
+    }
+
+    public record CandidateDetails(String name, String searchText) {}
+
+    /** 搜索索引只收集文字；不为屏幕外的数百个候选创建 JEI 布局。 */
+    public CandidateDetails candidateDetails(ResourceLocation id, ItemStack fallback) {
+        return candidateCache.computeIfAbsent(id, ignored -> {
+            Recipe<?> recipe = resolveRecipe(id);
+            if (recipe == null) return new CandidateDetails(id.getPath(), id.toString());
+            List<ItemStack> inputs = previewInputs(recipe);
+            ItemStack output = previewOutput(recipe, fallback);
+            String name = inputs.isEmpty() ? output.getHoverName().getString()
+                    : inputs.get(0).getHoverName().getString() + " → " + output.getHoverName().getString();
+            if (recipe instanceof IronSpellBooksRecipe iron && iron.isScrollRecycling()) {
+                ResourceLocation spell = ResourceLocation.tryParse(iron.spellId());
+                if (spell != null) {
+                    String key = "spell." + spell.getNamespace() + "." + spell.getPath();
+                    String spellName = I18n.exists(key) ? I18n.get(key) : spell.getPath();
+                    String level = id.getPath().substring(id.getPath().lastIndexOf('/') + 1);
+                    name = Component.translatable("rsi.plan.recipe_picker.spell_level", spellName, level).getString();
+                }
+            }
+            StringBuilder search = new StringBuilder(id.toString()).append(' ').append(name);
+            for (ItemStack input : inputs) {
+                search.append(' ').append(input.getHoverName().getString());
+                try {
+                    for (Component line : input.getTooltipLines(mc.player, TooltipFlag.Default.NORMAL)) {
+                        search.append(' ').append(line.getString());
+                    }
+                } catch (RuntimeException | LinkageError ignoredTooltip) {
+                    // 个别第三方物品的提示依赖菜单状态，不影响整个候选面板。
+                }
+            }
+            search.append(' ').append(output.getHoverName().getString());
+            return new CandidateDetails(name, search.toString());
+        });
+    }
+
+    /** 在候选行的固定区域中展示 JEI 布局，返回鼠标下的材料用于未缩放的提示。 */
+    public ItemStack renderRecipeInArea(GuiGraphics graphics, Font font, ResourceLocation id,
+                                       int x, int y, int width, int height, int mouseX, int mouseY,
+                                       ItemStack fallback) {
+        Optional<IRecipeLayoutDrawable<?>> layout = getDrawable(id);
+        if (layout.isPresent()) {
+            var drawable = layout.get();
+            int recipeW = Math.max(1, drawable.getRect().getWidth());
+            int recipeH = Math.max(1, drawable.getRect().getHeight());
+            float scale = Math.min(1f, Math.min(width / (float) recipeW, height / (float) recipeH));
+            int left = x + (int) ((width - recipeW * scale) / 2);
+            int top = y + (int) ((height - recipeH * scale) / 2);
+            int localX = (int) Math.floor((mouseX - left) / scale);
+            int localY = (int) Math.floor((mouseY - top) / scale);
+            drawable.setPosition(0, 0);
+            graphics.pose().pushPose();
+            try {
+                graphics.pose().translate(left, top, 0);
+                graphics.pose().scale(scale, scale, 1);
+                drawable.drawRecipe(graphics, localX, localY);
+            } finally {
+                graphics.pose().popPose();
+            }
+            if (mouseX < x || mouseX >= x + width || mouseY < y || mouseY >= y + height) return ItemStack.EMPTY;
+            ItemStack item = drawable.getIngredientUnderMouse(localX, localY, VanillaTypes.ITEM_STACK)
+                    .orElse(ItemStack.EMPTY);
+            if (!item.isEmpty()) return item;
+            return drawable.getIngredientUnderMouse(localX, localY, ForgeTypes.FLUID_STACK)
+                    .map(InkFluidSupport::token).orElse(ItemStack.EMPTY);
+        }
+
+        Recipe<?> recipe = resolveRecipe(id);
+        if (recipe == null) {
+            graphics.drawString(font, Component.translatable("rsi.plan.recipe_picker.no_preview"),
+                    x + 2, y + 4, 0xFF8CA898, false);
+            return ItemStack.EMPTY;
+        }
+        List<ItemStack> inputs = previewInputs(recipe);
+        int columns = Math.max(1, Math.min(4, inputs.size()));
+        int rows = Math.max(1, (inputs.size() + columns - 1) / columns);
+        int naturalW = columns * 22 + 42;
+        int naturalH = rows * 22;
+        float scale = Math.min(1f, Math.min(width / (float) naturalW, height / (float) naturalH));
+        int left = x + (int) ((width - naturalW * scale) / 2);
+        int top = y + (int) ((height - naturalH * scale) / 2);
+        double localX = (mouseX - left) / scale, localY = (mouseY - top) / scale;
+        ItemStack hovered = ItemStack.EMPTY;
+        graphics.pose().pushPose();
+        try {
+            graphics.pose().translate(left, top, 0);
+            graphics.pose().scale(scale, scale, 1);
+            for (int i = 0; i < inputs.size(); i++) {
+                int slotX = (i % columns) * 22, slotY = (i / columns) * 22;
+                renderPreviewSlot(graphics, font, inputs.get(i), slotX, slotY);
+                if (localX >= slotX && localX < slotX + 18 && localY >= slotY && localY < slotY + 18) hovered = inputs.get(i);
+            }
+            int outputX = columns * 22 + 24, outputY = (naturalH - 18) / 2;
+            graphics.drawString(font, "→", columns * 22 + 4, outputY + 4, 0xFFB8D1C0, false);
+            ItemStack output = previewOutput(recipe, fallback);
+            renderPreviewSlot(graphics, font, output, outputX, outputY);
+            if (localX >= outputX && localX < outputX + 18 && localY >= outputY && localY < outputY + 18) hovered = output;
+        } finally {
+            graphics.pose().popPose();
+        }
+        return hovered;
+    }
+
+    private static void renderPreviewSlot(GuiGraphics graphics, Font font, ItemStack stack, int x, int y) {
+        graphics.fill(x, y, x + 18, y + 18, 0xFF4C8060);
+        graphics.fill(x + 1, y + 1, x + 17, y + 17, 0xFF14251B);
+        InkFluidRenderer.render(graphics, stack, x + 1, y + 1);
+        if (stack.getCount() > 1) {
+            String count = Integer.toString(stack.getCount());
+            graphics.drawString(font, count, x + 18 - font.width(count), y + 10, 0xFFFFFFFF, true);
+        }
+    }
+
+    private static List<ItemStack> previewInputs(Recipe<?> recipe) {
+        if (recipe instanceof IronSpellBooksRecipe iron) {
+            List<ItemStack> inputs = new ArrayList<>(iron.inputs());
+            if (iron.isScrollRecycling()) inputs.add(InkFluidSupport.token(new FluidStack(Fluids.WATER, InkFluidSupport.BOTTLE_AMOUNT)));
+            return inputs;
+        }
+        List<ItemStack> inputs = new ArrayList<>();
+        for (Ingredient ingredient : recipe.getIngredients()) {
+            ItemStack[] items = ingredient.getItems();
+            if (items.length > 0) inputs.add(items[0]);
+        }
+        return inputs;
+    }
+
+    private ItemStack previewOutput(Recipe<?> recipe, ItemStack fallback) {
+        ItemStack output = recipe.getResultItem(mc.level.registryAccess());
+        if (output.isEmpty()) output = ModRecipeHandlers.tryGetResultItem(recipe, mc.level.registryAccess());
+        return output.isEmpty() ? fallback : output;
     }
 }

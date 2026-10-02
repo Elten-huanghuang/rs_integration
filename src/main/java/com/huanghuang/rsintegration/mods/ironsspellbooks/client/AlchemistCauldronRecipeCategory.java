@@ -17,6 +17,8 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<IronSpellBooksRecipe> {
@@ -33,6 +35,9 @@ public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<Ir
     @Override public int getHeight() { return 58; }
     @Override public IDrawable getIcon() { return icon; }
     @Override public ResourceLocation getRegistryName(IronSpellBooksRecipe recipe) { return recipe.getId(); }
+    @Override public boolean isHandled(IronSpellBooksRecipe recipe) {
+        return recipe.machine() == IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON;
+    }
     @Override
     public void setRecipe(IRecipeLayoutBuilder builder, IronSpellBooksRecipe recipe, IFocusGroup focuses) {
         var inputs = recipe.inputs();
@@ -44,14 +49,23 @@ public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<Ir
                 builder.addInvisibleIngredients(RecipeIngredientRole.INPUT).addItemStack(input.copyWithCount(1));
             } else slot.addIngredients(recipe.inputIngredients().get(i));
         }
+        if (recipe.isScrollRecycling()) {
+            builder.addInputSlot(36, 8).setStandardSlotBackground()
+                    .addIngredient(ForgeTypes.FLUID_STACK, new FluidStack(Fluids.WATER, InkFluidSupport.BOTTLE_AMOUNT))
+                    .setFluidRenderer(InkFluidSupport.BOTTLE_AMOUNT, false, 16, 16);
+        }
         ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
         var slot = builder.addOutputSlot(118, 8).setOutputSlotBackground();
-        slot.addItemStack(output);
+        if (InkFluidSupport.isToken(output)) {
+            slot.addIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(output))
+                    .setFluidRenderer(InkFluidSupport.BOTTLE_AMOUNT, false, 16, 16);
+        } else slot.addItemStack(output);
     }
     @Override
     public void draw(IronSpellBooksRecipe recipe, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
         var font = Minecraft.getInstance().font;
         graphics.drawString(font, "→", 83, 12, 0x404040, false);
-        graphics.drawString(font, Component.translatable("rsi.alchemist.bottle_hint"), 4, 37, 0x606060, false);
+        graphics.drawString(font, Component.translatable(recipe.isScrollRecycling()
+                ? "rsi.alchemist.recycle_hint" : "rsi.alchemist.bottle_hint"), 4, 37, 0x606060, false);
     }
 }

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -57,7 +58,7 @@ public final class CraftProgressPacket {
             buf.writeVarInt(node.state().ordinal());
             buf.writeUtf(node.recipeId(), MAX_RECIPE_ID_LENGTH);
             buf.writeUtf(node.modTypeId(), MAX_MOD_TYPE_ID_LENGTH);
-            buf.writeItem(node.displayOutput());
+            InkFluidSupport.writePacket(buf, node.displayOutput());
             buf.writeVarInt(completedOperations);
             buf.writeVarInt(totalOperations);
             buf.writeVarInt(runningOperations);
@@ -86,7 +87,7 @@ public final class CraftProgressPacket {
                     CraftProgressSnapshot.NodeState.fromOrdinal(buf.readVarInt());
             String recipeId = buf.readUtf(MAX_RECIPE_ID_LENGTH);
             String modTypeId = buf.readUtf(MAX_MOD_TYPE_ID_LENGTH);
-            ItemStack displayOutput = buf.readItem();
+            ItemStack displayOutput = InkFluidSupport.readPacket(buf);
             int completedOperations = readNonNegative(buf, "completedOperations");
             int totalOperations = readNonNegative(buf, "totalOperations");
             int runningOperations = readNonNegative(buf, "runningOperations");

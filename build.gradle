@@ -120,9 +120,9 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    // 混合终端视图测试会加载现有搜索缓存的 JEI 接口签名。
-    testRuntimeOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
-    testRuntimeOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
+    // 混合终端与配方预览测试需要编译、加载 JEI 接口。
+    testImplementation "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
+    testImplementation "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
 
     benchmarkImplementation 'org.openjdk.jmh:jmh-core:1.37'
     benchmarkAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'

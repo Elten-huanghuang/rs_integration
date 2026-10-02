@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraftforge.fml.ModList;
@@ -105,7 +107,7 @@ public final class PlanRenderEngine {
 
         ItemStack output = step.output();
         if (output != null && !output.isEmpty()) {
-            gfx.renderItem(output, cardX + 30, y + 6);
+            InkFluidRenderer.render(gfx, output, cardX + 30, y + 6);
         }
 
         String displayName = formatRecipeName(step.recipeId(), output);
@@ -252,11 +254,13 @@ public final class PlanRenderEngine {
 
                 ItemStack stack = entry.getKey().stack(1);
                 UIRenderer.slotBg(gfx, cx, cy, SLOT_SIZE, border);
-                gfx.renderItem(stack, cx + 1, cy + 1);
+                InkFluidRenderer.render(gfx, stack, cx + 1, cy + 1);
                 // The adjacent pill is the single source of truth for counts.
                 // Keep durability/cooldown decorations while suppressing the
                 // vanilla stack-count overlay to avoid a second number.
-                gfx.renderItemDecorations(font, stack, cx + 1, cy + 1, "");
+                if (!InkFluidSupport.isToken(stack)) {
+                    gfx.renderItemDecorations(font, stack, cx + 1, cy + 1, "");
+                }
 
                 if (missing > 0) {
                     int bookmarkX = cx + 9;
