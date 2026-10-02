@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
@@ -13,6 +14,8 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.item.crafting.SmokingRecipe;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -226,6 +229,62 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
         assertEquals(0, IronFurnacesBatchDelegate.effectiveFuelTicks(100, 1, 1, 1));
         assertEquals(80, IronFurnacesBatchDelegate.requiredFuelTicks(40, 2, 0));
         assertEquals(30, IronFurnacesBatchDelegate.requiredFuelTicks(40, 2, 50));
+    }
+
+    @Test
+    void speedAugmentDoublesCoalNeededForTheReported125GlassOperations() {
+        for (int tierCookTicks : List.of(200, 80, 40, 20)) {
+            assertEquals(16, selectCoal(tierCookTicks, false, false, 0).amount());
+            assertEquals(32, selectCoal(tierCookTicks, true, false, 0).amount());
+            assertEquals(8, selectCoal(tierCookTicks, false, true, 0).amount());
+        }
+    }
+
+    @Test
+    void speedAugmentFuelBudgetCreditsAlreadyBurningFuel() {
+        assertEquals(31, selectCoal(40, true, false, 80).amount());
+        assertEquals(0, IronFurnacesBatchDelegate.requiredFuelTicks(20, 125, 2500));
+    }
+
+    @Test
+    void plannedRecipeTimeKeepsShortLivedFuelsUsableBeforeInputsArePlaced() {
+        int cookTicks = IronFurnacesBatchDelegate.cookingTicks(200, 100, false, false);
+        int required = IronFurnacesBatchDelegate.requiredFuelTicks(cookTicks, 32, 0);
+        var selection = VanillaFurnaceFuelPolicy.select(
+                List.of(new ItemStack(Items.STICK, 64)), List.of(), required,
+                stack -> IronFurnacesBatchDelegate.effectiveFuelTicks(100, cookTicks, false, false));
+
+        assertEquals(100, cookTicks);
+        assertNotNull(selection);
+        assertFalse(selection.partial());
+        assertEquals(64, selection.amount());
+    }
+
+    @Test
+    void cookingAndBurnTimeRoundLikeIronFurnacesWithAugments() {
+        assertEquals(28, IronFurnacesBatchDelegate.cookingTicks(40, 145, false, false));
+        assertEquals(61, IronFurnacesBatchDelegate.cookingTicks(41, 300, false, false));
+        assertEquals(30, IronFurnacesBatchDelegate.cookingTicks(41, 300, true, false));
+        assertEquals(77, IronFurnacesBatchDelegate.cookingTicks(41, 300, false, true));
+        assertEquals(1, IronFurnacesBatchDelegate.cookingTicks(1, 100, true, false));
+        assertEquals(0, IronFurnacesBatchDelegate.effectiveFuelTicks(300, 1, true, false));
+        assertEquals(2, IronFurnacesBatchDelegate.effectiveFuelTicks(300, 1, false, true));
+    }
+
+    private static VanillaFurnaceFuelPolicy.Selection selectCoal(int tierCookTicks,
+                                                                 boolean speedAugment,
+                                                                 boolean fuelAugment,
+                                                                 int currentBurnTime) {
+        int cookTicks = IronFurnacesBatchDelegate.cookingTicks(
+                tierCookTicks, 200, speedAugment, fuelAugment);
+        int required = IronFurnacesBatchDelegate.requiredFuelTicks(cookTicks, 125, currentBurnTime);
+        var selection = VanillaFurnaceFuelPolicy.select(
+                List.of(new ItemStack(Items.COAL, 64)), List.of("minecraft:coal"), required,
+                stack -> IronFurnacesBatchDelegate.effectiveFuelTicks(
+                        1600, cookTicks, speedAugment, fuelAugment));
+        assertNotNull(selection);
+        assertFalse(selection.partial());
+        return selection;
     }
 
     @Test

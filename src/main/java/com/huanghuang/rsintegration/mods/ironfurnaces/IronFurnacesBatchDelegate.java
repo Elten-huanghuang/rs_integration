@@ -554,13 +554,18 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean ensureFuel(int cycles) {
-        int cookTicks = Math.max(1, furnace.getCookTime());
+        ItemStack augment = furnace.getItem(BlockIronFurnaceTileBase.AUGMENT_GREEN);
+        boolean speedAugment = augment.getItem() instanceof ItemAugmentSpeed;
+        boolean fuelAugment = augment.getItem() instanceof ItemAugmentFuel;
+        // 补燃料时原料可能尚未入槽，不能用空输入槽对应的 getCookTime()。
+        int cookTicks = cookingTicks(furnace.getCookTimeConfig().get(),
+                recipe.getCookingTime(), speedAugment, fuelAugment);
         int remaining = requiredFuelTicks(cookTicks, cycles, furnace.furnaceBurnTime);
         if (remaining == 0) return true;
 
         ItemStack existing = furnace.getItem(FUEL);
         if (!existing.isEmpty()) {
-            int burn = effectiveFuelTicks(existing, cookTicks);
+            int burn = effectiveFuelTicks(existing, cookTicks, speedAugment, fuelAugment);
             if (burn <= 0) return false;
             int needed = VanillaFurnaceFuelPolicy.requiredAmount(remaining, burn);
             int limit = Math.min(existing.getMaxStackSize(), furnace.getMaxStackSize());
@@ -586,7 +591,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),
-                remaining, stack -> effectiveFuelTicks(stack, cookTicks));
+                remaining, stack -> effectiveFuelTicks(stack, cookTicks, speedAugment, fuelAugment));
         if (selection == null || selection.partial()) return false;
         ItemStack extracted = extractExact(selection.fuel(), selection.amount());
         if (extracted.isEmpty()) return false;
@@ -935,13 +940,26 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private int effectiveFuelTicks(ItemStack fuel, int cookTicks) {
+    static int cookingTicks(int tierCookTicks, int recipeCookTicks,
+                            boolean speedAugment, boolean fuelAugment) {
+        // 对齐更多熔炉的 getSpeed()/getCookTime()，按本次配方换算等级速度。
+        int ticks = (int) Math.max(1.0, tierCookTicks / (200.0 / recipeCookTicks));
+        if (speedAugment) ticks = Math.max(1, ticks / 2);
+        if (fuelAugment) ticks = (int) Math.min(Integer.MAX_VALUE, (ticks * 5L + 3L) / 4L);
+        return ticks;
+    }
+
+    private int effectiveFuelTicks(ItemStack fuel, int cookTicks,
+                                   boolean speedAugment, boolean fuelAugment) {
         int rawBurn = BlockIronFurnaceTileBase.getBurnTime(fuel, furnace.recipeType);
-        // getCookTime() already includes the machine's speed/fuel augment
-        // modifiers. Applying another speed divisor here makes every fuel
-        // stack appear to cover fewer furnace ticks than it really does,
-        // causing multi-item requests to over-consume fuel and stall.
-        return effectiveFuelTicks(rawBurn, cookTicks, 1, 1);
+        return effectiveFuelTicks(rawBurn, cookTicks, speedAugment, fuelAugment);
+    }
+
+    static int effectiveFuelTicks(int rawBurn, int cookTicks,
+                                  boolean speedAugment, boolean fuelAugment) {
+        // 4.1.6 的 tick() 在按加工时间缩放后，还会将速度升级的燃烧时间减半，
+        // 或将燃料升级的燃烧时间翻倍；这与加工时间自身的升级倍率分别生效。
+        return effectiveFuelTicks(rawBurn, cookTicks, fuelAugment ? 2 : 1, speedAugment ? 2 : 1);
     }
 
     static int effectiveFuelTicks(int rawBurn, int cookTicks, int multiplier, int divisor) {
