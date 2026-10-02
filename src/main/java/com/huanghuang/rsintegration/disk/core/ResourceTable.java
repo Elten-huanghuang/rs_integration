@@ -36,7 +36,6 @@ public final class ResourceTable {
     private final IntArrayList live = new IntArrayList();
     private final IntArrayList free = new IntArrayList();
     private final IntArrayList dirtyPages = new IntArrayList();
-    private final SaturatedTree totals;
     private final int maxEntries;
     private final long epoch;
     private int allocated;
@@ -47,13 +46,13 @@ public final class ResourceTable {
     public ResourceTable(int maxEntries, long epoch) {
         this.maxEntries = maxEntries;
         this.epoch = epoch;
-        totals = new SaturatedTree(maxEntries);
         exact.defaultReturnValue(-1);
         plain.defaultReturnValue(-1);
     }
 
     public int size() { return live.size(); }
-    public int total() { return totals.total(); }
+    // 最大条目数乘以单项 int 上限仍远小于 long 上限；从精确展示汇总截断即可。
+    public int total() { return (int) Math.min(Integer.MAX_VALUE, displayTotal); }
     public long displayTotal() { return displayTotal; }
     public int capacity() { return maxEntries; }
     public long revision() { return revision; }
@@ -249,7 +248,6 @@ public final class ResourceTable {
         Page page = page(slot);
         displayTotal += (long) value - page.amounts[offset(slot)];
         page.amounts[offset(slot)] = value;
-        totals.set(slot, value);
         page.amountRevision = ++revision;
         markDirty(slot / PAGE_SIZE, page);
     }

@@ -22,6 +22,27 @@ final class NbtIdentity {
         return new Result(hash, visitor.malformed);
     }
 
+    /** 与完整 Stack NBT 的哈希、字节预算及深度一致，但不分配外层 Compound/标量 Tag。 */
+    static Result inspectResource(boolean fluid, String id, CompoundTag tag, CompoundTag caps) {
+        NbtIdentity visitor = new NbtIdentity();
+        visitor.add(5); // 根 Compound 的类型和元素数量。
+        int name = visitor.string(fluid ? "FluidName" : "id");
+        visitor.add(1);
+        int value = name ^ Integer.rotateLeft(31 * Tag.TAG_STRING + visitor.string(id), 13);
+        name = visitor.string(fluid ? "Amount" : "Count");
+        visitor.add(fluid ? 5 : 2);
+        value += name ^ Integer.rotateLeft(31 * (fluid ? Tag.TAG_INT : Tag.TAG_BYTE) + 1, 13);
+        if (tag != null) {
+            name = visitor.string(fluid ? "Tag" : "tag");
+            value += name ^ Integer.rotateLeft(visitor.visit(tag, 1), 13);
+        }
+        if (caps != null) {
+            name = visitor.string("ForgeCaps");
+            value += name ^ Integer.rotateLeft(visitor.visit(caps, 1), 13);
+        }
+        return new Result(31 * Tag.TAG_COMPOUND + value, visitor.malformed);
+    }
+
     private void add(long count) {
         if (count > FrozenKey.MAX_BYTES - bytes) throw new IllegalArgumentException("统一盘资源身份过大");
         bytes += (int) count;

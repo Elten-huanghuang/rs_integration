@@ -65,6 +65,8 @@ public final class UnifiedDiskLimitCheck {
                 check(core.insert(key(kind, i), Integer.MAX_VALUE, true) == Integer.MAX_VALUE, "填盘失败 " + kind + " " + i);
             }
             System.out.println("filled " + kind + " " + core.table(kind).size());
+            check(core.table(kind).displayTotal() == (long) CAPACITY * Integer.MAX_VALUE,
+                    "最大容量的精确展示总量错误 " + kind);
         }
         result.put("fillBothTablesMillis", millis(started));
         result.put("retainedHeapDeltaBytesApprox", retainedHeap() - baseline);
@@ -116,6 +118,7 @@ public final class UnifiedDiskLimitCheck {
         result.put("reloadMillis", millis(started));
         check(loaded.items.size() == CAPACITY && loaded.fluids.size() == CAPACITY, "恢复种类数错误");
         for (FrozenKey.Kind kind : FrozenKey.Kind.values()) {
+            check(loaded.table(kind).displayTotal() == core.table(kind).displayTotal(), "恢复展示总量错误 " + kind);
             for (int i = 0; i <= CAPACITY; i++) {
                 int expected = i == 10 ? 0 : i < CAPACITY && i % 997 == 0 ? Integer.MAX_VALUE - 1 : Integer.MAX_VALUE;
                 check(loaded.table(kind).amount(key(kind, i)) == expected, "恢复数量错误 " + kind + " " + i);

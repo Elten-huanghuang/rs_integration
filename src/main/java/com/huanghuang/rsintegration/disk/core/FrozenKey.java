@@ -69,13 +69,14 @@ public final class FrozenKey {
     }
 
     /** 临时查询只冻结身份，不生成保存字节或返回模板；不能放入库存。 */
-    private FrozenKey(Kind kind, Object type, CompoundTag identity) {
+    private FrozenKey(Kind kind, Object type, CompoundTag tag, CompoundTag caps) {
         this.kind = kind;
         this.type = type;
-        String tagField = kind == Kind.ITEM ? "tag" : "Tag";
-        this.tag = identity.contains(tagField) ? identity.getCompound(tagField) : null;
-        this.caps = identity.contains("ForgeCaps") ? identity.getCompound("ForgeCaps") : null;
-        NbtIdentity.Result result = NbtIdentity.inspect(identity);
+        this.tag = tag == null ? null : tag.copy();
+        this.caps = caps == null ? null : caps.copy();
+        String id = (kind == Kind.ITEM ? ForgeRegistries.ITEMS.getKey((Item) type)
+                : ForgeRegistries.FLUIDS.getKey((Fluid) type)).toString();
+        NbtIdentity.Result result = NbtIdentity.inspectResource(kind == Kind.FLUID, id, this.tag, this.caps);
         this.hash = 31 * (31 * kind.hashCode() + type.hashCode()) + result.hash();
         this.malformed = result.malformed();
         this.payload = null;
@@ -92,17 +93,12 @@ public final class FrozenKey {
         if (source.isEmpty()) throw new IllegalArgumentException("空物品不能作为资源身份");
         // 带能力物品沿用复制后归一化的路径，避免 count 相关能力在复制时改变身份。
         if (!source.areCapsCompatible((CapabilityDispatcher) null)) return item(source);
-        CompoundTag identity = source.save(new CompoundTag());
-        identity.putByte("Count", (byte) 1);
-        return new FrozenKey(Kind.ITEM, source.getItem(), identity);
+        return new FrozenKey(Kind.ITEM, source.getItem(), source.getTag(), null);
     }
 
     public static FrozenKey queryFluid(FluidStack source) {
         if (source.isEmpty()) throw new IllegalArgumentException("空流体不能作为资源身份");
-        CompoundTag identity = source.writeToNBT(new CompoundTag());
-        if (source.getTag() != null) identity.put("Tag", source.getTag().copy());
-        identity.putInt("Amount", 1);
-        return new FrozenKey(Kind.FLUID, source.getFluid(), identity);
+        return new FrozenKey(Kind.FLUID, source.getFluid(), source.getTag(), null);
     }
 
     public static FrozenKey item(ItemStack source) {
