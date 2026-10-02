@@ -6,6 +6,11 @@ import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.CuriosAccess;
@@ -93,6 +98,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.IdentityHashMap;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.function.Predicate;
 
 /**
@@ -150,6 +158,9 @@ public final class AsyncCraftChain {
     private int drainingTicks;
     private int flatObservedCompletedOperations;
     private int stepRemaining;
+    private final Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> probabilityTargets = new IdentityHashMap<>();
+    private Map<ResourceLocation, ResourceLocation> supplementalForcedRecipes = Map.of();
+    private Map<String, ItemStack> supplementalMaterialLocks = Map.of();
     private State state = State.PENDING;
     private int taintSlot = -1;
     private int taintRemaining;
@@ -310,7 +321,7 @@ public final class AsyncCraftChain {
         this.storageEndpoint = storageEndpoint != null
                 ? storageEndpoint
                 : network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
-        this.steps = List.copyOf(steps);
+        this.steps = new ArrayList<>(steps);
         if (graph != null) {
             CraftPlanValidator.validate(graph);
         }
@@ -373,7 +384,8 @@ public final class AsyncCraftChain {
             int dispatchOperationLimit = configuredOperationsPerDispatch();
             boolean oversizedNode = requiresFlatExecutionForOversizedNode(
                     steps, atomicVanillaLimit, dispatchOperationLimit);
-            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedNode;
+            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedNode
+                    && steps.stream().noneMatch(this::requiresTargetedProduction);
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "Using {} execution for self-contained graph: reason={} detail={}"),
                     useGraphExecution ? "graph" : "flat",
@@ -455,6 +467,18 @@ public final class AsyncCraftChain {
 
     public void setOutputDestination(@Nullable OutputDestination destination) {
         this.outputDestination = destination == null ? OutputDestination.RS_NETWORK : destination;
+    }
+
+    public void setSupplementalPlanningPreferences(Map<String, String> forcedRecipes,
+                                                   Map<String, ItemStack> materialLocks) {
+        Map<ResourceLocation, ResourceLocation> forced = new HashMap<>();
+        forcedRecipes.forEach((output, recipe) -> {
+            ResourceLocation itemId = ResourceLocation.tryParse(output);
+            ResourceLocation recipeId = ResourceLocation.tryParse(recipe);
+            if (itemId != null && recipeId != null) forced.put(itemId, recipeId);
+        });
+        supplementalForcedRecipes = Map.copyOf(forced);
+        supplementalMaterialLocks = MaterialLocks.immutableCopy(materialLocks);
     }
 
     /** Applies only to the target recipe and is matched against server-owned bindings. */
@@ -693,6 +717,8 @@ public final class AsyncCraftChain {
                     closeFlatOperationScope();
                     List<ItemStack> actualResults = collectedOutputs.stacks();
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
+                    ProbabilisticProduction probability = probabilityTargets.get(steps.get(currentStepIdx));
+                    if (probability != null) probability.settle(actualResults);
 
                     IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
                     int actualCount = countMatchingProduction(actualResults, expected);
@@ -775,7 +801,9 @@ public final class AsyncCraftChain {
                     waitTicks = 0;
                     flatObservedCompletedOperations = 0;
                     ledger.reset();
-                    stepRemaining = remainingAfterFlatBatch(stepRemaining, machineCount);
+                    stepRemaining = probability == null
+                            ? remainingAfterFlatBatch(stepRemaining, machineCount)
+                            : probability.complete() ? 0 : 1;
                     if (stepRemaining <= 0) currentStepIdx++;
                     state = State.EXECUTING;
                     snapshotCommittedVirtual();
@@ -847,6 +875,21 @@ public final class AsyncCraftChain {
             // Settled boundary: batch inputs committed, products in virtualInventory.
             snapshotCommittedVirtual();
         } else {
+            ProbabilisticProduction probability = probabilityTarget(step, online);
+            if (probability != null) {
+                if (!probability.canAttempt()) {
+                    abort("Probabilistic production attempt limit reached: " + step.recipeId(),
+                            Component.translatable("rsi.async.probability.limit", probability.produced(),
+                                    probability.target().quantity(), probability.attempts()));
+                    return true;
+                }
+                if (!prepareProbabilityInputs(step, probability, online)) {
+                    maybeSendProgress(online, false);
+                    return state == State.ABORTED;
+                }
+                // 一轮一试，避免达到目标后仍在途消耗额外材料。
+                stepRemaining = 1;
+            }
             if (stepRemaining <= 0) {
                 stepRemaining = step.executions();
                 machineCount = 1;
@@ -879,6 +922,7 @@ public final class AsyncCraftChain {
                 return true;
             }
             waitingForMachineLease = false;
+            if (probability != null) probability.started();
             machineLeaseWaitTicks = 0;
             machineStartFailureMessage = null;
             state = State.WAITING_MOD;
@@ -1099,6 +1143,115 @@ public final class AsyncCraftChain {
             int executions) {
         if (allowance.tryClaimExact(executions)) return true;
         admissions.releaseBeforeDispatch(admission);
+        return false;
+    }
+
+    @Nullable
+    private Recipe<?> recipeForStep(CraftingResolver.ResolutionStep step) {
+        if (server == null) return null;
+        Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
+        if (recipe == null && step.modType().id().startsWith("irons_spellbooks")) {
+            recipe = IronSpellBooksRecipeCatalog.byId(step.recipeId());
+        }
+        if (recipe == null && "pmmo_salvage".equals(step.modType().id())) {
+            recipe = PmmoSalvageCatalog.byId(step.recipeId());
+        }
+        return recipe;
+    }
+
+    private boolean requiresTargetedProduction(CraftingResolver.ResolutionStep step) {
+        if (step.productionTarget() == null) return false;
+        Recipe<?> recipe = recipeForStep(step);
+        ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.handlerFor(recipe);
+        return handler != null && handler.requiresTargetedProduction(recipe,
+                step.productionTarget().material().toStack(1));
+    }
+
+    @Nullable
+    private ProbabilisticProduction probabilityTarget(CraftingResolver.ResolutionStep step, ServerPlayer player) {
+        ProbabilisticProduction existing = probabilityTargets.get(step);
+        if (existing != null || !requiresTargetedProduction(step)) return existing;
+        int multiplier = 16;
+        int maximum = 4096;
+        try {
+            multiplier = RSIntegrationConfig.CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER.get();
+            maximum = RSIntegrationConfig.CRAFTING_PROBABILISTIC_MAX_ATTEMPTS.get();
+        } catch (RuntimeException ignored) {}
+        int limit = (int) Math.min(maximum, (long) step.executions() * multiplier);
+        ProbabilisticProduction progress = new ProbabilisticProduction(step.productionTarget(), Math.max(1, limit));
+        probabilityTargets.put(step, progress);
+        player.sendSystemMessage(Component.translatable("rsi.async.probability.started",
+                step.productionTarget().material().toStack(1).getHoverName(), step.productionTarget().quantity(), limit));
+        return progress;
+    }
+
+    /** 缺少下一次投入时插入原料子计划；已有真实产物始终留在本任务账本中。 */
+    private boolean prepareProbabilityInputs(CraftingResolver.ResolutionStep step,
+                                              ProbabilisticProduction progress, ServerPlayer player) {
+        Recipe<?> recipe = recipeForStep(step);
+        ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.handlerFor(recipe);
+        List<IngredientSpec> inputs = handler == null ? null : handler.getIngredients(recipe);
+        if (inputs == null || inputs.isEmpty()) {
+            abort("Probabilistic recipe has no material contract: " + step.recipeId(),
+                    Component.translatable("rsi.async.probability.materials", progress.remaining()));
+            return false;
+        }
+        inputs = MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks);
+        MaterialSources.invalidateFor(player, storageEndpoint);
+        Map<StackKey, Integer> available = new LinkedHashMap<>(MaterialSources.listAllAvailable(player, storageEndpoint));
+        for (ItemStack stack : virtualInventory) {
+            available.merge(StackKey.of(stack, true), stack.getCount(), MaterialSources::saturatedAdd);
+        }
+        // 先保护后续步骤的投入，也保护已经收集的当前目标，补做不能把它们再拆掉。
+        List<IngredientSpec> protectedInputs = new ArrayList<>();
+        Set<ResourceLocation> excluded = new HashSet<>();
+        for (int i = currentStepIdx; i < steps.size(); i++) {
+            CraftingResolver.ResolutionStep pending = steps.get(i);
+            excluded.add(pending.recipeId());
+            if (i == currentStepIdx) continue;
+            Recipe<?> pendingRecipe = recipeForStep(pending);
+            if (pendingRecipe == null) continue;
+            List<IngredientSpec> pendingInputs = CraftPacketUtils.extractIngredientSpecs(pendingRecipe);
+            if (pendingInputs == null) continue;
+            for (IngredientSpec input : MaterialLocks.narrowSpecs(pending.recipeId(),
+                    pendingInputs, supplementalMaterialLocks)) {
+                if (!input.isEmpty()) protectedInputs.add(new IngredientSpec(input.ingredient(),
+                        CraftPacketUtils.requiredCount(input, pending.executions()), input.role()));
+            }
+        }
+        Map<StackKey, Integer> usable = SupplementalMaterialPlan.afterProtecting(available, protectedInputs);
+        SupplementalMaterialPlan.protectProduced(available, usable, progress.target(), progress.produced());
+        // 材料已齐时直接开始下一试，避免每次轮询重建递归图。
+        if (SupplementalMaterialPlan.hasInputs(usable, inputs)) return true;
+        List<String> missing = new ArrayList<>();
+        CraftPlanGraph supplemental;
+        try {
+            supplemental = CraftingResolver.resolveSupplementalGraph(inputs, usable,
+                    player.serverLevel(), player, network, missing, excluded,
+                    supplementalForcedRecipes, supplementalMaterialLocks,
+                    new CraftingResolver.ActiveRootRecipe(step.recipeId(), progress.target().material().toStack(1)));
+        } catch (CraftingPlanningTimeoutException timeout) {
+            abort("Probabilistic supplemental planning timed out: " + step.recipeId(),
+                    Component.translatable("rsi.async.probability.planning_timeout", progress.remaining()));
+            return false;
+        }
+        if (!missing.isEmpty() || supplemental.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0)) {
+            abort("Probabilistic supplemental materials unavailable: " + step.recipeId(),
+                    Component.translatable("rsi.async.probability.materials", progress.remaining()));
+            return false;
+        }
+        List<CraftingResolver.ResolutionStep> additional = ExecutionEquivalence.projectFlatSteps(supplemental);
+        if (additional.isEmpty()) return true;
+        if ((long) steps.size() + additional.size() > RSIntegrationConfig.CRAFTING_MAX_STEPS.get()) {
+            abort("Probabilistic supplemental step limit reached", Component.translatable(
+                    "rsi.async.probability.materials", progress.remaining()));
+            return false;
+        }
+        steps.addAll(currentStepIdx, additional);
+        stepRemaining = 0;
+        RSIntegrationMod.LOGGER.info(ctx.format(
+                "Supplemental probability inputs: recipe={} attempts={} produced={} target={} addedSteps={}"),
+                step.recipeId(), progress.attempts(), progress.produced(), progress.target().quantity(), additional.size());
         return false;
     }
 
@@ -2985,7 +3138,7 @@ public final class AsyncCraftChain {
                             public void logLedgerState(ExtractionLedger ledger) {
                                 AsyncCraftChain.this.logLedgerState(ledger);
                             }
-                        }));
+                        }, supplementalMaterialLocks));
     }
 
     //  multi-block step execution
@@ -3922,6 +4075,10 @@ public final class AsyncCraftChain {
     private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
                                                     @Nullable List<ItemStack> virtualDebits,
                                                     boolean logFailure) {
+        if (currentStepIdx < steps.size()) {
+            specs = MaterialLocks.narrowSpecs(steps.get(currentStepIdx).recipeId(),
+                    specs, supplementalMaterialLocks);
+        }
         int mark = ledger.reservationMark();
         int debitMark = virtualDebits == null ? 0 : virtualDebits.size();
         List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
@@ -4462,6 +4619,19 @@ public final class AsyncCraftChain {
         while (finalSettlementCursor < virtualInventory.size() && stackBudget-- > 0) {
             ItemStack vi = virtualInventory.get(finalSettlementCursor++);
             if (!vi.isEmpty()) {
+                if (InkFluidSupport.isToken(vi)) {
+                    if (storageEndpoint == null || online == null) {
+                        finalSettlementCursor--;
+                        return false;
+                    }
+                    ItemStack remainder = insertIntoStorage(online, vi);
+                    virtualInventory.set(finalSettlementCursor - 1, remainder);
+                    if (!remainder.isEmpty()) {
+                        finalSettlementCursor--;
+                        return false;
+                    }
+                    continue;
+                }
                 if (storageEndpoint != null) {
                     boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
                             && (matchesFinalTarget(vi)

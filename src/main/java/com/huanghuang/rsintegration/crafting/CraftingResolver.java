@@ -450,13 +450,36 @@ public final class CraftingResolver {
             int timeoutMs,
             @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+                missingOut, forcedOverrides, bestEffort, singleVariantRoots, timeoutMs,
+                activeRoot, materialLocks, Set.of());
+    }
+
+    /** 补做原料沿用同一规划器，并排除当前等待中的生产步骤以阻断跨轮次循环。 */
+    static CraftPlanGraph resolveSupplementalGraph(List<IngredientSpec> needed,
+            Map<StackKey, Integer> available, Level level, ServerPlayer player, INetwork network,
+            List<String> missing, Set<ResourceLocation> excludedRecipes,
+            Map<ResourceLocation, ResourceLocation> forcedRecipes, Map<String, ItemStack> materialLocks,
+            ActiveRootRecipe activeRoot) {
+        return resolveGraphForSpecsWithTypes(needed, available, level, player, network, missing,
+                forcedRecipes, false, true, 50, activeRoot, materialLocks, excludedRecipes);
+    }
+
+    private static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed, Map<StackKey, Integer> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable INetwork network, @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
+        Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         ResolutionContext ctx = timeoutMs > 0
-                ? new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
+                ? new ResolutionContext(level, index, availableKeyed,
                         prefs, forcedOverrides, player, network, bestEffort, missingOut,
                         ResolutionContext.deadlineAfterMillis(timeoutMs), true)
-                : new ResolutionContext(level, RecipeIndex.get(level), availableKeyed,
+                : new ResolutionContext(level, index, availableKeyed,
                         prefs, forcedOverrides, player, network, bestEffort, missingOut);
+        ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         ctx.withMaterialLocks(materialLocks);
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
@@ -1244,7 +1267,8 @@ public final class CraftingResolver {
             boolean inferMode,
             int executions,
             @Nullable ItemStack syntheticInput,
-            @Nullable ItemStack syntheticOutput
+            @Nullable ItemStack syntheticOutput,
+            @Nullable ProductionTarget productionTarget
     ) {
         public ResolutionStep {
             alternativeIds = List.copyOf(alternativeIds);
@@ -1252,6 +1276,15 @@ public final class CraftingResolver {
             if (executions < 1) executions = 1;
             syntheticInput = syntheticInput == null ? null : syntheticInput.copyWithCount(1);
             syntheticOutput = syntheticOutput == null ? null : syntheticOutput.copyWithCount(1);
+        }
+        public ResolutionStep(ResourceLocation recipeId, ModType modType,
+                              @Nullable ResourceLocation recipeTypeId,
+                              List<ResourceLocation> alternativeIds,
+                              List<String> alternativeModTypes,
+                              boolean inferMode, int executions,
+                              @Nullable ItemStack syntheticInput, @Nullable ItemStack syntheticOutput) {
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes,
+                    inferMode, executions, syntheticInput, syntheticOutput, null);
         }
         /** Backward-compatible: explicit executions. */
         public ResolutionStep(ResourceLocation recipeId, ModType modType,

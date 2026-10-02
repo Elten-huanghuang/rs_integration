@@ -15,6 +15,12 @@ public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
     @Override public ModType modType() { return ModType.byId(IronSpellBooksRSModule.SCROLL_FORGE_TYPE); }
     @Override public boolean canHandle(Recipe<?> recipe) { return recipe instanceof IronSpellBooksRecipe; }
     @Override public boolean cacheByRecipeClass() { return false; }
+    @Override public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+        return !(recipe instanceof IronSpellBooksRecipe ironRecipe) || !ironRecipe.isScrollRecycling();
+    }
+    @Override public boolean supportsTargetedProduction(Recipe<?> recipe) {
+        return recipe instanceof IronSpellBooksRecipe ironRecipe && ironRecipe.isScrollRecycling();
+    }
     @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access).copy();
     }

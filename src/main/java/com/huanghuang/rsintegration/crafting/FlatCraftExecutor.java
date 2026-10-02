@@ -41,7 +41,14 @@ final class FlatCraftExecutor {
 
     record Context(ServerLevel level, CraftLogContext logContext,
                    List<CraftingResolver.ResolutionStep> chainSteps,
-                   @Nullable ItemStack targetOutput, Host host) {}
+                   @Nullable ItemStack targetOutput, Host host,
+                   Map<String, ItemStack> materialLocks) {
+        Context(ServerLevel level, CraftLogContext logContext,
+                List<CraftingResolver.ResolutionStep> chainSteps,
+                @Nullable ItemStack targetOutput, Host host) {
+            this(level, logContext, chainSteps, targetOutput, host, Map.of());
+        }
+    }
 
     private FlatCraftExecutor() {}
 
@@ -74,6 +81,7 @@ final class FlatCraftExecutor {
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
+                specs = MaterialLocks.narrowSpecs(stepId, specs, context.materialLocks());
                 ItemStack terminalOutput = terminalOutputFor(stepId, craftingRecipe, registryAccess, context);
                 if (!terminalOutput.isEmpty()
                         && !SelfAmplifyingRecipePolicy.isSelfAmplifying(specs, terminalOutput)) {
@@ -89,6 +97,7 @@ final class FlatCraftExecutor {
             }
 
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+            specs = MaterialLocks.narrowSpecs(stepId, specs, context.materialLocks());
             if (recipe instanceof SmithingTransformRecipe smithing) {
                 specs = SmithingRecipeHandler.requireDemandedOutputTag(
                         smithing, specs, step.syntheticOutput());

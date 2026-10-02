@@ -1,9 +1,14 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidTransfer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
+import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.network.grid.handler.FluidGridHandler;
+import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -23,6 +28,20 @@ import java.util.UUID;
 @Mixin(value = FluidGridHandler.class, remap = false)
 public abstract class FluidContainerPreflightMixin {
     @Shadow @Final private INetwork network;
+
+    @Inject(method = "onExtract", at = @At("HEAD"), cancellable = true)
+    private void rsi$extractInkBottle(ServerPlayer player, UUID id, boolean shift, CallbackInfo ci) {
+        FluidStack selected = network.getFluidStorageCache().getList().get(id);
+        if (selected == null || !InkFluidSupport.isInk(selected)) return;
+        // 原生路径要求至少 1000 mB 并且只取桶，墨水必须单独执行完整的权限与菜单校验。
+        ci.cancel();
+        if (!(player.containerMenu instanceof GridContainerMenu menu)
+                || !(menu.getGrid() instanceof INetworkAwareGrid grid) || grid.getNetwork() != network
+                || !menu.stillValid(player) || !menu.getGrid().isGridActive() || !network.canRun()
+                || !network.getSecurityManager().hasPermission(Permission.EXTRACT, player)) return;
+        UnifiedGridFluidTransfer.apply(player, network,
+                UnifiedGridFluidTransfer.fill(network, menu.getCarried(), selected), true, shift);
+    }
 
     @Inject(method = "onExtract", at = @At(value = "INVOKE",
             target = "Lcom/refinedmods/refinedstorage/util/NetworkUtils;extractBucketFromPlayerInventoryOrNetwork(Lnet/minecraft/world/entity/player/Player;Lcom/refinedmods/refinedstorage/api/network/INetwork;Ljava/util/function/Consumer;)V"),

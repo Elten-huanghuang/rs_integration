@@ -16,6 +16,9 @@ import net.minecraftforge.registries.RegistryObject;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.AlchemistCauldronRecipeCategory;
 import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
 import mezz.jei.api.constants.VanillaTypes;
 import net.minecraft.world.item.ItemStack;
@@ -91,6 +94,8 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
+        jeiRuntime.getIngredientManager().removeIngredientsAtRuntime(VanillaTypes.ITEM_STACK,
+                List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get())));
         unifiedDiskRemoved = false;
         refreshUnifiedDiskVisibility();
         TetraWorkbenchMaterialState.refreshForJei();
@@ -144,6 +149,8 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerCategories(IRecipeCategoryRegistration registration) {
+        if (ironAlchemistEnabled()) registration.addRecipeCategories(
+                new AlchemistCauldronRecipeCategory(registration.getJeiHelpers().getGuiHelper()));
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
             registration.addRecipeCategories(
                     new FtbQuestSubmissionCategory(
@@ -162,6 +169,9 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
+        if (ironAlchemistEnabled()) registration.addRecipes(AlchemistCauldronRecipeCategory.TYPE,
+                IronSpellBooksRecipeCatalog.allRecipes().stream()
+                        .filter(IronSpellBooksRecipe::isInkBottling).toList());
         if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
                 && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
             registration.addRecipes(LithumAltarFironRecipeCategory.TYPE,
@@ -182,6 +192,8 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipeCatalysts(mezz.jei.api.registration.IRecipeCatalystRegistration registration) {
+        if (ironAlchemistEnabled()) registration.addRecipeCatalyst(new ItemStack(ForgeRegistries.ITEMS.getValue(
+                new ResourceLocation("irons_spellbooks", "alchemist_cauldron"))), AlchemistCauldronRecipeCategory.TYPE);
         if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
                 && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
             var item = ForgeRegistries.ITEMS.getValue(
@@ -351,5 +363,9 @@ public final class RSJeiPlugin implements IModPlugin {
 
     private static boolean pmmoSalvageEnabled() {
         return RSIntegrationConfig.ENABLE_PMMO.get() && ModList.get().isLoaded(ModIds.PMMO);
+    }
+
+    private static boolean ironAlchemistEnabled() {
+        return RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get() && ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS);
     }
 }

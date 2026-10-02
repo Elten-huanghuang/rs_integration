@@ -5,6 +5,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
@@ -16,7 +17,7 @@ import java.util.List;
 
 /** One concrete NBT-sensitive operation exposed by an Iron's Spell Books workstation. */
 public final class IronSpellBooksRecipe implements Recipe<Container> {
-    public enum Machine { SCROLL_FORGE, ARCANE_ANVIL }
+    public enum Machine { SCROLL_FORGE, ARCANE_ANVIL, ALCHEMIST_CAULDRON }
 
     private final ResourceLocation id;
     private final Machine machine;
@@ -53,6 +54,22 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     public List<Ingredient> inputIngredients() { return inputIngredients; }
     public String spellId() { return spellId; }
     public int spellLevel() { return spellLevel; }
+
+    public boolean isScrollRecycling() {
+        return machine == Machine.ALCHEMIST_CAULDRON && InkFluidSupport.isToken(output);
+    }
+
+    public boolean isInkBottling() {
+        return machine == Machine.ALCHEMIST_CAULDRON && inputs.size() == 2
+                && InkFluidSupport.isToken(inputs.get(0)) && inputs.get(1).is(Items.GLASS_BOTTLE)
+                && !InkFluidSupport.isToken(output);
+    }
+
+    static IronSpellBooksRecipe bottleRecipe(ResourceLocation id, ItemStack fluid, ItemStack ink) {
+        return new IronSpellBooksRecipe(id, Machine.ALCHEMIST_CAULDRON,
+                List.of(fluid, new ItemStack(Items.GLASS_BOTTLE)),
+                List.of(StrictNBTIngredient.of(fluid), Ingredient.of(Items.GLASS_BOTTLE)), ink, "", 0);
+    }
 
     @Override public boolean matches(Container container, Level level) { return false; }
     @Override public ItemStack assemble(Container container, RegistryAccess access) { return output.copy(); }

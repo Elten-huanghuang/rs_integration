@@ -57,6 +57,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -1596,7 +1598,7 @@ public final class CraftingPlanScreen extends Screen {
         int border = avail >= needed ? C_GREEN : (avail > 0 ? C_ORANGE : C_RED);
 
         UIRenderer.slotBg(gfx, x, y, GRID_SLOT, border);
-        gfx.renderItem(stack, x + 1, y + 1);
+        InkFluidRenderer.render(gfx, stack, x + 1, y + 1);
 
         if (hovered) drawHoverBorder(gfx, x, y, GRID_SLOT);
 
@@ -1700,7 +1702,7 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         UIRenderer.slotBg(gfx, x, y, SLOT_SIZE, border);
-        gfx.renderItem(stack, x + 1, y + 1);
+        InkFluidRenderer.render(gfx, stack, x + 1, y + 1);
 
         boolean hovered = mouseX >= x - 1 && mouseX <= x + SLOT_SIZE + 1
                 && mouseY >= y - 1 && mouseY <= y + SLOT_SIZE + 1;
@@ -2276,7 +2278,7 @@ public final class CraftingPlanScreen extends Screen {
         int sx = startX + labelW + 8;
         int slotY = rowY + (STRIP_ROW_H - 16) / 2;
         for (StripEntry e : entries) {
-            gfx.renderItem(e.display(), sx, slotY);
+            InkFluidRenderer.render(gfx, e.display(), sx, slotY);
             if (!leftover && !e.enough()) {
                 int buttonX = sx + 8;
                 int buttonY = slotY;
@@ -2474,7 +2476,7 @@ public final class CraftingPlanScreen extends Screen {
             if (bgColor != 0) gfx.fill(sx, ry, sx + panelW, ry + rowH, bgColor);
             // Per-recipe machine icon so alternatives are visually distinct (all share one output).
             boolean drewIcon = recipePreview.drawCategoryIcon(gfx, rid, sx + 2, ry + 1, 16);
-            if (!drewIcon) gfx.renderItem(dropdownNode.displayStack, sx + 2, ry + 1);
+            if (!drewIcon) InkFluidRenderer.render(gfx, dropdownNode.displayStack, sx + 2, ry + 1);
             int textColor = sel ? 0xFF4AE04A
                     : machineBound ? 0xFFCCCCCC : 0xFF666666;
             String label = font.plainSubstrByWidth(labels[i], panelW - textLeft - 2);
@@ -2582,7 +2584,7 @@ public final class CraftingPlanScreen extends Screen {
                 ? !materialLocks.containsKey(node.materialLockKey)
                 : node.lockedMaterial != null
                 && ItemStack.isSameItemSameTags(node.lockedMaterial, option);
-        if (!option.isEmpty()) gfx.renderItem(option, sx + 2, ry + 2);
+        if (!option.isEmpty()) InkFluidRenderer.render(gfx, option, sx + 2, ry + 2);
         String label = option.isEmpty()
                 ? I18n.get("rsi.plan.material.auto") : option.getHoverName().getString();
         int textX = option.isEmpty() ? sx + 6 : sx + 22;
@@ -3243,7 +3245,7 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         // Item icon (small).
-        gfx.renderItem(step.output(), tx, y + (rowH - 16) / 2);
+        InkFluidRenderer.render(gfx, step.output(), tx, y + (rowH - 16) / 2);
         tx += 18;
 
         // Name.
@@ -3322,7 +3324,8 @@ public final class CraftingPlanScreen extends Screen {
                                 : TooltipFlag.Default.NORMAL));
 
         // Append availability info
-        String availStr = hoveredTooltipAvail + " / " + hoveredTooltipNeeded;
+        String availStr = hoveredTooltipAvail + " / " + hoveredTooltipNeeded
+                + (InkFluidSupport.isToken(hoveredItemForTooltip) ? " mB" : "");
         int statusColor;
         if (hoveredTooltipAvail >= hoveredTooltipNeeded)
             statusColor = 0xFF55FF55;

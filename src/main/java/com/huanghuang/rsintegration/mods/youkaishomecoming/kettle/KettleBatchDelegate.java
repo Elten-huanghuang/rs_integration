@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.kettle;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -155,6 +157,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
+        if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         // usingSharedLedger already set by caller — don't overwrite
         this.craftDone = false;
 
@@ -550,68 +553,28 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     private boolean ensureWater(IFluidHandler fluidHandler, BlockEntity be) {
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
 
-        // Already has water -- nothing to do
-        if (!tankFluid.isEmpty() && tankFluid.getFluid() == Fluids.WATER) {
+        if (!tankFluid.isEmpty() && tankFluid.getFluid() == Fluids.WATER && tankFluid.getAmount() >= 1000) {
             return true;
         }
 
-        // Drain any non-water fluid (e.g. previous recipe result) to make room
-        if (!tankFluid.isEmpty() && tankFluid.getFluid() != Fluids.WATER) {
-            fluidHandler.drain(tankFluid, IFluidHandler.FluidAction.EXECUTE);
-        }
+        if (!tankFluid.isEmpty() && tankFluid.getFluid() != Fluids.WATER) return false;
 
-        // Try to fill water directly (some tanks accept this)
-        int filled = fluidHandler.fill(new FluidStack(Fluids.WATER, 1000),
-                IFluidHandler.FluidAction.EXECUTE);
-        if (filled > 0) {
-            be.setChanged();
-            return true;
-        }
-
-        // Direct fill failed -- try setting the public fluids field directly
+        IFluidHandler tank = fluidHandler;
         if (fluidsField != null) {
             try {
-                Object tank = fluidsField.get(be);
-                if (tank != null) {
-                    Method fillMethod = tank.getClass().getMethod("setFluid", FluidStack.class);
-                    fillMethod.invoke(tank, new FluidStack(Fluids.WATER, 1000));
-                    be.setChanged();
-                    return true;
-                }
+                if (fluidsField.get(be) instanceof IFluidHandler internal) tank = internal;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Water fill via fluidsField failed", e);
             }
         }
-
-        // Last resort: extract water bucket from RS, use it to fill
-        if (!hasStorageAccess()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] No network, cannot get water");
-            return false;
-        }
-
-        ItemStack waterBucket = extractExactFromStorage(player,
-                new ItemStack(Items.WATER_BUCKET), 1, false);
-        if (waterBucket.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] No water bucket in RS network");
-            player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.kettle_water_warning"));
-            return false;
-        }
-
-        filled = fluidHandler.fill(new FluidStack(Fluids.WATER, 1000),
-                IFluidHandler.FluidAction.EXECUTE);
-        if (filled > 0) {
-            ItemStack leftover = insertIntoStorage(player,
-                    new ItemStack(Items.BUCKET), false);
-            if (!leftover.isEmpty()) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
+        int amount = Math.max(0, Math.min(1000, tank.getTankCapacity(0)) - tankFluid.getAmount());
+        if (amount == 0) return false;
+        if (amount > 0 && MachineWaterSupply.fill("youkaishomecoming_kettle", tank, amount,
+                storageEndpoint(), player) == amount) {
             be.setChanged();
             return true;
         }
-
-        // Refund the water bucket -- we couldn't use it
-        insertIntoStorage(player, waterBucket, false);
-        RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Fluid handler rejected water fill");
+        player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.kettle_water_warning"));
         return false;
     }
 

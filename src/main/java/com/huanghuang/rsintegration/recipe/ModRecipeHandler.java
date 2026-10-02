@@ -94,6 +94,16 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /** 显式声明允许按实际产物补做；手动仪式等非确定行为不能自动加入。 */
+    default boolean supportsTargetedProduction(@Nonnull Recipe<?> recipe) {
+        return false;
+    }
+
+    /** 指定目标是否需要实际产量门槛，包括概率副产物。 */
+    default boolean requiresTargetedProduction(@Nonnull Recipe<?> recipe, @Nonnull ItemStack output) {
+        return supportsTargetedProduction(recipe) && !hasDeterministicPrimaryOutput(recipe);
+    }
+
     /** Whether the primary output copies or otherwise derives NBT from runtime inputs. */
     default boolean hasRuntimeDependentPrimaryNbt(@Nonnull Recipe<?> recipe) {
         return false;

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -35,7 +36,10 @@ public final class ExecutionEquivalence {
         }
         return new CraftingResolver.ResolutionStep(node.recipeId(), modType,
                 node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
-                node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput());
+                node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput(),
+                node.outputs().stream().filter(output -> output.kind() == OutputKind.PRIMARY)
+                        .findFirst().map(output -> new ProductionTarget(output.material(), output.quantity()))
+                        .orElse(null));
     }
 
     public static Report compare(CraftPlanGraph graph,

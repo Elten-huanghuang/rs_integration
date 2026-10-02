@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -49,7 +50,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
 
     @Override
     public StorageOperationResult insert(ItemStack stack, boolean simulate) {
-        ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
+        ItemStack remainder = InkFluidSupport.isToken(stack) ? InkFluidSupport.insert(network, stack, simulate)
+                : network.insertItem(stack.copy(), stack.getCount(),
                 simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                         : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
         return StorageOperationResult.inserted(
@@ -60,15 +62,21 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
 
     @Override
     public StorageOperationResult insert(Player player, ItemStack stack, boolean simulate) {
-        ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
+        ItemStack remainder = InkFluidSupport.isToken(stack) ? InkFluidSupport.insert(network, stack, simulate)
+                : network.insertItem(stack.copy(), stack.getCount(),
                 simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                         : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
         if (!simulate && player != null) {
             ItemStack accepted = stack.copy();
             accepted.shrink(remainder.getCount());
             if (!accepted.isEmpty()) {
-                var tracker = network.getItemStorageTracker();
-                if (tracker != null) tracker.changed(player, accepted);
+                if (InkFluidSupport.isToken(accepted)) {
+                    var tracker = network.getFluidStorageTracker();
+                    if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
+                } else {
+                    var tracker = network.getItemStorageTracker();
+                    if (tracker != null) tracker.changed(player, accepted);
+                }
                 if (player instanceof ServerPlayer serverPlayer) {
                     MaterialSources.invalidateFor(serverPlayer, this);
                     serverPlayer.containerMenu.broadcastChanges();
@@ -84,7 +92,9 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     @Override
     public StorageOperationResult extractExact(Player player, ItemStack template,
                                                long amount, boolean simulate) {
-        ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
+        ItemStack result = InkFluidSupport.isToken(template)
+                ? InkFluidSupport.extract(network, template, Math.toIntExact(amount), simulate)
+                : RSIntegrationNetwork.extractExactFromNetwork(network, template,
                 Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null, simulate);
         return StorageOperationResult.extracted(
                 simulate ? StorageOperationMode.SIMULATE
@@ -140,6 +150,9 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                     items.add(new StoredItem(itemKey(stack), stack.getCount()));
                 }
             }
+            for (ItemStack token : InkFluidSupport.snapshot(network, itemTypes)) {
+                items.add(new StoredItem(itemKey(token), token.getCount()));
+            }
             return StorageSnapshotResult.success(new StorageSnapshot(
                     reference().backendId(), items));
         }
@@ -152,7 +165,9 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         @Override public StorageOperationResult extractExact(ServerPlayer player,
                 StorageItemKey key, long amount, boolean simulate) {
             ItemStack template = key.displayStack();
-            ItemStack result = RSIntegrationNetwork.extractExactFromNetwork(network, template,
+            ItemStack result = InkFluidSupport.isToken(template)
+                    ? InkFluidSupport.extract(network, template, Math.toIntExact(amount), simulate)
+                    : RSIntegrationNetwork.extractExactFromNetwork(network, template,
                     Math.toIntExact(amount), player, simulate);
             return StorageOperationResult.extracted(
                     simulate ? StorageOperationMode.SIMULATE
@@ -170,7 +185,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
         }
 
         @Override public StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate) {
-            ItemStack remainder = network.insertItem(stack.copy(), stack.getCount(),
+            ItemStack remainder = InkFluidSupport.isToken(stack) ? InkFluidSupport.insert(network, stack, simulate)
+                    : network.insertItem(stack.copy(), stack.getCount(),
                     simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
                             : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
             if (!simulate) {

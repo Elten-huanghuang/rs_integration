@@ -237,14 +237,17 @@ final class StepExecutor {
                     CraftingResolver.ingredientOf(demandedOutput, demandedOutput.hasTag()));
         }
         result = MinersDelightCopperPotSupport.adaptResult(entry.modType(), result);
-        registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
+        boolean targeted = handler != null && demandedOutput != null && !demandedOutput.isEmpty()
+                && handler.requiresTargetedProduction(entry.recipe(), demandedOutput);
+        ItemStack plannedPrimary = targeted ? demandedOutput : result;
+        registerGraphOutput(plannedPrimary, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
-        if (handler != null) {
+        if (handler != null && !targeted) {
             for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
                 registerGraphOutput(secondary, batches, OutputKind.SECONDARY,
                         graphNodeId, graphOutputs, ctx);
             }
-        } else {
+        } else if (handler == null) {
             for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
                 registerGraphOutput(secondary, batches, OutputKind.SECONDARY,
                         graphNodeId, graphOutputs, ctx);
@@ -254,7 +257,8 @@ final class StepExecutor {
         // batches already represents the physical executions needed for the
         // complete resolver demand; callers must not apply repeatCount again.
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
-                entry.recipeTypeId(), altIds, altModTypes, false, batches);
+                entry.recipeTypeId(), altIds, altModTypes, false, batches, null, null,
+                targeted ? ProductionTarget.of(plannedPrimary, mulCount(plannedPrimary.getCount(), batches)) : null);
         ctx.steps.add(step);
         ctx.addGraphNode(toGraphNode(graphNodeId, step, graphInputs, graphOutputs));
 

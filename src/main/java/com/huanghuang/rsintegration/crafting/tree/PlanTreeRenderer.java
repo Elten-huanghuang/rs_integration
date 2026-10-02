@@ -7,6 +7,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 
 import javax.annotation.Nullable;
 
@@ -213,7 +214,7 @@ public final class PlanTreeRenderer {
             }
         }
         if (!stack.isEmpty()) {
-            gfx.renderItem(stack, iconX, iconY);
+            InkFluidRenderer.render(gfx, stack, iconX, iconY);
         }
         if (node.lockedMaterial != null) {
             drawMaterialLock(gfx, iconX + PlanTreeLayout.ITEM_ICON_SIZE - 5, iconY - 1);
@@ -244,7 +245,7 @@ public final class PlanTreeRenderer {
         }
 
         // 8. Count label under node.
-        String count = "×" + node.amount;
+        String count = InkFluidRenderer.quantity(stack, node.amount);
         int tw = font.width(count);
         int cx = box.itemCenterX() - tw / 2;
         int cy = box.bottom() + 2;

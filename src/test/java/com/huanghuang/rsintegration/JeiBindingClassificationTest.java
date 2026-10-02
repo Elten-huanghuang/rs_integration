@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.mods.malum.MalumRSModule;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import com.huanghuang.rsintegration.mods.biomancy.BiomancyRSModule;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ class JeiBindingClassificationTest {
         MalumRSModule.INSTANCE.registerModType();
         ArsNouveauRSModule.INSTANCE.registerModType();
         BiomancyRSModule.INSTANCE.registerModType();
+        IronSpellBooksRSModule.INSTANCE.registerModType();
     }
 
     @Test
@@ -58,6 +60,16 @@ class JeiBindingClassificationTest {
     @Test
     void mapsMarketCategoryToCanonicalBindingPrefix() {
         assertEquals("market", ModType.filterForJeiUid("farmingforblockheads:market"));
+    }
+
+    @Test
+    void mapsAlchemistCustomPlusToItsCauldronBinding() {
+        assertEquals(IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE,
+                ModType.filterForJeiUid("rs_integration:alchemist_cauldron"));
+        assertEquals(IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE,
+                ModType.fromBlockKey("block.irons_spellbooks.alchemist_cauldron").id());
+        assertEquals("gui.rs_integration.jei.irons_spellbooks_alchemist_cauldron",
+                ModType.byId(IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE).jeiTooltipKey());
     }
 
     @Test

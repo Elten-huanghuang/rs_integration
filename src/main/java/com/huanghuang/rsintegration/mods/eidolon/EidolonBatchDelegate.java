@@ -72,7 +72,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private ServerPlayer player;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private Object crucible;             // CrucibleTileEntity (null for worktable/ritual)
+    private BlockEntity crucible;
     private Recipe<?> recipe;            // CrucibleRecipe or WorktableRecipe or RitualRecipe
     private boolean isWorktable;         // true = worktable mode, no BE interaction
     private boolean isRitual;            // true = brazier ritual mode
@@ -293,10 +293,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             hasWater = f.getBoolean(crucible);
         } catch (Exception e) { hasWater = false; }
 
-        boolean boiling = false;
-        try {
-            if (boilingField != null) boiling = boilingField.getBoolean(crucible);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        boolean boiling = EidolonWaterSupply.isHeated(crucible);
 
         boolean stepsEmpty = true;
         try {
@@ -306,15 +303,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
-        if (!hasWater) {
-            try {
-                crucible.getClass().getMethod("fill").invoke(crucible);
-            } catch (Exception ex) {
-                return false;
-            }
-        }
-
         if (!boiling) return false;
+        if (!hasWater) {
+            if (!EidolonWaterSupply.ensureWater(crucible, readWaterAmount(), storageEndpoint(), player)) return false;
+        }
         if (!stepsEmpty) {
             try {
                 if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
@@ -986,10 +978,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             f.setAccessible(true);
             hasWater = f.getBoolean(crucible);
         } catch (Exception e) { hasWater = false; }
-        boolean boiling = false;
-        try {
-            if (boilingField != null) boiling = boilingField.getBoolean(crucible);
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
+        boolean boiling = EidolonWaterSupply.isHeated(crucible);
         boolean stepsEmpty = true;
         try {
             if (stepsField != null) {
@@ -998,18 +987,10 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e); }
 
-        if (!hasWater) {
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.warn.needs_water"));
-            try {
-                crucible.getClass().getMethod("fill").invoke(crucible);
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.info.auto_filled"));
-            } catch (Exception ex) {
-                RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to fill selected crucible", ex);
-                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
-                return false;
-            }
-        }
         if (!boiling) return false;
+        if (!hasWater) {
+            if (!EidolonWaterSupply.ensureWater(crucible, readWaterAmount(), storageEndpoint(), player)) return false;
+        }
         if (!stepsEmpty) {
             try {
                 if (stepsField != null) stepsField.set(crucible, new ArrayList<>());
@@ -1253,13 +1234,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     }
 
     private static boolean isBoiling(BlockEntity be) {
-        if (be == null || boilingField == null) return false;
-        try {
-            return boilingField.getBoolean(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Reflection probe failed", e);
-            return false;
-        }
+        return be != null && EidolonWaterSupply.isHeated(be);
     }
 
     // ── Water amount ──────────────────────────────────────────────
@@ -1290,14 +1265,11 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         if (crucible == null) return true;
         int required = readWaterAmount();
         if (required <= 0) return true;
+        if (EidolonWaterSupply.ensureWater(crucible, required, storageEndpoint(), player)) return true;
         int current = readCurrentWaterAmount();
-        if (current < required) {
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.eidolon.error.insufficient_water",
-                    current, required));
-            return false;
-        }
-        return true;
+        player.sendSystemMessage(Component.translatable(
+                "rsi.eidolon.error.insufficient_water", current, required));
+        return false;
     }
 
     private int readCurrentWaterAmount() {
@@ -1379,10 +1351,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
                             if (!hasWater) {
                                 warnings.add(Component.translatable("rsi.eidolon.warn.needs_water_fill"));
                             }
-                            boolean boiling = false;
-                            try {
-                                if (boilingField != null) boiling = boilingField.getBoolean(be);
-                            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] reflection probe failed", e); }
+                            boolean boiling = EidolonWaterSupply.isHeated(be);
                             if (!boiling) {
                                 warnings.add(Component.translatable("rsi.eidolon.warn.needs_heat"));
                             }

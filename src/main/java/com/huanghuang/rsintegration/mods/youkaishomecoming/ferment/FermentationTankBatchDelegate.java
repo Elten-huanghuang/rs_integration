@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.ferment;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -191,6 +193,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
+        if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         this.craftDone = false;
 
         forceChunkLoad(true);
@@ -613,16 +616,8 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                                                 @Nullable BlockPos pos) {
         List<Component> warnings = new ArrayList<>();
         int water = readRecipeWater(recipe);
-        if (water > 0) {
-            int perBottle = getYHWaterBottleAmount();
-            if (perBottle > 0) {
-                int bottles = (water + perBottle - 1) / perBottle;
-                warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_water_needed",
-                        bottles, water));
-            } else {
-                warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_water_needed_mb",
-                        water));
-            }
+        if (water > 0 && !MachineWaterSupply.isFree("youkaishomecoming_ferment")) {
+            warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_water_needed_mb", water));
         }
         warnings.add(Component.translatable("rsi.youkaishomecoming.ferment_lid_warning"));
         return warnings;
@@ -1040,10 +1035,6 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return 0; // non-water fluid
     }
 
-    /**
-     * Ensure the fermentation tank has enough water by filling directly
-     * or by extracting water bottles from RS network.
-     */
     private boolean ensureWater(BlockEntity be, IFluidHandler fluidHandler, int deficitMb) {
         if (storageEndpoint() == null) {
             this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
@@ -1054,69 +1045,14 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Phase 1: try direct Forge fluid fill (YHK tanks usually accept this)
-        int filled = fluidHandler.fill(new FluidStack(Fluids.WATER, deficitMb),
-                IFluidHandler.FluidAction.EXECUTE);
-        if (filled > 0) {
+        int filled = MachineWaterSupply.fill("youkaishomecoming_ferment", fluidHandler, deficitMb,
+                storageEndpoint(), player);
+        if (filled == deficitMb) {
             be.setChanged();
-            RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Direct water fill: {}mb", filled);
-            // If fully filled, done
-            if (filled >= deficitMb) return true;
-            deficitMb -= filled;
+            return true;
         }
-
-        // Phase 2: use YHK fluid system — extract water bottles and fill tank
-        // YHFluid.WATER.type.amount() = 250mb per bottle
-        int perBottle = getYHWaterBottleAmount();
-        if (perBottle <= 0) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Cannot determine water bottle amount, perBottle={}", perBottle);
-            player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
-            return false;
-        }
-        int bottlesNeeded = (deficitMb + perBottle - 1) / perBottle;
-        RSIntegrationMod.LOGGER.debug("[RSI-Ferment] Need {} water bottles ({}mb each, deficit={}mb)",
-                bottlesNeeded, perBottle, deficitMb);
-
-        for (int i = 0; i < bottlesNeeded; i++) {
-            ItemStack waterBottle = storageEndpoint() != null
-                    ? findWaterHolder(storageEndpoint(), player)
-                    : findWaterHolder(network);
-            if (waterBottle.isEmpty()) {
-                // Drain whatever we managed to fill and refund
-                player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
-                return false;
-            }
-
-            // Extract the fluid holder from RS
-            ItemStack extracted = extractExactFromStorage(player, waterBottle.copyWithCount(1), 1, false);
-            if (extracted.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
-                return false;
-            }
-
-            // Fill the tank using the fluid handler
-            int bottleFilled = fluidHandler.fill(
-                    new FluidStack(Fluids.WATER, perBottle),
-                    IFluidHandler.FluidAction.EXECUTE);
-            if (bottleFilled <= 0) {
-                // Can't fill — refund the water bottle to RS
-                insertIntoStorage(player, extracted, false);
-                RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Fluid handler rejected water fill (bottle {})", i);
-                player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
-                return false;
-            }
-
-            // Return the empty container (if any) to RS
-            ItemStack emptyContainer = getYHWaterEmptyContainer(extracted);
-            if (!emptyContainer.isEmpty()) {
-                ItemStack leftover = insertIntoStorage(player, emptyContainer, false);
-                if (!leftover.isEmpty())
-                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
-            be.setChanged();
-        }
-
-        return true;
+        player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
+        return false;
     }
 
     /** Get the mb amount per water bottle from YHFluid system. */
@@ -1274,21 +1210,6 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                             }
                         } catch (Exception e) {
                             RSIntegrationMod.LOGGER.warn("[RSI-Ferment] Fluid refund failed", e);
-                        }
-                    } else if (tankFluid.getFluid() == Fluids.WATER) {
-                        // Vanilla water — refund as water bottles
-                        int perBottle = getYHWaterBottleAmount();
-                        if (perBottle <= 0) perBottle = 250;
-                        int amount = tankFluid.getAmount();
-                        if (amount >= perBottle) {
-                            int bottles = amount / perBottle;
-                            FluidStack drained = fh.drain(
-                                    new FluidStack(Fluids.WATER, bottles * perBottle),
-                                    IFluidHandler.FluidAction.EXECUTE);
-                            if (!drained.isEmpty()) {
-                                ItemStack refundStack = getYHWaterAsStack(bottles);
-                                if (!refundStack.isEmpty()) refund(refundStack);
-                            }
                         }
                     }
                     be.setChanged();

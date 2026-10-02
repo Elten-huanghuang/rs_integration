@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.steamer;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -139,6 +141,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
+        if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         // usingSharedLedger already set by caller — don't overwrite
         this.craftDone = false;
 
@@ -167,8 +170,10 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        if (!hasWater()) {
-            setWaterProperty(myLevel.getBlockState(potPos()), true);
+        if (!hasWater() && !MachineWaterSupply.fillProperty("youkaishomecoming_steamer", 1000,
+                storageEndpoint(), player, () -> setWaterProperty(myLevel.getBlockState(potPos()), true))) {
+            forceChunkLoad(false);
+            return false;
         }
 
         // Verify racks exist and are valid
@@ -572,14 +577,13 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private void setWaterProperty(BlockState state, boolean value) {
+    private boolean setWaterProperty(BlockState state, boolean value) {
         BlockPos p = potPos();
         if (waterPropertyField != null) {
             try {
                 Object prop = waterPropertyField.get(null);
                 if (prop instanceof BooleanProperty bp && state.hasProperty(bp)) {
-                    myLevel.setBlock(p, state.setValue(bp, value), 3);
-                    return;
+                    return myLevel.setBlock(p, state.setValue(bp, value), 3);
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Failed to set water property", e);
@@ -589,10 +593,10 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             String name = prop.getName();
             if ((name.equalsIgnoreCase("water") || name.equalsIgnoreCase("waterlogged"))
                     && prop instanceof BooleanProperty bp) {
-                myLevel.setBlock(p, state.setValue(bp, value), 3);
-                return;
+                return myLevel.setBlock(p, state.setValue(bp, value), 3);
             }
         }
+        return false;
     }
 
     // -- cleanup --

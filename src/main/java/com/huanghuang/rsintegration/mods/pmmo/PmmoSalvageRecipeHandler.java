@@ -50,4 +50,9 @@ public final class PmmoSalvageRecipeHandler implements ModRecipeHandler {
     public boolean hasDeterministicPrimaryOutput(@Nonnull Recipe<?> recipe) {
         return false;
     }
+
+    @Override
+    public boolean supportsTargetedProduction(@Nonnull Recipe<?> recipe) {
+        return recipe instanceof PmmoSalvageRecipeWrapper;
+    }
 }

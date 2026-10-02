@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
 import com.huanghuang.rsintegration.storage.StorageItemSubscription;
@@ -84,6 +85,7 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
             if (!stack.isEmpty() && stack.getCount() > 0
                     && (itemTypes == null || itemTypes.contains(stack.getItem()))) items.add(stack);
         }
+        items.addAll(InkFluidSupport.snapshot(network, itemTypes));
         // The response takes defensive copies before these native references leave the driver.
         return RefinedStorageSnapshotRead.available(items);
     }
@@ -174,18 +176,25 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     @Override
     public ItemStack extract(ItemStack template, int amount, boolean simulate) {
         requireAvailable();
+        if (InkFluidSupport.isToken(template)) return InkFluidSupport.extract(network, template, amount, simulate);
         return network.extractItem(template, amount, simulate ? Action.SIMULATE : Action.PERFORM);
     }
 
     @Override
     public ItemStack insert(ItemStack stack, boolean simulate) {
         requireAvailable();
+        if (InkFluidSupport.isToken(stack)) return InkFluidSupport.insert(network, stack, simulate);
         return network.insertItem(stack, stack.getCount(), simulate ? Action.SIMULATE : Action.PERFORM);
     }
 
     @Override
     public void recordInsertion(ServerPlayer player, ItemStack accepted) {
         requireAvailable();
+        if (InkFluidSupport.isToken(accepted)) {
+            var tracker = network.getFluidStorageTracker();
+            if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
+            return;
+        }
         var tracker = network.getItemStorageTracker();
         if (tracker != null) tracker.changed(player, accepted);
     }
