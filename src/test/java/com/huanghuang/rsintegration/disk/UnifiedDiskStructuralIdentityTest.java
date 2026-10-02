@@ -66,6 +66,27 @@ class UnifiedDiskStructuralIdentityTest extends BootstrapTest {
         assertEquals(2, core.items.size()); assertEquals(7, core.items.amount(first)); assertEquals(9, core.items.amount(second));
     }
 
+    @Test void compactQueriesMatchSavedKeysAcrossResourceKindsAndNullEmptyTags() {
+        Random random = new Random(2102026);
+        for (int i = 0; i < 120; i++) {
+            CompoundTag tag = i == 0 ? null : i == 1 ? new CompoundTag() : data(random, i);
+            if (i > 1 && i % 3 == 0) tag.putString("\uD800", "\uDC00");
+            ItemStack source = new ItemStack(i % 2 == 0 ? Items.DIAMOND : Items.STONE, 64);
+            source.setTag(tag);
+            FrozenKey item = FrozenKey.item(source), itemQuery = FrozenKey.queryItem(source);
+            assertEquals(item, itemQuery); assertEquals(item.hashCode(), itemQuery.hashCode());
+            FluidStack fluid = new FluidStack(i % 2 == 0 ? Fluids.WATER : Fluids.LAVA, 1000);
+            fluid.setTag(tag);
+            FrozenKey full = FrozenKey.fluid(fluid), query = FrozenKey.queryFluid(fluid);
+            assertEquals(full, query); assertEquals(full.hashCode(), query.hashCode());
+            if (tag != null) {
+                tag.putInt("changed", i);
+                assertNotEquals(item, FrozenKey.queryItem(source));
+                assertNotEquals(full, FrozenKey.queryFluid(fluid));
+            }
+        }
+    }
+
     @Test void signedZerosAndMalformedUnicodeKeepPreviousEncodingSemantics() throws Exception {
         var constructor = DoubleTag.class.getDeclaredConstructor(double.class); constructor.setAccessible(true);
         CompoundTag a = new CompoundTag(), b = new CompoundTag();
