@@ -37,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
@@ -218,6 +219,30 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         UnifiedDiskManager.stop(server); RSStorageConfig.SPEC.setConfig(null);
         manager = UnifiedDiskManager.get(level); assertTrue(manager.enabled());
         assertEquals(worldId, manager.worldId()); assertEquals(17, manager.entry(diskId).core.items.amount(key));
+    }
+
+    @Test void recoveryAfterRestartFindsOriginalItemAndFluidCheckpointWithoutCreatingNewDisk() throws Exception {
+        setup(); var original = manager.entry(root.id()).core;
+        FrozenKey key = UnifiedDiskCoreTest.variant(71);
+        original.insert(key, 123456, true);
+        original.insertFluid(new FluidStack(Fluids.WATER, 1), 987654, true);
+        UUID diskId = root.id(), worldId = root.worldId();
+        manager.flush(); UnifiedDiskManager.stop(server);
+        manager = UnifiedDiskManager.get(level);
+        assertEquals(List.of(diskId), manager.savedDiskIds());
+        ItemStack replacement = spy(new ItemStack(Items.STONE));
+        UnifiedDiskItem item = mock(UnifiedDiskItem.class, CALLS_REAL_METHODS);
+        doReturn(item).when(replacement).getItem();
+        manager.restoreIdentity(diskId, replacement);
+        assertEquals(diskId, item.getId(replacement)); assertEquals(worldId, item.worldId(replacement));
+        assertEquals(123456, manager.entry(diskId).core.items.amount(key));
+        assertEquals(987654, manager.entry(diskId).core.fluids.total());
+        assertEquals(List.of(diskId), manager.savedDiskIds());
+        ItemStack missing = spy(new ItemStack(Items.STONE));
+        doReturn(item).when(missing).getItem();
+        assertThrows(Exception.class, () -> manager.restoreIdentity(UUID.randomUUID(), missing));
+        assertFalse(missing.hasTag());
+        assertEquals(List.of(diskId), manager.savedDiskIds());
     }
 
     @Test void rootProxyIsSmallReadOnlyAndUnknownFormatPreservesOriginal() throws Exception {

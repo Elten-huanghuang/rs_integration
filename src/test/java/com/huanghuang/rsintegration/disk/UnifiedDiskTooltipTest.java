@@ -84,7 +84,7 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
         assertEquals("item.rs_integration.unified_storage_disk.stored_fluids",
                 ((TranslatableContents) lines.get(1).getContents()).getKey());
         assertEquals(disk.toString(), ((TranslatableContents) lines.get(4).getContents()).getArgs()[0]);
-        assertEquals(14, lines.size());
+        assertEquals(16, lines.size());
         lines.clear(); UnifiedDiskTooltip.append(lines, disk, new UnifiedDiskTooltip.View(null, true, false));
         assertEquals("item.rs_integration.unified_storage_disk.unavailable",
                 ((TranslatableContents) lines.get(0).getContents()).getKey());

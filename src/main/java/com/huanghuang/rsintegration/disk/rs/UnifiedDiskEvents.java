@@ -32,7 +32,7 @@ public final class UnifiedDiskEvents {
         }
     }
     @SubscribeEvent public static void commands(RegisterCommandsEvent event) {
-        event.getDispatcher().register(Commands.literal("rsi_unified_disk").requires(source -> source.hasPermission(2))
+        event.getDispatcher().register(UnifiedDiskRecoveryCommands.register(Commands.literal("rsi_unified_disk").requires(source -> source.hasPermission(2))
                 .then(Commands.literal("status").executes(context -> {
                     ItemStack held = context.getSource().getPlayerOrException().getMainHandItem();
                     if (!(held.getItem() instanceof UnifiedDiskItem item) || !item.isValid(held)) {
@@ -41,6 +41,6 @@ public final class UnifiedDiskEvents {
                     UnifiedDiskManager manager = UnifiedDiskManager.get(context.getSource().getLevel());
                     context.getSource().sendSuccess(() -> Component.literal(manager.diagnostic(item.getId(held))), false);
                     return 1;
-                })));
+                }))));
     }
 }
