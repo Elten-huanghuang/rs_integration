@@ -20,8 +20,10 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -32,12 +34,14 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Performs explicit, one-shot FTB item-task detection against storage or player items. */
+/** 分批执行仓储和玩家物品的 FTB 任务检测。 */
 public final class StorageQuestScanService {
 
     private static final long REQUEST_COOLDOWN_TICKS = 20L;
-    private static final int TASKS_PER_TEAM_PER_TICK = 8;
+    private static final int TASKS_PER_JOB_PER_TICK = 8;
     private static final int TASKS_PER_SERVER_PER_TICK = 32;
+    /** 任务数量之外再限制匹配耗时；单个任务结束后检查预算。 */
+    private static final long MATCHING_BUDGET_NANOS = 2_000_000L;
     private static final long AUTOMATIC_SCAN_DELAY_TICKS = 2L;
     private static final long AUTOMATIC_SCAN_RETRY_TICKS = 20L;
     private static final long AUTOMATIC_SCAN_TIMEOUT_TICKS = 200L;
@@ -46,13 +50,17 @@ public final class StorageQuestScanService {
     private static final int AUTOMATIC_SCANS_PER_TICK = 2;
     private static final long PLAYER_ITEM_SCAN_DELAY_TICKS = 2L;
     private static final long PLAYER_ITEM_SCAN_TIMEOUT_TICKS = 100L;
-    private static final int PLAYER_ITEM_SCANS_PER_TICK = 8;
+    private static final long PLAYER_ITEM_SCAN_MIN_INTERVAL_TICKS = 20L;
+    private static final int PLAYER_ITEM_SCANS_PER_TICK = 2;
     private static final Map<UUID, Long> LAST_TEAM_REQUEST = new HashMap<>();
     private static final Map<UUID, Long> LAST_AUTOMATIC_SCAN = new HashMap<>();
+    private static final Map<UUID, Long> LAST_PLAYER_ITEM_SCAN = new HashMap<>();
     private static final Map<UUID, ScanJob> ACTIVE_JOBS = new HashMap<>();
-    // Quest completion callbacks can enqueue a follow-up while the server tick
-    // dispatcher is still draining this table. A plain HashMap can fail inside
-    // compute() when those callbacks interleave with dispatch.
+    // 玩家重扫单独排队，不能覆盖同队伍正在进行的仓储扫描。
+    private static final Map<UUID, ScanJob> ACTIVE_PLAYER_ITEM_SCANS = new HashMap<>();
+    // 所有扫描轮流使用同一份预算，防止复杂过滤器让排在后面的玩家长期得不到处理。
+    private static final Deque<ScanJob> SCAN_QUEUE = new ArrayDeque<>();
+    // 完成任务的回调可能在派发扫描时再次入队，避免 HashMap.compute 的重入问题。
     private static final Map<UUID, PendingAutomaticScan> PENDING_AUTOMATIC_SCANS =
             new ConcurrentHashMap<>();
     private static final Map<UUID, PendingPlayerItemScan> PENDING_PLAYER_ITEM_SCANS =
@@ -200,8 +208,7 @@ public final class StorageQuestScanService {
             return;
         }
 
-        ACTIVE_JOBS.put(request.teamId(), new ScanJob(player.getUUID(), List.copyOf(taskIds),
-                items, kind));
+        enqueueJob(new ScanJob(player.getUUID(), request.teamId(), List.copyOf(taskIds), items, kind));
         if (kind.startedKey != null) {
             player.sendSystemMessage(Component.translatable(kind.startedKey));
         }
@@ -214,49 +221,81 @@ public final class StorageQuestScanService {
         long now = server.getTickCount();
         LAST_AUTOMATIC_SCAN.entrySet().removeIf(entry -> now < entry.getValue()
                 || now - entry.getValue() > 1_200L);
+        LAST_PLAYER_ITEM_SCAN.entrySet().removeIf(entry -> now < entry.getValue()
+                || now - entry.getValue() > 1_200L);
         if (!ExternalItemProgressBridge.isEnabled()) {
             PENDING_AUTOMATIC_SCANS.clear();
             PENDING_PLAYER_ITEM_SCANS.clear();
             LAST_AUTOMATIC_SCAN.clear();
+            LAST_PLAYER_ITEM_SCAN.clear();
+            ACTIVE_PLAYER_ITEM_SCANS.clear();
+            ACTIVE_JOBS.values().removeIf(job -> job.kind == ScanKind.AUTOMATIC);
+            SCAN_QUEUE.removeIf(job -> job.kind != ScanKind.STORAGE);
         }
         if (ACTIVE_JOBS.isEmpty() && PENDING_AUTOMATIC_SCANS.isEmpty()
-                && PENDING_PLAYER_ITEM_SCANS.isEmpty()) return;
+                && PENDING_PLAYER_ITEM_SCANS.isEmpty() && ACTIVE_PLAYER_ITEM_SCANS.isEmpty()) return;
         dispatchPlayerItemScans(server);
         dispatchAutomaticScans(server);
-        if (ACTIVE_JOBS.isEmpty()) return;
-        int remainingServerBudget = TASKS_PER_SERVER_PER_TICK;
+        processJobs(server);
+    }
 
-        Iterator<Map.Entry<UUID, ScanJob>> iterator = ACTIVE_JOBS.entrySet().iterator();
-        while (iterator.hasNext() && remainingServerBudget > 0) {
-            Map.Entry<UUID, ScanJob> entry = iterator.next();
-            ScanJob job = entry.getValue();
+    private static void enqueueJob(ScanJob job) {
+        activeJobs(job).put(jobKey(job), job);
+        SCAN_QUEUE.addLast(job);
+    }
+
+    private static Map<UUID, ScanJob> activeJobs(ScanJob job) {
+        return job.kind == ScanKind.PLAYER_ITEMS ? ACTIVE_PLAYER_ITEM_SCANS : ACTIVE_JOBS;
+    }
+
+    private static UUID jobKey(ScanJob job) {
+        return job.kind == ScanKind.PLAYER_ITEMS ? job.playerId : job.teamId;
+    }
+
+    private static void processJobs(MinecraftServer server) {
+        long matchingStartedAt = System.nanoTime();
+        int remainingServerBudget = TASKS_PER_SERVER_PER_TICK;
+        int jobsRemaining = SCAN_QUEUE.size();
+        while (jobsRemaining-- > 0 && remainingServerBudget > 0 && hasMatchingTime(matchingStartedAt)) {
+            ScanJob job = SCAN_QUEUE.removeFirst();
+            Map<UUID, ScanJob> jobs = activeJobs(job);
+            UUID key = jobKey(job);
+            if (jobs.get(key) != job) continue;
             ServerPlayer player = server.getPlayerList().getPlayer(job.playerId);
             if (player == null) {
-                iterator.remove();
+                jobs.remove(key);
                 continue;
             }
 
-            int allowance = Math.min(TASKS_PER_TEAM_PER_TICK, remainingServerBudget);
+            int allowance = Math.min(TASKS_PER_JOB_PER_TICK, remainingServerBudget);
             try {
-                int attempted = processBatch(player, entry.getKey(), job, allowance);
+                int attempted = processBatch(player, job, allowance, matchingStartedAt);
                 remainingServerBudget -= attempted;
             } catch (RuntimeException | LinkageError exception) {
+                // 失败的批次也占用预算，避免异常任务绕过每 tick 的数量上限。
+                remainingServerBudget -= allowance;
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-FTBQuests] Failed to scan {} tasks for team {}",
                         job.kind.logName,
-                        entry.getKey(), exception);
+                        job.teamId, exception);
                 if (job.kind.failedKey != null) {
                     player.sendSystemMessage(Component.translatable(job.kind.failedKey));
                 }
-                iterator.remove();
+                jobs.remove(key);
                 continue;
             }
 
             if (job.finished()) {
-                iterator.remove();
+                jobs.remove(key);
                 if (!job.cancelled) sendResult(player, job.kind, job.updated);
+            } else {
+                SCAN_QUEUE.addLast(job);
             }
         }
+    }
+
+    private static boolean hasMatchingTime(long matchingStartedAt) {
+        return System.nanoTime() - matchingStartedAt < MATCHING_BUDGET_NANOS;
     }
 
     @SubscribeEvent
@@ -264,6 +303,9 @@ public final class StorageQuestScanService {
         ACTIVE_JOBS.clear();
         LAST_TEAM_REQUEST.clear();
         LAST_AUTOMATIC_SCAN.clear();
+        LAST_PLAYER_ITEM_SCAN.clear();
+        ACTIVE_PLAYER_ITEM_SCANS.clear();
+        SCAN_QUEUE.clear();
         PENDING_AUTOMATIC_SCANS.clear();
         PENDING_PLAYER_ITEM_SCANS.clear();
     }
@@ -280,11 +322,18 @@ public final class StorageQuestScanService {
         while (iterator.hasNext() && started < PLAYER_ITEM_SCANS_PER_TICK) {
             Map.Entry<UUID, PendingPlayerItemScan> entry = iterator.next();
             PendingPlayerItemScan pending = entry.getValue();
+            // 扫描较多任务时保留期间产生的新变更，不能因等待当前扫描而丢失后续请求。
+            if (ACTIVE_PLAYER_ITEM_SCANS.containsKey(entry.getKey())) {
+                pending.deadlineTick = Math.max(pending.deadlineTick, now + PLAYER_ITEM_SCAN_TIMEOUT_TICKS);
+                continue;
+            }
             if (now > pending.deadlineTick) {
                 iterator.remove();
                 continue;
             }
             if (pending.dueTick > now) continue;
+            Long lastScan = LAST_PLAYER_ITEM_SCAN.get(entry.getKey());
+            if (lastScan != null && now - lastScan < PLAYER_ITEM_SCAN_MIN_INTERVAL_TICKS) continue;
 
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null) {
@@ -299,25 +348,25 @@ public final class StorageQuestScanService {
             }
 
             iterator.remove();
-            scanPlayerItems(player, file, data);
+            LAST_PLAYER_ITEM_SCAN.put(entry.getKey(), now);
+            startPlayerItemScan(player, file, data);
             started++;
         }
     }
 
-    private static void scanPlayerItems(ServerPlayer player, ServerQuestFile file, TeamData data) {
+    private static void startPlayerItemScan(ServerPlayer player, ServerQuestFile file, TeamData data) {
         List<ItemStack> curios = CuriosAccess.isPresent()
                 ? CuriosAccess.stacks(player) : List.of();
         List<QuestScanItems.Entry> items = QuestScanItems.fromPlayer(player, curios);
-        file.withPlayerContext(player, () -> {
-            for (Task task : file.getSubmitTasks()) {
-                if (!(task instanceof ItemTask itemTask)
-                        || !isAvailableAfterRewardClaim(data, itemTask)) continue;
-                long available = countMatching(items, itemTask);
-                long current = data.getProgress(itemTask);
-                long target = Math.min(itemTask.getMaxProgress(), available);
-                if (target > current) data.setProgress(itemTask, target);
+        List<Long> taskIds = new ArrayList<>();
+        for (Task task : file.getSubmitTasks()) {
+            if (task instanceof ItemTask itemTask && isStructurallyEligible(itemTask)) {
+                taskIds.add(FtbQuestObjectId.getId(itemTask));
             }
-        });
+        }
+        if (!taskIds.isEmpty()) {
+            enqueueJob(new ScanJob(player.getUUID(), data.getTeamId(), taskIds, items, ScanKind.PLAYER_ITEMS));
+        }
     }
 
     private static void dispatchAutomaticScans(MinecraftServer server) {
@@ -394,33 +443,34 @@ public final class StorageQuestScanService {
         startScan(player, request, ScanKind.AUTOMATIC, items, taskIds);
     }
 
-    private static int processBatch(ServerPlayer player, UUID expectedTeamId,
-                                    ScanJob job, int allowance) {
+    private static int processBatch(ServerPlayer player, ScanJob job, int allowance,
+                                    long matchingStartedAt) {
         ServerQuestFile file = ServerQuestFile.INSTANCE;
         TeamData data = TeamData.get(player);
         if (file == null || file.isLoading() || data == null || data.isLocked()
-                || !expectedTeamId.equals(data.getTeamId())) {
+                || !job.teamId.equals(data.getTeamId())) {
             job.cancel();
             return 0;
         }
 
-        int startCursor = job.cursor;
+        int[] attempted = {0};
         file.withPlayerContext(player, () -> {
-            int end = Math.min(job.taskIds.size(), job.cursor + allowance);
-            while (job.cursor < end) {
-                Task task = file.getTask(job.nextTaskId());
-                if (task instanceof ItemTask itemTask && isAvailable(data, itemTask)) {
-                    long available = countMatching(job.items, itemTask);
-                    long current = data.getProgress(itemTask);
-                    long target = Math.min(itemTask.getMaxProgress(), available);
-                    if (target > current) {
-                        data.setProgress(itemTask, target);
-                        job.updated++;
-                    }
-                }
-            }
+            attempted[0] = job.tasks.processBatch(allowance,
+                    () -> hasMatchingTime(matchingStartedAt), taskId -> {
+                        Task task = file.getTask(taskId);
+                        if (task instanceof ItemTask itemTask && (job.kind == ScanKind.PLAYER_ITEMS
+                                ? isAvailableAfterRewardClaim(data, itemTask) : isAvailable(data, itemTask))) {
+                            long available = countMatching(job.items, itemTask);
+                            long current = data.getProgress(itemTask);
+                            long target = Math.min(itemTask.getMaxProgress(), available);
+                            if (target > current) {
+                                data.setProgress(itemTask, target);
+                                job.updated++;
+                            }
+                        }
+                    });
         });
-        return job.cursor - startCursor;
+        return attempted[0];
     }
 
     private static boolean isStructurallyEligible(ItemTask task) {
@@ -446,27 +496,11 @@ public final class StorageQuestScanService {
     }
 
     private static long countMatching(List<QuestScanItems.Entry> items, ItemTask task) {
-        long total = 0L;
-        for (QuestScanItems.Entry item : items) {
-            boolean matches;
-            try {
-                matches = task.test(item.stack());
-            } catch (RuntimeException | LinkageError exception) {
-                continue;
-            }
-            if (!matches) continue;
-            total = saturatedAdd(total, item.amount());
-            if (total >= task.getMaxProgress()) return task.getMaxProgress();
-        }
-        return total;
+        return QuestScanItems.countMatching(items, task, task.getMaxProgress());
     }
 
     private static List<QuestScanItems.Entry> snapshotItems(StorageSnapshot snapshot) {
         return QuestScanItems.fromStorage(snapshot);
-    }
-
-    private static long saturatedAdd(long left, long right) {
-        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
     }
 
     private static void sendResult(ServerPlayer player, ScanKind kind, int updated) {
@@ -485,7 +519,8 @@ public final class StorageQuestScanService {
         STORAGE("storage", "rsi.ftb_quest.storage_scan.started",
                 "rsi.ftb_quest.storage_scan.failed", "rsi.ftb_quest.storage_scan.completed",
                 "rsi.ftb_quest.storage_scan.none"),
-        AUTOMATIC("automatic", null, null, null, null);
+        AUTOMATIC("automatic", null, null, null, null),
+        PLAYER_ITEMS("player items", null, null, null, null);
 
         private final String logName;
         private final String startedKey;
@@ -505,32 +540,29 @@ public final class StorageQuestScanService {
 
     private static final class ScanJob {
         private final UUID playerId;
-        private final List<Long> taskIds;
+        private final UUID teamId;
+        private final QuestTaskScan tasks;
         private final List<QuestScanItems.Entry> items;
         private final ScanKind kind;
-        private int cursor;
         private int updated;
         private boolean cancelled;
 
-        private ScanJob(UUID playerId, List<Long> taskIds, List<QuestScanItems.Entry> items,
-                        ScanKind kind) {
+        private ScanJob(UUID playerId, UUID teamId, List<Long> taskIds,
+                        List<QuestScanItems.Entry> items, ScanKind kind) {
             this.playerId = playerId;
-            this.taskIds = taskIds;
+            this.teamId = teamId;
+            this.tasks = new QuestTaskScan(taskIds);
             this.items = List.copyOf(items);
             this.kind = kind;
         }
 
-        private long nextTaskId() {
-            return taskIds.get(cursor++);
-        }
-
         private boolean finished() {
-            return cursor >= taskIds.size();
+            return tasks.finished();
         }
 
         private void cancel() {
             cancelled = true;
-            cursor = taskIds.size();
+            tasks.cancel();
         }
     }
 
