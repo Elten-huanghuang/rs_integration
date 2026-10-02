@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.resonance.bd;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.DiskNameStyle;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -23,6 +24,11 @@ public final class BDResonanceDiskItem extends Item {
 
     public BDResonanceDiskItem() {
         super(new Item.Properties().stacksTo(1));
+    }
+
+    @Override
+    public Component getName(ItemStack stack) {
+        return DiskNameStyle.resonance(super.getName(stack));
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.disk.UnifiedDiskDropProtection;
+import com.huanghuang.rsintegration.util.DiskNameStyle;
 import com.refinedmods.refinedstorage.api.storage.StorageType;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskProvider;
 import com.refinedmods.refinedstorage.apiimpl.API;
@@ -29,6 +30,11 @@ import java.util.UUID;
 public final class UnifiedDiskItem extends Item implements IStorageDiskProvider {
     private static final Logger LOGGER = LogManager.getLogger(UnifiedDiskItem.class);
     public UnifiedDiskItem() { super(new Properties().stacksTo(1).fireResistant()); }
+
+    @Override public Component getName(ItemStack stack) {
+        return DiskNameStyle.guixu(super.getName(stack));
+    }
+
     @Override public StorageType getType() { return StorageType.ITEM; }
     @Override public int getCapacity(ItemStack stack) { return -1; }
     @Override public UUID getId(ItemStack stack) { return isValid(stack) ? stack.getTag().getUUID("Id") : null; }

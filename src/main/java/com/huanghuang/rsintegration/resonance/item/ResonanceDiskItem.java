@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.resonance.item;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.util.DiskNameStyle;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.api.storage.StorageType;
@@ -31,6 +32,11 @@ public final class ResonanceDiskItem extends StorageDiskItem {
 
     private ResonanceDiskItem() {
         super(ItemStorageType.FOUR_K);
+    }
+
+    @Override
+    public Component getName(ItemStack stack) {
+        return DiskNameStyle.resonance(super.getName(stack));
     }
 
     @Override
