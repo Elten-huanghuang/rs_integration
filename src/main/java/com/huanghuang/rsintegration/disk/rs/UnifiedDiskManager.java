@@ -119,7 +119,14 @@ public final class UnifiedDiskManager {
         if (entry.core != null || entry.error != null) return entry;
         try {
             entry.manifest = files.manifest(id);
-            entry.core = files.load(worldId, id);
+            UnifiedDiskCore loaded = files.load(worldId, id,
+                    RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
+                    RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES));
+            if (!entry.manifest.limits().equals(loaded.limits)) {
+                // 先原子提交容量描述，再对外开放扩容库存；复用原页，不复制库存。
+                entry.manifest = files.save(Snapshot.freeze(loaded), entry.manifest).manifest();
+            }
+            entry.core = loaded;
         } catch (Exception e) {
             entry.error = e.getMessage();
             LOGGER.error("[RSI] 统一盘 {} 不可用，保留原始文件，拒绝创建空库存", id, e);

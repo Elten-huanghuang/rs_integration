@@ -6,6 +6,11 @@ import java.util.UUID;
 
 public final class UnifiedDiskCore {
     public record Limits(int items, int fluids, int entryBytes, int payloadBytes) {
+        public Limits expandEntries(int itemCapacity, int fluidCapacity) {
+            return new Limits(Math.max(items, itemCapacity), Math.max(fluids, fluidCapacity),
+                    entryBytes, payloadBytes);
+        }
+
         public Limits {
             if (items < 1 || items > 262144 || fluids < 1 || fluids > 262144
                     || entryBytes < 1024 || entryBytes > FrozenKey.MAX_BYTES

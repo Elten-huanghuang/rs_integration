@@ -38,6 +38,66 @@ class DiskFileStoreTest extends BootstrapTest {
     private void acknowledge(UnifiedDiskCore core, Snapshot snapshot) {
         core.items.acknowledge(snapshot.items()); core.fluids.acknowledge(snapshot.fluids());
     }
+
+    @Test void expandedEntriesReuseSavedPagesPreserveInventoryAndAcceptNewKeys() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(2);
+        FrozenKey first = UnifiedDiskCoreTest.variant(1), second = UnifiedDiskCoreTest.variant(2);
+        FrozenKey water = FrozenKey.fluid(new FluidStack(Fluids.WATER, 1));
+        core.insert(first, Integer.MAX_VALUE, true); core.insert(second, 17, true);
+        core.insert(water, 5790, true);
+        var old = files.save(Snapshot.freeze(core), null);
+        UnifiedDiskCore expanded = files.load(core.worldId, core.diskId, 262144, 262144);
+        assertFalse(expanded.dirty());
+        assertEquals(262144, expanded.items.capacity()); assertEquals(262144, expanded.fluids.capacity());
+        assertEquals(core.diskId, expanded.diskId); assertEquals(core.owner, expanded.owner);
+        assertEquals(core.payloadBytes(), expanded.payloadBytes());
+        assertEquals(Integer.MAX_VALUE, expanded.items.amount(first)); assertEquals(17, expanded.items.amount(second));
+        assertEquals(5790, expanded.fluids.amount(water));
+        assertEquals(core.items.exactSlot(first), expanded.items.exactSlot(first));
+        var upgraded = files.save(Snapshot.freeze(expanded), old.manifest());
+        assertEquals(0, upgraded.keySegmentsWritten()); assertEquals(0, upgraded.amountPagesWritten());
+        assertEquals(old.manifest().items(), upgraded.manifest().items());
+        assertEquals(old.manifest().fluids(), upgraded.manifest().fluids());
+        expanded = files.load(core.worldId, core.diskId, 1, 1);
+        assertEquals(262144, expanded.limits.items()); assertEquals(262144, expanded.limits.fluids());
+        FrozenKey third = UnifiedDiskCoreTest.variant(3);
+        assertEquals(31, expanded.insert(third, 31, true));
+        var next = files.save(Snapshot.freeze(expanded), upgraded.manifest());
+        UnifiedDiskCore loaded = files.load(core.worldId, core.diskId);
+        assertEquals(31, loaded.items.amount(third)); assertEquals(Integer.MAX_VALUE, loaded.items.amount(first));
+        assertEquals(5790, loaded.fluids.amount(water));
+        assertEquals(262144, next.manifest().limits().items());
+    }
+
+    @Test void failedExpansionCommitKeepsOldCapacityAndInventoryIncludingEmptyDisk() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        for (boolean empty : List.of(false, true)) {
+            UnifiedDiskCore core = UnifiedDiskCoreTest.core(65536);
+            FrozenKey key = UnifiedDiskCoreTest.variant(1);
+            if (!empty) core.insert(key, 447, true);
+            var old = files.save(Snapshot.freeze(core), null);
+            UnifiedDiskCore expanded = files.load(core.worldId, core.diskId, 262144, 262144);
+            DiskFileStore broken = new DiskFileStore(root, () -> { throw new IOException("扩容提交失败"); });
+            assertThrows(IOException.class, () -> broken.save(Snapshot.freeze(expanded), old.manifest()));
+            UnifiedDiskCore original = files.load(core.worldId, core.diskId);
+            assertEquals(65536, original.limits.items()); assertEquals(empty ? 0 : 447, original.items.amount(key));
+            files.save(Snapshot.freeze(expanded), old.manifest());
+            assertEquals(262144, files.load(core.worldId, core.diskId).limits.items());
+        }
+    }
+
+    @Test void saveRejectsCapacityReductionAndPayloadLimitChanges() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(1024);
+        var saved = files.save(Snapshot.freeze(core), null);
+        for (var limits : List.of(new UnifiedDiskCore.Limits(512, 1024, 1048576, 268435456),
+                new UnifiedDiskCore.Limits(2048, 2048, 1024, 268435456))) {
+            UnifiedDiskCore changed = new UnifiedDiskCore(core.worldId, core.diskId, core.owner, limits);
+            assertThrows(IOException.class, () -> files.save(Snapshot.freeze(changed), saved.manifest()));
+        }
+        assertEquals(core.limits, files.manifest(core.diskId).limits());
+    }
     @Test void bothTablesRoundTripWithIntMaxAndAmountOnlyWrites() throws Exception {
         DiskFileStore files = new DiskFileStore(root);
         UnifiedDiskCore core = UnifiedDiskCoreTest.core(1024);

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.disk;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.persistence.DiskFileStore;
 import com.huanghuang.rsintegration.disk.rs.UnifiedBoundDisk;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
@@ -86,6 +87,35 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         return manager.mounts().acquire(root, node, 0, items, fluids, current.get(), () -> {});
     }
     @AfterEach void shutdown() { if (server != null) UnifiedDiskManager.stop(server); RSStorageConfig.SPEC.setConfig(null); }
+
+    @Test void oldDiskLoadsWithConfiguredCapacityAndSummarySurvivesRestart() throws Exception {
+        CommentedConfig config = CommentedConfig.inMemory();
+        config.set("unifiedDisk.maxItemEntries", 65536);
+        config.set("unifiedDisk.maxFluidEntries", 65536);
+        RSStorageConfig.SPEC.setConfig(config);
+        setup();
+        var original = manager.entry(root.id()).core;
+        original.insertItem(new ItemStack(Items.DIAMOND), 447, true);
+        original.insertFluid(new FluidStack(Fluids.WATER, 1), 5790, true);
+        UUID diskId = root.id();
+        UnifiedDiskManager.stop(server);
+        var files = new DiskFileStore(world.resolve("data/rs_integration/unified_disks"));
+        assertEquals(65536, files.manifest(diskId).limits().items());
+        config.set("unifiedDisk.maxItemEntries", 262144);
+        config.set("unifiedDisk.maxFluidEntries", 262144);
+        RSStorageConfig.SPEC.setConfig(config);
+        manager = UnifiedDiskManager.get(level);
+        var summary = manager.summary(diskId);
+        assertEquals(447, summary.items()); assertEquals(5790, summary.fluids());
+        assertEquals(262144, summary.itemCapacity()); assertEquals(262144, summary.fluidCapacity());
+        assertEquals(262144, files.manifest(diskId).limits().items());
+        UnifiedDiskManager.stop(server);
+        config.set("unifiedDisk.maxItemEntries", 65536);
+        config.set("unifiedDisk.maxFluidEntries", 65536);
+        RSStorageConfig.SPEC.setConfig(config);
+        manager = UnifiedDiskManager.get(level);
+        assertEquals(summary, manager.summary(diskId));
+    }
 
     @Test void loadingChunkReturnsImmediatelyAndSameWrapperRecoversAfterAttachment() throws Exception {
         setup();

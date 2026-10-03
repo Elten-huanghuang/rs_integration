@@ -112,7 +112,8 @@ public final class DiskFileStore {
         Path directory = directory(snapshot.disk);
         Files.createDirectories(directory);
         if (previous != null && (!previous.disk.equals(snapshot.disk) || !previous.world.equals(snapshot.world)
-                || !previous.limits.equals(snapshot.limits))) throw new IOException("提交来源身份不一致");
+                || !previous.limits.expandEntries(snapshot.limits.items(), snapshot.limits.fluids())
+                .equals(snapshot.limits))) throw new IOException("提交来源身份或容量不一致");
         int[] writes = new int[2];
         List<PageFiles> items = savePages(directory, "item", snapshot.itemPages, snapshot.items,
                 previous == null ? List.of() : previous.items, writes);
@@ -154,8 +155,19 @@ public final class DiskFileStore {
 
     public UnifiedDiskCore load(UUID worldId, UUID diskId) throws IOException {
         Manifest manifest = manifest(diskId);
+        return load(worldId, diskId, manifest, manifest.limits);
+    }
+
+    /** 按服务端配置扩大条目容量；旧文件仍按其原容量校验，减小配置不缩容。 */
+    public UnifiedDiskCore load(UUID worldId, UUID diskId, int itemCapacity, int fluidCapacity) throws IOException {
+        Manifest manifest = manifest(diskId);
+        Limits expanded = manifest.limits.expandEntries(itemCapacity, fluidCapacity);
+        return load(worldId, diskId, manifest, expanded);
+    }
+
+    private UnifiedDiskCore load(UUID worldId, UUID diskId, Manifest manifest, Limits limits) throws IOException {
         if (!manifest.world.equals(worldId)) throw new IOException("磁盘属于另一个存档");
-        UnifiedDiskCore core = new UnifiedDiskCore(worldId, diskId, manifest.owner, manifest.limits);
+        UnifiedDiskCore core = new UnifiedDiskCore(worldId, diskId, manifest.owner, limits);
         int itemBytes = loadPages(core.items, FrozenKey.Kind.ITEM, manifest.items, directory(diskId), manifest.limits);
         int fluidBytes = loadPages(core.fluids, FrozenKey.Kind.FLUID, manifest.fluids, directory(diskId), manifest.limits);
         if (fluidBytes > manifest.limits.payloadBytes() - itemBytes) throw new IOException("磁盘载荷总量超过容量描述");
@@ -206,7 +218,8 @@ public final class DiskFileStore {
 
     private int loadPages(ResourceTable table, FrozenKey.Kind kind, List<PageFiles> pages, Path directory,
                           Limits limits) throws IOException {
-        int slots = Math.min(table.capacity(), pages.size() * ResourceTable.PAGE_SIZE);
+        int storedCapacity = kind == FrozenKey.Kind.ITEM ? limits.items() : limits.fluids();
+        int slots = Math.min(storedCapacity, pages.size() * ResourceTable.PAGE_SIZE);
         int[] generations = new int[slots];
         List<Record> records = new ArrayList<>();
         int totalBytes = 0;
