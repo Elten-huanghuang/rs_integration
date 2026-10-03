@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -37,6 +38,9 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     private ExpectedProduction actualProduction;
     private boolean consumed;
     private String recycleFailure = "";
+    private boolean outputStoragePreflightDone;
+    private boolean outputStoragePreflightPassed;
+    private boolean outputStorageWarningSent;
     private Method meltInput;
     private List<ItemStack> heldInputs = List.of();
     private ServerPlayer owner;
@@ -60,6 +64,9 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         this.pos = pos.immutable();
         this.recipe = found;
         this.owner = player;
+        outputStoragePreflightDone = false;
+        outputStoragePreflightPassed = false;
+        outputStorageWarningSent = false;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         return true;
@@ -83,8 +90,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         if (player == null || recipe == null || storageEndpoint() == null
                 || !"refinedstorage".equals(storageEndpoint().session().reference().backendId().value())
                 || !level.hasChunkAt(pos) || !isCauldron(level.getBlockEntity(pos))) return false;
-        if (consumed) return recycleFailure.isEmpty() && (!recycles() || result.isEmpty()
-                || canStoreOutput(storageEndpoint(), player, result));
+        if (consumed) return recycleFailure.isEmpty();
         if (!recycles()) return true;
         BlockEntity tile = level.getBlockEntity(pos);
         Container container = (Container) tile;
@@ -92,11 +98,32 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
             if (!container.getItem(slot).isEmpty()) return false;
         }
         IFluidHandler tank = tile.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
-        if (tank == null || !canStoreOutput(storageEndpoint(), player, recipe.getResultItem(level.registryAccess()))) return false;
+        if (tank == null) return false;
+        if (!outputStoragePreflightDone) {
+            outputStoragePreflightDone = true;
+            outputStoragePreflightPassed = canStoreOutput(storageEndpoint(), player,
+                    recipe.getResultItem(level.registryAccess()));
+            if (!outputStoragePreflightPassed) {
+                player.sendSystemMessage(Component.translatable("rsi.alchemist.error.fluid_storage_required"));
+            }
+        }
+        if (!outputStoragePreflightPassed) return false;
         int missingWater = missingWater(tank);
         if (missingWater > 0 && !MachineWaterSupply.canFill(IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE,
                 tank, missingWater, storageEndpoint(), player)) return false;
         return canFitRecycledInk(tank, InkFluidSupport.fluid(recipe.getResultItem(level.registryAccess())));
+    }
+
+    @Override
+    public Component validateOutputStorage(@Nonnull ServerPlayer player) {
+        if (!recycles() || storageEndpoint() == null) return null;
+        if (!outputStoragePreflightDone) {
+            outputStoragePreflightDone = true;
+            outputStoragePreflightPassed = canStoreOutput(storageEndpoint(), player,
+                    recipe.getResultItem(level.registryAccess()));
+        }
+        return outputStoragePreflightPassed ? null
+                : Component.translatable("rsi.alchemist.error.fluid_storage_required");
     }
 
     static boolean canStoreOutput(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack output) {
@@ -203,9 +230,6 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
         if (!recycleFailure.isEmpty()) return failObservation(recycleFailure);
         if (recycles() && !result.isEmpty()) {
-            if (!canStoreOutput(storageEndpoint(), owner, result)) {
-                return failObservation("RS 无法完整存储墨水流体，墨水保留在炼金锅中");
-            }
             IFluidHandler tank = be.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
             FluidStack expected = InkFluidSupport.fluid(result);
             if (tank == null || tank.drain(expected, IFluidHandler.FluidAction.SIMULATE).getAmount() != expected.getAmount()) {
@@ -231,7 +255,13 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
             if (!level.hasChunkAt(pos) || !isCauldron(level.getBlockEntity(pos))) return ItemStack.EMPTY;
             IFluidHandler tank = level.getBlockEntity(pos).getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
             ItemStack collected = collectFluid(tank, storageEndpoint(), player, result);
-            if (collected.isEmpty()) return ItemStack.EMPTY;
+            if (collected.isEmpty()) {
+                if (!outputStorageWarningSent) {
+                    player.sendSystemMessage(Component.translatable("rsi.alchemist.error.fluid_storage_missing_output_kept"));
+                    outputStorageWarningSent = true;
+                }
+                return ItemStack.EMPTY;
+            }
             result = ItemStack.EMPTY;
             return collected;
         }
@@ -268,6 +298,9 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         if (!usingSharedLedger && !consumed && ledger != null) ledger.refundCommitted(network, player);
         result = ItemStack.EMPTY;
         actualProduction = null;
+        outputStoragePreflightDone = false;
+        outputStoragePreflightPassed = false;
+        outputStorageWarningSent = false;
         owner = null;
         resetState();
     }
@@ -275,6 +308,9 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         markTerminalCleanup();
         result = ItemStack.EMPTY;
         actualProduction = null;
+        outputStoragePreflightDone = false;
+        outputStoragePreflightPassed = false;
+        outputStorageWarningSent = false;
         owner = null;
         resetState();
     }
