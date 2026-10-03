@@ -42,7 +42,7 @@ public final class RSStorageConfig {
         UNIFIED_GRID = builder.comment("默认开启。关闭后使用 RS 原版单类型订阅、显示和取放路径。")
                 .define("enabled", true);
         builder.pop();
-        builder.comment("物品/流体统一磁盘。开关需重启，关闭不删除库存；容量设置只影响新建磁盘。")
+        builder.comment("物品/流体统一磁盘。开关需重启，关闭不删除库存；条目容量调大后旧盘在下次加载时自动扩容，调小不缩容。载荷容量只影响新盘。")
                 .push("unifiedDisk");
         UNIFIED_DISK = builder.comment("默认开启。关闭后在创造栏和配方浏览器隐藏并禁用配方，保留旧盘与文件但不挂载和读写库存。需要重启。")
                 .define("enabled", true);
