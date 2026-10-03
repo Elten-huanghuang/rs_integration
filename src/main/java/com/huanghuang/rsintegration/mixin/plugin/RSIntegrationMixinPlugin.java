@@ -32,6 +32,13 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".sophisticatedbackpacks.StorageScreenFluidFilterMixin")) {
+            return hasMethod(targetClassName, "renderStack");
+        }
+        if (mixinClassName.endsWith(".sophisticatedbackpacks.StorageGhostIngredientHandlerMixin")) {
+            return isClassPresent("mezz.jei.api.ingredients.ITypedIngredient")
+                    && hasMethod(targetClassName, "getTargetsTyped");
+        }
         if (mixinClassName.contains("constructionwand.")) {
             return isClassPresent("thetadev.constructionwand.basics.WandUtil")
                     && isClassPresent("thetadev.constructionwand.wand.supplier.SupplierInventory")

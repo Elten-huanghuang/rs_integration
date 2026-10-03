@@ -103,6 +103,8 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "sophisticatedbackpacks.StorageGhostIngredientHandlerMixin",
+    "sophisticatedbackpacks.StorageScreenFluidFilterMixin",
     "constructionwand.ConstructionWandClientNetworkMixin",
     "minecraft.CraftFailureReportClickMixin",
     "beyonddimensions.BDBaseGuiOverlayMixin",

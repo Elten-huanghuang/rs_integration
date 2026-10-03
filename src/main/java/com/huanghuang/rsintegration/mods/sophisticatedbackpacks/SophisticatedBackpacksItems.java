@@ -82,7 +82,7 @@ public final class SophisticatedBackpacksItems {
         RS_MAGNET_TYPE = new UpgradeContainerType<>(
                 (Player player, int containerId, MagnetUpgradeWrapper wrapper,
                  UpgradeContainerType<MagnetUpgradeWrapper, MagnetUpgradeContainer> type) ->
-                        new MagnetUpgradeContainer(player, containerId, wrapper, type));
+                        new RSMagnetUpgradeContainer(player, containerId, wrapper, type));
 
         RS_REFILL_TYPE = new UpgradeContainerType<>(
                 (Player player, int containerId, RefillUpgradeWrapper wrapper,
