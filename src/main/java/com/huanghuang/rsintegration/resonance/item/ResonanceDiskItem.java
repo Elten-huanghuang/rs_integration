@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.resonance.item;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
 import com.huanghuang.rsintegration.util.DiskNameStyle;
+import com.huanghuang.rsintegration.util.DiskTooltipEffects;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.api.storage.StorageType;
@@ -11,6 +11,7 @@ import com.refinedmods.refinedstorage.apiimpl.API;
 import com.refinedmods.refinedstorage.apiimpl.storage.ItemStorageType;
 import com.refinedmods.refinedstorage.item.StorageDiskItem;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
@@ -56,36 +57,39 @@ public final class ResonanceDiskItem extends StorageDiskItem {
     @Override
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip,
                                 TooltipFlag flag) {
+        int baseTooltipSize = tooltip.size();
         super.appendHoverText(stack, level, tooltip, flag);
+        // RS 原生容量/类型行也纳入共振主题，避免顶部仍显示默认灰色。
+        for (int i = baseTooltipSize; i < tooltip.size(); i++) {
+            tooltip.set(i, DiskTooltipEffects.flow(tooltip.get(i),
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN,
+                    (i - baseTooltipSize) * 0.12F));
+        }
         tooltip.add(Component.empty());
 
         if (!Screen.hasShiftDown()) {
-            tooltip.add(TextBuilder.translate("item.rs_integration.resonance_storage_disk.tooltip")
-                    .colorFlow(1600L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS)
-                    .bold()
-                    .build());
-            tooltip.add(TextBuilder.translate(
-                            "item.rs_integration.resonance_storage_disk.tooltip.subtitle")
-                    .colorFlow(1600L, 0.35F, RSIntegrationMod.RS_FLOW_COLORS)
-                    .build());
-            tooltip.add(TextBuilder.translate(
-                            "item.rs_integration.resonance_storage_disk.tooltip.expand")
-                    .darkGray()
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow(
+                    "item.rs_integration.resonance_storage_disk.tooltip",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN, 0.0F)
+                    .copy().withStyle(ChatFormatting.BOLD));
+            tooltip.add(DiskTooltipEffects.flow(
+                    "item.rs_integration.resonance_storage_disk.tooltip.subtitle",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN, 0.35F));
+            tooltip.add(DiskTooltipEffects.flow(
+                    "item.rs_integration.resonance_storage_disk.tooltip.expand",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.HINT, 0.7F));
             return;
         }
 
-        tooltip.add(TextBuilder.translate(
-                        "item.rs_integration.resonance_storage_disk.tooltip.title")
-                .aqua()
-                .bold()
-                .build());
+        tooltip.add(DiskTooltipEffects.flow(
+                "item.rs_integration.resonance_storage_disk.tooltip.title",
+                DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.HINT, 0.0F)
+                .copy().withStyle(ChatFormatting.BOLD));
         for (int line = 1; line <= 8; line++) {
-            tooltip.add(TextBuilder.of("• ").darkAqua()
-                    .append(TextBuilder.translate(
-                            "item.rs_integration.resonance_storage_disk.tooltip.detail_" + line)
-                            .gray())
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow(
+                    TextBuilder.of("• ").append(Component.translatable(
+                            "item.rs_integration.resonance_storage_disk.tooltip.detail_" + line)).build(),
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MUTED, line * 0.09F));
         }
     }
 
