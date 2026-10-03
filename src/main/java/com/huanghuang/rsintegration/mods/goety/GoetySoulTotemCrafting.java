@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
@@ -95,9 +96,14 @@ public final class GoetySoulTotemCrafting {
         }
         try {
             Object value = recipe.getClass().getMethod("getSoulCost").invoke(recipe);
-            int perTick = value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+            int soulCost = value instanceof Number number ? Math.max(0, number.intValue()) : 0;
 
-            // 黑暗祭坛每刻都会消耗一次 getSoulCost()，所以持续时间也必须计入
+            // Age of Mythology 接管塔罗觉醒仪式后，会在启动时一次性扣除
+            // getSoulCost()，运行期间不再按持续时间扣费。该类是可选依赖，
+            // 必须通过反射判断当前配方，避免把普通 Goety 配方误判为总量。
+            if (isTotalSettlementRitual(recipe)) return soulCost;
+
+            // 黑暗祭坛每秒都会消耗一次 getSoulCost()，持续时间的单位也是秒，必须计入
             // 能量需求；只读取单次消耗会低估长时间仪式的总消耗。
             if (hasNamedSuperclass(recipe.getClass(),
                     "com.Polarice3.Goety.common.crafting.RitualRecipe")) {
@@ -105,7 +111,7 @@ public final class GoetySoulTotemCrafting {
                     Object durationValue = recipe.getClass().getMethod("getDuration").invoke(recipe);
                     if (durationValue instanceof Number durationNumber) {
                         int duration = durationNumber.intValue();
-                        if (duration > 0) return saturatingMultiply(perTick, duration);
+                        if (duration > 0) return saturatingMultiply(soulCost, duration);
                     }
                 } catch (ReflectiveOperationException | RuntimeException ignored) {
                     // 兼容没有暴露持续时间访问器的旧版 Goety。
@@ -113,9 +119,27 @@ public final class GoetySoulTotemCrafting {
             }
             // BrazierRecipe 没有持续时间访问器，其 getSoulCost() 本身就是机器
             // 会抽取的灵魂总量。
-            return perTick;
+            return soulCost;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return 0;
+        }
+    }
+
+    private static boolean isTotalSettlementRitual(Object recipe) {
+        try {
+            ModList mods = ModList.get();
+            if (mods == null || !mods.isLoaded("ageofmythology")) return false;
+            Class<?> service = Class.forName(
+                    "com.kurome.ageofmythology.tarot.awakening.upright.TarotRitualStartService");
+            for (Class<?> type = recipe.getClass(); type != null; type = type.getSuperclass()) {
+                if ("com.Polarice3.Goety.common.crafting.RitualRecipe".equals(type.getName())) {
+                    Method manages = service.getMethod("manages", type);
+                    return Boolean.TRUE.equals(manages.invoke(null, recipe));
+                }
+            }
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            return false;
         }
     }
 
