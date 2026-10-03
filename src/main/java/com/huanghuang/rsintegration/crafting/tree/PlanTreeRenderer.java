@@ -130,10 +130,10 @@ public final class PlanTreeRenderer {
             String label = "×" + node.batches;
             int lw = font.width(label);
             int lx = parent.itemCenterX() - lw / 2;
-            int ly = parentBottomY + (busY - parentBottomY) / 2 - font.lineHeight / 2;
-            // Backdrop pill.
-            gfx.fill(lx - 4, ly - 1, lx + lw + 4, ly + font.lineHeight + 1, 0xDDE8ECEF);
-            gfx.drawString(font, label, lx, ly, 0xFF4E5B60, false);
+            // 次数标记靠近横向连线，避开节点下方的数量和机器名称。
+            int ly = busY - font.lineHeight - 2;
+            gfx.fill(lx - 4, ly - 1, lx + lw + 4, ly + font.lineHeight + 1, C_COUNT_BACKDROP);
+            gfx.drawString(font, label, lx, ly, C_COUNT_TEXT, false);
         }
     }
 
