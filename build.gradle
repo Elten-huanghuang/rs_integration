@@ -119,6 +119,7 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
+    testImplementation fg.deobf("local:sophisticatedcore:1.20.1-1.2.55.975")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // 混合终端与配方预览测试需要编译、加载 JEI 接口。
     testImplementation "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"

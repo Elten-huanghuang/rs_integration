@@ -21,6 +21,7 @@ import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeSlotChangeResult;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.IUpgradeCountLimitConfig;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.IUpgradeItem;
+import net.p3pp3rf1y.sophisticatedcore.upgrades.UpgradeType;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeItem;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.magnet.MagnetUpgradeWrapper;
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
@@ -34,6 +35,13 @@ import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 
 public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
+    private static final UpgradeType<MagnetUpgradeWrapper> RS_TYPE =
+            new UpgradeType<>(RSMagnetUpgradeWrapper::new);
+
+    @Override
+    public UpgradeType<MagnetUpgradeWrapper> getType() {
+        return RS_TYPE;
+    }
 
     public RSMagnetUpgradeItem(IntSupplier radius, IntSupplier filterSlotCount,
                                 IUpgradeCountLimitConfig countLimitConfig) {
@@ -63,6 +71,13 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
         super.appendHoverText(stack, level, tooltip, flag);
         appendRSInfo(stack, tooltip);
+        if (stack.hasTag() && stack.getTag().getBoolean(RSMagnetFluidCollector.UNCERTAIN)) {
+            tooltip.add(TextBuilder.translate("gui.rs_integration.magnet.fluid_uncertain").red().build());
+        } else {
+            var pending = RSMagnetFluidCollector.pending(stack);
+            if (!pending.isEmpty()) tooltip.add(Component.translatable(
+                    "gui.rs_integration.magnet.fluid_pending", pending.getAmount()));
+        }
     }
 
     @Override
