@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.util.DiskTooltipEffects;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -12,39 +13,52 @@ import java.util.UUID;
 /** 展示与查询分离，便于验证摘要、展开说明和未初始化状态。 */
 public final class UnifiedDiskTooltip {
     private static final String PREFIX = "item.rs_integration.unified_storage_disk.";
-    private static final int[] COLORS = {0x55FFFF, 0x5599FF, 0xAA55FF, 0xFF55CC};
     public record View(UnifiedDiskSummary summary, boolean unavailable, boolean expanded) {}
     private UnifiedDiskTooltip() {}
 
     public static void append(List<Component> tooltip, UUID id, View view) {
         if (id == null) {
-            tooltip.add(Component.translatable(PREFIX + "uninitialized").withStyle(ChatFormatting.GRAY));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "uninitialized", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.WARNING, 0.0F));
         } else {
             UnifiedDiskSummary summary = view == null ? null : view.summary();
             if (summary == null) {
-                tooltip.add(Component.translatable(PREFIX + (view != null && view.unavailable()
-                        ? "unavailable" : "loading")).withStyle(ChatFormatting.GRAY));
+                tooltip.add(DiskTooltipEffects.flow(PREFIX + (view != null && view.unavailable()
+                        ? "unavailable" : "loading"), DiskTooltipEffects.Theme.GUIXU,
+                        view != null && view.unavailable()
+                                ? DiskTooltipEffects.Tone.WARNING : DiskTooltipEffects.Tone.MUTED, 0.0F));
             } else {
-                tooltip.add(Component.translatable(PREFIX + "stored_items", number(summary.items())).withStyle(ChatFormatting.GRAY));
-                tooltip.add(Component.translatable(PREFIX + "stored_fluids", number(summary.fluids())).withStyle(ChatFormatting.GRAY));
-                tooltip.add(Component.translatable(PREFIX + "item_types", number(summary.itemTypes()),
-                        number(summary.itemCapacity())).withStyle(ChatFormatting.GRAY));
-                tooltip.add(Component.translatable(PREFIX + "fluid_types", number(summary.fluidTypes()),
-                        number(summary.fluidCapacity())).withStyle(ChatFormatting.GRAY));
+                tooltip.add(DiskTooltipEffects.flow(PREFIX + "stored_items", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.MAIN, 0.0F, number(summary.items())));
+                tooltip.add(DiskTooltipEffects.flow(PREFIX + "stored_fluids", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.FLUID, 0.18F, number(summary.fluids())));
+                tooltip.add(DiskTooltipEffects.flow(PREFIX + "item_types", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.MAIN, 0.36F, number(summary.itemTypes()),
+                        number(summary.itemCapacity())));
+                tooltip.add(DiskTooltipEffects.flow(PREFIX + "fluid_types", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.FLUID, 0.54F, number(summary.fluidTypes()),
+                        number(summary.fluidCapacity())));
             }
-            tooltip.add(Component.translatable(PREFIX + "id", id.toString()).withStyle(ChatFormatting.DARK_GRAY));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "id", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.MUTED, 0.7F, id.toString()));
         }
         tooltip.add(Component.empty());
-        tooltip.add(TextBuilder.translate(PREFIX + "tooltip.title").colorFlow(1800L, 0.0F, COLORS).bold().build());
+        tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.title", DiskTooltipEffects.Theme.GUIXU,
+                DiskTooltipEffects.Tone.MAIN, 0.0F).copy().withStyle(ChatFormatting.BOLD));
         if (view == null || !view.expanded()) {
-            tooltip.add(TextBuilder.translate(PREFIX + "tooltip.subtitle").colorFlow(1800L, 0.35F, COLORS).build());
-            tooltip.add(TextBuilder.translate(PREFIX + "tooltip.subtitle_2").colorFlow(1800L, 0.7F, COLORS).build());
-            tooltip.add(Component.translatable(PREFIX + "tooltip.expand").withStyle(ChatFormatting.DARK_GRAY));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.subtitle", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.MAIN, 0.35F));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.subtitle_2", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.MAIN, 0.7F));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.expand", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.HINT, 0.25F));
         } else {
-            tooltip.add(Component.translatable(PREFIX + "tooltip.rules").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+            tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.rules", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.HINT, 0.0F).copy().withStyle(ChatFormatting.BOLD));
             for (int line = 1; line <= 8; line++) {
-                tooltip.add(TextBuilder.of("• ").darkAqua().append(TextBuilder.translate(
-                        PREFIX + "tooltip.detail_" + line).gray()).build());
+                tooltip.add(DiskTooltipEffects.flow(TextBuilder.of("• ").append(Component.translatable(
+                        PREFIX + "tooltip.detail_" + line)).build(), DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.MUTED, line * 0.09F));
             }
         }
     }
