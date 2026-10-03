@@ -225,6 +225,16 @@ public interface IBatchDelegate {
     }
 
     /**
+     * Optional one-shot preflight for outputs that require a storage capability
+     * beyond ordinary item storage, such as a fluid disk. Returning a message
+     * rejects the operation before materials are committed.
+     */
+    @Nullable
+    default Component validateOutputStorage(@Nonnull ServerPlayer player) {
+        return null;
+    }
+
+    /**
      * Whether a bound block without a block entity is a valid idle form for this delegate.
      * Most machines require a block entity; world-interaction machines may opt in after
      * validating the concrete block at the bound position.

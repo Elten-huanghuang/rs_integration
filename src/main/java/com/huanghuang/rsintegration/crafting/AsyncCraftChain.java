@@ -1785,6 +1785,11 @@ public final class AsyncCraftChain {
             delegate.configureMaterialReservation(nodeLedger, online);
             delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
             delegate.prepareOperationCount(Math.max(1, prepared.step().executions()));
+            Component outputStorageFailure = delegate.validateOutputStorage(online);
+            if (outputStorageFailure != null) {
+                online.sendSystemMessage(outputStorageFailure);
+                return GraphDispatchResult.fatal("output storage preflight rejected");
+            }
             if (prepared.parallelGroup()) {
                 List<BoundMachine> workers = new ArrayList<>(
                         prepared.machines().subList(0, prepared.operationCost()));
@@ -3426,6 +3431,13 @@ public final class AsyncCraftChain {
 
         final IBatchDelegate startedDelegate = delegate;
         try {
+            Component outputStorageFailure = startedDelegate.validateOutputStorage(online);
+            if (outputStorageFailure != null) {
+                machineStartFailureDetail = "output storage preflight rejected";
+                machineStartFailureMessage = outputStorageFailure;
+                releasePreparationQuietly(startedDelegate);
+                return null;
+            }
             int configuredLimit = configuredOperationsPerDispatch();
             int delegateLimit = startedDelegate.flatBatchOperationLimit(configuredLimit);
             int allowedBatch = Math.min(stepRemaining, Math.max(1, delegateLimit));
