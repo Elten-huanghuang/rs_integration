@@ -574,26 +574,22 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             String key = machine.dim() + "@" + machine.pos().asLong();
             if (!seen.add(key)) continue;
             ServerLevel level = CraftPacketUtils.resolveLevel(player.server, machine.dim(), player);
+            if (level == null || !level.isLoaded(machine.pos())) continue;
             ItemStack icon = level != null && level.isLoaded(machine.pos())
                     ? new ItemStack(level.getBlockState(machine.pos()).getBlock()) : ItemStack.EMPTY;
             MachineCandidateView.State state;
             Component status;
             SummoningRitualAltarBatchDelegate delegate = null;
             try {
-                if (level == null || !level.isLoaded(machine.pos())) {
-                    state = MachineCandidateView.State.TEMPORARY;
-                    status = Component.translatable("rsi.machine_candidate.temporary");
-                } else {
-                    delegate = new SummoningRitualAltarBatchDelegate();
-                    IBatchDelegate.PreparationResult check = PreparationMessageScope.prepare(
-                            delegate, player, recipe.getId(), machine.dim(), machine.pos());
-                    state = check.state() == IBatchDelegate.PreparationState.READY
-                            ? MachineCandidateView.State.READY
-                            : MachineCandidateView.State.TEMPORARY;
-                    status = check.state() == IBatchDelegate.PreparationState.READY
-                            ? Component.translatable("rsi.machine_candidate.ready")
-                            : Component.translatable("rsi.machine_candidate.temporary");
-                }
+                delegate = new SummoningRitualAltarBatchDelegate();
+                IBatchDelegate.PreparationResult check = PreparationMessageScope.prepare(
+                        delegate, player, recipe.getId(), machine.dim(), machine.pos());
+                state = check.state() == IBatchDelegate.PreparationState.READY
+                        ? MachineCandidateView.State.READY
+                        : MachineCandidateView.State.TEMPORARY;
+                status = check.state() == IBatchDelegate.PreparationState.READY
+                        ? Component.translatable("rsi.machine_candidate.ready")
+                        : Component.translatable("rsi.machine_candidate.temporary");
             } catch (RuntimeException exception) {
                 state = MachineCandidateView.State.TEMPORARY;
                 status = Component.translatable("rsi.machine_candidate.check_failed");
@@ -604,12 +600,29 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
                     machine.pos().getX(), machine.pos().getY(), machine.pos().getZ(),
                     icon, state, status));
         }
-        ResourceLocation playerDim = player.level().dimension().location();
-        result.sort(Comparator
-                .comparingInt((MachineCandidateView candidate) ->
-                        candidate.state() == MachineCandidateView.State.READY ? 0 : 1)
-                .thenComparingInt(candidate ->
-                        candidate.dimension().equals(playerDim.toString()) ? 0 : 1));
-        return List.copyOf(result);
+        return orderPlanMachineCandidates(result, player.level().dimension().location(),
+                player.getX(), player.getY(), player.getZ());
+    }
+
+    static List<MachineCandidateView> orderPlanMachineCandidates(
+            List<MachineCandidateView> candidates, ResourceLocation playerDimension,
+            double playerX, double playerY, double playerZ) {
+        if (candidates == null || candidates.isEmpty()) return List.of();
+        return candidates.stream()
+                .sorted(Comparator
+                        .comparingInt((MachineCandidateView candidate) ->
+                                candidate.state() == MachineCandidateView.State.READY ? 0 : 1)
+                        .thenComparingInt(candidate ->
+                                candidate.dimension().equals(playerDimension.toString()) ? 0 : 1)
+                        .thenComparingDouble(candidate -> {
+                            if (!candidate.dimension().equals(playerDimension.toString())) {
+                                return Double.MAX_VALUE;
+                            }
+                            double dx = candidate.x() + 0.5D - playerX;
+                            double dy = candidate.y() + 0.5D - playerY;
+                            double dz = candidate.z() + 0.5D - playerZ;
+                            return dx * dx + dy * dy + dz * dz;
+                        }))
+                .toList();
     }
 }
