@@ -374,6 +374,13 @@ public final class RSIntegrationMod {
         int schema = RSIntegrationConfig.SERVER_CONFIG_SCHEMA_VERSION.get();
         if (schema >= RSIntegrationConfig.SERVER_CONFIG_SCHEMA) return;
 
+        var currentFreeWater = RSIntegrationConfig.FREE_WATER_MACHINES.get();
+        var migratedFreeWater = RSIntegrationConfig.migrateFreeWaterMachines(schema, currentFreeWater);
+        if (!migratedFreeWater.equals(currentFreeWater)) {
+            RSIntegrationConfig.FREE_WATER_MACHINES.set(migratedFreeWater);
+            LOGGER.info("[RSI-Config] 已启用炼金机免费补水");
+        }
+
         int currentMax = RSIntegrationConfig.REPEAT_COUNT_MAX.get();
         int migratedMax = RSIntegrationConfig.migrateRepeatCountMax(schema, currentMax);
         if (migratedMax != currentMax) {

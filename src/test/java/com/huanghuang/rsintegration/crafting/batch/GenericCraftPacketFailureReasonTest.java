@@ -7,6 +7,10 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
@@ -18,6 +22,9 @@ import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -28,6 +35,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GenericCraftPacketFailureReasonTest extends BootstrapTest {
+    @Test
+    void differentFluidStockIsNotReportedAsAnItemNbtMismatch() {
+        ItemStack water = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 2000));
+        ItemStack lava = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.LAVA, 5000));
+        assertFalse(GenericCraftPacket.hasNbtMismatch(Map.of(IngredientKey.of(water),
+                new PlanResponse.Availability(2000, 0)), Map.of(water.getItem(), 5000)));
+        var demand = ImmutableRecipeGraphProjector.projectIngredient(new IngredientSpec(
+                StrictNBTIngredient.of(water.copyWithCount(1)), 2000));
+        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand),
+                Map.of(new StackKey(lava.getItem(), lava.getTag().toString()), 5000)));
+    }
+
     @Test
     void plannedNbtIntermediateDoesNotBecomeNbtMismatch() {
         ItemStack intermediate = new ItemStack(Items.POTION);

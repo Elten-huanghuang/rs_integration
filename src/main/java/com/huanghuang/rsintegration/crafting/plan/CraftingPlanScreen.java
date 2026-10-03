@@ -2098,7 +2098,7 @@ public final class CraftingPlanScreen extends Screen {
         for (var e : plan.materials().entrySet()) {
             ItemStack st = e.getKey().stack(1);
             out.add(new StripEntry(st, e.getKey(), e.getValue().needed(),
-                    e.getValue().available(), e.getValue().isEnough()));
+                    e.getValue().available(), e.getValue().missingCount() == 0));
         }
         return out;
     }
@@ -2149,7 +2149,7 @@ public final class CraftingPlanScreen extends Screen {
                 if (hitRight > hitLeft && hitBottom > hitTop) {
                     registerBookmarkHit(e.display(), hitLeft, hitTop,
                             hitRight - hitLeft, hitBottom - hitTop,
-                            Math.max(1, e.count() - e.available()));
+                            Math.max(1, plan.availability(e.key()).missingCount()));
                 }
             }
             String cnt = stripCountText(e, leftover);

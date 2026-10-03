@@ -14,13 +14,13 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 6;
+    public static final int SERVER_CONFIG_SCHEMA = 7;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final List<String> DEFAULT_FREE_WATER_MACHINES = List.of(
             "farmersrespite_kettle", "youkaishomecoming_kettle", "youkaishomecoming_ferment",
             "youkaishomecoming_moka", "youkaishomecoming_steamer", "irons_spellbooks_alchemist_cauldron",
-            "eidolon_crucible", "botania_petal_apothecary");
+            "eidolon_crucible", "botania_petal_apothecary", "wizards_reborn_alchemy");
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> FREE_WATER_MACHINES;
     private static final List<String> LEGACY_DEFAULT_PASSIVE_TICK_ITEMS = List.of(
             "reliquary:pyromancer_staff|mutates",
@@ -1006,7 +1006,7 @@ public final class RSIntegrationConfig {
                         "未列出的机器从 RS 流体存储扣除补入的水；已有的水可以继续使用。",
                         "Supported: farmersrespite_kettle, youkaishomecoming_kettle, youkaishomecoming_ferment,",
                         "youkaishomecoming_moka, youkaishomecoming_steamer, irons_spellbooks_alchemist_cauldron,",
-                        "eidolon_crucible, botania_petal_apothecary.",
+                        "eidolon_crucible, botania_petal_apothecary, wizards_reborn_alchemy.",
                         "摩卡壶、蒸锅和花药台每次从无水变为有水时消耗 1000 mB，其余机器按缺水量扣除。")
                 .defineListAllowEmpty("freeWaterMachines", DEFAULT_FREE_WATER_MACHINES,
                         value -> value instanceof String name && name.matches("[a-z0-9_]+"));
@@ -1534,6 +1534,11 @@ public final class RSIntegrationConfig {
     public static int migrateRepeatCountMax(int schema, int currentValue) {
         return schema < 2 && currentValue == 64
                 ? REPEAT_COUNT_DEFAULT : currentValue;
+    }
+
+    public static List<? extends String> migrateFreeWaterMachines(int schema, List<? extends String> currentValue) {
+        List<String> oldDefaults = DEFAULT_FREE_WATER_MACHINES.subList(0, DEFAULT_FREE_WATER_MACHINES.size() - 1);
+        return schema < 7 && currentValue.equals(oldDefaults) ? DEFAULT_FREE_WATER_MACHINES : currentValue;
     }
 
     public static List<? extends String> migrateAnvilMemoryAdapters(

@@ -71,6 +71,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
+import com.huanghuang.rsintegration.recipe.WRAlchemyRecipeHandler;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
@@ -385,6 +386,10 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI-Mixin] Iron's Spell Books output capture: recipeId={} output={}",
                         recipeId, ironSpellBooksTarget.getHoverName().getString());
+            } else if (recipe instanceof Recipe<?> alchemyRecipe
+                    && new WRAlchemyRecipeHandler().canHandle(alchemyRecipe)) {
+                concreteTargetOutput = new WRAlchemyRecipeHandler()
+                        .getResultItem(alchemyRecipe, player.level().registryAccess());
             } else if (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())
                     && recipeId.getPath().startsWith("arcane_iterator/")) {
                 concreteTargetOutput = extractOutputStack(recipeLayout);

@@ -21,6 +21,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PlanTreeModelLegacyTest extends BootstrapTest {
 
     @Test
+    void sharedProducerExpandsItsActualExecutionsOnlyOnce() {
+        PlanStep powder = new PlanStep(new ResourceLocation("test", "powder"),
+                new ItemStack(Items.IRON_NUGGET, 9), 1, List.of(new ItemStack(Items.IRON_BLOCK)));
+        PlanStep left = new PlanStep(new ResourceLocation("test", "left"),
+                new ItemStack(Items.PAPER), 1, List.of(new ItemStack(Items.IRON_NUGGET, 4)));
+        PlanStep right = new PlanStep(new ResourceLocation("test", "right"),
+                new ItemStack(Items.EMERALD), 1, List.of(new ItemStack(Items.IRON_NUGGET, 4)));
+        PlanStep target = new PlanStep(new ResourceLocation("test", "target"),
+                new ItemStack(Items.DIAMOND), 1,
+                List.of(new ItemStack(Items.PAPER), new ItemStack(Items.EMERALD)));
+        PlanResponse plan = new PlanResponse(true, "", target.output(),
+                List.of(powder, left, right, target), Map.of(), List.of(), target.recipeId().toString());
+
+        PlanTreeModel tree = PlanTreeModel.from(plan);
+        Map<IngredientKey, Integer> demand = PlanTreeModel.grossDemandByKey(tree);
+
+        assertEquals(8, demand.get(IngredientKey.of(new ItemStack(Items.IRON_NUGGET))));
+        assertEquals(1, demand.get(IngredientKey.of(new ItemStack(Items.IRON_BLOCK))));
+        assertEquals(4, tree.root.children.get(0).children.get(0).amount);
+        assertEquals(4, tree.root.children.get(1).children.get(0).amount);
+    }
+
+    @Test
     void rootKeepsTargetStepAndAlternativesWithoutGraphNodes() {
         ResourceLocation selected = new ResourceLocation("crafttweaker", "refined_mod.moon_slash");
         ResourceLocation alternative = new ResourceLocation(

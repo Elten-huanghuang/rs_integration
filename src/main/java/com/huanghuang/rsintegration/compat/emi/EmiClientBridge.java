@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.compat.emi;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import net.minecraftforge.fluids.FluidStack;
 import dev.emi.emi.api.EmiApi;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
@@ -36,7 +38,7 @@ public final class EmiClientBridge {
     private EmiClientBridge() {}
 
     public static RecipeBrowserBridge.FavoriteResult addFavorite(ItemStack stack) {
-        EmiStack ingredient = EmiStack.of(stack.copyWithCount(1));
+        EmiStack ingredient = browserIngredient(stack);
         for (EmiFavorite favorite : EmiFavorites.favorites) {
             if (favorite.strictEquals(ingredient)) {
                 return RecipeBrowserBridge.FavoriteResult.EXISTS;
@@ -68,8 +70,14 @@ public final class EmiClientBridge {
     }
 
     public static void showRecipesOrUses(ItemStack stack, boolean uses) {
-        EmiStack ingredient = EmiStack.of(stack.copyWithCount(1));
+        EmiStack ingredient = browserIngredient(stack);
         if (uses) EmiApi.displayUses(ingredient); else EmiApi.displayRecipes(ingredient);
+    }
+
+    static EmiStack browserIngredient(ItemStack stack) {
+        if (!InkFluidSupport.isToken(stack)) return EmiStack.of(stack.copyWithCount(1));
+        FluidStack fluid = InkFluidSupport.fluid(stack);
+        return fluid.isEmpty() ? EmiStack.EMPTY : EmiStack.of(fluid.getFluid(), fluid.getTag(), fluid.getAmount());
     }
 
     @Nullable

@@ -28,6 +28,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.farmersdelight.CosmopolitanTisaneRecipeResolver;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import io.netty.handler.codec.DecoderException;
 import java.util.Collections;
@@ -1532,6 +1533,9 @@ public final class GenericCraftPacket {
         // Strip JEI pagination prefix if present (e.g. mod:jei.real_path -> mod:real_path)
         recipeId = unwrapJeiId(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (recipe != null) return recipe;
+
+        recipe = FluidContainerCatalog.resolve(level, recipeId);
         if (recipe != null) return recipe;
 
         recipe = BiomancyDigestingRecipeResolver.resolve(level, recipeId);
@@ -4655,54 +4659,12 @@ public final class GenericCraftPacket {
         // duplicates never crosses depth boundaries.
         List<PlanStep> steps = new ArrayList<>();
 
-        List<ResourceLocation> mergedStepIds = new ArrayList<>();
-        List<Integer> mergedBatchCounts = new ArrayList<>();
-        List<ResolutionStep> mergedRepresentatives = new ArrayList<>();
-        Map<String, Integer> mergeIndex = new HashMap<>();
-        int mergeSrcCount = usedTypedResolver ? resolutionSteps.size() : stepIds.size();
-        for (int mi = 0; mi < mergeSrcCount; mi++) {
-            ResourceLocation id;
-            int runs;
-            if (usedTypedResolver) {
-                ResolutionStep rs = resolutionSteps.get(mi);
-                id = rs.recipeId();
-                runs = Math.max(1, rs.executions());
-            } else {
-                id = stepIds.get(mi);
-                runs = 1;
-            }
-            ResolutionStep representative = usedTypedResolver ? resolutionSteps.get(mi) : null;
-            String mergeKey = id.toString();
-            Recipe<?> mergeRecipe = resolveRecipe(player.serverLevel(), id);
-            if (mergeRecipe != null && isSelfAmplifyingRecipe(
-                    mergeRecipe, player.serverLevel().registryAccess())) {
-                // Each stage consumes output from the preceding stage. Folding
-                // 1, 2, 4 executions into one x7 step would require seven seed
-                // items up front and destroy the producer dependency chain.
-                mergeKey += "|amplification-stage:" + mi;
-            }
-            if (representative != null && representative.syntheticInput() != null
-                    && representative.syntheticOutput() != null) {
-                mergeKey += "|" + IngredientKey.of(representative.syntheticInput()).hashCode()
-                        + "|" + IngredientKey.of(representative.syntheticOutput()).hashCode();
-            } else if (representative != null && representative.syntheticOutput() != null) {
-                mergeKey += "|state:" + representative.syntheticOutput().getTag();
-            }
-            Integer idx = mergeIndex.get(mergeKey);
-            if (idx != null) {
-                mergedBatchCounts.set(idx, mergedBatchCounts.get(idx) + runs);
-            } else {
-                mergeIndex.put(mergeKey, mergedStepIds.size());
-                mergedStepIds.add(id);
-                mergedBatchCounts.add(runs);
-                mergedRepresentatives.add(representative);
-            }
-        }
-
-        for (int si = 0; si < mergedStepIds.size(); si++) {
-            ResourceLocation stepId = mergedStepIds.get(si);
-            int batches = mergedBatchCounts.get(si);
-            ResolutionStep mergedRs = si < mergedRepresentatives.size() ? mergedRepresentatives.get(si) : null;
+        List<PreviewStep> mergedSteps = mergePreviewSteps(resolutionSteps,
+                id -> resolveRecipe(player.serverLevel(), id), player.serverLevel().registryAccess());
+        for (PreviewStep previewStep : mergedSteps) {
+            ResolutionStep mergedRs = previewStep.step();
+            ResourceLocation stepId = mergedRs.recipeId();
+            int batches = previewStep.batches();
             if (mergedRs != null && mergedRs.syntheticInput() != null && mergedRs.syntheticOutput() != null) {
                 steps.add(new PlanStep(stepId, mergedRs.syntheticOutput().copy(), batches,
                         List.of(mergedRs.syntheticInput().copy()), Collections.emptyList(), mergedRs.modType(),
@@ -5555,11 +5517,47 @@ public final class GenericCraftPacket {
                 directTerminalPlan);
     }
 
+    record PreviewStep(ResolutionStep step, int batches) {}
+
+    /** 两种规划器都已携带执行次数，预览必须保留这些次数才能正确抵扣中间产物。 */
+    static List<PreviewStep> mergePreviewSteps(
+            @Nullable List<ResolutionStep> steps,
+            Function<ResourceLocation, Recipe<?>> recipes, RegistryAccess access) {
+        if (steps == null) return List.of();
+        Map<String, PreviewStep> merged = new LinkedHashMap<>();
+        for (int i = 0; i < steps.size(); i++) {
+            ResolutionStep step = steps.get(i);
+            String key = step.recipeId().toString();
+            Recipe<?> recipe = recipes.apply(step.recipeId());
+            // 自增配方的各阶段依赖前一阶段产出，不能合并启动种子需求。
+            if (recipe != null && isSelfAmplifyingRecipe(recipe, access)) {
+                key += "|amplification-stage:" + i;
+            }
+            if (step.syntheticInput() != null && step.syntheticOutput() != null) {
+                key += "|" + IngredientKey.of(step.syntheticInput()).hashCode()
+                        + "|" + IngredientKey.of(step.syntheticOutput()).hashCode();
+            } else if (step.syntheticOutput() != null) {
+                key += "|state:" + step.syntheticOutput().getTag();
+            }
+            PreviewStep previous = merged.get(key);
+            int batches = step.executions();
+            if (previous != null) {
+                batches = (int) Math.min(Integer.MAX_VALUE, (long) previous.batches() + batches);
+                step = previous.step();
+            }
+            merged.put(key, new PreviewStep(step, batches));
+        }
+        return List.copyOf(merged.values());
+    }
+
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
                                   Map<Item, Integer> itemAvailable) {
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
             PlanResponse.Availability availability = entry.getValue();
-            if (availability.missingCount() == 0 || !entry.getKey().stack(1).hasTag()) continue;
+            ItemStack display = entry.getKey().stack(1);
+            // 流体种类保存在凭据 NBT 中，其他流体的库存不是同种物品的数据变体。
+            if (availability.missingCount() == 0 || !display.hasTag()
+                    || InkFluidSupport.isToken(display)) continue;
             if ((long) itemAvailable.getOrDefault(entry.getKey().item(), 0)
                     >= (long) availability.available() + availability.missingCount()) {
                 return true;
@@ -5753,7 +5751,9 @@ public final class GenericCraftPacket {
                     .map(ImmutableRecipeGraph.MaterialRef::itemId)
                     .collect(Collectors.toSet());
             long sameItemStock = projected.entrySet().stream()
-                    .filter(entry -> itemIds.contains(entry.getKey().itemId()))
+                    .filter(entry -> itemIds.contains(entry.getKey().itemId())
+                            && !InkFluidSupport.isToken(new ItemStack(
+                                    BuiltInRegistries.ITEM.get(entry.getKey().itemId()))))
                     .mapToLong(Map.Entry::getValue)
                     .sum();
             if (sameItemStock >= demand.count()) return true;

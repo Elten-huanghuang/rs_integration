@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
@@ -68,6 +70,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
+        if (found == null) found = FluidContainerCatalog.resolve(level, recipeId);
         if (found == null) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
@@ -94,6 +97,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateExecutionContext(@Nullable ServerPlayer player) {
         if (recipe == null) return false;
+        if (recipe instanceof FluidContainerRecipe conversion) return FluidContainerCatalog.isValid(conversion);
         ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler == null) {
             return !recipe.getClass().getName().startsWith("snownee.lychee.item_inside.");
@@ -155,6 +159,12 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 return false; // ledger not committed — nothing lost
             }
             templates.add(stack);
+        }
+
+        if (recipe instanceof FluidContainerRecipe conversion && !conversion.acceptsMaterials(templates, 1)) {
+            this.pendingResult = ItemStack.EMPTY;
+            this.pendingSecondary.clear();
+            return false;
         }
 
         // Phase 3: commit all extractions atomically
@@ -275,6 +285,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}",
                     recipe != null ? recipe.getId() : "null");
             return false;
+        }
+
+        if (recipe instanceof FluidContainerRecipe conversion) {
+            if (!conversion.acceptsMaterials(materials, preparedGraphExecutions)) {
+                pendingResult = ItemStack.EMPTY;
+                return false;
+            }
+            pendingResult.setCount(Math.multiplyExact(pendingResult.getCount(), preparedGraphExecutions));
+            for (ItemStack secondary : conversion.secondaryOutputs()) {
+                pendingSecondary.add(secondary.copyWithCount(Math.multiplyExact(
+                        secondary.getCount(), preparedGraphExecutions)));
+            }
+            craftDone = true;
+            return true;
         }
 
         // Materials are in exact spec order, including empty shaped slots.
@@ -505,6 +529,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
+        if (recipe instanceof FluidContainerRecipe && !craftDone) return ItemStack.EMPTY;
         ItemStack r = pendingResult.copy();
         pendingResult = ItemStack.EMPTY;
         craftDone = false;
@@ -513,6 +538,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public List<ItemStack> collectAllResults(ServerPlayer player) {
+        if (recipe instanceof FluidContainerRecipe && !craftDone) return List.of();
         // A non-CraftingRecipe (notably SmithingTransformRecipe) is resolved
         // from its declared result during dispatch rather than assembled from
         // a grid.  If a graph retry/cleanup cleared the transient result

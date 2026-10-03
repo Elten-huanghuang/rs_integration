@@ -58,6 +58,7 @@ public final class ModType {
 
 
     public static final ModType GENERIC;
+    public static final ModType FLUID_CONTAINER;
     public static final ModType CUSTOM_GUI;
     public static final ModType FARMINGFORBLOCKHEADS_MARKET;
 
@@ -66,6 +67,14 @@ public final class ModType {
                 new String[0], new String[0], new String[0],
                 GenericBatchDelegate::new);
         GENERIC.confirmGraphExecution("logical crafting has no external machine state");
+
+        FLUID_CONTAINER = registerVirtual("fluid_container",
+                new String[]{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"},
+                GenericBatchDelegate::new);
+        FLUID_CONTAINER.confirmGraphExecution("液体容器转换仅消耗账本材料并返回确定产物");
+        configureJei("fluid_container", new String[][]{{"rs_integration:fluid_container"}},
+                new String[][]{{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"}},
+                "gui.rs_integration.jei.fluid_container_craft");
 
         CUSTOM_GUI = register("custom_gui",
                 new String[0],

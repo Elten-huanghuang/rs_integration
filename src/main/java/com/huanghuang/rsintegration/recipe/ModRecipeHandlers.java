@@ -3,6 +3,7 @@ import java.lang.reflect.Field;
 
 import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipeHandler;
 import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler;
 
@@ -70,6 +71,7 @@ public final class ModRecipeHandlers {
         HANDLERS.add(new VanillaMachineRecipeHandler());
         HANDLERS.add(new SmithingRecipeHandler());
         HANDLERS.add(new VanillaBrewingRecipeHandler());
+        HANDLERS.add(new FluidContainerRecipeHandler());
         HANDLERS.add(new MarketRecipeHandler());
     }
 

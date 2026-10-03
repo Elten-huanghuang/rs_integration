@@ -86,8 +86,9 @@ public final class PlanTreeModel {
         // Path-local stack (push on enter, pop on exit) — detects genuine cycles (A→B→A)
         // without misflagging DAG reuse (iron ingot shared by two sibling components).
         Set<IngredientKey> pathStack = new LinkedHashSet<>();
-        buildChildren(root, producerByOutput, pathStack, plan);
-        retainUnlinkedLegacySteps(root, plan, producerByOutput);
+        Set<PlanStep> expandedSteps = new HashSet<>();
+        buildChildren(root, producerByOutput, pathStack, expandedSteps, plan);
+        retainUnlinkedLegacySteps(root, plan, producerByOutput, expandedSteps);
         return new PlanTreeModel(root);
     }
 
@@ -101,7 +102,7 @@ public final class PlanTreeModel {
      */
     private static void retainUnlinkedLegacySteps(
             PlanTreeNode root, PlanResponse plan,
-            Map<IngredientKey, PlanStep> producers) {
+            Map<IngredientKey, PlanStep> producers, Set<PlanStep> expandedSteps) {
         Set<ResourceLocation> rendered = new HashSet<>();
         collectRenderedRecipeIds(root, rendered);
         ResourceLocation targetRecipe = plan.recipeId() == null
@@ -119,7 +120,7 @@ public final class PlanTreeModel {
             applyAvailability(unlinked, plan, output);
             Set<IngredientKey> path = new LinkedHashSet<>();
             path.add(unlinked.key);
-            buildChildren(unlinked, producers, path, plan);
+            buildChildren(unlinked, producers, path, expandedSteps, plan);
             root.children.add(unlinked);
             collectRenderedRecipeIds(unlinked, rendered);
         }
@@ -468,12 +469,12 @@ public final class PlanTreeModel {
     /**
      * Aggregate every non-root node's demanded {@code amount} by item. Consumed inputs add across
      * the whole tree; reusable catalysts add within one recipe step and take the peak across steps.
-     * This is the gross bill of materials the tree shows (from-scratch demand, ignoring stock and
-     * ignoring resolver batch capping).
+     * This is the gross bill of materials for the planned executions. A consumer's demand
+     * includes stored intermediate items, while producer inputs use the actual planned batches.
      * <p>
      * The server uses this to fill {@link PlanResponse#materials()} so the total-demand strip and
-     * card material panel display exactly the numbers the tree renders, instead of the resolver's
-     * net/capped batch counts which under- or over-report per branch.
+     * card material panel display exactly the numbers the tree renders, including intermediate
+     * demand as well as external materials.
      */
     public static Map<IngredientKey, Integer> grossDemandByKey(PlanTreeModel model) {
         Map<IngredientKey, Integer> consumed = new LinkedHashMap<>();
@@ -507,18 +508,16 @@ public final class PlanTreeModel {
 
     private static void buildChildren(PlanTreeNode parent,
                                       Map<IngredientKey, PlanStep> producers,
-                                      Set<IngredientKey> pathStack, PlanResponse plan) {
-        PlanStep parentStep = producers.get(parent.key);
+                                      Set<IngredientKey> pathStack,
+                                      Set<PlanStep> expandedSteps, PlanResponse plan) {
+        PlanStep parentStep = parent.step != null ? parent.step : producers.get(parent.key);
         if (parentStep == null) return; // leaf — no producing step
 
-        // How many times the parent's recipe must run to satisfy THIS branch's demand, derived
-        // from the parent node's own amount — not parentStep.batches(), which is the server's
-        // GLOBAL run count for this output. When a material is reused by several parents (a DAG,
-        // e.g. iron ingot feeding both an iron block and a loose stack), the global count
-        // over-scales every child subtree; scaling by this branch's parent.amount keeps each
-        // subtree self-consistent and correct per branch. ceilDiv: a partial batch still runs whole.
-        int perBatchOutput = Math.max(1, parentStep.output().getCount());
-        int parentBatches = Math.max(1, (parent.amount + perBatchOutput - 1) / perBatchOutput);
+        // 总需求可能由库存和新产物共同满足；原料只能按服务端实际执行次数展开。
+        // 共享步骤保留各分支的需求引用，但与图模式一样只展开一次生产成本。
+        if (!expandedSteps.add(parentStep)) return;
+        int parentBatches = Math.max(1, parentStep.batches());
+        parent.batches = parentBatches;
         // Merge same-item inputs (e.g. the nine gold-ingot slots of a 3×3 recipe) into one
         // entry, summing counts — the tree shows "gold ingot ×9", not nine "×1" nodes.
         // Empty grid slots carry no ingredient and are skipped.
@@ -559,7 +558,7 @@ public final class PlanTreeModel {
                 applyAvailability(child, plan, input);
                 parent.children.add(child);
 
-                buildChildren(child, producers, pathStack, plan);
+                buildChildren(child, producers, pathStack, expandedSteps, plan);
                 pathStack.remove(inputKey); // backtrack — sibling branches may reuse this material
             } else {
                 PlanTreeNode leaf = new PlanTreeNode(
