@@ -14,6 +14,7 @@ import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 import java.util.Set;
 import net.minecraft.world.item.Item;
 
@@ -130,6 +131,20 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
             }
         };
         cache.addListener(nativeListener);
+        // 流体也参与材料规划；变动时刷新快照，避免仍使用补水前的库存。
+        IStorageCache<FluidStack> fluidCache = network.getFluidStorageCache();
+        IStorageCacheListener<FluidStack> fluidListener = new IStorageCacheListener<>() {
+            @Override public void onAttached() {}
+            @Override public void onInvalidated() { listener.onInvalidated(); }
+            @Override public void onChanged(StackListResult<FluidStack> result) { listener.onInvalidated(); }
+            @Override public void onChangedBulk(List<StackListResult<FluidStack>> results) { listener.onInvalidated(); }
+        };
+        try {
+            if (fluidCache != null) fluidCache.addListener(fluidListener);
+        } catch (RuntimeException | LinkageError failure) {
+            cache.removeListener(nativeListener);
+            throw failure;
+        }
         return Optional.of(new StorageItemSubscription() {
             private boolean closed;
 
@@ -138,7 +153,7 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
                 if (closed) return false;
                 try {
                     return network.canRun() && network.getItemStorageCache() == cache
-                            && cache.getList() != null;
+                            && cache.getList() != null && network.getFluidStorageCache() == fluidCache;
                 } catch (RuntimeException | LinkageError ignored) {
                     return false;
                 }
@@ -152,6 +167,11 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
                     cache.removeListener(nativeListener);
                 } catch (RuntimeException | LinkageError ignored) {
                     // The cache may already have been invalidated and detached.
+                }
+                try {
+                    if (fluidCache != null) fluidCache.removeListener(fluidListener);
+                } catch (RuntimeException | LinkageError ignored) {
+                    // 流体缓存可能已经失效并解绑。
                 }
             }
         });

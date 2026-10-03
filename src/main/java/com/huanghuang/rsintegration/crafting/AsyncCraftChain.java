@@ -73,6 +73,7 @@ import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -1161,6 +1162,7 @@ public final class AsyncCraftChain {
     private Recipe<?> recipeForStep(CraftingResolver.ResolutionStep step) {
         if (server == null) return null;
         Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
+        if (recipe == null) recipe = FluidContainerCatalog.byId(step.recipeId());
         if (recipe == null && step.modType().id().startsWith("irons_spellbooks")) {
             recipe = IronSpellBooksRecipeCatalog.byId(step.recipeId());
         }

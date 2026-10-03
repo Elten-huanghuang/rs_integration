@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CraftLogContext;
@@ -68,6 +70,7 @@ final class FlatCraftExecutor {
             ResourceLocation stepId = step.recipeId();
             int executions = step.executions();
             Recipe<?> recipe = recipeManager.byKey(stepId).orElse(null);
+            if (recipe == null) recipe = FluidContainerCatalog.resolve(level, stepId);
             if (recipe == null) {
                 RSIntegrationMod.LOGGER.debug(log.format("  step {} not found in recipe manager"), stepId);
                 continue;
@@ -78,6 +81,7 @@ final class FlatCraftExecutor {
                 return false;
             }
             RSIntegrationMod.LOGGER.debug(log.format("  processing step: {} x{}"), stepId, executions);
+            if (recipe instanceof FluidContainerRecipe conversion && !FluidContainerCatalog.isValid(conversion)) return false;
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
@@ -153,6 +157,8 @@ final class FlatCraftExecutor {
                         secondary.copyWithCount(StepExecutor.mulCount(
                                 secondary.getCount(), executions)));
             }
+            // 排空节点已显式返回容器，不能再按桶的 crafting remainder 重复返还。
+            if (recipe instanceof FluidContainerRecipe) continue;
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
                 for (ItemStack stack : spec.ingredient().getItems()) {

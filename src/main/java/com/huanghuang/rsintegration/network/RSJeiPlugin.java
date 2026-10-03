@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
 import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestSubmissionCategory;
 import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
 import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.client.FluidContainerRecipeCategory;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import net.minecraft.client.Minecraft;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
 import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient;
 import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeGhostIngredientHandler;
@@ -149,6 +152,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerCategories(IRecipeCategoryRegistration registration) {
+        registration.addRecipeCategories(new FluidContainerRecipeCategory(registration.getJeiHelpers().getGuiHelper()));
         if (ironAlchemistEnabled()) registration.addRecipeCategories(
                 new AlchemistCauldronRecipeCategory(registration.getJeiHelpers().getGuiHelper()));
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
@@ -169,6 +173,8 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
+        registration.addRecipes(FluidContainerRecipeCategory.TYPE,
+                FluidContainerCatalog.allRecipes(Minecraft.getInstance().level));
         if (ironAlchemistEnabled()) registration.addRecipes(AlchemistCauldronRecipeCategory.TYPE,
                 IronSpellBooksRecipeCatalog.allRecipes().stream()
                         .filter(IronSpellBooksRecipe::isInkBottling).toList());

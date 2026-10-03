@@ -2,10 +2,13 @@ package com.huanghuang.rsintegration.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.compat.emi.EmiClientBridge;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
 import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient;
 import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.forge.ForgeTypes;
+import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.gui.bookmarks.IngredientBookmark;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import net.minecraft.client.gui.GuiGraphics;
@@ -143,8 +146,9 @@ public final class RecipeBrowserBridge {
         if (runtime == null || !(runtime.getBookmarkOverlay() instanceof BookmarkOverlay overlay)) {
             return FavoriteResult.UNAVAILABLE;
         }
-        var typed = runtime.getIngredientManager().createTypedIngredient(
-                VanillaTypes.ITEM_STACK, stack.copyWithCount(1));
+        Optional<? extends ITypedIngredient<?>> typed = InkFluidSupport.isToken(stack)
+                ? runtime.getIngredientManager().createTypedIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(stack))
+                : runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK, stack.copyWithCount(1));
         if (typed.isEmpty()) return FavoriteResult.UNAVAILABLE;
         var bookmark = IngredientBookmark.create(typed.get(), runtime.getIngredientManager());
         boolean added = ((BookmarkOverlayAccessor) overlay)

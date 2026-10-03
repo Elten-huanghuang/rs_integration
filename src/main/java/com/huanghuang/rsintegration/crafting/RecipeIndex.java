@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrappe
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeDefinition;
@@ -270,6 +272,7 @@ public final class RecipeIndex {
             int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
             int pmmoSalvageIndexed = indexPmmoSalvage(idx, seen);
             int brewingIndexed = VanillaBrewingCatalog.index(level, idx, seen, projected);
+            FluidContainerCatalog.index(level, idx, seen, projected);
 
             Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
             Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> publishedSpellScrollIndex =
@@ -979,6 +982,7 @@ public final class RecipeIndex {
         if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
             IronSpellBooksRecipeCatalog.invalidate();
         }
+        FluidContainerCatalog.invalidate();
         ImmutableRecipeGraphProjector.clearCache();
         GenericCraftPacket.clearPlanCache();
     }
@@ -1116,6 +1120,7 @@ public final class RecipeIndex {
     }
 
     public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
+        if (recipe instanceof FluidContainerRecipe conversion) return conversion.secondaryOutputs();
         List<ItemStack> results = new ArrayList<>();
         Set<Object> seenOutputContainers = Collections.newSetFromMap(new IdentityHashMap<>());
         if (recipe == null) return results;

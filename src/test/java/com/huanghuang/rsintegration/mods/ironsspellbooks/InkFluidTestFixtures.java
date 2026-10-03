@@ -10,12 +10,12 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.ForgeRegistry;
 import java.lang.reflect.Method;
 
-final class InkFluidTestFixtures {
+public final class InkFluidTestFixtures {
     private static final ResourceLocation ID = new ResourceLocation("rs_integration_test", "ink_fluid");
 
     private InkFluidTestFixtures() {}
 
-    static synchronized InkFluidItem tokenItem() {
+    public static synchronized InkFluidItem tokenItem() {
         Item existing = ForgeRegistries.ITEMS.getValue(ID);
         if (existing instanceof InkFluidItem token) return token;
         ForgeRegistry<Item> registry = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;

@@ -54,7 +54,7 @@ public final class InkFluidSupport {
         return token(ModItems.ALCHEMIST_INK_FLUID.get(), fluid);
     }
 
-    static ItemStack token(Item item, FluidStack fluid) {
+    public static ItemStack token(Item item, FluidStack fluid) {
         if (fluid.isEmpty()) return ItemStack.EMPTY;
         ItemStack result = new ItemStack(item, fluid.getAmount());
         FluidStack identity = fluid.copy();
@@ -78,7 +78,8 @@ public final class InkFluidSupport {
         List<ItemStack> result = new ArrayList<>();
         for (var entry : cache.getList().getStacks()) {
             FluidStack fluid = entry.getStack();
-            if (!fluid.isEmpty() && isInk(fluid)) result.add(token(fluid));
+            // 炼金机也使用这套流体账本，包括水、熔岩和模组流体。
+            if (!fluid.isEmpty()) result.add(token(fluid));
         }
         return result;
     }

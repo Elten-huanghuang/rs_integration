@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
+import com.huanghuang.rsintegration.recipe.WRAlchemyRecipeHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.DistExecutor;
@@ -42,10 +43,23 @@ public final class WizardsRebornRSModule implements IModIntegration {
                 new String[][]{{"wizards_reborn:wissen_crystallizer", "wissen_crystallizer"}, {"wizards_reborn:arcane_iterator", "arcane_iterator"}, {"wizards_reborn:arcane_workbench", "arcane_workbench"}, {"wizards_reborn:crystal_ritual", "crystal_ritual"}, {"wizards_reborn:crystal_infusion", "crystal_ritual"}},
                 new String[][]{{"mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusion", "crystal_ritual"}, {"mod.maxbogomol.wizards_reborn.common.recipe.CrystalRitual", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneWorkbench", "arcane_workbench"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer", "wissen_crystallizer"}, {"mod.maxbogomol.wizards_reborn.", "wizards_reborn"}},
                 null);
+        ModType.register(WRAlchemyRecipeHandler.TYPE,
+                new String[]{WRAlchemyRecipeHandler.RECIPE_CLASS},
+                new String[]{"alchemy_machine"}, new String[]{"alchemy_machine"},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyBatchDelegate"))
+                .confirmGraphExecution("炼金材料通过账本投入，产物从炼金机和上方锅炉回收");
+        ModType.configureJei(WRAlchemyRecipeHandler.TYPE,
+                new String[][]{{"wizards_reborn:alchemy_machine", "alchemy_machine"}},
+                new String[][]{{WRAlchemyRecipeHandler.RECIPE_CLASS, "alchemy_machine"}}, null);
     }
 
     @Override
     public void registerBindingTargets() {
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "wizards_reborn", ModType.byId(WRAlchemyRecipeHandler.TYPE),
+                RSIntegrationConfig.ENABLE_WIZARDS_REBORN, List.of(
+                "mod.maxbogomol.wizards_reborn.common.block.alchemy_machine.AlchemyMachineBlock"
+        ), "alchemy_machine", true));
         // All WR machines are in-world interaction, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "wizards_reborn", ModType.byId("wizards_reborn"),
@@ -64,6 +78,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new WRRecipeHandler());
+        ModRecipeHandlers.register(new WRAlchemyRecipeHandler());
     }
 
     @Override
