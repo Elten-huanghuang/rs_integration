@@ -247,6 +247,10 @@ Configuration files are documented in-place with comments and validation ranges:
 
 Settings files include descriptions and valid value ranges. Most settings are kept during upgrades; new list entries may need to be added manually.
 
+Remote crafting uses the server-side `autoCrafting.freeWaterMachines` allowlist for automatic water refills. Listed machine types refill for free; omitted types consume water from the selected RS network's fluid storage, not water bucket or bottle items. Set the list to `[]` to disable all free refills.
+
+Defaults cover Farmer's Respite's kettle, Youkai's Homecoming's kettle/fermentation tank/moka pot/steamer, Iron's alchemist cauldron, Eidolon's crucible, and Botania's petal apothecary. The config comments list their exact machine IDs. Existing water remains usable; heat sources, ingredients, and containers are still required. Moka pots, steamers, and petal apothecaries consume 1000 mB when changing from empty to water-filled; other tanks consume only the refill deficit. Eidolon crucibles refill to at least 1000 mB to satisfy their native full-bucket check.
+
 ## Diagnostics
 
 - `/rsi cancel` cancels the player's active chain.
