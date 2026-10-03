@@ -71,6 +71,11 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
         super.appendHoverText(stack, level, tooltip, flag);
         appendRSInfo(stack, tooltip);
+        boolean pickupFluids = stack.hasTag() && stack.getTag().getBoolean(RSMagnetUpgradeWrapper.PICKUP_FLUIDS);
+        tooltip.add(Component.translatable(pickupFluids
+                ? "item.rs_integration.rs_magnet_upgrade.fluid_on"
+                : "item.rs_integration.rs_magnet_upgrade.fluid_off"));
+        tooltip.add(Component.translatable("item.rs_integration.rs_magnet_upgrade.fluid_storage_hint"));
         if (stack.hasTag() && stack.getTag().getBoolean(RSMagnetFluidCollector.UNCERTAIN)) {
             tooltip.add(TextBuilder.translate("gui.rs_integration.magnet.fluid_uncertain").red().build());
         } else {

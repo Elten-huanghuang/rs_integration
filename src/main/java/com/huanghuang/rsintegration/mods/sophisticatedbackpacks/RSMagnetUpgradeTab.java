@@ -26,7 +26,10 @@ public class RSMagnetUpgradeTab extends MagnetUpgradeTab {
         return new ToggleButton.StateData(new TextureBlitData(
                 new ResourceLocation("minecraft", "textures/item/" + icon + ".png"),
                 new Position(1, 1), Dimension.SQUARE_16, new UV(0, 0), Dimension.SQUARE_16),
-                Component.translatable(tooltip));
+                Component.translatable(tooltip),
+                Component.translatable("gui.rs_integration.magnet.fluid_hint_source"),
+                Component.translatable("gui.rs_integration.magnet.fluid_hint_storage"),
+                Component.translatable("gui.rs_integration.magnet.fluid_hint_filter"));
     }
 
     public RSMagnetUpgradeTab(MagnetUpgradeContainer container, Position position,
