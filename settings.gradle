@@ -1,4 +1,11 @@
 pluginManagement {
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'net.minecraftforge.gradle') {
+                useModule('net.minecraftforge.gradle:ForgeGradle:6.0.54')
+            }
+        }
+    }
     repositories {
         gradlePluginPortal()
         maven { url = 'https://maven.minecraftforge.net/' }

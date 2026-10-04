@@ -129,6 +129,13 @@ dependencies {
     benchmarkAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
 }
 
+// ForgeGradle 的 eventbus 依赖声明为动态的 10.0.+，会在每次打包时
+// 查询 Maven metadata。固定到 Forge 1.20.1 开发环境已缓存且兼容的版本，
+// 避免代理/证书问题导致整个构建在配置阶段失败。
+configurations.configureEach {
+    resolutionStrategy.force 'cpw.mods:modlauncher:10.0.9'
+}
+
 compileBenchmarkJava {
     options.encoding = 'UTF-8'
 }

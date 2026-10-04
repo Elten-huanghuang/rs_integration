@@ -145,9 +145,6 @@ final class SyncHandler {
 
         RSSidePanelClient.dataModel.updatePanels(new ArrayList<>(RSSidePanelClient.panels), RSSidePanelClient.totalSlotCount);
         BindingCache.getInstance().updateBindings(bindings);
-
-        RSIntegrationMod.LOGGER.info("[RSI] SidePanel sync applied: {} panel entries, totalSlotCount={}, network='{}'",
-                RSSidePanelClient.panels.size(), totalSlotCount, networkName);
     }
 
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {

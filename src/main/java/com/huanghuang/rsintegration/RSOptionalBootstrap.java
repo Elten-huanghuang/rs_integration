@@ -23,6 +23,7 @@ import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskEvents;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipPackets;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipClient;
+import com.huanghuang.rsintegration.disk.rs.RSInfiniteDiskTooltip;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerPlayer;
@@ -65,6 +66,7 @@ public final class RSOptionalBootstrap {
 
     public static void registerClientEventSubscribers() {
         MinecraftForge.EVENT_BUS.register(UnifiedDiskTooltipClient.class);
+        MinecraftForge.EVENT_BUS.register(RSInfiniteDiskTooltip.class);
         MinecraftForge.EVENT_BUS.register(
                 RSGridSearchCache.class);
     }
