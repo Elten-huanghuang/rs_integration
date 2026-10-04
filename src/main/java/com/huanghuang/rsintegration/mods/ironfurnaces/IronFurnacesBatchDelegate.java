@@ -584,7 +584,13 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (storageEndpoint() != null) {
             var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
             if (snapshot == null) return false;
-            for (var entry : snapshot.items()) candidates.add(entry.stack());
+            for (var entry : snapshot.items()) {
+                ItemStack stack = entry.stack();
+                // Snapshot stacks are normalized to count one; use the stored
+                // amount so large RS inventories are not mistaken for one item.
+                long amount = Math.min(Integer.MAX_VALUE, entry.amount());
+                candidates.add(stack.copyWithCount((int) amount));
+            }
         } else {
             if (network == null) return false;
             for (var entry : network.getItemStorageCache().getList().getStacks()) candidates.add(entry.getStack());
