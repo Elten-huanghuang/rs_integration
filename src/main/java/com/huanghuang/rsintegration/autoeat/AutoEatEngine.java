@@ -289,9 +289,13 @@ public final class AutoEatEngine {
             ResourceLocation rl = new ResourceLocation(parts[0], parts[1]);
             MobEffect effect = ForgeRegistries.MOB_EFFECTS.getValue(rl);
             if (effect == null || !player.hasEffect(effect)) {
+                // 传递效果组件，让客户端按当前语言显示效果名称，而不是直接显示注册 ID。
+                Component effectName = effect == null
+                        ? Component.literal(requiredEffect)
+                        : effect.getDisplayName();
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new AutoEatSyncPacket(mode, 0,
-                                Component.translatable("rsi.autoeat.missing_effect", requiredEffect)));
+                                Component.translatable("rsi.autoeat.missing_effect", effectName)));
                 return false;
             }
         }
