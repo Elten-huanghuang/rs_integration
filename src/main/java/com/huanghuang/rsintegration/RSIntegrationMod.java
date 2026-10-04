@@ -687,6 +687,26 @@ public final class RSIntegrationMod {
                         List.of(), List.of("minecraft:enchanting_table"),
                         "custom_gui", true));
 
+        // Tetra 加工台按方块 ID 精确绑定，只提供远程界面。
+        if (ModList.get().isLoaded(ModIds.TETRA)) {
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            ModIds.TETRA, ModType.CUSTOM_GUI,
+                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                            List.of(), List.of("tetra:basic_workbench", "tetra:forged_workbench"),
+                            "custom_gui", true));
+        }
+
+        // Tetra 加工台按方块 ID 精确绑定，只提供远程界面。
+        if (ModList.get().isLoaded(ModIds.TETRA)) {
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            ModIds.TETRA, ModType.CUSTOM_GUI,
+                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                            List.of(), List.of("tetra:basic_workbench", "tetra:forged_workbench"),
+                            "custom_gui", true));
+        }
+
         // Subsystems
         if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()
                 && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)

@@ -17,6 +17,8 @@ class DedicatedGuiOnlyBindingContractTest {
                 "irons_spellbooks:inscription_table");
         assertGuiOnlyTarget("mods/apotheosis/ApotheosisRSModule.java",
                 "apotheosis:augmenting_table");
+        assertGuiOnlyTarget("RSIntegrationMod.java", "tetra:basic_workbench");
+        assertGuiOnlyTarget("RSIntegrationMod.java", "tetra:forged_workbench");
     }
 
     @Test
