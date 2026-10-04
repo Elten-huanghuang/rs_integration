@@ -11,10 +11,16 @@ public final class IronFurnaceMachinePriority {
     private IronFurnaceMachinePriority() {}
 
     public static Comparator<BoundMachine> comparator() {
-        return Comparator.comparingInt((BoundMachine machine) -> priority(machine.blockKey()))
-                .reversed()
-                .thenComparing(machine -> machine.dim().toString())
-                .thenComparing(machine -> machine.pos().asLong());
+        return IronFurnaceMachinePriority::compare;
+    }
+
+    public static int compare(BoundMachine left, BoundMachine right) {
+        int leftPriority = priority(left.blockKey());
+        int rightPriority = priority(right.blockKey());
+        // Return equality for unrelated machine types so Java's stable sort
+        // preserves the existing binding order outside Iron Furnaces.
+        if (leftPriority == 0 || rightPriority == 0) return 0;
+        return Integer.compare(rightPriority, leftPriority);
     }
 
     static int priority(String blockKey) {

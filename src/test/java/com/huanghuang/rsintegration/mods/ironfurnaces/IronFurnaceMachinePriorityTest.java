@@ -24,6 +24,14 @@ class IronFurnaceMachinePriorityTest {
         assertEquals(7_000, IronFurnaceMachinePriority.priority(diamond.blockKey()));
     }
 
+    @Test
+    void unrelatedMachinesKeepTheirExistingOrder() {
+        BoundMachine first = machine("some_machine||block.example.first", 1);
+        BoundMachine second = machine("some_machine||block.example.second", 2);
+
+        assertEquals(0, IronFurnaceMachinePriority.compare(first, second));
+    }
+
     private static BoundMachine machine(String blockKey, int x) {
         return new BoundMachine(new ResourceLocation("minecraft", "overworld"),
                 new BlockPos(x, 64, 0), ModType.GENERIC, blockKey);
