@@ -125,6 +125,18 @@ class VanillaFurnaceFuelPolicyTest extends BootstrapTest {
         assertEquals(0, VanillaFurnaceFuelPolicy.requiredAmount(0, 1600));
     }
 
+    @Test
+    void splitEntriesOfTheSameFuelAreConsolidated() {
+        var selection = VanillaFurnaceFuelPolicy.select(
+                List.of(new ItemStack(Items.COAL, 1), new ItemStack(Items.COAL, 1)),
+                DEFAULT_PRIORITY, 2000, VanillaFurnaceFuelPolicyTest::burnTime);
+
+        assertNotNull(selection);
+        assertTrue(selection.fuel().is(Items.COAL));
+        assertEquals(2, selection.amount());
+        assertFalse(selection.partial());
+    }
+
     private static VanillaFurnaceFuelPolicy.Selection select(List<ItemStack> candidates) {
         return VanillaFurnaceFuelPolicy.select(
                 candidates, DEFAULT_PRIORITY, 200, VanillaFurnaceFuelPolicyTest::burnTime);

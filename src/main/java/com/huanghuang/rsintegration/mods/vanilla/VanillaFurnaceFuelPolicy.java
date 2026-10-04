@@ -48,6 +48,21 @@ public final class VanillaFurnaceFuelPolicy {
         }
         safe.sort(Comparator.comparing(VanillaFurnaceFuelPolicy::registryId));
 
+        // A storage snapshot may expose one logical stack per backend entry;
+        // consolidate same-item entries before checking whether one fuel type
+        // can cover the request. This avoids rejecting coal/charcoal when the
+        // backend split their amount across several stacks.
+        List<ItemStack> consolidated = new ArrayList<>();
+        for (ItemStack stack : safe) {
+            ItemStack existing = findByItem(consolidated, stack.getItem());
+            if (existing == null) {
+                consolidated.add(stack.copy());
+            } else {
+                existing.setCount(Math.min(existing.getMaxStackSize(), existing.getCount() + stack.getCount()));
+            }
+        }
+        safe = consolidated;
+
         Set<Item> tried = new HashSet<>();
         for (String id : priorityIds) {
             ResourceLocation key = ResourceLocation.tryParse(id);
