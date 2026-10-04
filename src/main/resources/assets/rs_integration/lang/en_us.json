@@ -59,6 +59,7 @@
   "item.rs_integration.unified_storage_disk.item_types": "Item types: %s / %s",
   "item.rs_integration.unified_storage_disk.fluid_types": "Fluid types: %s / %s",
   "item.rs_integration.unified_storage_disk.id": "Disk ID: %s",
+  "item.rs_integration.infinite_disk_conversion": "When the recipe is available, this infinite disk can become a Myriad Realms Guixu Disk",
   "item.rs_integration.unified_storage_disk.tooltip.title": "All streams return to Guixu. All realms find their vault.",
   "item.rs_integration.unified_storage_disk.tooltip.subtitle": "Mountains become a grain; oceans become a drop.",
   "item.rs_integration.unified_storage_disk.tooltip.subtitle_2": "Every form keeps its name. Solid and fluid share one home.",

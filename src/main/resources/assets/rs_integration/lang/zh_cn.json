@@ -59,6 +59,7 @@
   "item.rs_integration.unified_storage_disk.item_types": "物品种类：%s / %s",
   "item.rs_integration.unified_storage_disk.fluid_types": "流体种类：%s / %s",
   "item.rs_integration.unified_storage_disk.id": "磁盘 ID：%s",
+  "item.rs_integration.infinite_disk_conversion": "存在对应配方时，可将此无限盘转化为万界归墟盘",
   "item.rs_integration.unified_storage_disk.tooltip.title": "万流归墟，万界归藏",
   "item.rs_integration.unified_storage_disk.tooltip.subtitle": "群山凝为一粒，沧海收作一滴。",
   "item.rs_integration.unified_storage_disk.tooltip.subtitle_2": "万千形态，各有其名；固与流，于此同归。",
