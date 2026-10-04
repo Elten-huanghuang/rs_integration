@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.RSIMachineAccessor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceMachinePriority;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -150,6 +151,10 @@ public final class LoadBalancer {
 
             available.add(m);
         }
+        // Iron Furnaces bindings carry the concrete furnace tier in blockKey.
+        // Prefer faster tiers consistently, otherwise inventory/binding order
+        // can make a slow ordinary furnace win over a faster bound furnace.
+        available.sort(IronFurnaceMachinePriority.comparator());
         return available;
     }
 
