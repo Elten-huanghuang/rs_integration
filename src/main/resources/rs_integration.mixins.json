@@ -124,6 +124,8 @@
     "jei.RecipesGuiMixin",
     "jei.RecipeBookmarkMixin",
     "jei.BookmarkOverlayAccessor",
+    "jei.BookmarkOverlayConfigButtonMixin",
+    "jei.BookmarkOverlayConfigButtonV15Mixin",
     "jei.BookmarkListTradeLockMixin",
     "jei.IngredientFilterSolCarrotMixin",
     "jei.IngredientFilterTetraMixin",

@@ -387,111 +387,125 @@ public final class RSIntegrationConfig {
 
         //  COMMON: feature toggles
 
-        c.push("general");
+        c.comment("基本设置").push("general");
         ENABLE_BINDING = c
-                .comment("Master switch for all block-binding features (Shift+Right-click to bind RS networks to machines).",
-                        "Disabling this turns off all binding-related functionality regardless of per-mod settings.")
+                .comment("启用机器绑定",
+                        "机器绑定功能的总开关；关闭后所有按模组设置的绑定功能都会停用。")
                 .define("enableBinding", true);
         NEARBY_BINDING_HORIZONTAL_RADIUS = c
-                .comment("Horizontal radius for the one-shot nearby machine binding key.",
-                        "Only loaded chunks are scanned. Range: 1-64 blocks.")
+                .comment("附近绑定水平半径（格）",
+                        "单次附近绑定的水平搜索半径；只扫描已加载的区块。")
                 .defineInRange("nearbyBindingHorizontalRadius", 24, 1, 64);
         NEARBY_BINDING_VERTICAL_RADIUS = c
-                .comment("Vertical radius above and below the player for nearby machine binding.",
-                        "Keeping this lower than the horizontal radius avoids scanning unused height. Range: 1-24 blocks.")
+                .comment("附近绑定垂直半径（格）",
+                        "玩家上下的搜索半径；小于水平半径可避免扫描无用高度。")
                 .defineInRange("nearbyBindingVerticalRadius", 12, 1, 24);
         NEARBY_BINDING_MAX_MACHINES = c
-                .comment("Maximum machines bound by one nearby binding operation.",
-                        "Prevents excessive connector NBT growth. Range: 1-128.")
+                .comment("单次附近绑定机器上限",
+                        "限制一次扫描绑定的机器数量，避免连接器 NBT 过大。")
                 .defineInRange("nearbyBindingMaxMachines", 128, 1, 128);
         NEARBY_BINDING_TICK_BUDGET_MICROS = c
-                .comment("Maximum server-thread time used by nearby binding per tick.",
-                        "The scan continues on later ticks when this budget is reached. Range: 100-5000 microseconds.")
+                .comment("附近绑定每 tick 预算（微秒）",
+                        "服务端每 tick 用于附近绑定扫描的时间预算；达到后在后续 tick 继续。")
                 .defineInRange("nearbyBindingTickBudgetMicros", 1000, 100, 5000);
         NEARBY_BINDING_COOLDOWN_MS = c
-                .comment("Cooldown between nearby binding requests from the same player.",
-                        "Range: 250-10000 milliseconds.")
+                .comment("附近绑定冷却（毫秒）",
+                        "同一玩家两次附近绑定请求之间的最小时间间隔。")
                 .defineInRange("nearbyBindingCooldownMs", 2000, 250, 10000);
         ENABLE_AUTO_CRAFTING = c
-                .comment("Allow the mod to automatically craft intermediate items via the RS network when direct materials are missing.",
-                        "Disabling this means recipes will simply fail if all items are not already present.")
+                .comment("自动合成",
+                        "材料不足时通过存储网络递归合成中间材料；关闭后只使用已有库存。")
                 .define("enableAutoCrafting", true);
         c.pop();
 
-        c.push("integrations");
+        c.comment("模组兼容").push("integrations");
         ENABLE_GOETY = c
-                .comment("Enable RS integration with Goety (Dark Altar remote crafting).")
+                .comment("启用诡厄巫法兼容",
+                        "支持黑暗祭坛等机器绑定与远程合成。")
                 .define("enableGoety", true);
         ENABLE_MALUM = c
-                .comment("Enable RS integration with Malum (Spirit Altar remote crafting).")
+                .comment("启用灵灾兼容",
+                        "支持精魂祭坛、精魂坩埚等机器绑定与远程合成。")
                 .define("enableMalum", true);
         ENABLE_BOTANIA = c
-                .comment("Enable RS integration with Botania recursive crafting machines.")
+                .comment("启用植物魔法兼容",
+                        "支持植物魔法机器参与递归合成。")
                 .define("enableBotania", true);
         ENABLE_WIZARDS_REBORN = c
-                .comment("Enable RS integration with Wizards Reborn (Wissen Crystallizer, Arcane Iterator, etc.).")
+                .comment("启用巫师重生兼容",
+                        "支持智慧结晶器、奥术迭代器等机器的远程合成。")
                 .define("enableWizardsReborn", true);
         ENABLE_FORBIDDEN_ARCANUS = c
-                .comment("Enable RS integration with Forbidden & Arcanus (Hephaestus Forge remote crafting).")
+                .comment("启用禁忌与奥秘兼容",
+                        "支持赫菲斯托斯锻炉远程仪式合成。")
                 .define("enableForbiddenArcanus", true);
         ENABLE_EIDOLON = c
-                .comment("Enable RS integration with Eidolon Repraised (Crucible remote crafting).")
+                .comment("启用幻梦兼容",
+                        "支持幻之坩锅等机器的远程合成。")
                 .define("enableEidolon", true);
         ENABLE_TOUHOU_LITTLE_MAID = c
-                .comment("Enable RS integration with Touhou Little Maid (Maid Altar remote crafting).")
+                .comment("启用车万女仆兼容",
+                        "支持女仆祭坛远程合成。")
                 .define("enableTouhouLittleMaid", true);
         ENABLE_SRFIX = c
-                .comment("Enable Better Summoning Rituals altar preparation through remote storage.",
-                        "RSI only prepares and recovers altar items; it does not start rituals or collect world drops.")
+                .comment("启用召唤仪式兼容",
+                        "通过远程存储准备及回收祭坛物品；不会启动仪式或收集世界掉落物。")
                 .define("enableBetterSummoningRituals", true);
         ENABLE_SLASHBLADE = c
-                .comment("Enable RS integration with SlashBlade (crafting table recipes with NBT requirements).")
+                .comment("启用拔刀剑兼容",
+                        "支持带 NBT 条件的拔刀剑工作台配方。")
                 .define("enableSlashblade", true);
         ENABLE_AVARITIA = c
-                .comment("Enable RS integration with Avaritia (Dire Crafting Tables,",
-                        "Extreme Smithing Table, Neutron Collector, Chest, Tesseract, Anvil).")
+                .comment("启用无尽贪婪兼容",
+                        "支持无尽合成台、终极锻造台、中子态素收集器、箱子、超立方体及铁砧。")
                 .define("enableAvaritia", true);
         ENABLE_CONFLUENCE = c
-                .comment("Enable RS integration with TerraCurio (Confluence Workshop recursive crafting).")
+                .comment("启用汇流来世兼容",
+                        "支持汇流来世工作坊递归合成。")
                 .define("enableConfluence", true);
         ENABLE_IMMORTERS_DELIGHT = c
-                .comment("Enable RS integration with Immortaler's Delight (Enchantal Cooler remote crafting).")
+                .comment("启用千古乐事兼容",
+                        "支持魔凝机远程合成。")
                 .define("enableImmortersDelight", true);
         ENABLE_FARMERSDELIGHT = c
-                .comment("Enable RS integration with Farmer's Delight (Cooking Pot + Skillet remote crafting).")
+                .comment("启用农夫乐事兼容",
+                        "支持烹饪锅和煎锅远程合成。")
                 .define("enableFarmersDelight", true);
         ENABLE_YOUKAISHOMECOMING = c
-                .comment("Enable RS integration with Youkai's Homecoming (Moka Pot + Steamer Pot remote crafting).")
+                .comment("启用妖怪归家兼容",
+                        "支持摩卡壶、蒸锅等机器的远程合成。")
                 .define("enableYoukaisHomecoming", true);
         ENABLE_FARMERSRESPITE = c
-                .comment("Enable RS integration with Farmer's Respite (Kettle fluid brewing).")
+                .comment("启用农夫暇事兼容",
+                        "支持水壶的流体泡制。")
                 .define("enableFarmersRespite", true);
         ENABLE_IRON_FURNACES = c
-                .comment("Enable RS integration with Iron Furnaces furnace and factory modes.",
-                        "Supports smelting, blasting, and smoking recipes; Generator mode is not supported.")
+                .comment("启用更多熔炉兼容",
+                        "支持普通熔炉和工厂的熔炼、烧炼及烟熏配方；不支持发电模式。")
                 .define("enableIronFurnaces", true);
         ENABLE_DISTANT_WORLDS = c
-                .comment("Enable RS integration with Distant Worlds Lithum Altar Firon recipes.")
+                .comment("启用遥远世界兼容",
+                        "支持锂祭坛的 Firon 配方。")
                 .define("enableDistantWorlds", true);
         ENABLE_LYCHEE = c
-                .comment("Enable virtual RS crafting for the supported Lychee item_inside recipes.",
-                        "The matching substrate bucket in any Resonance Disk slot is required but never consumed.")
+                .comment("启用lychee虚拟合成",
+                        "只支持已适配的 item_inside 配方；共振盘必须有匹配的基底桶，基底不会被消耗。")
                 .define("enableLychee", true);
         ENABLE_BIOMANCY = c
-                .comment("Enable RS integration with Biomancy machines.")
+                .comment("启用血肉重铸兼容",
+                        "支持生物炼金机器绑定与远程合成。")
                 .define("enableBiomancy", true);
         ENABLE_PMMO = c
-                .comment("Enable recursive PMMO salvage through its configured salvage block.",
-                        "The requested count is the number of independent salvage attempts, not a guaranteed output count.")
+                .comment("启用 PMMO 回收兼容",
+                        "通过配置指定的回收方块递归回收；请求数量为独立尝试次数，不保证相同数量的产物。")
                 .define("enablePmmoSalvage", true);
         ENABLE_WISHING_FOUNTAIN = c
-                .comment("Enable binding and recursive item-producing wishes through a formed Wishing Fountain.",
-                        "Weather wishes have no item output and remain manual.")
+                .comment("启用许愿泉兼容",
+                        "支持完整许愿泉的绑定及产物类愿望的递归合成；天气愿望仍需手动进行。")
                 .define("enableWishingFountain", true);
         LYCHEE_RECIPE_ALLOWLIST = c
-                .comment("Lychee recipe IDs allowed for virtual RS crafting.",
-                        "Only built-in deterministic powder-snow, Greek-fire, Dwarven-oil, and Deep-Aether-poison profiles are accepted.",
-                        "An empty list disables all Lychee virtual recipes.")
+                .comment("lychee虚拟配方白名单",
+                        "填写配方 ID，只接受已内置适配的细雪、希腊火、矮人油和深层天境毒液类型；清空后关闭所有虚拟配方。")
                 .defineListAllowEmpty("lycheeRecipeAllowlist", List.of(
                                 "crafttweaker:avaritia.diamond_lattice.1",
                                 "crafttweaker:avaritia.diamond_lattice.2",
@@ -539,247 +553,222 @@ public final class RSIntegrationConfig {
                         value -> value instanceof String recipeId
                                 && ResourceLocation.tryParse(recipeId) != null);
         ALLOW_DISTANT_WORLDS_RESEARCH_BYPASS = c
-                .comment("Allow RS Integration to craft Distant Worlds Firon recipes without the",
-                        "distant_worlds:incandescent_forever advancement.",
-                        "This only affects RSI automation; normal Distant Worlds altar interaction remains unchanged.")
+                .comment("允许跳过遥远世界研究要求",
+                        "RSI 自动化可不持有 distant_worlds:incandescent_forever 进度执行 Firon 配方；原模组祭坛操作不受影响。")
                 .define("allowDistantWorldsResearchBypass", true);
         DISABLE_DISTANT_WORLDS_FIRON_FAILURE = c
-                .comment("Disable the random failure/explosion branches for distant_worlds:firon_* altar rituals.",
-                        "Enabled by default so automated Firon crafts deterministically produce their real output.")
+                .comment("关闭 Firon 仪式随机失败",
+                        "关闭 distant_worlds:firon_* 祭坛仪式的随机失败和爆炸分支，使自动合成稳定产出真实结果。")
                 .define("disableDistantWorldsFironFailure", true);
         ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION = c
-                .comment("Automatically supply nearby Lithum Furnaces with tagged fuel while an RSI altar craft runs.")
+                .comment("自动供给遥远世界熔炉燃料",
+                        "RSI 祭坛合成期间为附近遥远世界熔炉补充符合标签的燃料。")
                 .define("allowDistantWorldsFuelAutomation", true);
         DISTANT_WORLDS_FUEL_SEARCH_RADIUS = c
-                .comment("Maximum block radius used to find a Lithum Furnace for an altar craft.")
+                .comment("遥远世界熔炉搜索半径（格）",
+                        "祭坛合成寻找遥远世界熔炉时使用的最大方块半径。")
                 .defineInRange("distantWorldsFuelSearchRadius", 8, 1, 16);
         DISTANT_WORLDS_FUEL_BATCH_SIZE = c
-                .comment("Maximum fuel items inserted into the selected Lithum Furnace per refill.")
+                .comment("遥远世界熔炉单次补充燃料上限",
+                        "每次补充到选中遥远世界熔炉的最大燃料数量。")
                 .defineInRange("distantWorldsFuelBatchSize", 4, 1, 64);
         DISTANT_WORLDS_FUEL_PRIORITY = c
-                .comment("Preferred Lithum Furnace fuels, highest priority first.")
+                .comment("遥远世界熔炉燃料优先级",
+                        "填写物品 ID，越靠前优先级越高。")
                 .defineListAllowEmpty(List.of("distantWorldsFuelPriority"),
                         List.of("distant_worlds:curelite_block", "distant_worlds:raw_curelite_block",
                                 "distant_worlds:curelite", "distant_worlds:raw_curelite"),
                         value -> value instanceof String sValue && ResourceLocation.tryParse(sValue) != null);
         ENABLE_APOTHEOSIS = c
-                .comment("Enable RS integration with Apotheosis, including Fletching Table recipes and remote GUI access.",
-                        "Only applies when Apotheosis is installed.")
+                .comment("启用神化兼容",
+                        "支持制箭台配方及远程界面；仅在安装神化时生效。")
                 .define("enableApotheosis", true);
         ENABLE_IRONS_SPELLBOOKS = c
-                .comment("Enable RS integration with Iron's Spell Books (Scroll Forge and Arcane Anvil).")
+                .comment("启用铁魔法兼容",
+                        "支持卷轴撰写台及奥术铁砧。")
                 .define("enableIronsSpellbooks", true);
         ENABLE_APPRENTICE_CODEX = c
-                .comment("Enable recursive RS crafting for Apprentice Codex (Essence Smoker and Spellcaster Workbench).")
+                .comment("启用学徒法典兼容",
+                        "支持精华熏制炉及施法工作台递归合成。")
                 .define("enableApprenticeCodex", true);
         ENABLE_ISS_CSW = c
-                .comment("Enable recursive RS crafting for Interlace Spellweaves (Spell Forge).")
+                .comment("启用奥术交错兼容",
+                        "支持奥术交错台递归合成。")
                 .define("enableIssCsw", true);
         ENABLE_AETHERWORKS = c
-                .comment("Enable RS integration with Embers Aetherworks Addon",
-                        "(Aetherium Anvil remote crafting with auto-hammer support).")
+                .comment("启用天华工艺兼容",
+                        "支持天华砧远程合成及自动敲击。")
                 .define("enableAetherworks", true);
         ENABLE_AETHER = c
-                .comment("Enable RS integration with Aether (Freezer, Incubator, Altar).")
+                .comment("启用天境兼容",
+                        "支持冷冻器、孵化器及祭坛。")
                 .define("enableAether", true);
         ENABLE_ARS_NOUVEAU = c
-                .comment("Enable RS integration with Ars Nouveau (Imbuement Chamber and Enchanting Apparatus",
-                        "recursive crafting). Only the imbuement and enchanting_apparatus recipe types are",
-                        "automated; enchantment/glyph/reactive/dye/etc. remain manual (NBT or world interaction).")
+                .comment("启用新生魔艺兼容",
+                        "只自动化浸润仪和附魔装置的物品配方；附魔、魔符、反应及染色等涉及 NBT 或世界交互的配方仍需手动完成。")
                 .define("enableArsNouveau", true);
         ENABLE_CROCKPOT = c
-                .comment("Enable RS integration with CrockPot (Crock Pot and Portable Crock Pot).")
+                .comment("启用烹饪锅兼容",
+                        "支持烹饪锅和便携烹饪锅。")
                 .define("enableCrockPot", true);
         ENABLE_TACZ = c
-                .comment("Enable RS integration with TACZ (Gun Smith Table recursive crafting).")
+                .comment("启用永恒枪械工坊兼容",
+                        "支持枪械工作台递归合成。")
                 .define("enableTacz", true);
         ENABLE_EMBERS_ALCHEMY = c
-                .comment("Enable RS integration with Embers Rekindled (Alchemy Tablet remote crafting).")
+                .comment("启用余烬炼金兼容",
+                        "支持余烬复燃的炼金台远程合成。")
                 .define("enableEmbersAlchemy", true);
         ENABLE_EMBERS_ALCHEMY_CALC = c
-                .comment("Enable Calculate mode for Embers Alchemy -shows the deterministic pedestal layout.",
-                        "When disabled, only Infer (trial-and-error) mode is available.",
-                        "Requires enableEmbersAlchemy=true.")
+                .comment("启用余烬炼金计算模式",
+                        "显示确定的基座布局；关闭后仅可使用试错推断模式，需要同时启用余烬炼金兼容。")
                 .define("enableEmbersAlchemyCalculate", false);
         ENABLE_VANILLA_MACHINES = c
-                .comment("Enable RS integration with vanilla machines (Furnace, Blast Furnace, Smoker,",
-                        "Campfire, Stonecutter, Smithing Table). Allows binding and remote crafting",
-                        "via these blocks.")
+                .comment("启用原版机器兼容",
+                        "支持熔炉、高炉、烟熏炉、营火、切石机及锻造台的绑定和远程合成。")
                 .define("enableVanillaMachines", true);
         ENABLE_SOPHISTICATED_BACKPACKS = c
-                .comment("Enable RS integration with Sophisticated Backpacks (RS-based upgrade items).")
+                .comment("启用精妙背包兼容",
+                        "启用基于 RS 网络的背包升级物品。")
                 .define("enableSophisticatedBackpacks", true);
         ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS = c
-                .comment("Count items actually inserted into RS by backpack upgrades and crafting toward",
-                        "eligible FTB Quests item tasks. Simulated, voided, refunded, and recovery items are excluded.")
+                .comment("计入 FTB 任务外部存入进度",
+                        "背包升级和合成实际存入 RS 的物品计入符合条件的物品任务；模拟、销毁、退款及回收物品不计入。")
                 .define("enableFtbQuestExternalItemProgress", true);
         ENABLE_FTB_QUEST_CHECKMARK_BUTTON = c
-                .comment("Show the FTB Quests sidebar button for bulk checkmark confirmation.")
+                .comment("显示 FTB 任务批量确认按钮",
+                        "在侧边栏显示批量确认勾选任务的按钮。")
                 .define("enableFtbQuestCheckmarkButton", true);
         ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON = c
-                .comment("Show the FTB Quests sidebar button for one-shot storage and inventory scans.")
+                .comment("显示 FTB 任务库存扫描按钮",
+                        "在侧边栏显示一次性扫描存储网络和玩家背包的按钮。")
                 .define("enableFtbQuestStorageScanButton", true);
         ENABLE_JEI = c
-                .comment("Show '+' buttons in JEI recipe views for remote crafting.",
-                        "Client-side; the server value is synced to the client.")
+                .comment("启用 JEI 兼容",
+                        "在 JEI 配方页显示远程合成加号；由服务端同步开关到客户端。")
                 .define("enableJeiIntegration", true);
         ENABLE_JEI_NETWORK_OVERLAY = c
-                .comment("Show the current RS/BD network item count in JEI item slots.",
-                        "Uses one initial snapshot followed by incremental updates.",
-                        "Client-side rendering; the server value is synced to clients.")
+                .comment("显示 JEI 网络库存标记",
+                        "在 JEI 物品槽显示 RS 或超越维度网络库存；初始快照后使用增量更新，由服务端同步开关。")
                 .define("enableJeiNetworkOverlay", true);
         ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY = c
-                .comment("Show the active recursive crafting plan shortage in JEI item slots.",
-                        "The red shortage marker is separate from the network inventory number.",
-                        "Client-side rendering; the server value is synced to clients.")
+                .comment("显示 JEI 合成缺料标记",
+                        "在 JEI 物品槽显示当前递归合成计划的红色缺料标记，与网络库存数字分开，由服务端同步开关。")
                 .define("enableJeiCraftingShortageOverlay", true);
         ENABLE_JEI_MARQUEE_SELECTION = c
-                .comment("Enable drag-to-select (marquee) in JEI ingredient list for batch bookmarking/hiding.",
-                        "Disable if you find drag gestures interfere with your workflow.",
-                        "Client-side; the server value is synced to the client.")
+                .comment("启用 JEI 物品框选",
+                        "在 JEI 物品列表拖动框选以批量收藏或隐藏；与其他拖动操作冲突时可关闭，由服务端同步开关。")
                 .define("enableJeiMarqueeSelection", true);
         ENABLE_JEI_BOOKMARK_MARQUEE_SELECTION = c
-                .comment("Enable drag-to-select (marquee) in JEI bookmark panel for batch removal/hiding.",
-                        "Works the same as ingredient list marquee, but on the left bookmark panel.",
-                        "Client-side; the server value is synced to the client.")
+                .comment("启用 JEI 书签框选",
+                        "在 JEI 左侧书签栏拖动框选以批量移除或隐藏，由服务端同步开关。")
                 .define("enableJeiBookmarkMarqueeSelection", true);
         ENABLE_RS_GRID_SWIPE_EXTRACT = c
-                .comment("Enable mouse swipe-to-extract on the RS grid.",
-                        "Hold Ctrl and drag across grid slots to extract one of each item you pass over.",
-                        "Disable if you find this gesture interferes with your normal grid usage.",
-                        "Client-side; the server value is synced to the client.")
+                .comment("启用 RS 网格滑动取出",
+                        "按住 Ctrl 在 RS 网格中拖动鼠标，每个经过的物品取出一个；与其他手势冲突时可关闭。")
                 .define("enableRSGridSwipeExtract", true);
         ENABLE_FARMINGFORBLOCKHEADS = c
-                .comment("Enable FarmingForBlockheads Market integration for recursive crafting.",
-                        "Allows the Market to participate in JEI-to-RS auto-crafting chains.",
-                        "When enabled, you can bind a Market block and use its exchange trades",
-                        "as crafting steps in recursive plans.")
+                .comment("启用懒人厨房兼容",
+                        "支持贸易站等已适配机器的远程操作。")
                 .define("enableFarmingForBlockheads", true);
         c.pop();
 
-        c.push("autoCrafting");
+        c.comment("自动合成").push("autoCrafting");
         ENABLE_MULTIBLOCK_AUTO_CRAFTING = c
-                .comment("Allow multi-block machines (altars, forges, crucibles, etc.) to be used as intermediate",
-                        "steps during recursive auto-crafting. When disabled, only vanilla crafting-table recipes",
-                        "are used for intermediate items.")
+                .comment("中间材料使用多方块机器",
+                        "递归合成时可用祭坛、锻炉、坩埚等机器制作中间材料；关闭后中间材料仅使用原版工作台配方。")
                 .define("enableMultiblockAutoCrafting", true);
         c.pop();
 
-        c.push("sophisticated_backpacks");
+        c.comment("精妙背包").push("sophisticated_backpacks");
         DEPOSIT_UPGRADE_RS = c
-                .comment("Whether the backpack's Deposit Upgrade can push items into the RS network.",
-                        "Enabled (true): deposit upgrade interacts with RS grids.",
-                        "Disabled (false): deposit upgrade works as vanilla Sophisticated Backpacks.")
+                .comment("存入升级连接 RS 网络",
+                        "开启后背包存入升级可向 RS 终端推送物品；关闭后使用精妙背包原有行为。")
                 .define("depositUpgradeRS", true);
         ENABLE_MAJ_ACCESSORY_COMPRESSION = c
-                .comment("Enable Majrusz's Accessories compression via the Compacting Upgrade.",
-                        "When enabled, the Compacting Upgrade also auto-combines MAJ accessories",
-                        "that match the upgrade's whitelist filter. Accessories are combined",
-                        "two at a time (max efficiency + another) until they reach 100%.")
+                .comment("压缩升级合并 MAJ 饰品",
+                        "匹配白名单的 Majrusz 饰品会两两合并，从最高效率饰品开始，直到达到 100%。")
                 .define("enableMajAccessoryCompression", true);
         c.pop();
 
-        c.push("passiveEffects");
+        c.comment("被动效果").push("passiveEffects");
         ENABLE_RS_PASSIVE_EFFECTS = c
-                .comment("Enable RS passive effects system. Items stored in a bound RS network",
-                        "that say \"works from inventory/hotbar\" will grant their passive effects",
-                        "to the player as if carried in the inventory.",
-                        "Three layers:",
-                        "  Phase 1 -Attribute modifiers (zero-config, ~50-70% of items),",
-                        "  Phase 2 -inventoryTick simulation (JSON whitelist, ~20-35% of items),",
-                        "  Phase 3 -event-driven Mixin redirect (per-item, ~5-15% of items).",
-                        "Disable this if you prefer vanilla inventory-only passive mechanics.")
+                .comment("启用网络被动效果",
+                        "绑定 RS 网络中的物品可提供原本在背包或快捷栏生效的被动效果，包括属性、白名单物品 tick 及已适配事件效果。")
                 .define("enableRSPassiveEffects", true);
         PASSIVE_TICK_ITEMS = c
-                .comment("Items whose inventoryTick should be simulated from the resonance disk.",
-                        "Format: \"modid:item_id\" or \"modid:item_id|mutates\".",
-                        "Items marked |mutates will use extract-tick-insert to persist NBT changes.",
-                        "Items without |mutates will be ticked on a snapshot copy (read-only).")
+                .comment("模拟背包 tick 的物品",
+                        "格式为 modid:item_id 或 modid:item_id|mutates；带 mutates 的条目会取出、执行 tick 并存回以保存 NBT，其他条目使用只读副本。")
                 .defineList("passiveTickItems",
                         DEFAULT_PASSIVE_TICK_ITEMS,
                         obj -> obj instanceof String && ((String) obj).contains(":"));
         NINE_SWORD_MAX_COUNT = c
-                .comment("Maximum effective count of Nine Sword Books across inventory + resonance disk.",
-                        "Books beyond this limit are ignored. Hotbar slots (9) is the vanilla maximum,",
-                        "so this prevents exceeding it via the resonance disk.",
-                        "Range: 1-36.")
+                .comment("九剑书生效数量上限",
+                        "统计玩家背包和共振盘中的九剑书；超出数量不生效，原版快捷栏上限为 9。")
                 .defineInRange("nineSwordMaxCount", 9, 1, 36);
         c.pop();
 
-        c.push("autoEat");
+        c.comment("自动进食").push("autoEat");
         ENABLE_AUTO_EAT = c
-                .comment("Enable the auto-eat system on supported storage screens.",
-                        "Adds three buttons to RS Grid and Beyond Dimensions terminal screens.",
-                        "Food and cost items are read from the selected backend storage network.",
-                        "Modes: Diversity (SolCarrot), Stack (bulk eat), Diet (nutrition balance).")
+                .comment("启用自动进食",
+                        "在 RS 和超越维度终端提供多样饮食、堆叠暴食及膳食均衡；食物和消耗物品由所选存储网络提供。")
                 .define("enableAutoEat", true);
         AUTO_EAT_REQUIRED_EFFECT = c
-                .comment("Required potion effect to use auto-eat. Format: \"modid:effect_id\".",
-                        "Empty string = no requirement (always available).",
-                        "Example: \"crockpot:gnaws_gift\" (requires CrockPot's Gnaw's Gift effect).")
+                .comment("自动进食所需状态效果",
+                        "填写 modid:effect_id；留空表示无需效果，例如 crockpot:gnaws_gift。")
                 .define("requiredEffect", "");
         AUTO_EAT_COST_ITEM = c
-                .comment("Item consumed from RS network per auto-eat execution. Format: \"modid:item_id\".",
-                        "\"minecraft:air\" = no item cost.",
-                        "Example: \"crockpot:gnaws_gift\".")
+                .comment("自动进食消耗物品",
+                        "填写 modid:item_id；minecraft:air 表示不消耗物品。")
                 .define("costItem", "minecraft:air");
         AUTO_EAT_COST_PER_ITEM = c
-                .comment("How many cost items to consume per food item eaten.",
-                        "0 = no cost. Range: 0-64.")
+                .comment("每份食物消耗数量",
+                        "每吃一份食物需从网络扣除的消耗物品数量；0 表示免费。")
                 .defineInRange("costPerItem", 0, 0, 64);
         AUTO_EAT_MAX_PER_BATCH = c
-                .comment("Maximum number of food items eaten in a single batch.",
-                        "Range: 1-1024.")
+                .comment("单次进食数量上限",
+                        "每次批量进食最多吃掉的食物数量。")
                 .defineInRange("maxPerBatch", 16, 1, 1024);
         c.pop();
 
-        c.push("containerTransfer");
+        c.comment("容器传输").push("containerTransfer");
         ENABLE_CONTAINER_TRANSFER = c
-                .comment("Enable one-key container-to-RS transfer.",
-                        "When any container GUI is open, press the configured key to transfer",
-                        "all container items into the bound RS network.",
-                        "Requires: a dimensional accessor and a bound RS network.")
+                .comment("启用一键容器传输",
+                        "打开容器后按指定按键将物品存入绑定网络；需要维度访问器及已绑定的 RS 网络。")
                 .define("enableContainerTransfer", true);
         c.pop();
 
-        c.push("sidePanel");
+        c.comment("侧边面板").push("sidePanel");
         ENABLE_RS_SIDE_PANEL = c
-                .comment("Enable the RS Side Panel -a foldable, draggable overlay showing RS network items on any screen.",
-                        "Toggle with the configured hotkey while in-game.")
+                .comment("启用 RS 侧边面板",
+                        "通过指定按键显示可折叠、拖动的网络物品面板。")
                 .define("enableRSSidePanel", false);
         c.pop();
 
-        c.push("remoteMachineGui");
+        c.comment("远程机器").push("remoteMachineGui");
         ENABLE_MACHINE_GUI_TABS = c
-                .comment("Enable RSI virtual machine interfaces in the Machine Center and RS terminals.",
-                        "When disabled, no virtual machine interface is shown and remote machine GUI requests are rejected.",
-                        "This is the virtual-interface switch; it is independent from whether a machine must be bound.")
+                .comment("启用虚拟机器界面",
+                        "在机器中心和 RS 终端显示虚拟机器界面；关闭后拒绝相应远程请求，与机器是否必须绑定的选项独立。")
                 .define("enableMachineGuiTabs", true);
         REQUIRE_MACHINE_BINDING_FOR_GUI = c
-                .comment("Require the target machine itself to be bound before opening its GUI remotely.",
-                        "When enabled, remote GUI requests for unbound machines are rejected.",
-                        "When disabled, a valid machine position may be opened without an RSI binding.")
+                .comment("远程界面要求机器绑定",
+                        "开启后拒绝打开未绑定机器的界面；关闭后有效机器位置可直接远程打开。")
                 .define("requireMachineBindingForGui", true);
         REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = c
-                .comment("Require a bound real machine before using its matching virtual RS station interface.",
-                        "Applies to the virtual stonecutter, smithing table, and anvil modes in RS terminals.",
-                        "The native 3x3 crafting mode is not affected.")
+                .comment("虚拟工作站要求实体机器",
+                        "虚拟切石机、锻造台和铁砧必须有已绑定的对应实体机器；原生 3×3 合成不受影响。")
                 .define("requireBoundMachineForVirtualStation", false);
         CUSTOM_GUI_MACHINE_MODS = c
-                .comment("Mod IDs to register as GUI-type machines without writing any Java code.",
-                        "Machines from these mods appear in the Machine Hub, can be remotely opened,",
-                        "and do NOT support batch-crafting -this is purely for remote GUI access.",
-                        "Mods that already have full module support (aether, crockpot, tacz, etc.)",
-                        "should NOT be listed here -their modules handle binding automatically.",
-                        "Example: [\"crabbersdelight\", \"metalbarrels\"]")
+                .comment("自定义远程界面模组",
+                        "填写模组 ID，为其机器提供绑定和远程打开界面，不提供批量合成；已有完整模块支持的模组无需填写。")
                 .defineList("customGuiMachineMods", List.of("crabbersdelight", "metalbarrels", "pgp", "emxarms", "ancientreforging"),
                         obj -> obj instanceof String);
         c.pop();
 
-        c.push("advanced");
+        c.comment("高级设置").push("advanced");
         DIAGNOSTIC_VERBOSE_LOGGING = c
-                .comment("Enable verbose diagnostic logging for debugging.",
-                        "WARNING: This may spam the server log. Only enable for troubleshooting.")
+                .comment("启用详细诊断日志",
+                        "仅建议排查问题时启用，可能产生大量服务端日志。")
                 .define("diagnosticVerboseLogging", false);
         c.pop();
 
@@ -791,218 +780,175 @@ public final class RSIntegrationConfig {
                 .comment("Internal server-config schema version. Do not edit manually.")
                 .defineInRange("configSchemaVersion", 1, 1, SERVER_CONFIG_SCHEMA);
 
-        s.push("integrations");
+        s.comment("模组兼容").push("integrations");
         ENABLE_VILLAGER_TRADE_LOCK = s
-                .comment("Lock villager trade rerolls when a current trade result is bookmarked in JEI.",
-                        "Supports Retraining and Trade Cycling. Disable to bypass all server-side trade-lock checks.")
+                .comment("书签匹配时锁定村民交易",
+                        "当前村民交易结果已在 JEI 收藏时锁定交易刷新；支持 Retraining 和 Trade Cycling。")
                 .define("enableVillagerTradeLock", true);
         FTB_QUEST_CHECKMARK_BLACKLIST = s
-                .comment("Specific FTB Quest IDs excluded from bulk checkmark confirmation.",
-                        "Use the hexadecimal ID from the FTB Quests SNBT file, without a 0x prefix.",
-                        "Use the outer quest node ID, not an ID inside its tasks list.",
-                        "This does not prevent players from confirming the task manually.")
+                .comment("FTB 任务批量确认黑名单",
+                        "使用任务节点的十六进制 ID，不加 0x，不能使用内部子任务 ID；仅排除批量确认，仍可手动确认。")
                 .defineListAllowEmpty("ftbQuestCheckmarkBlacklist", List.of(),
                         value -> value instanceof String id
                                 && id.matches("(?i)[0-9a-f]{1,16}"));
         CROCKPOT_FILLER_ITEM = s
-                .comment("Default filler item for CrockPot recipes when input slots are not",
-                        "fully occupied by the recipe's must-contain ingredients.",
-                        "The pot needs all input slots filled to start cooking; this item",
-                        "is used to pad the remaining slots.",
-                        "Format: \"modid:item_id\". Default: \"minecraft:stick\".")
+                .comment("烹饪锅默认填充物",
+                        "配方必要材料未占满输入槽时使用此物品补齐；填写 modid:item_id，默认 minecraft:stick。")
                 .define("crockpotFillerItem", "minecraft:stick");
         CROCKPOT_FUEL_PRIORITY = s
-                .comment("Preferred fuels for auto-refueling a Crock Pot, in priority order.",
-                        "The first item the RS network can supply is used. When none of these",
-                        "are available, the system falls back to any safe bulk fuel (never tools,",
-                        "bows, container fuels like lava buckets, or NBT/enchanted items).",
-                        "An existing valid fuel stack is topped up to the slot limit; unused",
-                        "automatically supplied fuel is returned after the craft finishes.",
-                        "Format: \"modid:item_id\" per line.")
+                .comment("烹饪锅燃料优先级",
+                        "填写物品 ID，优先使用靠前且库存充足的燃料。没有匹配时使用安全的批量燃料，跳过工具、弓、容器燃料及带 NBT 的物品；合成结束后回收未使用的自动补充燃料。")
                 .defineList("crockpotFuelPriority",
                         List.of("minecraft:coal", "minecraft:charcoal", "minecraft:coal_block"),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         VANILLA_FURNACE_FUEL_PRIORITY = s
-                .comment("Preferred fuels for vanilla furnaces, blast furnaces, smokers, and the Forbidden & Arcanus Clibano, in priority order.",
-                        "When the fuel slot is empty, coal is tried before charcoal, then other safe fuels.",
-                        "When the slot already contains fuel, only that same fuel type is topped up.",
-                        "Automatic selection skips tools, container-return fuels, and items with NBT.",
-                        "Format: \"modid:item_id\" per line.")
+                .comment("熔炉燃料优先级",
+                        "适用于熔炉、高炉、烟熏炉及炽炉。空槽按列表选燃料，非空槽只补同类燃料；跳过工具、返还容器的燃料及带 NBT 的物品。")
                 .defineList("vanillaFurnaceFuelPriority",
                         List.of("minecraft:coal", "minecraft:charcoal"),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         ENABLE_VANILLA_FURNACE_INPUT_BUFFER = s
-                .comment("Allow vanilla furnaces, blast furnaces, and smokers to preload several recipe inputs.",
-                        "The machine still consumes one input per cooking cycle; this only reduces RSI dispatch and storage traffic.",
-                        "Other furnace mods require their own explicitly verified buffer integration.")
+                .comment("启用原版熔炉输入预载",
+                        "熔炉、高炉和烟熏炉每周期仍消耗一份输入，实际批次受输入输出堆叠容量和派发上限限制。")
                 .define("enableVanillaFurnaceInputBuffer", true);
         VANILLA_FURNACE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one vanilla furnace input slot.",
-                        "The actual batch is also limited by input/output stack capacity and craftingOperationsPerDispatch.",
-                        "Range: 1-64.")
+                .comment("原版熔炉输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。熔炉、高炉和烟熏炉每周期仍消耗一份输入，实际批次受输入输出堆叠容量和派发上限限制。")
                 .defineInRange("vanillaFurnaceInputBufferLimit", 64, 1, 64);
         ENABLE_BRICK_FURNACE_INPUT_BUFFER = s
-                .comment("Allow Brick Furnace smelting, blasting, and smoking machines to preload recipe inputs.",
-                        "Each machine still consumes one input per cooking cycle.",
-                        "Disable this if the installed Brick Furnace version changes its inventory behavior.")
+                .comment("启用砖制熔炉输入预载",
+                        "熔炼、烧炼和烟熏仍每周期消耗一份输入，实际批次受槽位容量限制。")
                 .define("enableBrickFurnaceInputBuffer", true);
         BRICK_FURNACE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Brick Furnace input slot.",
-                        "The actual batch is also limited by input/output stack capacity.",
-                        "Range: 1-64.")
+                .comment("砖制熔炉输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。熔炼、烧炼和烟熏仍每周期消耗一份输入，实际批次受槽位容量限制。")
                 .defineInRange("brickFurnaceInputBufferLimit", 64, 1, 64);
         ENABLE_IRON_FURNACE_INPUT_BUFFER = s
-                .comment("Allow ordinary Iron Furnaces and Iron Furnaces factory lanes to preload recipe inputs.",
-                        "The machine still consumes one input per processing cycle; rainbow furnaces keep their existing multiplier path.",
-                        "Disable this only if a specific Iron Furnaces tier is incompatible with the installed mod version.")
+                .comment("启用更多熔炉输入预载",
+                        "普通熔炉和工厂每通道仍每周期处理一份输入，彩虹熔炉保持原有倍率；批次受槽位容量和通道数限制。")
                 .define("enableIronFurnaceInputBuffer", true);
         IRON_FURNACE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Iron Furnaces lane.",
-                        "The actual batch is also limited by input/output stack capacity and the machine's lane count.",
-                        "Range: 1-64.")
+                .comment("更多熔炉输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。普通熔炉和工厂每通道仍每周期处理一份输入，彩虹熔炉保持原有倍率；批次受槽位容量和通道数限制。")
                 .defineInRange("ironFurnaceInputBufferLimit", 64, 1, 64);
         ENABLE_GOETY_INFUSER_INPUT_BUFFER = s
-                .comment("Allow Goety cursed infusers to preload recipe inputs into their available recipe slots.",
-                        "The infuser still processes one placed item per cycle; world outputs are accumulated before settlement.",
-                        "Disable this only if a specific Goety tier is incompatible with the installed mod version.")
+                .comment("启用诡厄巫法注入器输入预载",
+                        "仍每周期处理一个放置物品，世界产物统一结算；批次受空配方槽和机器等级限制。")
                 .define("enableGoetyInfuserInputBuffer", true);
         GOETY_INFUSER_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Goety cursed infuser.",
-                        "The actual batch is limited by free recipe slots and the machine tier.",
-                        "Range: 1-64.")
+                .comment("诡厄巫法注入器输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。仍每周期处理一个放置物品，世界产物统一结算；批次受空配方槽和机器等级限制。")
                 .defineInRange("goetyInfuserInputBufferLimit", 64, 1, 64);
         ENABLE_APPRENTICE_CODEX_INPUT_BUFFER = s
-                .comment("Allow Apprentice Codex Essence Smokers to preload one catalyst and up to eight material slots.",
-                        "The catalyst is reserved once per physical smoker cycle and is not multiplied by material count.",
-                        "Disable this only if the installed Apprentice Codex version is incompatible.")
+                .comment("启用学徒法典精华熏制炉输入预载",
+                        "最多预载一个催化剂及八份材料；催化剂按实体熏制周期只预留一次，不随材料数量翻倍。")
                 .define("enableApprenticeCodexInputBuffer", true);
         APPRENTICE_CODEX_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical material operations preloaded into one Essence Smoker.",
-                        "The physical machine currently supports at most eight materials per ignition.",
-                        "Range: 1-8.")
+                .comment("学徒法典精华熏制炉输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。最多预载一个催化剂及八份材料；催化剂按实体熏制周期只预留一次，不随材料数量翻倍。")
                 .defineInRange("apprenticeCodexInputBufferLimit", 8, 1, 8);
         ENABLE_MALUM_CRUCIBLE_INPUT_BUFFER = s
-                .comment("Allow Malum Spirit Crucibles to preload stacked spirits while consuming one operation at a time.",
-                        "The catalyst is reserved once when the recipe marks it reusable; it is never multiplied by the operation count.",
-                        "Recipes with durability-consuming or transformed catalysts remain on the legacy path.")
+                .comment("启用精魂坩埚输入预载",
+                        "可堆叠预载精魂，每次仍只执行一份；可复用催化剂只预留一次，消耗耐久或转换催化剂的配方仍走原路径。")
                 .define("enableMalumCrucibleInputBuffer", true);
         MALUM_CRUCIBLE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Malum Spirit Crucible.",
-                        "The actual batch is limited by every spirit slot's stack capacity and the configured dispatch bound.",
-                        "Range: 1-64.")
+                .comment("精魂坩埚输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。可堆叠预载精魂，每次仍只执行一份；可复用催化剂只预留一次，消耗耐久或转换催化剂的配方仍走原路径。")
                 .defineInRange("malumCrucibleInputBufferLimit", 64, 1, 64);
         ENABLE_MALUM_ALTAR_INPUT_BUFFER = s
-                .comment("Allow Malum Spirit Altars to preload stacked center, pedestal, and spirit inputs.",
-                        "The altar still completes one recipe at a time and automatically starts the next buffered operation.",
-                        "Disable this only if the installed Malum version changes the native altar consumption semantics.")
+                .comment("启用精魂祭坛输入预载",
+                        "可堆叠预载中央、基座及精魂材料；每次完成一份配方后开始下一份，批次受各槽位容量限制。")
                 .define("enableMalumAltarInputBuffer", true);
         MALUM_ALTAR_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Malum Spirit Altar.",
-                        "The actual batch is limited by every center, pedestal, and spirit stack capacity.",
-                        "Range: 1-64.")
+                .comment("精魂祭坛输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。可堆叠预载中央、基座及精魂材料；每次完成一份配方后开始下一份，批次受各槽位容量限制。")
                 .defineInRange("malumAltarInputBufferLimit", 64, 1, 64);
         ENABLE_AETHER_FURNACE_INPUT_BUFFER = s
-                .comment("Allow Aether Freezers and Altars to preload stacked recipe inputs.",
-                        "The machine still processes one input per cycle; Incubators remain on the single-operation path.",
-                        "Disable this only if the installed Aether version changes its furnace inventory semantics.")
+                .comment("启用天境冷冻器和祭坛输入预载",
+                        "每周期仍只处理一份输入，批次受输入输出槽容量限制；孵化器仍使用单次操作。")
                 .define("enableAetherFurnaceInputBuffer", true);
         AETHER_FURNACE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Aether Freezer or Altar.",
-                        "The actual batch is also limited by input and output slot capacity.",
-                        "Range: 1-64.")
+                .comment("天境冷冻器和祭坛输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。每周期仍只处理一份输入，批次受输入输出槽容量限制；孵化器仍使用单次操作。")
                 .defineInRange("aetherFurnaceInputBufferLimit", 64, 1, 64);
         ENABLE_CLIBANO_INPUT_BUFFER = s
-                .comment("Allow one idle Clibano lane to preload a stack of recipe inputs.",
-                        "Each lane still processes one item per cycle; the second lane remains independently available.",
-                        "Disable this only if the installed Forbidden & Arcanus version changes its lane semantics.")
+                .comment("启用炽炉输入预载",
+                        "在空闲通道预载材料，每次仍完成一份配方；批次受槽位容量和派发上限限制。")
                 .define("enableClibanoInputBuffer", true);
         CLIBANO_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Clibano lane.",
-                        "The actual batch is limited by that lane's input and paired output slot capacity.",
-                        "Range: 1-64.")
+                .comment("炽炉输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。在空闲通道预载材料，每次仍完成一份配方；批次受槽位容量和派发上限限制。")
                 .defineInRange("clibanoInputBufferLimit", 64, 1, 64);
         ENABLE_ENCHANTAL_COOLER_INPUT_BUFFER = s
-                .comment("Allow Enchantal Coolers to preload stacked ingredients and containers.",
-                        "The cooler still consumes one item from each recipe slot per cycle.",
-                        "Non-stackable or dynamic outputs naturally remain limited to one operation.")
+                .comment("启用魔凝机输入预载",
+                        "预载材料后仍按原有机器周期处理，实际批次受槽位容量限制。")
                 .define("enableEnchantalCoolerInputBuffer", true);
         ENCHANTAL_COOLER_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Enchantal Cooler.",
-                        "The actual batch is limited by every input, container, and output slot.",
-                        "Range: 1-64.")
+                .comment("魔凝机输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。预载材料后仍按原有机器周期处理，实际批次受槽位容量限制。")
                 .defineInRange("enchantalCoolerInputBufferLimit", 64, 1, 64);
         ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER = s
-                .comment("Allow Farmer's Delight Cooking Pots to preload stacked ingredients and serving containers.",
-                        "The pot still cooks one recipe per cycle; recipes with ingredient remainders and Arcane Cooking Pots stay on the legacy path.",
-                        "Disable this only if the installed Farmer's Delight version changes its native slot consumption semantics.")
+                .comment("启用农夫乐事烹饪锅输入预载",
+                        "预载食材和盛装容器，每周期仍只烹饪一份；有材料返还的配方及奥术烹饪锅仍走原路径。")
                 .define("enableFarmersDelightCookingPotInputBuffer", true);
         FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Farmer's Delight Cooking Pot.",
-                        "The actual batch is limited by every ingredient slot, the serving-container slot, and the output slot.",
-                        "Range: 1-64.")
+                .comment("农夫乐事烹饪锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。预载食材和盛装容器，每周期仍只烹饪一份；有材料返还的配方及奥术烹饪锅仍走原路径。")
                 .defineInRange("farmersDelightCookingPotInputBufferLimit", 64, 1, 64);
         ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER = s
-                .comment("Allow Miner's Delight Copper Pots to preload stacked ingredients and copper cups.",
-                        "The pot still cooks one recipe per cycle; recipes with ingredient remainders stay on the legacy path.",
-                        "Copper-cup conversions use the native doubled output count when sizing and settling the batch.")
+                .comment("启用矿工乐事铜锅输入预载",
+                        "预载食材和铜杯，有材料返还的配方仍走原路径；批次和结算使用原生铜杯双倍产量，受四个输入槽及容器输出槽限制。")
                 .define("enableMinersDelightCopperPotInputBuffer", true);
         MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Miner's Delight Copper Pot.",
-                        "The actual batch is limited by all four ingredient slots, the copper-cup slot, and the output slot.",
-                        "Range: 1-64.")
+                .comment("矿工乐事铜锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。预载食材和铜杯，有材料返还的配方仍走原路径；批次和结算使用原生铜杯双倍产量，受四个输入槽及容器输出槽限制。")
                 .defineInRange("minersDelightCopperPotInputBufferLimit", 64, 1, 64);
         ENABLE_MOKA_POT_INPUT_BUFFER = s
-                .comment("Allow Youkai's Homecoming Moka Pots to preload stacked ingredients and output containers.",
-                        "The pot still brews one recipe per cycle; recipes with crafting remainders stay on the legacy path.",
-                        "Output containers are reserved by the same RS/BD transaction as the recipe ingredients.")
+                .comment("启用妖怪归家摩卡壶输入预载",
+                        "预载材料和容器，每周期仍只冲泡一份；有材料返还的配方走原路径，容器与材料在同一存储事务中预留。")
                 .define("enableMokaPotInputBuffer", true);
         MOKA_POT_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical operations preloaded into one Youkai's Homecoming Moka Pot.",
-                        "The actual batch is limited by all four input slots, the container slot, and the output slot.",
-                        "Range: 1-64.")
+                .comment("妖怪归家摩卡壶输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。预载材料和容器，每周期仍只冲泡一份；有材料返还的配方走原路径，容器与材料在同一存储事务中预留。")
                 .defineInRange("mokaPotInputBufferLimit", 64, 1, 64);
         ENABLE_BOTANIA_MANA_POOL_BATCH = s
-                .comment("Allow one Botania Mana Pool to infuse a batch of identical input items.",
-                        "Every item still consumes the recipe's normal mana cost; completion waits for the whole batch.")
+                .comment("启用魔力池批量转化",
+                        "一次投入多份相同物品；每份仍消耗配方原有魔力，等待整批处理完后结算。")
                 .define("enableBotaniaManaPoolBatch", true);
         BOTANIA_MANA_POOL_BATCH_LIMIT = s
-                .comment("Maximum logical operations submitted to one Mana Pool in a physical batch.",
-                        "The actual batch is also limited by currently affordable mana. Range: 1-1024.")
+                .comment("魔力池批量转化操作上限",
+                        "一次实体批次最多投入的逻辑操作数，实际数量还受当前可用魔力限制。")
                 .defineInRange("botaniaManaPoolBatchLimit", 1024, 1, 1024);
         ENABLE_BOTANIA_ELVEN_TRADE_INPUT_BUFFER = s
-                .comment("Allow one Botania Alfheim Portal to buffer several identical Elven Trade operations.",
-                        "The portal still resolves one recipe at a time and spends 500 mana per operation.")
+                .comment("启用精灵门交易输入预载",
+                        "每次仍完成一份配方并消耗 500 魔力，所有声明的产物统一结算。")
                 .define("enableBotaniaElvenTradeInputBuffer", true);
         BOTANIA_ELVEN_TRADE_INPUT_BUFFER_LIMIT = s
-                .comment("Maximum logical Elven Trade operations admitted to one portal queue.",
-                        "All declared outputs are accumulated before settlement. Range: 1-64.")
+                .comment("精灵门交易输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。每次仍完成一份配方并消耗 500 魔力，所有声明的产物统一结算。")
                 .defineInRange("botaniaElvenTradeInputBufferLimit", 64, 1, 64);
         EMBERS_INFER_MAX_ATTEMPTS = s
-                .comment("Maximum trial-and-error attempts for Embers Alchemy inference mode.",
-                        "Each failed attempt consumes some materials (per Embers' failure mechanics).",
-                        "Range: 5-200.")
+                .comment("余烬炼金最大推断次数",
+                        "推断模式最多尝试的次数；失败会按余烬原有机制消耗部分材料。")
                 .defineInRange("embersInferMaxAttempts", 20, 5, 200);
         EMBERS_INFER_ZERO_BLACK_LIMIT = s
-                .comment("Consecutive zero-black-pin attempts before aborting Embers Alchemy inference.",
-                        "A zero-black-pin result means no aspect is in the correct position.",
-                        "After this many consecutive such failures, inference aborts early.",
-                        "Range: 3-50.")
+                .comment("余烬炼金连续零黑针上限",
+                        "连续达到该次数的零黑针结果时提前终止推断；零黑针表示没有任何要素位置正确。")
                 .defineInRange("embersInferZeroBlackLimit", 5, 3, 50);
         EMBERS_LOCK_TIMEOUT_MINUTES = s
-                .comment("Minutes before an Embers Alchemy tablet lock auto-expires.",
-                        "Prevents permanent lock-up when a player disconnects mid-craft.",
-                        "Range: 1-60.")
+                .comment("余烬炼金锁超时（分钟）",
+                        "炼金台锁超过此时间后自动释放，避免玩家中途断线导致永久占用。")
                 .defineInRange("embersLockTimeoutMinutes", 10, 1, 60);
         EMBERS_PROGRESS_TIMEOUT_TICKS = s
-                .comment("Maximum ticks (1 tick = 1/20 second) to wait for an Embers Alchemy",
-                        "tablet to finish processing before timing out.",
-                        "Range: 100-2400 (5s to 120s).")
+                .comment("余烬炼金加工超时（tick）",
+                        "等待炼金台完成加工的最长时间；20 tick 为 1 秒。")
                 .defineInRange("embersProgressTimeoutTicks", 600, 100, 2400);
         s.pop();
 
-        s.push("autoCrafting");
+        s.comment("自动合成").push("autoCrafting");
         FREE_WATER_MACHINES = s
-                .comment("允许免费补水的机器类型列表。清空列表可关闭所有免费补水。",
+                .comment("免费补水的机器类型",
+                        "允许免费补水的机器类型列表。清空列表可关闭所有免费补水。",
                         "未列出的机器从 RS 流体存储扣除补入的水；已有的水可以继续使用。",
                         "Supported: farmersrespite_kettle, youkaishomecoming_kettle, youkaishomecoming_ferment,",
                         "youkaishomecoming_moka, youkaishomecoming_steamer, irons_spellbooks_alchemist_cauldron,",
@@ -1011,378 +957,332 @@ public final class RSIntegrationConfig {
                 .defineListAllowEmpty("freeWaterMachines", DEFAULT_FREE_WATER_MACHINES,
                         value -> value instanceof String name && name.matches("[a-z0-9_]+"));
         ENABLE_CATALYST_RECIPE_PREFERENCE = s
-                .comment("Automatically prefer crafting paths backed by reusable catalysts.",
-                        "CraftTweaker inputs using .reuse() are recognized without listing recipe IDs.",
-                        "The ordinary recipe path remains available when the catalyst path cannot be resolved.")
+                .comment("优先可重复使用催化剂配方",
+                        "自动识别 CraftTweaker 的 .reuse() 输入；无法解析催化剂路线时仍可使用普通配方。")
                 .define("enableCatalystRecipePreference", true);
         CATALYST_RECIPE_PREFERENCE_BONUS = s
-                .comment("Candidate score bonus for reusable-catalyst recipes and their immediate consumers.",
-                        "Raise this only when another custom scoring rule still wins unexpectedly.",
-                        "Range: 0-100000.")
+                .comment("催化剂配方评分加成",
+                        "给可复用催化剂配方及其直接下游配方增加评分；其他自定义评分仍压过该路线时可调高。")
                 .defineInRange("catalystRecipePreferenceBonus",
                         DEFAULT_CATALYST_RECIPE_PREFERENCE_BONUS, 0, 100000);
         PREFERRED_RECIPES = s
-                .comment("Preferred recipe IDs for auto-crafting resolution.",
-                        "When multiple recipes produce the same item, the preferred recipe gets a +10000 scoring bonus.",
-                        "Format: one recipe ID per line, e.g. \"minecraft:oak_planks\".",
-                        "Example: prefer 4-plank-from-log over 1-plank-from-log when crafting.")
+                .comment("优先配方",
+                        "填写配方 ID；同一产物的优先配方获得 10000 分加成。")
                 .defineList("preferredRecipes", List.of(), obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         PREFERRED_INGREDIENT_VARIANTS = s
-                .comment("Soft item preferences for ingredients that accept multiple variants.",
-                        "Entries are checked in order and apply only when the item is accepted by the ingredient.",
-                        "Existing accepted stock still wins over recursively crafting a preferred variant.",
-                        "Explicit material locks remain hard constraints. Format: one item ID per line.")
+                .comment("优先材料变体",
+                        "填写物品 ID，按顺序优先选择配方接受的变体；已有可用库存优先于新合成，明确锁定的材料仍是硬性限制。")
                 .defineList("preferredIngredientVariants", DEFAULT_PREFERRED_INGREDIENT_VARIANTS,
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         MULTIBLOCK_CRAFT_TIMEOUT_SECONDS = s
-                .comment("Maximum time (in seconds) to wait for a multi-block craft to complete.",
-                        "If exceeded, the crafting chain is aborted and items are refunded.",
-                        "Range: 10-600.")
+                .comment("多方块合成超时（秒）",
+                        "超过等待时间后终止该合成链并执行回收。")
                 .defineInRange("multiblockCraftTimeoutSeconds", 300, 10, 600);
         CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS = s
-                .comment("Maximum time without meaningful progress (in seconds) for a graph crafting chain.",
-                        "Completed operations, published outputs, and completed nodes reset this timer.",
-                        "Long-running orders may exceed this duration while they keep making progress;",
-                        "a genuinely wedged chain is still aborted after this idle period.",
-                        "Materials already dispatched into a machine are NOT refunded (never duped);",
-                        "only undispatched/settled materials are returned. Range: 60-3600.")
+                .comment("合成链无进展超时（秒）",
+                        "完成操作、发布产物及完成节点会重置计时；持续有进展的长任务可超过此时长。终止时只退回尚未派发或已结算的材料，不退款已投入机器的材料。")
                 .defineInRange("craftingChainGlobalTimeoutSeconds", 900, 60, 3600);
         MULTIBLOCK_RECIPE_BLACKLIST = s
-                .comment("Multi-block recipe IDs that should NEVER be used for auto-crafting.",
-                        "Format: \"modid:recipe_id\".")
+                .comment("多方块配方黑名单",
+                        "填写 modid:recipe_id；名单中的配方禁止参与自动合成。")
                 .defineList("multiblockRecipeBlacklist", List.of(),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         MULTIBLOCK_RECIPE_ALLOWLIST = s
-                .comment("If non-empty, ONLY these multi-block recipe IDs may be used for auto-crafting.",
-                        "Format: \"modid:recipe_id\". Empty list = all recipes allowed (subject to blacklist).")
+                .comment("多方块配方白名单",
+                        "非空时仅允许这些配方；空列表表示允许所有不在黑名单中的配方。")
                 .defineList("multiblockRecipeAllowlist", List.of(),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         REPEAT_COUNT_MAX = s
-                .comment("Maximum repeat count allowed in the CraftingPlanScreen.",
-                        "Higher values allow more concurrent crafts but increase server load.",
-                        "Range: 1-1024.")
+                .comment("计划重复次数上限",
+                        "提高上限允许更大的合成任务，也会增加服务端负载。")
                 .defineInRange("repeatCountMax", REPEAT_COUNT_DEFAULT,
                         1, REPEAT_COUNT_ABSOLUTE_MAX);
         CRAFTING_MAX_DEPTH = s
-                .comment("Maximum recursion depth for crafting resolution.",
-                        "Limits how many nested sub-recipes the resolver can chain.",
-                        "Increase for deep modpack recipe chains; decrease for strict server limits.",
-                        "Range: 4-32.")
+                .comment("合成递归深度上限",
+                        "限制连续解析的子配方层数；深层整合包可提高，服务端严格限流时可降低。")
                 .defineInRange("craftingMaxDepth", 16, 4, 32);
         CRAFTING_MAX_STEPS = s
-                .comment("Maximum total crafting steps in a single resolution plan.",
-                        "Prevents runaway plans from consuming excessive server resources.",
-                        "The upper bound matches the craft-progress network protocol.",
-                        "Range: 256-4096.")
+                .comment("单次计划步骤上限",
+                        "限制单个计划的总步骤，避免过大任务耗尽资源；上限与合成进度网络协议一致。")
                 .defineInRange("craftingMaxSteps", 4096, 256, 4096);
         CRAFTING_PLANNING_WORKERS = s
-                .comment("Number of background workers used for immutable preview planning.",
-                        "World, block entity and RS mutations never run on these workers.",
-                        "Changes take effect when the server config reloads. Range: 1-8.")
+                .comment("后台规划线程数",
+                        "只执行不可变预览规划，世界、方块实体和 RS 修改仍在服务端线程；配置重载后生效。")
                 .defineInRange("craftingPlanningWorkers",
                         DEFAULT_CRAFTING_PLANNING_WORKERS,
                         CraftingPlanningConfig.MIN_WORKERS, CraftingPlanningConfig.MAX_WORKERS);
         CRAFTING_PLANNING_QUEUE_CAPACITY = s
-                .comment("Maximum number of preview-planning tasks waiting behind active workers.",
-                        "A full queue rejects new previews with a retryable busy response instead of",
-                        "running expensive planning on the Minecraft server thread. Range: 8-1024.")
+                .comment("后台规划等待队列上限",
+                        "等待后台线程的预览数量；满队列时返回可重试的繁忙提示。")
                 .defineInRange("craftingPlanningQueueCapacity",
                         DEFAULT_CRAFTING_PLANNING_QUEUE_CAPACITY,
                         CraftingPlanningConfig.MIN_QUEUE_CAPACITY,
                         CraftingPlanningConfig.MAX_QUEUE_CAPACITY);
         CRAFTING_PURE_SEARCH_MAX_STATES = s
-                .comment("Maximum backtracking states expanded by one immutable pure-plan search.",
-                        "When exhausted, the result is unknown and does not fall back to another planner.",
-                        "Range: 256-262144.")
+                .comment("纯规划搜索状态上限",
+                        "单次回溯搜索最多展开的状态数量；耗尽后返回未知结果，不回退到其他规划器。")
                 .defineInRange("craftingPureSearchMaxStates",
                         DEFAULT_CRAFTING_PURE_SEARCH_MAX_STATES,
                         CraftingPlanningConfig.MIN_SEARCH_STATES,
                         CraftingPlanningConfig.MAX_SEARCH_STATES);
         CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES = s
-                .comment("Maximum proven-failure search states cached during one pure-plan request.",
-                        "Higher values reduce repeated backtracking at the cost of temporary memory.",
-                        "Set to 0 to disable failure memoization. Range: 0-65536.")
+                .comment("纯规划失败缓存上限",
+                        "缓存已证实失败的状态，减少重复回溯；增大将占用更多临时内存，0 表示关闭。")
                 .defineInRange("craftingPureSearchMaxMemoizedFailures",
                         DEFAULT_CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES,
                         CraftingPlanningConfig.MIN_MEMOIZED_FAILURES,
                         CraftingPlanningConfig.MAX_MEMOIZED_FAILURES);
         CRAFTING_PURE_DEMAND_MAX_NODES = s
-                .comment("Maximum nodes inspected by the inventory-aware pure demand-tree route check.",
-                        "If the bound is reached, the request is conservatively sent to the typed resolver.",
-                        "Range: 64-4096.")
+                .comment("纯需求树检查节点上限",
+                        "库存感知路线检查最多访问的节点数量；达到上限时转交类型化解析器。")
                 .defineInRange("craftingPureDemandMaxNodes",
                         DEFAULT_CRAFTING_PURE_DEMAND_MAX_NODES,
                         CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
                         CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
         CRAFTING_PURE_PLANNING_TIMEOUT_MS = s
-                .comment("Search-time budget for background pure planning, not a mandatory wait.",
-                        "Ordinary pure search starts its clock after availability preparation; queue and routing time are excluded.",
-                        "Max-craftable probes share their search budget and return unknown when it expires. Range: 50-5000.")
+                .comment("纯规划搜索预算（毫秒）",
+                        "普通搜索从库存准备完成后开始计时，不含排队和路由时间；最大可合成探测共享搜索预算，超时返回未知。")
                 .defineInRange("craftingPurePlanningTimeoutMs",
                         DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
                         CraftingPlanningConfig.MAX_PURE_TIMEOUT_MS);
         CRAFTING_TYPED_PREVIEW_TIMEOUT_MS = s
-                .comment("Hard server-thread budget for typed recipe preview resolution.",
-                        "Timeout aborts the preview instead of being reported as missing materials.",
-                        "The default allows supported complex recipes while bounding server stalls.",
-                        "Range: 10-500.")
+                .comment("类型化预览执行预算（毫秒）",
+                        "服务端线程解析预览的硬性时间预算；超时终止预览，不当作缺料。")
                 .defineInRange("craftingTypedPreviewTimeoutMs",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MAX_TYPED_PREVIEW_TIMEOUT_MS);
         CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY = s
-                .comment("Maximum number of players waiting for typed preview admission.",
-                        "Only each player's latest request is retained. Range: 1-256.")
+                .comment("类型化预览排队人数上限",
+                        "每位玩家只保留最新请求。")
                 .defineInRange("craftingTypedPreviewQueueCapacity",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY, 1, 256);
         CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK = s
-                .comment("Maximum typed preview requests admitted to the server thread per tick.",
-                        "Keep this low because typed resolution reads live world and network state.",
-                        "Range: 1-8.")
+                .comment("每 tick 接收类型化预览上限",
+                        "类型化解析会读取实时世界和网络状态，建议保持较小的值。")
                 .defineInRange("craftingTypedPreviewAdmissionsPerTick",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK, 1, 8);
         CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS = s
-                .comment("Maximum time a typed preview may wait in the admission queue.",
-                        "This is an expiry grace period, not an added delay or a larger execution budget.",
-                        "Expired requests return the localized planner-busy response. Range: 100-10000.")
+                .comment("类型化预览排队超时（毫秒）",
+                        "排队请求的过期宽限时间，不是额外等待或执行预算；过期返回规划器繁忙提示。")
                 .defineInRange("craftingTypedPreviewQueueTimeoutMs",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_QUEUE_TIMEOUT_MS, 100, 10_000);
         ENABLE_CRAFTING_VARIANT_CONVERSION_GUARD = s
-                .comment("Skip crafting conversions with no net gain for a broad tag demand.",
-                        "This prevents color and material variants from recursively converting",
-                        "through each other while preserving exact-output conversions.")
+                .comment("防止材料变体循环转换",
+                        "跳过对宽泛标签需求没有净收益的颜色和材质转换；明确目标产物的转换仍可使用。")
                 .define("enableCraftingVariantConversionGuard", true);
         CRAFTING_PREVIEW_RATE_LIMIT_MS = s
-                .comment("Minimum interval in milliseconds between craft preview requests.",
-                        "Range: 10-2000.")
+                .comment("合成预览最小间隔（毫秒）",
+                        "限制同一玩家发送合成预览请求的频率。")
                 .defineInRange("craftingPreviewRateLimitMs",
                         DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS,
                         CraftingPreviewPolicy.MIN_RATE_LIMIT_MS,
                         CraftingPreviewPolicy.MAX_RATE_LIMIT_MS);
         CRAFTING_PLAN_CACHE_TTL_MS = s
-                .comment("Lifetime in milliseconds for reusable craft preview plans.",
-                        "Cached plans are revalidated against only the materials they actually use.",
-                        "Range: 50-120000.")
+                .comment("合成预览缓存有效期（毫秒）",
+                        "复用预览计划的最长时间；使用前只重新校验该计划实际需要的材料。")
                 .defineInRange("craftingPlanCacheTtlMs",
                         DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS,
                         CraftingPreviewPolicy.MIN_CACHE_TTL_MS,
                         CraftingPreviewPolicy.MAX_CACHE_TTL_MS);
         CRAFTING_PLAN_CACHE_MAX_ENTRIES = s
-                .comment("Maximum number of reusable craft preview plans retained in memory.",
-                        "Range: 8-1024.")
+                .comment("合成预览缓存数量上限",
+                        "内存中最多保留的可复用预览计划数量。")
                 .defineInRange("craftingPlanCacheMaxEntries",
                         DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MIN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MAX_CACHE_MAX_ENTRIES);
         CRAFTING_RESOLVE_TIMEOUT_MS = s
-                .comment("Maximum wall-clock time (ms) the crafting resolver may spend on one plan.",
-                        "Deep, interdependent modpack recipe trees (e.g. self-referential 'upgrade'",
-                        "recipes) can exhaust the default budget and falsely report a reachable",
-                        "ingredient as missing. Increase for such packs; the resolver runs on the",
-                        "server thread, so very large values can cause a brief hitch. Range: 200-10000.")
+                .comment("递归解析预算（毫秒）",
+                        "单次计划解析的最长实际时间。深层或互相依赖配方可提高，但解析在服务端线程进行，过大会造成短暂卡顿。")
                 .defineInRange("craftingResolveTimeoutMs",
                         DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS, 200, 10000);
         CRAFTING_MAX_ENSURE_CALLS = s
-                .comment("Maximum recursive ingredient-resolution calls per plan.",
-                        "Companion cap to craftingResolveTimeoutMs guarding against runaway recursion.",
-                        "Increase alongside the timeout for deep recipe trees. Range: 1000-100000.")
+                .comment("材料递归调用上限",
+                        "限制单个计划的递归材料解析次数；与解析超时共同防止失控递归。")
                 .defineInRange("craftingMaxEnsureCalls",
                         DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
         CRAFTING_VANILLA_OPERATIONS_PER_TICK = s
-                .comment("Maximum vanilla crafting executions performed synchronously per server tick.",
-                        "This is a per-chain fairness cap. Larger chains continue across ticks.",
-                        "Range: 1-256.")
+                .comment("单条合成链每 tick 工作台操作上限",
+                        "限制每条合成链的同步原版合成次数，大任务分多个 tick 继续。")
                 .defineInRange("craftingVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK, 1, 256);
         CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = s
-                .comment("Maximum vanilla crafting executions shared by all active chains per server tick.",
-                        "The manager distributes this budget fairly between chains. Range: 1-1024.")
+                .comment("全局每 tick 工作台操作上限",
+                        "所有活动合成链共享的原版合成次数预算，管理器公平分配。")
                 .defineInRange("craftingGlobalVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK, 1, 1024);
         CRAFTING_SERVER_TICK_BUDGET_MS = s
-                .comment("Maximum time (ms) RSI may spend advancing active crafting chains in one server tick.",
-                        "Remaining chains continue on later ticks after the budget is reached.",
-                        "This protects server responsiveness; it cannot interrupt one third-party API call already in progress.",
-                        "Range: 1-40.")
+                .comment("合成推进预算（毫秒 / tick）",
+                        "达到时间预算后剩余任务延到后续 tick；无法中断已开始的第三方接口调用。")
                 .defineInRange("craftingServerTickBudgetMs",
                         DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS, 1, 40);
         CRAFTING_OPERATIONS_PER_DISPATCH = s
-                .comment("Maximum recipe operations RSI may reserve and commit in one non-vanilla dispatch.",
-                        "Larger graph nodes automatically use the flat, tick-sliced executor.",
-                        "A machine delegate may raise this to one bounded native physical batch.",
-                        "This bounds ledger entries, storage calls, and batch output work per dispatch. Range: 1-256.")
+                .comment("单次机器派发操作上限",
+                        "限制单次非原版派发的预留、存储调用和产物工作量；大节点使用分 tick 执行器，已适配机器可提升到一次有界实体批次。")
                 .defineInRange("craftingOperationsPerDispatch",
                         DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH, 1, 256);
         CRAFTING_SETTLEMENT_STACKS_PER_TICK = s
-                .comment("Maximum distinct completed-product stacks RSI may deliver per crafting chain each tick.",
-                        "Large recursive jobs settle over multiple ticks instead of blocking terminal interaction.",
-                        "Range: 1-256.")
+                .comment("单条合成链每 tick 结算堆叠上限",
+                        "已完成产物分多个 tick 送回，避免大任务阻塞终端交互。")
                 .defineInRange("craftingSettlementStacksPerTick",
                         DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK, 1, 256);
         CRAFTING_COMPLETION_CALLBACKS_PER_TICK = s
-                .comment("Maximum completed-chain callbacks RSI runs per server tick.",
-                        "Callbacks may schedule the next batch; limiting them preserves server responsiveness.",
-                        "Range: 1-32.")
+                .comment("每 tick 完成回调上限",
+                        "限制完成回调及其后续批次调度，维持服务端响应。")
                 .defineInRange("craftingCompletionCallbacksPerTick",
                         DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK, 1, 32);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
-                .comment("Maximum number of independent DAG recipe nodes that may run in parallel.",
-                        "Set to 1 for serial execution (safest); increase for multi-machine speedup.",
-                        "Only nodes with no material/machine/capture conflicts are dispatched.",
-                        "Range: 1-16.")
+                .comment("并行配方节点上限",
+                        "只派发不存在材料、机器或捕获冲突的节点；1 表示串行，增大可利用多台机器。")
                 .defineInRange("craftingMaxConcurrentGraphNodes", 4, 1, 16);
         CRAFTING_GRAPH_DISPATCH_PER_TICK = s
-                .comment("Maximum number of new graph nodes one craft may dispatch in a single tick.",
-                        "Admission retries do not consume this budget. Range: 1-16.")
+                .comment("单条任务每 tick 新节点上限",
+                        "限制一次合成在一个 tick 中派发的新图节点数量；接收重试不计入。")
                 .defineInRange("craftingGraphDispatchPerTick", 4, 1, 16);
         CRAFTING_GRAPH_DISPATCH_PER_CRAFT = s
-                .comment("Maximum total graph-node dispatches in one craft run.",
-                        "Prevents retry/callback bugs from dispatching an unbounded number of operations.",
-                        "Set above craftingMaxSteps for normal large plans. Range: 16-32768.")
+                .comment("单次合成节点派发总上限",
+                        "防止重试或回调错误无限派发；常规大计划应高于步骤上限。")
                 .defineInRange("craftingGraphDispatchPerCraft", 8192, 16, 32768);
         CRAFTING_MAX_CONCURRENT_OPERATIONS = s
-                .comment("Maximum machine-backed operations one craft may own concurrently.",
-                        "A normal graph node costs one; a parallel group costs one per running worker.",
-                        "Range: 1-64.")
+                .comment("单次合成并发机器操作上限",
+                        "普通节点计一次，平行组每个运行中的工作单元计一次。")
                 .defineInRange("craftingMaxConcurrentOperations", 8, 1, 64);
         CRAFTING_OPERATION_DISPATCH_PER_CRAFT = s
-                .comment("Maximum machine-operation starts during one craft run.",
-                        "Retries before delegate start do not consume this budget. Range: 16-65536.")
+                .comment("单次合成机器启动总上限",
+                        "限制机器实际操作启动次数，委托启动之前的重试不计入。")
                 .defineInRange("craftingOperationDispatchPerCraft", 16384, 16, 65536);
         CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER = s
-                .comment("递归概率材料的最大尝试次数倍数，以最初计划的执行次数为基数。",
+                .comment("概率材料尝试次数倍数",
+                        "递归概率材料的最大尝试次数倍数，以最初计划的执行次数为基数。",
                         "达到上限时终止并保留真实产物，不退还已消耗材料。")
                 .defineInRange("craftingProbabilisticAttemptMultiplier", 16, 1, 1024);
         CRAFTING_PROBABILISTIC_MAX_ATTEMPTS = s
-                .comment("每个递归概率材料目标的绝对尝试次数上限，同时受全任务操作预算限制。")
+                .comment("概率材料尝试次数绝对上限",
+                        "每个递归概率材料目标的绝对尝试次数上限，同时受全任务操作预算限制。")
                 .defineInRange("craftingProbabilisticMaxAttempts", 4096, 1, 65536);
         CRAFTING_PARALLEL_DISABLED_MODS = s
-                .comment("Mod/delegate type IDs that must always run as exclusive graph nodes.",
-                        "This denylist overrides a delegate's concurrency capability declaration.",
-                        "Example: [\"malum\", \"goety\"].")
+                .comment("禁止并行的模组或委托类型",
+                        "填写类型 ID，例如 malum、goety；强制对应图节点独占运行，覆盖委托自身的并发声明。")
                 .defineList("craftingParallelDisabledMods", List.of(),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str + ":dummy") != null);
         CRAFTING_PARALLEL_DELEGATE_POLICIES = s
-                .comment("Optional per-mod or per-delegate graph concurrency policy overrides.",
-                        "Format: id=AUTO|OFF|FORCE_WITH_GUARDS. A full or simple delegate class name",
-                        "is more specific than a mod type ID. FORCE_WITH_GUARDS never bypasses safety guards.",
-                        "Example: [\"avaritia=AUTO\", \"CrabTrapBatchDelegate=OFF\"].")
+                .comment("模组或委托并行策略",
+                        "格式为 id=AUTO、id=OFF 或 id=FORCE_WITH_GUARDS；完整或简短委托类名比模组类型更具体，强制模式也不会绕过安全检查。")
                 .defineList("craftingParallelDelegatePolicies", List.of(),
                         obj -> obj instanceof String str && str.contains("="));
         RECIPE_TREE_MAX_DEPTH = s
-                .comment("Maximum depth for the client-side recipe tree view.",
-                        "Limits how many nested layers the tree renders.",
-                        "Range: 4-32.")
+                .comment("配方树深度上限",
+                        "限制客户端配方树显示的嵌套层数。")
                 .defineInRange("recipeTreeMaxDepth", 16, 4, 32);
         RECIPE_TREE_MAX_NODES = s
-                .comment("Maximum number of nodes in the recipe tree.",
-                        "Prevents the tree renderer from consuming excessive client resources.",
-                        "Range: 64-4096.")
+                .comment("配方树节点上限",
+                        "限制显示节点数量，避免渲染占用过多客户端资源。")
                 .defineInRange("recipeTreeMaxNodes", 512, 64, 4096);
         RECIPE_TREE_BATCH_DEBOUNCE_MS = s
-                .comment("Batch count scroll debounce in milliseconds for the recipe tree.",
-                        "Shorter = more responsive; longer = fewer server round-trips.",
-                        "Range: 100-2000.")
+                .comment("配方树数量防抖（毫秒）",
+                        "批次数量滚动停止后等待的时间；越短越灵敏，越长服务端请求越少。")
                 .defineInRange("recipeTreeBatchDebounceMs", 300, 100, 2000);
         RECIPE_TREE_MAX_CANDIDATES = s
-                .comment("Maximum number of alternative recipes shown in a tree node's dropdown.",
-                        "Nodes with more alternatives than this are marked 'limited' and the extras are hidden.",
-                        "Range: 2-32.")
+                .comment("配方树备选配方上限",
+                        "每个节点下拉列表最多显示的配方数量；超出的配方会被隐藏并标记为受限。")
                 .defineInRange("recipeTreeMaxCandidates", 8, 2, 32);
         REQUIRE_RS_NETWORK_FOR_RECIPE_TREE = s
-                .comment("Require an available RS network when opening a recipe tree preview.",
-                        "When false, previews may use the player's own inventory without a wireless terminal.",
-                        "This setting affects previews only; actual crafting still requires its normal network validation.")
+                .comment("配方树预览要求 RS 网络",
+                        "关闭后可仅用玩家背包预览，无需无线终端；实际合成仍进行正常网络校验。")
                 .define("requireRsNetworkForRecipeTree", false);
         PROTECTED_ITEMS = s
-                .comment("Items that should be kept in reserve during recursive auto-crafting.",
-                        "When a recipe would consume these items, the system first crafts extra",
-                        "copies so you always keep at least 'protectedReserve' copies after crafting.",
-                        "Format: \"modid:item_id\" per line. Example: \"bossmod:boss_drop\".")
+                .comment("递归合成保留物品",
+                        "填写物品 ID；配方消耗这些物品前先补足，确保合成后仍保留指定数量。")
                 .defineList("protectedItems", List.of(),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         PROTECTED_RESERVE = s
-                .comment("Minimum copies to retain for each item in 'protectedItems'.",
-                        "Range: 1-1024.")
+                .comment("保留物品最低数量",
+                        "对保留物品列表中的每种物品设置最低保有数量。")
                 .defineInRange("protectedReserve", 2, 1, 1024);
         s.pop();
 
-        s.push("containerTransfer");
+        s.comment("容器传输").push("containerTransfer");
         CONTAINER_TRANSFER_KEY = s
-                .comment("Key code for container-to-RS transfer (default F = 70).",
-                        "See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
+                .comment("容器传输按键码",
+                        "使用 GLFW 按键码，默认 F 为 70。")
                 .defineInRange("containerTransferKey", 70, 32, 348);
         s.pop();
 
-        s.push("sidePanel");
+        s.comment("侧边面板").push("sidePanel");
         RS_SIDE_PANEL_KEY = s
-                .comment("Key code for toggling the RS Side Panel (default Y = 89).",
-                        "See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
+                .comment("侧边面板按键码",
+                        "使用 GLFW 按键码，默认 Y 为 89。")
                 .defineInRange("rsSidePanelKey", 89, 32, 348);
         RS_SIDE_PANEL_MAX_SLOTS = s
-                .comment("Maximum number of RS storage slots to show in the side panel.",
-                        "Lower values reduce network traffic and client memory usage.",
-                        "Range: 36-1024.")
+                .comment("侧边面板最大显示槽位",
+                        "降低可减少网络流量和客户端内存占用。")
                 .defineInRange("rsSidePanelMaxSlots", 256, 36, 1024);
         SIDE_PANEL_SYNC_INTERVAL = s
-                .comment("Interval in ticks for full side-panel sync (default 300 = 15s).",
-                        "Lower values = more responsive but higher network traffic.")
+                .comment("侧边面板完整同步间隔（tick）",
+                        "默认 300 tick 为 15 秒；越短响应越快，网络流量越大。")
                 .defineInRange("sidePanelSyncInterval", 300, 20, 1200);
         SIDE_PANEL_EXTRACTION_TIMEOUT = s
-                .comment("Timeout in milliseconds for side-panel extraction operations.")
+                .comment("侧边面板取出超时（毫秒）",
+                        "从网络取出物品操作的最长等待时间。")
                 .defineInRange("sidePanelExtractionTimeout", 2000, 500, 10000);
         s.pop();
 
-        s.push("anvilMemory");
+        s.comment("铁砧记忆").push("anvilMemory");
         ENABLE_ANVIL_MEMORY = s
-                .comment("Enable per-player material memory and restocking on supported anvils.")
+                .comment("启用铁砧记忆",
+                        "为支持的铁砧提供按玩家保存的材料记忆及补货。")
                 .define("enabled", true);
         ANVIL_MEMORY_RESTOCK_TARGET = s
-                .comment("Target material count when a memory entry is clicked; capped by max stack size.")
+                .comment("铁砧自动补货目标数量",
+                        "点击记忆条目时的材料目标数量，实际数量不超过物品堆叠上限。")
                 .defineInRange("restockTarget", 64, 1, 64);
         ANVIL_MEMORY_REMEMBER_NBT = s
-                .comment("Treat the same item with different NBT as separate remembered materials.")
+                .comment("记忆物品 NBT",
+                        "将物品相同但 NBT 不同的材料记为不同条目。")
                 .define("rememberNbt", true);
         ANVIL_MEMORY_PREFER_PLAYER_INVENTORY = s
-                .comment("Take matching materials from the player inventory before the RS network.")
+                .comment("优先使用玩家背包物品",
+                        "先使用玩家背包中的匹配材料，再从网络取出。")
                 .define("preferPlayerInventory", true);
         ANVIL_MEMORY_BOOKMARK_MISSING = s
-                .comment("Ask the client to add a still-missing material to JEI bookmarks.")
+                .comment("自动收藏缺少的物品",
+                        "通知客户端把仍缺少的材料加入 JEI 书签。")
                 .define("bookmarkMissing", true);
         ANVIL_MEMORY_IPN_COMPAT = s
-                .comment("Let Inventory Profiles Next fast-rename restoration fill its remaining",
-                        "material-slot shortage from RS after IPN has restored the player inventory.")
+                .comment("兼容 IPN 快速重命名",
+                        "IPN 快速重命名恢复玩家背包后，从 RS 补足材料槽的剩余缺口。")
                 .define("ipnFastRenameCompat", true);
         ANVIL_MEMORY_ADAPTERS = s
-                .comment("Enabled adapter ids. Mod integrations can register more adapters in code.")
+                .comment("启用的铁砧适配器",
+                        "填写启用的适配器 ID；模组兼容可在代码中注册更多适配器。")
                 .defineList("adapters", DEFAULT_ANVIL_MEMORY_ADAPTERS,
                         value -> value instanceof String id && !id.isBlank());
         s.pop();
 
-        s.push("rateLimits");
+        s.comment("请求限流").push("rateLimits");
         GUI_OPEN_RATE_LIMIT_MS = s
-                .comment("Minimum interval in milliseconds between remote GUI open requests.",
-                        "Applies per player to machine and supported backpack GUI requests.",
-                        "Range: 50-5000.")
+                .comment("远程界面请求最小间隔（毫秒）",
+                        "按玩家限制机器和支持的背包远程打开请求频率。")
                 .defineInRange("guiOpenRateLimitMs",
                         DEFAULT_GUI_OPEN_RATE_LIMIT_MS,
                         GuiTimingConfig.MIN_OPEN_RATE_LIMIT_MS,
                         GuiTimingConfig.MAX_OPEN_RATE_LIMIT_MS);
         s.pop();
 
-        s.push("remoteMachineGui");
+        s.comment("远程机器").push("remoteMachineGui");
         MACHINE_TAB_THRESHOLD = s
-                .comment("Maximum number of machine shortcut tabs displayed before auto-collapsing",
-                        "into a single Hub control-panel button. Set to 0 to always use Hub mode.")
+                .comment("机器快捷页签折叠阈值",
+                        "机器快捷页签超过该数量时折叠为机器中心按钮；0 表示始终使用机器中心。")
                 .defineInRange("machineTabThreshold", 0, 0, 64);
         MACHINE_HUB_TOGGLE_KEY = s
-                .comment("Key code for toggling the Machine Hub overlay on the RS Grid screen.",
-                        "Default H = 72. See GLFW key codes: https://www.glfw.org/docs/latest/group__keys.html")
+                .comment("机器中心按键码",
+                        "在 RS 网格中切换机器中心面板，GLFW 按键码默认 H 为 72。")
                 .defineInRange("machineHubToggleKey", 72, 32, 348);
         s.pop();
 
-        s.push("advanced");
+        s.comment("高级设置").push("advanced");
         s.pop();
 
         SERVER_SPEC = s.build();
@@ -1390,140 +1290,166 @@ public final class RSIntegrationConfig {
         //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
-        cl.push("sidePanel");
-        RS_SIDE_PANEL_X = cl.defineInRange("x", 100, 0, 4000);
-        RS_SIDE_PANEL_Y = cl.defineInRange("y", 100, 0, 4000);
+        cl.comment("侧边面板").push("sidePanel");
+        RS_SIDE_PANEL_X = cl.comment("侧边面板水平位置",
+                        "侧边面板左边缘的水平屏幕坐标，单位为像素。")
+                .defineInRange("x", 100, 0, 4000);
+        RS_SIDE_PANEL_Y = cl.comment("侧边面板垂直位置",
+                        "侧边面板上边缘的垂直屏幕坐标，单位为像素。")
+                .defineInRange("y", 100, 0, 4000);
         RS_SIDE_PANEL_WIDTH = cl
-                .comment("Custom panel width in pixels. 0 = use RS default (247px).",
-                        "Range: 0-600.")
+                .comment("侧边面板宽度（0 为默认）",
+                        "侧边面板宽度，单位为像素；0 使用 RS 默认宽度 247。")
                 .defineInRange("width", 0, 0, 600);
         RS_SIDE_PANEL_HEIGHT = cl
-                .comment("Custom panel height in pixels. 0 = auto-calculate from grid rows.",
-                        "Range: 0-600.")
+                .comment("侧边面板高度（0 为自动）",
+                        "侧边面板高度，单位为像素；0 按网格行数自动计算。")
                 .defineInRange("height", 0, 0, 600);
         RS_SIDE_PANEL_HIDDEN = cl
-                .comment("Collapse the side panel to a small bar.")
+                .comment("折叠侧边面板",
+                        "将侧边面板折叠为窄条。")
                 .define("hidden", false);
         SIDE_PANEL_NAVIGATION_TIMEOUT_MS = cl
-                .comment("Time allowed for returning from a remote machine GUI to the RS Grid.",
-                        "Stale navigation state is discarded after this interval. Range: 1000-30000.")
+                .comment("远程界面返回等待（毫秒）",
+                        "从远程机器界面返回 RS 网格的最长等待时间；超时丢弃旧导航状态。")
                 .defineInRange("navigationTimeoutMs",
                         DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MIN_NAVIGATION_TIMEOUT_MS,
                         GuiTimingConfig.MAX_NAVIGATION_TIMEOUT_MS);
         cl.pop();
-        cl.push("autoEat");
+        cl.comment("自动进食").push("autoEat");
         AUTO_EAT_MENU_EXPANDED = cl
-                .comment("Remember whether the compact Auto Eat flyout is expanded.")
+                .comment("展开自动进食菜单",
+                        "记住自动进食菜单是否展开。")
                 .define("menuExpanded", false);
         cl.pop();
-        cl.push("jeiOverlay");
+        cl.comment("JEI 标记").push("jeiOverlay");
         JEI_NETWORK_OVERLAY_SCALE = cl
-                .comment("Scale of the white RS/BD network count in the JEI item slot bottom-right.",
-                        "This is a local visual preference. Range: 0.4-1.0.")
+                .comment("JEI 网络库存字号比例",
+                        "JEI 物品槽右下角白色网络库存数字的缩放比例，只影响本地显示。")
                 .defineInRange("networkCountScale", 0.70D, 0.40D, 1.00D);
         JEI_CRAFTING_SHORTAGE_OVERLAY_SCALE = cl
-                .comment("Maximum scale of the red crafting shortage in the JEI item slot top-left.",
-                        "Long values still shrink automatically to fit. Range: 0.4-1.0.")
+                .comment("JEI 合成缺料字号比例",
+                        "JEI 物品槽左上角红色缺料数字的最大缩放比例；过长数字仍会自动缩小。")
                 .defineInRange("craftingShortageScale", 0.75D, 0.40D, 1.00D);
         cl.pop();
-        cl.push("tetra");
+        cl.comment("Tetra 预览").push("tetra");
         TETRA_JEI_PREVIEW_CACHE = cl
-                .comment("Keep the last JEI material hover preview visible after the cursor leaves the JEI ingredient.",
-                        "The preview is cleared when the target, slot, schematic, or workbench changes.")
+                .comment("保留 JEI 材料悬停预览",
+                        "鼠标离开 JEI 材料后保留最近的悬停预览；目标、槽位、蓝图或工作台变化时清除。")
                 .define("keepJeiMaterialPreview", true);
         cl.pop();
-        cl.push("gridSearch");
+        cl.comment("网格搜索").push("gridSearch");
         GRID_SEARCH_IDLE_BUDGET_MICROS = cl
-                .comment("RS 网格未执行特殊搜索时，每个客户端 tick 用于后台预热搜索索引的时间预算。",
+                .comment("后台预热预算（微秒 / tick）",
+                        "RS 网格未执行特殊搜索时，每个客户端 tick 用于后台预热搜索索引的时间预算。",
                         "范围：100-10000 微秒。")
                 .defineInRange("idleBudgetMicros", DEFAULT_GRID_SEARCH_IDLE_BUDGET_MICROS,
                         100, 10_000);
         GRID_SEARCH_ACTIVE_BUDGET_MICROS = cl
-                .comment("正在等待 @、# 或 $ 搜索时，每个客户端 tick 用于索引和匹配的时间预算。",
+                .comment("搜索计算预算（微秒 / tick）",
+                        "正在等待 @、# 或 $ 搜索时，每个客户端 tick 用于索引和匹配的时间预算。",
                         "范围：500-10000 微秒。")
                 .defineInRange("activeBudgetMicros", DEFAULT_GRID_SEARCH_ACTIVE_BUDGET_MICROS,
                         500, 10_000);
         GRID_SEARCH_DEBOUNCE_MS = cl
-                .comment("输入停止后开始执行特殊搜索的等待时间，避免每输入一个字符都重复扫描。",
+                .comment("输入防抖等待（毫秒）",
+                        "输入停止后开始执行特殊搜索的等待时间，避免每输入一个字符都重复扫描。",
                         "范围：0-500 毫秒。")
                 .defineInRange("debounceMs", DEFAULT_GRID_SEARCH_DEBOUNCE_MS, 0, 500);
         GRID_SEARCH_PARTIAL_REFRESH_MS = cl
-                .comment("# 搜索索引尚未完成时，部分结果刷新到网格的最小间隔。",
+                .comment("部分结果刷新间隔（毫秒）",
+                        "# 搜索索引尚未完成时，部分结果刷新到网格的最小间隔。",
                         "较小的值响应更快，较大的值可减少网格重排。范围：16-500 毫秒。")
                 .defineInRange("partialRefreshMs", DEFAULT_GRID_SEARCH_PARTIAL_REFRESH_MS,
                         16, 500);
         GRID_SEARCH_QUERY_CACHE_ENTRIES = cl
-                .comment("保留的 @、#、$ 单项搜索结果数量，用于重复搜索和继续输入时复用结果。",
+                .comment("搜索结果缓存条数",
+                        "保留的 @、#、$ 单项搜索结果数量，用于重复搜索和继续输入时复用结果。",
                         "范围：8-128。")
                 .defineInRange("queryCacheEntries", DEFAULT_GRID_SEARCH_QUERY_CACHE_ENTRIES,
                         8, 128);
         GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS = cl
-                .comment("RS 重建网格视图时，保留上一份非空搜索快照的等待时间。",
+                .comment("空快照保留等待（毫秒）",
+                        "RS 重建网格视图时，保留上一份非空搜索快照的等待时间。",
                         "用于忽略短暂的空列表，避免清空并重建全部索引。范围：0-2000 毫秒。")
                 .defineInRange("emptySnapshotGraceMs",
                         DEFAULT_GRID_SEARCH_EMPTY_SNAPSHOT_GRACE_MS, 0, 2_000);
         GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT = cl
-                .comment("倒排索引候选占当前可搜索条目的比例上限。",
+                .comment("倒排候选占比上限（%）",
+                        "倒排索引候选占当前可搜索条目的比例上限。",
                         "超过该比例时直接分片扫描，避免为接近全集的候选额外复制和求交。范围：10-100。")
                 .defineInRange("candidateIndexMaxPercent",
                         DEFAULT_GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT, 10, 100);
         GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS = cl
-                .comment("搜索文本开始成批就绪后，按多长间隔在后台重建倒排索引。",
+                .comment("候选索引重建间隔（毫秒）",
+                        "搜索文本开始成批就绪后，按多长间隔在后台重建倒排索引。",
                         "连续预热期间会合并更新，同时保留动态结果，避免为每个物品重复发布。范围：0-2000 毫秒。")
                 .defineInRange("candidateRebuildDelayMs",
                         DEFAULT_GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS, 0, 2_000);
         GRID_SEARCH_PINYIN_WORKERS = cl
-                .comment("用于生成 # 搜索拼音索引的后台线程数。",
+                .comment("拼音索引后台线程数",
+                        "用于生成 # 搜索拼音索引的后台线程数。",
                         "Minecraft tooltip 本身仍在客户端线程采集；只有纯文本转拼音在后台运行。",
                         "范围：1-4。")
                 .defineInRange("pinyinWorkers", DEFAULT_GRID_SEARCH_PINYIN_WORKERS, 1, 4);
         GRID_SEARCH_DISK_CACHE_ENABLED = cl
-                .comment("将已经完成的 RS tooltip 与拼音搜索文本保存到本地磁盘。",
+                .comment("启用磁盘搜索缓存",
+                        "将已经完成的 RS tooltip 与拼音搜索文本保存到本地磁盘。",
                         "再次启动客户端时可直接复用，避免每次进入世界都重新冷预热。")
                 .define("diskCacheEnabled", true);
         GRID_SEARCH_DISK_CACHE_ENTRIES = cl
-                .comment("磁盘搜索缓存最多保留的物品/流体变体数量。",
+                .comment("磁盘搜索缓存条目上限",
+                        "磁盘搜索缓存最多保留的物品/流体变体数量。",
                         "缓存键包含类型、注册名和 NBT，不包含数量。范围：1000-100000。")
                 .defineInRange("diskCacheEntries", DEFAULT_GRID_SEARCH_DISK_CACHE_ENTRIES,
                         1_000, 100_000);
         GRID_SEARCH_DISK_CACHE_MAX_MIB = cl
-                .comment("压缩搜索缓存允许使用的最大磁盘空间。范围：4-256 MiB。")
+                .comment("磁盘搜索缓存容量（MiB）",
+                        "压缩搜索缓存允许使用的最大磁盘空间。范围：4-256 MiB。")
                 .defineInRange("diskCacheMaxMiB", DEFAULT_GRID_SEARCH_DISK_CACHE_MAX_MIB,
                         4, 256);
         GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS = cl
-                .comment("最后一次补全 tooltip 后延迟多久异步写回磁盘。",
+                .comment("磁盘搜索缓存保存等待（毫秒）",
+                        "最后一次补全 tooltip 后延迟多久异步写回磁盘。",
                         "较长的延迟可以合并连续写入。范围：500-30000 毫秒。")
                 .defineInRange("diskCacheSaveDelayMs",
                         DEFAULT_GRID_SEARCH_DISK_CACHE_SAVE_DELAY_MS, 500, 30_000);
         LIGHTWEIGHT_SLASHBLADE_LIST_RENDERING = cl
-                .comment("在 RS 网格和 JEI 物品列表中使用轻量的 SlashBlade 图标渲染。",
+                .comment("轻量显示拔刀剑图标",
+                        "在 RS 网格和 JEI 物品列表中使用轻量的 SlashBlade 图标渲染。",
                         "保留刀身与纹理，但省略发光、3D 耐久装饰和附魔的重复模型绘制。")
                 .define("lightweightSlashBladeRendering", false);
         cl.pop();
-        cl.push("recentSearch");
+        cl.comment("搜索历史").push("recentSearch");
         RS_RECENT_SEARCH_ENABLED = cl
-                .comment("在 RS 网格搜索框下方显示按世界或服务器隔离的最近搜索记录。")
+                .comment("显示最近搜索记录",
+                        "在 RS 网格搜索框下方显示按世界或服务器隔离的最近搜索记录。")
                 .define("enabled", true);
         RS_RECENT_SEARCH_MAX_VISIBLE_ENTRIES = cl
-                .comment("搜索浮层最多显示的历史记录数量。范围：1-20。")
+                .comment("搜索记录显示条数",
+                        "搜索浮层最多显示的历史记录数量。范围：1-20。")
                 .defineInRange("maxVisibleEntries",
                         DEFAULT_RECENT_SEARCH_MAX_VISIBLE_ENTRIES, 1, 20);
         RS_RECENT_SEARCH_MAX_STORED_ENTRIES = cl
-                .comment("每个玩家在每个世界或服务器最多保存的搜索记录数量。范围：10-1000。",
+                .comment("搜索记录保存条数",
+                        "每个玩家在每个世界或服务器最多保存的搜索记录数量。范围：10-1000。",
                         "达到上限时优先删除最旧的非收藏记录。")
                 .defineInRange("maxStoredEntries",
                         DEFAULT_RECENT_SEARCH_MAX_STORED_ENTRIES, 10, 1_000);
         RS_RECENT_SEARCH_FAVORITES_ENABLED = cl
-                .comment("允许收藏搜索记录并将收藏项显示在普通记录之前。")
+                .comment("允许收藏搜索记录",
+                        "允许收藏搜索记录并将收藏项显示在普通记录之前。")
                 .define("favoritesEnabled", true);
         RS_RECENT_SEARCH_DELETE_BUTTONS_ENABLED = cl
-                .comment("在搜索历史浮层中显示单条删除和清空按钮。")
+                .comment("显示搜索记录删除按钮",
+                        "在搜索历史浮层中显示单条删除和清空按钮。")
                 .define("deleteButtonsEnabled", true);
         cl.pop();
-        cl.push("distantWorlds");
+        cl.comment("遥远世界").push("distantWorlds");
         ENABLE_DISTANT_WORLDS_HUD = cl
-                .comment("Show Lithum Altar status while looking at a Lithum Core.")
+                .comment("显示祭坛状态",
+                        "看向核心时显示祭坛状态。")
                 .define("enableHud", true);
         cl.pop();
         CLIENT_SPEC = cl.build();

@@ -286,6 +286,22 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("jei.BookmarkOverlayAccessor")) {
             return hasField(targetClassName, "bookmarkList");
         }
+        if (mixinClassName.endsWith("jei.BookmarkOverlayConfigButtonMixin")) {
+            return isClassPresent("mezz.jei.gui.overlay.IngredientGridWithNavigation")
+                    && hasField(targetClassName, "contents")
+                    && hasField(targetClassName, "screenPropertiesCache")
+                    && hasMethod(targetClassName, "getDisplayArea")
+                    && hasMethod(targetClassName, "updateBounds")
+                    && hasMethod(targetClassName, "createInputHandler");
+        }
+        if (mixinClassName.endsWith("jei.BookmarkOverlayConfigButtonV15Mixin")) {
+            return isClassPresent("mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation")
+                    && hasField(targetClassName, "contents")
+                    && hasField(targetClassName, "screenPropertiesCache")
+                    && hasMethod(targetClassName, "getDisplayArea")
+                    && hasMethod(targetClassName, "updateBounds")
+                    && hasMethod(targetClassName, "createInputHandler");
+        }
         if (mixinClassName.contains("easyvillagers.EasyVillagersTradeLockMixin")) {
             return isClassPresent("de.maxhenkel.easyvillagers.events.GuiEvents")
                     && hasMethod(targetClassName, "onCycleTrades");
