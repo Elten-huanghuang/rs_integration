@@ -8,7 +8,7 @@ public final class DiskNameStyle {
             0xD99028, 0xF2BD48, 0xFFF1B0, 0xF2BD48, 0xD99028
     };
     private static final int[] RESONANCE_GLOW = {
-            0xC58A28, 0xFFE29A, 0xFFF1B0, 0xE6B84F, 0xC58A28
+            0x65DDF5, 0x8BA8FF, 0xC398FF, 0xBDF9FF, 0x65DDF5
     };
 
     private DiskNameStyle() {}
