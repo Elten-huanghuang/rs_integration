@@ -333,7 +333,7 @@ public final class RSIntegrationConfigScreen extends Screen {
                 editor = new ConfigTheme.ConfigButton(0, 0, 99, 18, listLabel(),
                         button -> minecraft.setScreen(new ListEditorScreen(entry)));
             } else {
-                EditBox input = new EditBox(font, 0, 0, 93, 16, name(entry));
+                ClippedEditBox input = new ClippedEditBox(font, 0, 0, 93, 16, name(entry));
                 input.setMaxLength(1024);
                 input.setBordered(false);
                 input.setTextColor(TEXT);
@@ -399,7 +399,13 @@ public final class RSIntegrationConfigScreen extends Screen {
                 ConfigTheme.frame(graphics, editorX, controlY, 99, 18, 0xFFF8F6FA);
                 if (!entry.isValid()) graphics.hLine(editorX + 1, editorX + 97, controlY + 17, ERROR);
             }
-            editor.render(graphics, mouseX, mouseY, partialTick);
+            if (editor instanceof ClippedEditBox input) {
+                graphics.enableScissor(editorX + 2, controlY + 1, editorX + 97, controlY + 17);
+                input.render(graphics, mouseX, mouseY, partialTick);
+                graphics.disableScissor();
+            } else {
+                editor.render(graphics, mouseX, mouseY, partialTick);
+            }
             reset.render(graphics, mouseX, mouseY, partialTick);
         }
     }
@@ -475,6 +481,12 @@ public final class RSIntegrationConfigScreen extends Screen {
             int border = isFocused() ? ACCENT : EDITOR_BORDER;
             graphics.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), border);
             graphics.fill(getX() + 1, getY() + 1, getX() + getWidth() - 1, getY() + getHeight() - 1, EDITOR);
+        }
+    }
+
+    private static final class ClippedEditBox extends EditBox {
+        private ClippedEditBox(Font font, int x, int y, int width, int height, Component message) {
+            super(font, x, y, width, height, message);
         }
     }
 }
