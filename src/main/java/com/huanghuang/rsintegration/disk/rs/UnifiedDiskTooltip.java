@@ -18,29 +18,29 @@ public final class UnifiedDiskTooltip {
 
     public static void append(List<Component> tooltip, UUID id, View view) {
         if (id == null) {
-            tooltip.add(DiskTooltipEffects.flow(PREFIX + "uninitialized", DiskTooltipEffects.Theme.GUIXU,
-                    DiskTooltipEffects.Tone.WARNING, 0.0F));
+            tooltip.add(DiskTooltipEffects.tint(PREFIX + "uninitialized", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.WARNING));
         } else {
             UnifiedDiskSummary summary = view == null ? null : view.summary();
             if (summary == null) {
-                tooltip.add(DiskTooltipEffects.flow(PREFIX + (view != null && view.unavailable()
+                tooltip.add(DiskTooltipEffects.tint(PREFIX + (view != null && view.unavailable()
                         ? "unavailable" : "loading"), DiskTooltipEffects.Theme.GUIXU,
                         view != null && view.unavailable()
-                                ? DiskTooltipEffects.Tone.WARNING : DiskTooltipEffects.Tone.MUTED, 0.0F));
+                                ? DiskTooltipEffects.Tone.WARNING : DiskTooltipEffects.Tone.MUTED));
             } else {
-                tooltip.add(DiskTooltipEffects.flow(PREFIX + "stored_items", DiskTooltipEffects.Theme.GUIXU,
-                        DiskTooltipEffects.Tone.MAIN, 0.0F, number(summary.items())));
-                tooltip.add(DiskTooltipEffects.flow(PREFIX + "stored_fluids", DiskTooltipEffects.Theme.GUIXU,
-                        DiskTooltipEffects.Tone.FLUID, 0.18F, number(summary.fluids())));
-                tooltip.add(DiskTooltipEffects.flow(PREFIX + "item_types", DiskTooltipEffects.Theme.GUIXU,
-                        DiskTooltipEffects.Tone.MAIN, 0.36F, number(summary.itemTypes()),
+                tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_items", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.MAIN, number(summary.items())));
+                tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_fluids", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.FLUID, number(summary.fluids())));
+                tooltip.add(DiskTooltipEffects.tint(PREFIX + "item_types", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.MAIN, number(summary.itemTypes()),
                         number(summary.itemCapacity())));
-                tooltip.add(DiskTooltipEffects.flow(PREFIX + "fluid_types", DiskTooltipEffects.Theme.GUIXU,
-                        DiskTooltipEffects.Tone.FLUID, 0.54F, number(summary.fluidTypes()),
+                tooltip.add(DiskTooltipEffects.tint(PREFIX + "fluid_types", DiskTooltipEffects.Theme.GUIXU,
+                        DiskTooltipEffects.Tone.FLUID, number(summary.fluidTypes()),
                         number(summary.fluidCapacity())));
             }
-            tooltip.add(DiskTooltipEffects.flow(PREFIX + "id", DiskTooltipEffects.Theme.GUIXU,
-                    DiskTooltipEffects.Tone.MUTED, 0.7F, id.toString()));
+            tooltip.add(DiskTooltipEffects.tint(PREFIX + "id", DiskTooltipEffects.Theme.GUIXU,
+                    DiskTooltipEffects.Tone.MUTED, id.toString()));
         }
         tooltip.add(Component.empty());
         tooltip.add(DiskTooltipEffects.flow(PREFIX + "tooltip.title", DiskTooltipEffects.Theme.GUIXU,

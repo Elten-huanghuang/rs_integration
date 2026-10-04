@@ -7,12 +7,13 @@ public final class DiskTooltipEffects {
     public enum Theme { GUIXU, RESONANCE }
     public enum Tone { MAIN, FLUID, MUTED, HINT, WARNING }
 
+    // 所有磁盘提示共用鎏金色系，只通过明暗区分信息层级。
     private static final int[] GOLD = {0xDCAD48, 0xFFF1B0, 0xF4C95D, 0xDCAD48};
-    private static final int[] RESONANCE = {0x70DBF0, 0xA2B5FF, 0xD4ACFF, 0x70DBF0};
-    private static final int[] FLUID = {0x65CCD6, 0xB8FFF1, 0x88DAF0, 0x65CCD6};
-    private static final int[] MUTED = {0x91AFB8, 0xD0DFDE, 0xA5BDCC, 0x91AFB8};
-    private static final int[] HINT = {0xB5A0E8, 0xEED4FF, 0xA9D9ED, 0xB5A0E8};
-    private static final int[] WARNING = {0xF19B79, 0xFFDBA0, 0xF19B79};
+    private static final int[] RESONANCE = {0xC58A28, 0xFFE29A, 0xE6B84F, 0xC58A28};
+    private static final int[] FLUID = {0xB98224, 0xFFE9A8, 0xD6A23D, 0xB98224};
+    private static final int[] MUTED = {0x8C702D, 0xD8BD77, 0xB3934A, 0x8C702D};
+    private static final int[] HINT = {0xA8751C, 0xFFE5A1, 0xD9A83A, 0xA8751C};
+    private static final int[] WARNING = {0xA96E17, 0xFFD77A, 0xC98C22, 0xA96E17};
 
     private DiskTooltipEffects() {}
 
@@ -42,6 +43,18 @@ public final class DiskTooltipEffects {
 
     public static Component flow(String key, Theme theme, Tone tone, float phaseShift, Object... args) {
         return flow(Component.translatable(key, args), theme, tone, phaseShift);
+    }
+
+    /**
+     * 只给组件着色，不展开翻译内容。适用于容量、ID 等需要保留参数结构的行。
+     */
+    public static Component tint(Component component, Theme theme, Tone tone) {
+        int rgb = color(theme, tone, 0, System.currentTimeMillis());
+        return component.copy().withStyle(style -> style.withColor(rgb));
+    }
+
+    public static Component tint(String key, Theme theme, Tone tone, Object... args) {
+        return tint(Component.translatable(key, args), theme, tone);
     }
 
     private static int[] pulsePalette(Theme theme, Tone tone, long millis) {
