@@ -21,12 +21,14 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.Direction;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.level.BlockEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.FillBucketEvent;
 import net.minecraftforge.eventbus.api.EventListenerHelper;
 import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.ListenerList;
 import net.minecraftforge.eventbus.LockHelper;
 import net.minecraftforge.fluids.FluidStack;
@@ -43,6 +45,7 @@ import net.p3pp3rf1y.sophisticatedcore.settings.memory.MemorySettingsCategory;
 import net.p3pp3rf1y.sophisticatedcore.inventory.InventoryHandler;
 
 import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -260,7 +263,6 @@ class RSMagnetFluidCollectorTest extends BootstrapTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void collectionStopsAfterFourSourcesAndHonorsProtectionCancellation() throws Exception {
         Level level = sourceWorld();
         acceptAll();
@@ -269,21 +271,96 @@ class RSMagnetFluidCollectorTest extends BootstrapTest {
         collector.collect(level, new BlockPos(0, 64, 0), 2, player, session, upgrade, save, fluid -> true);
         verify(level, times(RSMagnetFluidCollector.SOURCE_LIMIT)).setBlock(any(), any(), anyInt());
         clearInvocations(level, session);
-        Consumer<BlockEvent.BreakEvent> protection = event -> event.setCanceled(true);
+        withCollectionListeners(event -> event.setCanceled(true), event -> fail("采液不应发送挖掘事件"), () -> {
+            collector.collect(level, new BlockPos(0, 64, 0), 2, player, session, upgrade, save, fluid -> true);
+            verify(level, never()).setBlock(any(), any(), anyInt());
+            verify(session, never()).insert(any(), any(), eq(false));
+            assertTrue(RSMagnetFluidCollector.pending(upgrade).isEmpty());
+        });
+    }
+
+    @Test
+    void collectingRiverSourcesDoesNotTriggerUltimineOrDamageHeldTool() throws Exception {
+        Level level = sourceWorld();
+        acceptAll();
+        when(level.setBlock(any(), any(), anyInt())).thenReturn(true);
+        ItemStack shovel = new ItemStack(Items.IRON_SHOVEL);
+        shovel.setDamageValue(7);
+        when(player.getMainHandItem()).thenReturn(shovel);
+        AtomicInteger bucketChecks = new AtomicInteger();
+        AtomicInteger miningEvents = new AtomicInteger();
+        withCollectionListeners(event -> {
+            bucketChecks.incrementAndGet();
+            assertSame(player, event.getEntity());
+            assertSame(level, event.getLevel());
+            assertTrue(event.getEmptyBucket().is(Items.BUCKET));
+            BlockHitResult hit = assertInstanceOf(BlockHitResult.class, event.getTarget());
+            assertTrue(level.getFluidState(hit.getBlockPos()).isSource());
+        }, event -> {
+            // 模拟连锁模组收到玩家挖掘事件后消耗手持工具耐久。
+            miningEvents.incrementAndGet();
+            shovel.setDamageValue(shovel.getDamageValue() + 1);
+        }, () -> {
+            var collector = new RSMagnetFluidCollector();
+            for (int tick = 0; tick < 3; tick++) {
+                collector.collect(level, new BlockPos(0, 64, 0), 2, player, session, upgrade, save, fluid -> true);
+            }
+        });
+        assertEquals(3 * RSMagnetFluidCollector.SOURCE_LIMIT, bucketChecks.get());
+        assertEquals(0, miningEvents.get());
+        assertEquals(7, shovel.getDamageValue());
+        verify(level, times(3 * RSMagnetFluidCollector.SOURCE_LIMIT)).setBlock(any(), any(), anyInt());
+        verify(session, times(3 * RSMagnetFluidCollector.SOURCE_LIMIT)).insert(eq(player), any(), eq(false));
+    }
+
+    @Test
+    void deniedOrExternallyHandledBucketEventDoesNotDrainOrStoreAgain() throws Exception {
+        Level level = sourceWorld();
+        acceptAll();
+        for (Event.Result result : new Event.Result[]{Event.Result.DENY, Event.Result.ALLOW}) {
+            withCollectionListeners(event -> event.setResult(result), event -> fail("采液不应发送挖掘事件"),
+                    () -> new RSMagnetFluidCollector().collect(level, BlockPos.ZERO, 0,
+                            player, session, upgrade, save, fluid -> true));
+        }
+        verify(level, never()).setBlock(any(), any(), anyInt());
+        verify(session, never()).insert(any(), any(), eq(false));
+        verifyNoInteractions(save);
+    }
+
+    @Test
+    void filteredOrFullStorageDoesNotEmitBucketInteractionEvents() throws Exception {
+        Level level = sourceWorld();
+        withCollectionListeners(event -> fail("不能采集的液体不应发送装桶事件"),
+                event -> fail("采液不应发送挖掘事件"), () -> {
+                    new RSMagnetFluidCollector().collect(level, BlockPos.ZERO, 0,
+                            player, session, upgrade, save, fluid -> false);
+                    when(session.insert(eq(player), any(), eq(true))).thenAnswer(call ->
+                            StorageOperationResult.inserted(StorageOperationMode.SIMULATE,
+                                    call.getArgument(1), ((ItemStack) call.getArgument(1)).copy()));
+                    new RSMagnetFluidCollector().collect(level, BlockPos.ZERO, 0,
+                            player, session, upgrade, save, fluid -> true);
+                });
+        verify(level, never()).setBlock(any(), any(), anyInt());
+        verify(session, never()).insert(any(), any(), eq(false));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void withCollectionListeners(Consumer<FillBucketEvent> bucketListener,
+            Consumer<BlockEvent.BreakEvent> miningListener, Runnable action) throws Exception {
         // 普通单测未经过 Forge 的事件类变换，需要显式提供运行时监听器列表。
         Field listenerCache = EventListenerHelper.class.getDeclaredField("listeners");
         listenerCache.setAccessible(true);
         var cache = (LockHelper<Class<?>, ListenerList>) listenerCache.get(null);
         cache.computeIfAbsent(BlockEvent.BreakEvent.class, ListenerList::new);
-        cache.computeIfAbsent(PlayerEvent.HarvestCheck.class, ListenerList::new);
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, BlockEvent.BreakEvent.class, protection);
+        cache.computeIfAbsent(FillBucketEvent.class, ListenerList::new);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, FillBucketEvent.class, bucketListener);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, BlockEvent.BreakEvent.class, miningListener);
         MinecraftForge.EVENT_BUS.start();
         try {
-            collector.collect(level, new BlockPos(0, 64, 0), 2, player, session, upgrade, save, fluid -> true);
-            verify(level, never()).setBlock(any(), any(), anyInt());
-            verify(session, never()).insert(any(), any(), anyBoolean());
+            action.run();
         } finally {
-            MinecraftForge.EVENT_BUS.unregister(protection);
+            MinecraftForge.EVENT_BUS.unregister(bucketListener);
+            MinecraftForge.EVENT_BUS.unregister(miningListener);
             MinecraftForge.EVENT_BUS.shutdown();
         }
     }

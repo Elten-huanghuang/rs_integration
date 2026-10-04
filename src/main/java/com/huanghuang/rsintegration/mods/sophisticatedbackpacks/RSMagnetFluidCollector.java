@@ -16,9 +16,11 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BucketPickup;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.event.entity.player.FillBucketEvent;
+import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.IFluidBlock;
 import net.minecraftforge.fluids.capability.IFluidHandler;
@@ -26,6 +28,7 @@ import net.minecraftforge.fluids.capability.wrappers.BucketPickupHandlerWrapper;
 import net.minecraftforge.fluids.capability.wrappers.FluidBlockWrapper;
 import org.slf4j.Logger;
 
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 /** 分批采集世界液体；已取出的余量随升级物品保存，避免存储变化时丢失。 */
@@ -55,8 +58,8 @@ public final class RSMagnetFluidCollector {
             IFluidHandler source = sourceHandler(level, pos, state);
             if (source == null || CraftOutputInterceptor.isInActiveZone(level, Vec3.atCenterOf(pos))) continue;
             if (!level.mayInteract(player, pos) || !player.mayUseItemAt(pos, Direction.UP, new ItemStack(Items.BUCKET))) continue;
-            if (MinecraftForge.EVENT_BUS.post(new BlockEvent.BreakEvent(level, pos, state, player))) continue;
-            if (!transfer(source, session, player, upgrade, save, filter)) continue;
+            if (!transfer(source, session, player, upgrade, save, filter,
+                    () -> canCollectSource(level, pos, player))) continue;
             if (++sources >= SOURCE_LIMIT || !pending(upgrade).isEmpty()
                     || upgrade.getOrCreateTag().getBoolean(UNCERTAIN)) break;
         }
@@ -64,6 +67,15 @@ public final class RSMagnetFluidCollector {
 
     private static int offset(long index) {
         return (int) ((index + 1) / 2) * (index % 2 == 0 ? -1 : 1);
+    }
+
+    private static boolean canCollectSource(Level level, BlockPos pos, ServerPlayer player) {
+        // 采液不是手持工具挖掘；BreakEvent 会误触发连锁挖掘及工具耐久消耗。
+        FillBucketEvent event = new FillBucketEvent(player, new ItemStack(Items.BUCKET), level,
+                new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false));
+        if (MinecraftForge.EVENT_BUS.post(event)) return false;
+        // ALLOW 表示其他模组已接管装桶，也不能再自行抽取一次。
+        return event.getResult() == Event.Result.DEFAULT;
     }
 
     static IFluidHandler sourceHandler(Level level, BlockPos pos, BlockState state) {
@@ -83,10 +95,16 @@ public final class RSMagnetFluidCollector {
 
     static boolean transfer(IFluidHandler source, StorageSession session, ServerPlayer player,
             ItemStack upgrade, Runnable save, Predicate<FluidStack> filter) {
+        return transfer(source, session, player, upgrade, save, filter, () -> true);
+    }
+
+    private static boolean transfer(IFluidHandler source, StorageSession session, ServerPlayer player,
+            ItemStack upgrade, Runnable save, Predicate<FluidStack> filter, BooleanSupplier canCollect) {
         FluidStack offered = source.drain(1000, IFluidHandler.FluidAction.SIMULATE);
         if (offered.isEmpty() || !filter.test(offered)) return false;
         ItemStack token = InkFluidSupport.token(offered);
         if (!session.insert(player, token, true).complete()) return false;
+        if (!canCollect.getAsBoolean()) return false;
         FluidStack collected = source.drain(offered, IFluidHandler.FluidAction.EXECUTE);
         if (collected.isEmpty()) return false;
         storePending(upgrade, collected, save);
