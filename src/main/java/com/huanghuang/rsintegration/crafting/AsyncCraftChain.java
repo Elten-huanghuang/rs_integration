@@ -64,6 +64,7 @@ import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
+import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceMachinePriority;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
@@ -1537,7 +1538,8 @@ public final class AsyncCraftChain {
             ResourceLocation playerDim = online.level().dimension().location();
             boolean aSame = a.dim().equals(playerDim);
             boolean bSame = b.dim().equals(playerDim);
-            return aSame == bSame ? 0 : aSame ? -1 : 1;
+            if (aSame != bSame) return aSame ? -1 : 1;
+            return IronFurnaceMachinePriority.compare(a, b);
         });
         machines = applyMachineSelection(machines, step.recipeId());
         IBatchDelegate delegate = createStepDelegate(step);
@@ -3260,8 +3262,8 @@ public final class AsyncCraftChain {
         machines.sort((a, b) -> {
             boolean aSame = a.dim().equals(playerDim);
             boolean bSame = b.dim().equals(playerDim);
-            if (aSame == bSame) return 0;
-            return aSame ? -1 : 1;
+            if (aSame != bSame) return aSame ? -1 : 1;
+            return IronFurnaceMachinePriority.compare(a, b);
         });
         machines = applyMachineSelection(machines, step.recipeId());
 
