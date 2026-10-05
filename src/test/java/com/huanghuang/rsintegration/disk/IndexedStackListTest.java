@@ -52,6 +52,20 @@ class IndexedStackListTest extends BootstrapTest {
         assertNotEquals(entry.getId(), list.add(first, 1).getId());
     }
 
+    @Test void emptyItemTagsShareThePlainIndexedEntry() {
+        IndexedStackList<ItemStack> list = new IndexedStackList<>(FrozenKey.Kind.ITEM);
+        ItemStack plain = new ItemStack(Items.STONE), emptyTag = plain.copy();
+        emptyTag.setTag(new CompoundTag());
+
+        var entry = list.add(plain, 32);
+        list.add(emptyTag, 21);
+
+        assertEquals(1, list.size());
+        assertEquals(53, list.getCount(plain, IComparer.COMPARE_NBT));
+        assertEquals(53, list.getCount(emptyTag, IComparer.COMPARE_NBT));
+        assertEquals(entry.getId(), list.getEntry(emptyTag, IComparer.COMPARE_NBT).getId());
+    }
+
     @Test void externalUnknownCallbacksReconcileOnlyRequestedKey() {
         var first = source();
         ItemStack stone = new ItemStack(Items.STONE);

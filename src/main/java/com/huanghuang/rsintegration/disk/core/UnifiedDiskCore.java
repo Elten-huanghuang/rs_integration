@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.disk.core;
 
+import com.huanghuang.rsintegration.util.ItemStackUtils;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 import java.util.UUID;
@@ -58,6 +59,7 @@ public final class UnifiedDiskCore {
     public int insertItem(ItemStack source, int amount, boolean perform) {
         checkThread();
         if (amount <= 0 || source.isEmpty()) return 0;
+        source = ItemStackUtils.normalizeEmptyTag(source);
         if (FrozenKey.plainItem(source)) {
             int slot = items.plainSlot(source.getItem());
             return slot >= 0 ? items.insertExisting(slot, amount, perform)

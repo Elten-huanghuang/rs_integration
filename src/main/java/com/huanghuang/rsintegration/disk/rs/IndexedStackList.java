@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.SaturatedTree;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
 import com.refinedmods.refinedstorage.api.storage.IStorage;
 import com.refinedmods.refinedstorage.api.storage.externalstorage.IExternalStorage;
@@ -69,7 +70,11 @@ public final class IndexedStackList<T> implements IStackList<T> {
     public void beginRebuild() { rebuilding = true; }
     public void sourceForRebuild(IStorage<?> source) { rebuilding = true; rebuildSource = source; }
     public void endRebuild() { rebuilding = false; rebuildSource = null; }
-    private FrozenKey key(T source) { return kind == FrozenKey.Kind.ITEM ? FrozenKey.queryItem((ItemStack) source) : FrozenKey.queryFluid((FluidStack) source); }
+    private FrozenKey key(T source) {
+        return kind == FrozenKey.Kind.ITEM
+                ? FrozenKey.queryItem(ItemStackUtils.normalizeEmptyTag((ItemStack) source))
+                : FrozenKey.queryFluid((FluidStack) source);
+    }
     private FrozenKey indexedKey(T source) {
         try { return key(source); }
         catch (IllegalArgumentException unsupported) { return null; }
@@ -97,7 +102,8 @@ public final class IndexedStackList<T> implements IStackList<T> {
         Entry existing = entries.get(query);
         if (existing != null) return existing;
         try {
-            FrozenKey stored = kind == FrozenKey.Kind.ITEM ? query.freezeItem((ItemStack) source)
+            ItemStack normalized = kind == FrozenKey.Kind.ITEM ? ItemStackUtils.normalizeEmptyTag((ItemStack) source) : null;
+            FrozenKey stored = kind == FrozenKey.Kind.ITEM ? query.freezeItem(normalized)
                     : query.freezeFluid((FluidStack) source);
             return ensure(stored, null);
         } catch (IllegalArgumentException unsupported) { return null; }

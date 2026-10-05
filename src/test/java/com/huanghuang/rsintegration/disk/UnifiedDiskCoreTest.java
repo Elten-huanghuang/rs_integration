@@ -34,6 +34,19 @@ class UnifiedDiskCoreTest extends BootstrapTest {
         return new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 new UnifiedDiskCore.Limits(capacity, capacity, 1048576, 268435456));
     }
+
+    @Test
+    void emptyRootTagIsNormalizedDuringItemInsertion() {
+        var core = core(4);
+        ItemStack plain = new ItemStack(Items.REDSTONE_BLOCK);
+        ItemStack emptyTag = plain.copy();
+        emptyTag.setTag(new CompoundTag());
+
+        assertEquals(32, core.insertItem(plain, 32, true));
+        assertEquals(21, core.insertItem(emptyTag, 21, true));
+        assertEquals(1, core.items.size());
+        assertEquals(53, core.items.total());
+    }
     static FrozenKey variant(int id) {
         ItemStack stack = new ItemStack(Items.STONE);
         stack.getOrCreateTag().putInt("variant", id);

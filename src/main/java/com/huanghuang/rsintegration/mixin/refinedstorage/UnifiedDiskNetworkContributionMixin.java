@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -14,9 +15,15 @@ import net.minecraftforge.fluids.FluidStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 @Mixin(value = Network.class, remap = false)
 public abstract class UnifiedDiskNetworkContributionMixin {
+    @ModifyVariable(method = "insertItem", at = @At("HEAD"), argsOnly = true, require = 1)
+    private ItemStack rsi$normalizeEmptyTag(ItemStack resource) {
+        return ItemStackUtils.normalizeEmptyTag(resource);
+    }
+
     @WrapOperation(method = {"insertItem", "insertFluid"}, at = @At(value = "INVOKE", target =
             "Lcom/refinedmods/refinedstorage/api/storage/IStorage;insert(Ljava/lang/Object;ILcom/refinedmods/refinedstorage/api/util/Action;)Ljava/lang/Object;"), require = 2)
     private Object rsi$insert(IStorage<Object> storage, Object resource, int amount, Action action, Operation<Object> original) {

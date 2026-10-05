@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.disk.rs;
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskContainerContext;
@@ -56,6 +57,7 @@ public final class UnifiedBoundDisk<T> implements IStorageDisk<T> {
         if (size <= 0) return empty();
         if (!ready() || getAccessType() == AccessType.EXTRACT || amount(source) <= 0
                 || kind == FrozenKey.Kind.ITEM && ((ItemStack) source).getItem() instanceof UnifiedDiskItem) return copy(source, size);
+        if (kind == FrozenKey.Kind.ITEM) source = cast(ItemStackUtils.normalizeEmptyTag((ItemStack) source));
         int accepted;
         try { accepted = kind == FrozenKey.Kind.ITEM
                 ? core.insertItem((ItemStack) source, size, action == Action.PERFORM)
