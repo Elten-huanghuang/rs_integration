@@ -21,6 +21,7 @@ public abstract class GridRecipeTransferSmithingMixin {
                                           boolean maxTransfer, boolean doTransfer,
                                           CallbackInfoReturnable<IRecipeTransferError> cir) {
         if (!(recipe instanceof SmithingRecipe) && !(recipe instanceof StonecutterRecipe)) return;
+        if (SmithingJeiTransferHandler.isPreflightInProgress()) return;
         cir.setReturnValue(SmithingJeiTransferHandler.intercept(container, recipe,
                 recipeSlots, player, maxTransfer, doTransfer));
     }
