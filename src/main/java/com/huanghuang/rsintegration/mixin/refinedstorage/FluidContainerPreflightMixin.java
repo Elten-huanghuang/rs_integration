@@ -7,6 +7,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
+import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.apiimpl.network.grid.handler.FluidGridHandler;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
@@ -51,7 +52,10 @@ public abstract class FluidContainerPreflightMixin {
         if (!RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER)) return;
         FluidStack selected = network.getFluidStorageCache().getList().get(id);
         if (selected == null) return;
-        FluidStack available = network.extractFluid(selected, FluidType.BUCKET_VOLUME, Action.SIMULATE);
+        // 归墟盘的索引列表对 COMPARE_QUANTITY 使用精确数量匹配；容器取液需要的是
+        // 至少一桶，因此用不带数量比较的请求，避免正好 1000 mB 时被误判为空。
+        FluidStack available = network.extractFluid(selected, FluidType.BUCKET_VOLUME,
+                IComparer.COMPARE_NBT, Action.SIMULATE);
         if (available.isEmpty() || available.getAmount() < FluidType.BUCKET_VOLUME) {
             ci.cancel();
             return;
