@@ -83,12 +83,8 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
             int targetSlots = targetMode == CraftingStationMode.SMITHING ? 3 : 1;
             if (options.size() == targetSlots) break;
         }
-        if (CraftingStationAccess.access(container).rsi$getCraftingStationMode() != targetMode) {
-            CraftingStationAccess.access(container).rsi$setCraftingStationMode(targetMode);
-            CraftingStationAccess.access(container).rsi$refreshCraftingStationSlots();
-            NetworkHandler.CHANNEL.sendToServer(new CraftingStationModePacket(targetMode));
-        }
-        NetworkHandler.CHANNEL.sendToServer(new CraftingStationJeiTransferPacket(options));
+        // 模式校验、切换和物品提取全部由服务端按顺序完成。
+        NetworkHandler.CHANNEL.sendToServer(new CraftingStationJeiTransferPacket(targetMode, options));
         return null;
     }
 }
