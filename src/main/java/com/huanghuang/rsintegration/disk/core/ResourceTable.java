@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.disk.core;
 
+import com.huanghuang.rsintegration.util.ItemStackUtils;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
@@ -66,7 +67,12 @@ public final class ResourceTable {
     int plainSlot(Object type) { return plain.getInt(type); }
     public int exactSlot(ItemStack source) {
         if (source.isEmpty()) return -1;
-        return FrozenKey.plainItem(source) ? plain.getInt(source.getItem()) : exact.getInt(FrozenKey.queryItem(source));
+        ItemStack normalized = ItemStackUtils.normalizeEmptyTag(source);
+        int slot = FrozenKey.plainItem(normalized) ? plain.getInt(normalized.getItem())
+                : exact.getInt(FrozenKey.queryItem(normalized));
+        // 兼容已经保存的空 tag 条目；新插入路径不会再创建这类条目。
+        return slot >= 0 || normalized == source || source.getTag() == null
+                ? slot : exact.getInt(FrozenKey.queryItem(source));
     }
     public int exactSlot(FluidStack source) {
         if (source.isEmpty()) return -1;

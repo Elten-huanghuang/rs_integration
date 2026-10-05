@@ -41,4 +41,17 @@ public final class ItemStackUtils {
         }
         return stack;
     }
+
+    /**
+     * 将没有任何字段的根物品标签视为没有标签。
+     * 空 tag 不携带物品身份信息，但 RS 会把它和无 tag 当成两个变体。
+     */
+    public static ItemStack normalizeEmptyTag(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || stack.getTag() == null || !stack.getTag().isEmpty()) {
+            return stack;
+        }
+        ItemStack normalized = stack.copy();
+        normalized.setTag(null);
+        return normalized;
+    }
 }

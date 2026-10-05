@@ -46,25 +46,26 @@ class UnifiedDiskLookupTest extends BootstrapTest {
         assertEquals(2, core.items.size());
     }
 
-    @Test void plainAndEmptyTagsRemainDistinctAcrossDeletionAndSlotReuse() {
+    @Test void plainAndEmptyTagsMergeAcrossDeletionAndSlotReuse() {
         var core = UnifiedDiskCoreTest.core(3);
         ItemStack plain = new ItemStack(Items.STONE), emptyTag = new ItemStack(Items.STONE);
         emptyTag.setTag(new CompoundTag());
         ItemStack variant = UnifiedDiskCoreTest.variant(1).itemStack(1);
         core.insertItem(plain, 7, true); core.insertItem(emptyTag, 8, true); core.insertItem(variant, 9, true);
         int plainSlot = core.items.exactSlot(plain), emptySlot = core.items.exactSlot(emptyTag);
-        assertNotEquals(plainSlot, emptySlot);
+        assertEquals(plainSlot, emptySlot);
+        assertEquals(15, core.items.amount(plainSlot));
         assertEquals(core.items.exactSlot(FrozenKey.item(variant)), core.items.exactSlot(variant));
-        assertEquals(0, core.insertItem(new ItemStack(Items.DIAMOND), 1, true));
+        assertEquals(1, core.insertItem(new ItemStack(Items.DIAMOND), 1, true));
         assertEquals(1, core.insertItem(plain, 1, true));
-        core.extract(FrozenKey.Kind.ITEM, plainSlot, 8, true);
+        core.extract(FrozenKey.Kind.ITEM, plainSlot, 16, true);
         assertEquals(-1, core.items.exactSlot(plain));
         assertEquals(1, core.insertItem(new ItemStack(Items.DIAMOND), 1, true));
         assertEquals(-1, core.items.exactSlot(plain));
         core.extract(FrozenKey.Kind.ITEM, core.items.exactSlot(variant), 9, true);
         assertEquals(2, core.insertItem(plain, 2, true));
         assertEquals(2, core.items.amount(core.items.exactSlot(plain)));
-        assertEquals(8, core.items.amount(emptySlot));
+        assertEquals(2, core.items.amount(core.items.exactSlot(emptyTag)));
     }
 
     @Test void queriesIgnoreTopLevelAmountsButObserveEveryTagMutation() {
