@@ -223,32 +223,34 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         }
         int top = screen.getTopHeight() + screen.getVisibleRows() * 18 + RSI_BUTTON_TOP_OFFSET;
         int step = RSI_BUTTON_SIZE + RSI_BUTTON_GAP;
-        rsi$drawModeButton(graphics, RSI_BUTTON_X, top, new ItemStack(Items.CRAFTING_TABLE),
-                CraftingStationAvailability.isAvailable(CraftingStationMode.CRAFTING),
-                mode == CraftingStationMode.CRAFTING, rsi$inside(mouseX, mouseY, RSI_BUTTON_X, top));
-        rsi$drawModeButton(graphics, RSI_BUTTON_X, top + step, new ItemStack(Items.STONECUTTER),
-                CraftingStationAvailability.isAvailable(CraftingStationMode.STONECUTTER),
-                mode == CraftingStationMode.STONECUTTER,
-                rsi$inside(mouseX, mouseY, RSI_BUTTON_X, top + step));
-        rsi$drawModeButton(graphics, RSI_BUTTON_X, top + step * 2,
-                new ItemStack(Items.SMITHING_TABLE),
-                CraftingStationAvailability.isAvailable(CraftingStationMode.SMITHING),
-                mode == CraftingStationMode.SMITHING,
-                rsi$inside(mouseX, mouseY, RSI_BUTTON_X, top + step * 2));
-        rsi$drawModeButton(graphics, RSI_BUTTON_X, top + step * 3,
-                new ItemStack(Items.ANVIL),
-                CraftingStationAvailability.isAvailable(CraftingStationMode.ANVIL),
-                mode == CraftingStationMode.ANVIL,
-                rsi$inside(mouseX, mouseY, RSI_BUTTON_X, top + step * 3));
+        int buttonIndex = 0;
+        buttonIndex = rsi$drawAvailableModeButton(graphics, mouseX, mouseY, top, buttonIndex,
+                mode, CraftingStationMode.CRAFTING, new ItemStack(Items.CRAFTING_TABLE));
+        buttonIndex = rsi$drawAvailableModeButton(graphics, mouseX, mouseY, top, buttonIndex,
+                mode, CraftingStationMode.STONECUTTER, new ItemStack(Items.STONECUTTER));
+        buttonIndex = rsi$drawAvailableModeButton(graphics, mouseX, mouseY, top, buttonIndex,
+                mode, CraftingStationMode.SMITHING, new ItemStack(Items.SMITHING_TABLE));
+        rsi$drawAvailableModeButton(graphics, mouseX, mouseY, top, buttonIndex,
+                mode, CraftingStationMode.ANVIL, new ItemStack(Items.ANVIL));
+    }
+
+    @Unique
+    private static int rsi$drawAvailableModeButton(GuiGraphics graphics, double mouseX, double mouseY,
+                                                   int top, int buttonIndex, CraftingStationMode selectedMode,
+                                                   CraftingStationMode mode, ItemStack icon) {
+        if (!CraftingStationAvailability.isAvailable(mode)) return buttonIndex;
+        int y = top + buttonIndex * (RSI_BUTTON_SIZE + RSI_BUTTON_GAP);
+        rsi$drawModeButton(graphics, RSI_BUTTON_X, y, icon,
+                selectedMode == mode, rsi$inside(mouseX, mouseY, RSI_BUTTON_X, y));
+        return buttonIndex + 1;
     }
 
     @Unique
     private static void rsi$drawModeButton(GuiGraphics graphics, int x, int y,
-                                           ItemStack icon, boolean enabled, boolean selected,
-                                           boolean hovered) {
+                                           ItemStack icon, boolean selected, boolean hovered) {
         // 直接复用 RS 侧边按钮背景，避免 RSI 自己绘制一块灰色底板。
         // RS 的普通态和高亮态分别位于 icons.png 的 v=16 和 v=35。
-        int backgroundV = enabled && (selected || hovered) ? 35 : 16;
+        int backgroundV = selected || hovered ? 35 : 16;
         graphics.blit(BaseScreen.ICONS_TEXTURE, x, y, 238, backgroundV,
                 RSI_BUTTON_SIZE, RSI_BUTTON_SIZE, 256, 256);
         graphics.renderItem(icon, x + 1, y + 1);
@@ -312,18 +314,23 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         double relX = mouseX - screen.getGuiLeft();
         double relY = mouseY - screen.getGuiTop();
         int step = RSI_BUTTON_SIZE + RSI_BUTTON_GAP;
-        CraftingStationMode mode;
-        if (rsi$inside(relX, relY, RSI_BUTTON_X, y)) mode = CraftingStationMode.CRAFTING;
-        else if (rsi$inside(relX, relY, RSI_BUTTON_X, y + step)) {
-            mode = CraftingStationMode.STONECUTTER;
-        } else if (rsi$inside(relX, relY, RSI_BUTTON_X, y + step * 2)) mode = CraftingStationMode.SMITHING;
-        else if (rsi$inside(relX, relY, RSI_BUTTON_X, y + step * 3)) {
-            mode = CraftingStationMode.ANVIL;
-        } else return;
-        if (!CraftingStationAvailability.isAvailable(mode)) {
-            cir.setReturnValue(true);
-            return;
+        CraftingStationMode mode = null;
+        int buttonIndex = 0;
+        CraftingStationMode[] modes = {
+                CraftingStationMode.CRAFTING,
+                CraftingStationMode.STONECUTTER,
+                CraftingStationMode.SMITHING,
+                CraftingStationMode.ANVIL
+        };
+        for (CraftingStationMode candidate : modes) {
+            if (!CraftingStationAvailability.isAvailable(candidate)) continue;
+            if (rsi$inside(relX, relY, RSI_BUTTON_X, y + buttonIndex * step)) {
+                mode = candidate;
+                break;
+            }
+            buttonIndex++;
         }
+        if (mode == null) return;
         if (access.rsi$getCraftingStationMode() == mode) {
             cir.setReturnValue(true);
             return;
