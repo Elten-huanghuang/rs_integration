@@ -728,7 +728,7 @@ public final class RSIntegrationConfig {
         AUTO_EAT_MAX_PER_BATCH = c
                 .comment("单次进食数量上限",
                         "每次批量进食最多吃掉的食物数量。")
-                .defineInRange("maxPerBatch", 16, 1, 1024);
+                .defineInRange("maxPerBatch", 64, 1, 1024);
         c.pop();
 
         c.comment("容器传输").push("containerTransfer");

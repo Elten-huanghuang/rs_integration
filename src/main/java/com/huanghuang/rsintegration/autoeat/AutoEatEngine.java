@@ -37,6 +37,7 @@ public final class AutoEatEngine {
      * 128/1024. Auto-eat performs storage operations and food callbacks on the
      * server thread, so an unbounded request can stall every player's tick.
      */
+    /** 每 tick 的安全分片上限；一个请求可跨多个 tick 完成。 */
     private static final int SAFE_MAX_PER_REQUEST = 16;
 
     private static final String NBT_KEY = "rsi:food_blacklist";
@@ -49,7 +50,7 @@ public final class AutoEatEngine {
     private static final Map<UUID, Integer> stackRoundRobinOffsets =
             new ConcurrentHashMap<>();
 
-    private record Request(AutoEatMode mode, List<ResourceLocation> selectedItems) {
+    private record Request(AutoEatMode mode, List<ResourceLocation> selectedItems, int eaten) {
         private Request {
             mode = mode == null ? AutoEatMode.DIVERSITY : mode;
             selectedItems = boundedSelection(selectedItems);
@@ -146,9 +147,8 @@ public final class AutoEatEngine {
 
     private AutoEatEngine() {}
 
-    private static int maxItemsPerRequest() {
-        return Math.min(SAFE_MAX_PER_REQUEST,
-                Math.max(1, RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get()));
+    private static int configuredRequestLimit() {
+        return Math.max(1, Math.min(64, RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get()));
     }
 
     // ── Public API ──────────────────────────────────────────────
@@ -156,7 +156,7 @@ public final class AutoEatEngine {
     public static void execute(ServerPlayer player, AutoEatMode mode,
                                Collection<ResourceLocation> selectedItems) {
         if (!runningTasks.add(player.getUUID())) return;
-        pendingTasks.put(player.getUUID(), new Request(mode, boundedSelection(selectedItems)));
+        pendingTasks.put(player.getUUID(), new Request(mode, boundedSelection(selectedItems), 0));
     }
 
     public static void stop(ServerPlayer player) {
@@ -177,7 +177,17 @@ public final class AutoEatEngine {
             Request request = entry.getValue();
             boolean again;
             try {
-                again = executeInner(player, request.mode(), request.selectedItems());
+                int remaining = configuredRequestLimit() - request.eaten();
+                int eaten = request.mode() == AutoEatMode.STACK && remaining > 0
+                        ? executeInner(player, request.mode(), request.selectedItems(), Math.min(16, remaining)) : 0;
+                if (request.mode() == AutoEatMode.STACK) {
+                    Request updated = new Request(request.mode(), request.selectedItems(), request.eaten() + eaten);
+                    pendingTasks.replace(playerId, request, updated);
+                    again = eaten > 0 && updated.eaten() < configuredRequestLimit();
+                } else {
+                    executeInner(player, request.mode(), request.selectedItems(), 16);
+                    again = false;
+                }
             } catch (Throwable error) {
                 RSIntegrationMod.LOGGER.error("[RSI-AutoEat] request failed for {}", playerId, error);
                 again = false;
@@ -236,6 +246,23 @@ public final class AutoEatEngine {
         updateResourceLocations(player, EFFECT_NBT_KEY, getEffectBlacklist(player), added, removed);
     }
 
+    /** 用客户端提交的完整快照替换黑名单，避免退出时增量包丢失导致显示与服务端不一致。 */
+    public static void replaceBlacklists(Player player, Set<ResourceLocation> items,
+                                         Set<ResourceLocation> effects) {
+        replaceResourceLocations(player, NBT_KEY, items);
+        replaceResourceLocations(player, EFFECT_NBT_KEY, effects);
+    }
+
+    private static void replaceResourceLocations(Player player, String key,
+                                                  Set<ResourceLocation> values) {
+        if (values == null || values.size() > AutoEatBlacklistPolicy.MAX_SIZE) return;
+        ListTag list = new ListTag();
+        for (ResourceLocation rl : values) {
+            if (rl != null) list.add(StringTag.valueOf(rl.toString()));
+        }
+        player.getPersistentData().put(key, list);
+    }
+
     private static void updateResourceLocations(Player player,
                                                 String key, Set<ResourceLocation> current,
                                                 Set<ResourceLocation> added, Set<ResourceLocation> removed) {
@@ -265,12 +292,12 @@ public final class AutoEatEngine {
 
     // ── Inner execution ─────────────────────────────────────────
 
-    private static boolean executeInner(ServerPlayer player, AutoEatMode mode,
-                                        List<ResourceLocation> selectedItems) {
+    private static int executeInner(ServerPlayer player, AutoEatMode mode,
+                                    List<ResourceLocation> selectedItems, int batchLimit) {
         Optional<AutoEatStorage> resolved = AutoEatStorage.resolve(player);
         if (resolved.isEmpty()) {
             failState(player, mode, "rsi.autoeat.error.network_unavailable", "storage_unavailable");
-            return false;
+            return 0;
         }
         AutoEatStorage storage = resolved.orElseThrow();
 
@@ -284,7 +311,7 @@ public final class AutoEatEngine {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new AutoEatSyncPacket(mode, 0,
                                 Component.translatable("rsi.autoeat.invalid_effect_config", requiredEffect)));
-                return false;
+                return 0;
             }
             ResourceLocation rl = new ResourceLocation(parts[0], parts[1]);
             MobEffect effect = ForgeRegistries.MOB_EFFECTS.getValue(rl);
@@ -296,14 +323,14 @@ public final class AutoEatEngine {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new AutoEatSyncPacket(mode, 0,
                                 Component.translatable("rsi.autoeat.missing_effect", effectName)));
-                return false;
+                return 0;
             }
         }
 
         return switch (mode) {
-            case DIVERSITY -> executeDiversity(player, storage);
-            case STACK -> executeStack(player, storage, selectedItems);
-            case DIET -> executeDiet(player, storage);
+            case DIVERSITY -> { executeDiversity(player, storage); yield 0; }
+            case STACK -> executeStack(player, storage, selectedItems, batchLimit);
+            case DIET -> { executeDiet(player, storage); yield 0; }
         };
     }
 
@@ -325,7 +352,7 @@ public final class AutoEatEngine {
 
         Set<ResourceLocation> blacklist = getBlacklist(player);
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
-        int maxPerBatch = maxItemsPerRequest();
+        int maxPerBatch = 16;
         int eaten = 0;
 
         // Collect stacks first (avoid concurrent mod during iteration)
@@ -421,13 +448,13 @@ public final class AutoEatEngine {
 
     // ── Mode 2: Stack ───────────────────────────────────────────
 
-    private static boolean executeStack(ServerPlayer player, AutoEatStorage storage,
-                                        List<ResourceLocation> selectedItems) {
+    private static int executeStack(ServerPlayer player, AutoEatStorage storage,
+                                    List<ResourceLocation> selectedItems, int maxPerBatch) {
         if (selectedItems.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
                             Component.translatable("rsi.autoeat.no_item_selected")));
-            return false;
+            return 0;
         }
 
         LinkedHashMap<ResourceLocation, List<ItemStack>> candidates = new LinkedHashMap<>();
@@ -438,7 +465,7 @@ public final class AutoEatEngine {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new AutoEatSyncPacket(AutoEatMode.STACK, 0,
                                 Component.translatable("rsi.autoeat.not_edible", selectedItem.toString())));
-                return false;
+                return 0;
             }
             candidates.put(selectedItem, new ArrayList<>());
         }
@@ -462,7 +489,7 @@ public final class AutoEatEngine {
         if (candidates.values().stream().allMatch(List::isEmpty)) {
             sendFailure(player, AutoEatMode.STACK,
                     effectBlocked ? "rsi.autoeat.effect_blacklisted" : "rsi.autoeat.result.none");
-            return false;
+            return 0;
         }
 
         // Resolve Diet tracker once (so Diet nutrition values update correctly)
@@ -477,7 +504,6 @@ public final class AutoEatEngine {
         MobEffect gnawsGift = ForgeRegistries.MOB_EFFECTS.getValue(GNAWS_GIFT);
         boolean hasGnawsGift = gnawsGift != null && player.hasEffect(gnawsGift);
 
-        int maxPerBatch = maxItemsPerRequest();
         int eaten = 0;
         boolean hungerBlocked = false;
         boolean costFailed = false;
@@ -502,7 +528,12 @@ public final class AutoEatEngine {
                         hungerBlocked = true;
                         continue;
                     }
-                    taken = storage.extract(player, template, 1, false);
+                taken = storage.extract(player, template, 1, false);
+                    if (!taken.isEmpty() && hasBlacklistedEffect(taken, player, effectBlacklist)) {
+                        returnToStorage(storage, player, taken);
+                        taken = ItemStack.EMPTY;
+                        continue;
+                    }
                     if (!taken.isEmpty()) break;
                 }
                 if (taken.isEmpty()) continue;
@@ -553,11 +584,8 @@ public final class AutoEatEngine {
             sendFailure(player, AutoEatMode.STACK,
                     hungerBlocked ? "rsi.autoeat.full" : "rsi.autoeat.result.none");
         }
-        // Stack mode is a one-shot action: the button requests one bounded
-        // batch, not a continuously running feed loop. Returning true here
-        // would leave the request in pendingTasks and make the server consume
-        // another batch on every tick while storage still contains this food.
-        return false;
+        // 返回 true 让同一个请求在后续 tick 继续分片，直到配置上限或没有可吃食物。
+        return eaten;
     }
 
     private static void returnToStorage(AutoEatStorage storage, ServerPlayer player, ItemStack stack) {
@@ -621,7 +649,7 @@ public final class AutoEatEngine {
 
         Set<ResourceLocation> blacklist = getBlacklist(player);
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
-        int maxPerBatch = maxItemsPerRequest();
+        int maxPerBatch = 16;
         int eaten = 0;
 
         List<ItemStack> stacks = new ArrayList<>();
@@ -668,6 +696,12 @@ public final class AutoEatEngine {
 
             ItemStack taken = storage.extract(player, foodToEat, 1, false);
             if (taken.isEmpty()) {
+                values.put(lowestGroup, 1.0f);
+                continue;
+            }
+
+            if (hasBlacklistedEffect(taken, player, effectBlacklist)) {
+                storage.insert(player, taken, false);
                 values.put(lowestGroup, 1.0f);
                 continue;
             }

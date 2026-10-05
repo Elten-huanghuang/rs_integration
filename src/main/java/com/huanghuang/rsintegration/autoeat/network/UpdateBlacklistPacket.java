@@ -17,13 +17,25 @@ public class UpdateBlacklistPacket {
     public final Set<ResourceLocation> removed;
     public final Set<ResourceLocation> addedEffects;
     public final Set<ResourceLocation> removedEffects;
+    public final boolean snapshot;
 
     public UpdateBlacklistPacket(Set<ResourceLocation> added, Set<ResourceLocation> removed,
                                  Set<ResourceLocation> addedEffects, Set<ResourceLocation> removedEffects) {
+        this(added, removed, addedEffects, removedEffects, false);
+    }
+
+    public UpdateBlacklistPacket(Set<ResourceLocation> items, Set<ResourceLocation> effects) {
+        this(items, Set.of(), effects, Set.of(), true);
+    }
+
+    private UpdateBlacklistPacket(Set<ResourceLocation> added, Set<ResourceLocation> removed,
+                                  Set<ResourceLocation> addedEffects, Set<ResourceLocation> removedEffects,
+                                  boolean snapshot) {
         this.added = added;
         this.removed = removed;
         this.addedEffects = addedEffects;
         this.removedEffects = removedEffects;
+        this.snapshot = snapshot;
     }
 
     public static void encode(UpdateBlacklistPacket packet, FriendlyByteBuf buf) {
@@ -31,18 +43,23 @@ public class UpdateBlacklistPacket {
         writeSet(buf, packet.removed);
         writeSet(buf, packet.addedEffects);
         writeSet(buf, packet.removedEffects);
+        buf.writeBoolean(packet.snapshot);
     }
 
     public static UpdateBlacklistPacket decode(FriendlyByteBuf buf) {
-        return new UpdateBlacklistPacket(readSet(buf), readSet(buf), readSet(buf), readSet(buf));
+        return new UpdateBlacklistPacket(readSet(buf), readSet(buf), readSet(buf), readSet(buf), buf.readBoolean());
     }
 
     public static void handle(UpdateBlacklistPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             var sender = ctx.get().getSender();
             if (sender != null && !(sender instanceof FakePlayer)) {
-                AutoEatEngine.updateBlacklist(sender, packet.added, packet.removed);
-                AutoEatEngine.updateEffectBlacklist(sender, packet.addedEffects, packet.removedEffects);
+                if (packet.snapshot) {
+                    AutoEatEngine.replaceBlacklists(sender, packet.added, packet.addedEffects);
+                } else {
+                    AutoEatEngine.updateBlacklist(sender, packet.added, packet.removed);
+                    AutoEatEngine.updateEffectBlacklist(sender, packet.addedEffects, packet.removedEffects);
+                }
             }
         });
         ctx.get().setPacketHandled(true);

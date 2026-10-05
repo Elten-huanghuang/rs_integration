@@ -416,8 +416,7 @@ public final class AutoEatScreen extends Screen {
 
             if (!addedItems.isEmpty() || !removedItems.isEmpty()
                     || !addedEffects.isEmpty() || !removedEffects.isEmpty()) {
-                NetworkHandler.CHANNEL.sendToServer(new UpdateBlacklistPacket(
-                        addedItems, removedItems, addedEffects, removedEffects));
+                NetworkHandler.CHANNEL.sendToServer(new UpdateBlacklistPacket(itemBlacklist, effectBlacklist));
             }
         }
         super.onClose();
