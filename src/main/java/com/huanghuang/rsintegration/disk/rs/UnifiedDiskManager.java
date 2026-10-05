@@ -158,7 +158,10 @@ public final class UnifiedDiskManager {
         if (disk instanceof UnifiedDiskRoot root) {
             return root.compatible() && id.equals(root.id()) && worldId.equals(root.worldId()) ? root : null;
         }
-        if (disk != null) return null;
+        if (disk != null) {
+            LOGGER.warn("[RSI] 统一盘 {} 在 RS 管理器中存在错误类型代理: {}", id, disk.getFactoryId());
+            return null;
+        }
         Entry entry = entry(id);
         if (entry.core == null) return null;
         UnifiedDiskRoot root = new UnifiedDiskRoot(this, id, worldId, entry.core.owner);
