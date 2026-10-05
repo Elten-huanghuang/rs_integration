@@ -27,23 +27,49 @@ public final class UnifiedDiskMounts {
         items[slot] = null; fluids[slot] = null;
         try {
             UnifiedDiskManager manager = UnifiedDiskManager.get(level);
-            if (!manager.enabled() || node == null || !item.initialize(stack, level, node.getOwner())) return true;
-            UnifiedDiskRoot root = manager.resolve(stack, level);
-            if (root == null) return true;
-            UnifiedDiskManager.Entry entry = manager.entry(root.id());
-            if (entry.core == null) return true;
+            if (!manager.enabled() || node == null) return true;
             Runnable retry = () -> UnifiedMountCoordinator.withCaller(node, () -> {
                 StackUtils.createStorages(level, stack, slot, items, fluids, itemWrapper, fluidWrapper);
                 return null;
             });
+            if (!item.initialize(stack, level, node.getOwner())) {
+                LOGGER.warn("[RSI] 统一盘槽位 {} 初始化失败，稍后由 RS 网络重试: dim={} pos={} id={}",
+                        slot, level.dimension().location(), node.getPos(), item.getId(stack));
+                manager.mounts().defer(node, slot, retry);
+                return true;
+            }
+            UnifiedDiskRoot root = manager.resolve(stack, level);
+            if (root == null) {
+                LOGGER.warn("[RSI] 统一盘槽位 {} 无法解析持久化代理，稍后重试: dim={} pos={} id={}",
+                        slot, level.dimension().location(), node.getPos(), item.getId(stack));
+                manager.mounts().defer(node, slot, retry);
+                return true;
+            }
+            UnifiedDiskManager.Entry entry = manager.entry(root.id());
+            if (entry.core == null) {
+                LOGGER.warn("[RSI] 统一盘槽位 {} 库存尚未加载，稍后重试: dim={} pos={} id={} error={}",
+                        slot, level.dimension().location(), node.getPos(), root.id(), entry.error);
+                manager.mounts().defer(node, slot, retry);
+                return true;
+            }
             UnifiedMountCoordinator.Lease lease = manager.mounts().acquire(root, node, slot, items, fluids, stack, retry);
-            if (lease == null) return true;
+            if (lease == null) {
+                LOGGER.debug("[RSI] 统一盘槽位等待其他挂载释放: dim={} pos={} slot={} id={}",
+                        level.dimension().location(), node.getPos(), slot, root.id());
+                return true;
+            }
             items[slot] = itemWrapper.apply(new UnifiedBoundDisk<>(lease, entry.core, FrozenKey.Kind.ITEM));
             fluids[slot] = fluidWrapper.apply(new UnifiedBoundDisk<>(lease, entry.core, FrozenKey.Kind.FLUID));
         } catch (RuntimeException e) {
             items[slot] = null; fluids[slot] = null;
             UnifiedDiskManager failed = UnifiedDiskManager.existing(level.getServer());
-            if (failed != null) failed.mounts().releaseSlot(node, slot);
+            if (failed != null) {
+                failed.mounts().releaseSlot(node, slot);
+                if (node != null) failed.mounts().defer(node, slot, () -> UnifiedMountCoordinator.withCaller(node, () -> {
+                    StackUtils.createStorages(level, stack, slot, items, fluids, itemWrapper, fluidWrapper);
+                    return null;
+                }));
+            }
             LOGGER.error("[RSI] 统一盘挂载失败，两个库存视图均禁用", e);
         }
         return true;
