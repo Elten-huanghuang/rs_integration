@@ -81,8 +81,11 @@ class IronSpellConfigMixinContractTest {
     void serverTicksRetryInvalidatedInFlightGenerationWithoutRetryingFailures() throws Exception {
         String source = Files.readString(Path.of("src/main/java/com/huanghuang/rsintegration/"
                 + "crafting/RecipeIndex.java"));
-        String refresh = source.substring(source.indexOf("public static void refreshDynamicRuntimeIfNeeded"),
-                source.indexOf("public static void warmUp(Level level)"));
+        int refreshStart = source.indexOf("void refreshDynamicRuntimeIfNeeded(Level level)");
+        int warmUpStart = source.indexOf("void warmUp(Level level)");
+        assertTrue(refreshStart >= 0, "未找到动态配方刷新方法");
+        assertTrue(warmUpStart > refreshStart, "未找到刷新方法之后的预热方法");
+        String refresh = source.substring(refreshStart, warmUpStart);
         assertTrue(refresh.contains("if (!isReady(level))"));
         assertTrue(refresh.contains("if (!generationBuildFailed()) warmUp(level);"));
         assertTrue(refresh.indexOf("if (!isReady(level))") < refresh.indexOf("hasRuntimeDrift()"),
