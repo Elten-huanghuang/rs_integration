@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
+import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -10,6 +12,8 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -53,6 +57,58 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
         assertTrue(success.cursor().is(Items.WATER_BUCKET));
         assertEquals(0, f.buckets);
         assertEquals(1000, f.amount);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"999,0", "999,1", "1000,0", "1000,1", "1000,3", "1001,1", "2000,0", "2000,1"})
+    void fillingFromLiveCachePreservesFluidIdentityWhenLastBucketClearsEntry(int amount, int cursorBuckets) {
+        Store f = new Store(amount, 4000, cursorBuckets == 0 ? 1 : 0);
+        IndexedStackList<FluidStack> cache = new IndexedStackList<>(FrozenKey.Kind.FLUID);
+        FluidStack resource = water(amount);
+        resource.getOrCreateTag().putString("variant", "last_bucket");
+        cache.add(resource);
+        FluidStack selected = cache.getStacks().iterator().next().getStack();
+        when(f.network.extractFluid(any(), anyInt(), any(Action.class))).thenAnswer(invocation -> {
+            int requested = invocation.getArgument(1);
+            FluidStack extracted = new FluidStack(resource, Math.min(f.amount, requested));
+            if (invocation.getArgument(2) == Action.PERFORM && !extracted.isEmpty()) {
+                f.amount -= extracted.getAmount();
+                // 和真实 RS 缓存一样，实际提取会同步修改之前交给终端的对象。
+                cache.remove(extracted, extracted.getAmount());
+            }
+            return extracted;
+        });
+        ItemStack cursor = cursorBuckets == 0 ? ItemStack.EMPTY : new ItemStack(Items.BUCKET, cursorBuckets);
+        var result = UnifiedGridFluidTransfer.fill(f.network, cursor, selected, Tank::new);
+        if (amount < 1000) {
+            assertEquals(0, result.transferred());
+            assertSame(cursor, result.cursor());
+            assertEquals(amount, f.amount);
+            assertEquals(cursorBuckets == 0 ? 1 : 0, f.buckets);
+            verify(f.network, never()).extractFluid(any(), anyInt(), eq(Action.PERFORM));
+            verify(f.network, never()).extractItem(any(), anyInt(), eq(Action.PERFORM));
+            return;
+        }
+        ItemStack filled = cursorBuckets > 1 ? result.overflow() : result.cursor();
+        assertTrue(filled.is(Items.WATER_BUCKET));
+        assertEquals(1, filled.getCount());
+        assertEquals(1000, result.transferred());
+        assertEquals(amount - 1000, f.amount);
+        assertEquals(amount - 1000, selected.getAmount());
+        assertEquals(amount > 1000 ? 1 : 0, cache.size());
+        assertEquals(0, f.buckets);
+        selected.setAmount(0);
+        assertTrue(result.resource().isFluidEqual(resource));
+        assertEquals(resource.getTag(), result.resource().getTag());
+        assertTrue(result.recovery().isEmpty());
+        if (cursorBuckets > 1) {
+            assertTrue(result.cursor().is(Items.BUCKET));
+            assertEquals(cursorBuckets - 1, result.cursor().getCount());
+        } else {
+            assertTrue(result.overflow().isEmpty());
+        }
+        verify(f.network, never()).insertFluid(any(), anyInt(), any(Action.class));
+        verify(f.network, never()).insertItem(any(), anyInt(), any(Action.class));
     }
 
     @Test void partialExtractionAfterSimulationRefundsFluidAndBorrowedBucket() {

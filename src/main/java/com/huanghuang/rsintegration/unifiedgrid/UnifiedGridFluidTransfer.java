@@ -33,6 +33,8 @@ public final class UnifiedGridFluidTransfer {
 
     static Result fill(INetwork network, ItemStack cursor, FluidStack fluid,
                        Function<ItemStack, IFluidHandlerItem> containers) {
+        // 取尽库存会把缓存对象清成零，整次转移必须使用独立的流体身份。
+        fluid = fluid.copy();
         boolean borrowed = cursor.isEmpty();
         ItemStack source = cursor;
         Item emptyContainer = InkFluidSupport.isInk(fluid) ? Items.GLASS_BOTTLE : Items.BUCKET;
