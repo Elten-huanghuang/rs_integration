@@ -223,6 +223,20 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         assertEquals(7, item.getStored());
     }
 
+    @Test void exactBucketVolumeFluidExtractionSucceeds() throws Exception {
+        setup(); var lease = lease(); var core = manager.entry(root.id()).core;
+        UnifiedBoundDisk<FluidStack> fluid = new UnifiedBoundDisk<>(lease, core, FrozenKey.Kind.FLUID);
+        FluidStack water = new FluidStack(Fluids.WATER, 1000);
+
+        assertTrue(fluid.insert(water, 1000, Action.PERFORM).isEmpty());
+        FluidStack selected = fluid.getStacks().iterator().next();
+        FluidStack extracted = fluid.extract(selected, 1000, IComparer.COMPARE_NBT, Action.PERFORM);
+
+        assertEquals(Fluids.WATER, extracted.getFluid());
+        assertEquals(1000, extracted.getAmount());
+        assertEquals(0, fluid.getStored());
+    }
+
     @Test void duplicateUuidAndStaleWrappersCannotOperate() throws Exception {
         setup(); var first = lease();
         DiskDriveNetworkNode other = mock(DiskDriveNetworkNode.class);

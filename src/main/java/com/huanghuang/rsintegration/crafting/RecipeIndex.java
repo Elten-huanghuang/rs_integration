@@ -153,6 +153,14 @@ public final class RecipeIndex {
         return previousTick == Long.MIN_VALUE || tick < previousTick || tick - previousTick >= 100;
     }
 
+    private static boolean isServerThread(Level level) {
+        if (level == null || !level.isClientSide()) {
+            var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+            return server != null && server.isSameThread();
+        }
+        return false;
+    }
+
     /**
      * Starts catalog generation without blocking the server thread. The
      * published maps are immutable, so readers continue using the previous
@@ -160,20 +168,35 @@ public final class RecipeIndex {
      */
     public static void warmUp(Level level) {
         if (level == null || isReady(level)) return;
-        generationBuildFailed = false;
         if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) return;
+
+        // Capture manager + revision on server thread before handing off to worker
+        RecipeManager rm = level.getRecipeManager();
+        long revision = CraftPlanningRevision.current();
+
         WARMUP_EXECUTOR.execute(() -> {
             long start = System.currentTimeMillis();
             try {
-                // Keep the original private entry point in this worker so all
-                // indexing code remains in one transaction and is published
-                // only after the complete generation has been built.
-                buildSynchronously(level);
+                BuildResult result = buildUnsynchronized(level, rm, revision);
+                if (result == null) return; // Stale manager/revision, skip publication
+
+                synchronized (RecipeIndex.class) {
+                    // Validate manager + revision still match before publishing
+                    if (source == rm && sourceRevision == revision) {
+                        RSIntegrationMod.LOGGER.debug(
+                                "[RecipeCatalog] async build stale: manager or revision changed");
+                        return;
+                    }
+                    publishBuildResult(result, rm, revision);
+                    generationBuildFailed = false;
+                }
                 RSIntegrationMod.LOGGER.info("[RecipeCatalog] async generation ready in {}ms",
                         System.currentTimeMillis() - start);
             } catch (RuntimeException | LinkageError e) {
-                invalidate();
-                generationBuildFailed = true;
+                synchronized (RecipeIndex.class) {
+                    invalidate();
+                    generationBuildFailed = true;
+                }
                 RSIntegrationMod.LOGGER.warn(
                         "[RecipeCatalog] async generation build failed; planning remains unavailable", e);
             } finally {
@@ -182,29 +205,100 @@ public final class RecipeIndex {
         });
     }
 
-    /** Compatibility fallback for callers that explicitly require a ready index now. */
+    /**
+     * Compatibility fallback for callers that explicitly require a ready index now.
+     * <p><b>Thread safety:</b> This method accesses Level, RecipeManager, and third-party
+     * Recipe objects that are NOT thread-safe. When called from non-server threads
+     * (e.g. JEI render thread in integrated client), it proceeds with a warning.
+     * <p><b>Performance warning:</b> On first call after startup/reload, this scans every
+     * recipe in the pack and may block the calling thread for hundreds of milliseconds.
+     * Normal startup uses the async {@link #warmUp(Level)} path instead.
+     */
     public static void warmUpBlocking(Level level) {
-        if (level == null) return;
-        long start = System.currentTimeMillis();
-        generationBuildFailed = false;
-        try {
-            // In an integrated client the render thread may build this dynamic
-            // catalog for JEI before the server has applied its spell configs.
-            // A complete server generation must always start from the server's
-            // final rarity/level mappings instead of reusing that client cache.
-            if (!isReady(level)
-                    && ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
-                IronSpellBooksRecipeCatalog.invalidate();
+        if (level == null || isReady(level)) return;
+
+        boolean onServerThread = isServerThread();
+        if (!onServerThread) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] warmUpBlocking called from non-server thread ({}); " +
+                    "this violates Minecraft threading contract but is required for JEI compatibility",
+                    Thread.currentThread().getName());
+        }
+
+        // Participate in BUILD_IN_FLIGHT to coordinate with warmUp
+        if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) {
+            // Another build is in flight. Wait for it to complete instead of building again.
+            RSIntegrationMod.LOGGER.debug(
+                    "[RecipeCatalog] warmUpBlocking waiting for in-flight build on thread {}",
+                    Thread.currentThread().getName());
+            for (int i = 0; i < 100 && BUILD_IN_FLIGHT.get(); i++) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    RSIntegrationMod.LOGGER.warn("[RecipeCatalog] warmUpBlocking interrupted");
+                    return;
+                }
+                if (isReady(level)) {
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RecipeCatalog] warmUpBlocking: in-flight build completed");
+                    return;
+                }
             }
-            buildSynchronously(level);
-            RSIntegrationMod.LOGGER.info("[RecipeCatalog] generation ready in {}ms",
-                    System.currentTimeMillis() - start);
+            if (BUILD_IN_FLIGHT.get()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeCatalog] warmUpBlocking timed out waiting for in-flight build");
+                return;
+            }
+            // In-flight build finished but index still not ready - fall through to build
+            if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeCatalog] warmUpBlocking giving up: concurrent build started after timeout");
+                return;
+            }
+        }
+
+        long start = System.currentTimeMillis();
+        try {
+            RecipeManager rm = level.getRecipeManager();
+            long revision = CraftPlanningRevision.current();
+
+            // In integrated client, invalidate spell cache BEFORE building so worker doesn't see stale data
+            synchronized (RecipeIndex.class) {
+                if (!isReady(level) && ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+                    IronSpellBooksRecipeCatalog.invalidate();
+                }
+            }
+
+            BuildResult result = buildUnsynchronized(level, rm, revision);
+            if (result != null) {
+                synchronized (RecipeIndex.class) {
+                    publishBuildResult(result, rm, revision);
+                    generationBuildFailed = false;
+                }
+            }
+
+            long elapsed = System.currentTimeMillis() - start;
+            if (onServerThread && elapsed > 500) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RecipeCatalog] synchronous generation blocked the server thread for {}ms", elapsed);
+            }
+            RSIntegrationMod.LOGGER.info("[RecipeCatalog] generation ready in {}ms", elapsed);
         } catch (RuntimeException | LinkageError e) {
-            invalidate();
-            generationBuildFailed = true;
+            synchronized (RecipeIndex.class) {
+                invalidate();
+                generationBuildFailed = true;
+            }
             RSIntegrationMod.LOGGER.warn(
                     "[RecipeCatalog] generation build failed; planning remains unavailable", e);
+        } finally {
+            BUILD_IN_FLIGHT.set(false);
         }
+    }
+
+    private static boolean isServerThread() {
+        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        return server != null && server.isSameThread();
     }
 
     /**

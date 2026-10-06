@@ -58,16 +58,17 @@ public final class ImmutableRecipeGraphProjector {
             return ready.graph();
         }
 
-        // Compatibility fallback for callers that invoke capture before the normal
-        // startup/reload lifecycle. Planning packets never reach this path because
-        // their readiness gate requires the complete generation.
-        RecipeIndex.warmUpBlocking(level);
-        ready = cachedProjection;
-        if (ready == null || !ready.matches(
-                level.getRecipeManager(), CraftPlanningRevision.current())) {
-            throw new IllegalStateException("Recipe graph generation is unavailable");
+        // Recipe graph generation is unavailable. Callers must wait for the
+        // async startup warmup to complete. Planning packets already gate on
+        // RecipeIndex.isReady() before reaching this point.
+        throw new RecipeGraphUnavailableException(
+                "Recipe catalog is still loading; planning requests should wait for RecipeIndex.isReady()");
+    }
+
+    public static final class RecipeGraphUnavailableException extends IllegalStateException {
+        public RecipeGraphUnavailableException(String message) {
+            super(message);
         }
-        return ready.graph();
     }
 
     /** Publishes a graph captured during the same pass that built the recipe index. */
