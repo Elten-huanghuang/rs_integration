@@ -9,10 +9,10 @@ import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -64,8 +64,8 @@ public final class UnifiedDiskItem extends Item implements IStorageDiskProvider 
     }
 
     @Override public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean selected) {
-        if (level instanceof ServerLevel serverLevel && entity instanceof Player player && !isValid(stack)) {
-            if (serverLevel.getGameTime() % 100 == 0) initialize(stack, serverLevel, player.getUUID());
+        if (level instanceof ServerLevel serverLevel && entity instanceof ServerPlayer player && !isValid(stack)) {
+            if (serverLevel.getGameTime() % 100 == 0) UnifiedDiskInventoryInitialization.request(serverLevel, player);
         }
     }
 
