@@ -226,6 +226,14 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         assertFalse(GoetyBatchDelegate.hasReadyMachine(List.of(first, second)));
     }
 
+    @Test
+    void temporaryCandidatesRemainRetryableWhenNoAltarIsReady() {
+        MachineCandidateView temporary = candidate(MachineCandidateView.State.TEMPORARY,
+                GoetyBatchDelegate.soulPreparationResult(100, 0).userMessage());
+
+        assertTrue(GoetyBatchDelegate.hasTemporaryMachine(List.of(temporary)));
+    }
+
     private static MachineCandidateView candidate(
             MachineCandidateView.State state, Component status) {
         return new MachineCandidateView("minecraft:overworld", 0, 64, 0,

@@ -274,6 +274,7 @@ public final class GenericCraftPacket {
     }
     private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
     private static final int MAX_DEFERRED_EXECUTION_REQUESTS = 64;
+    private static final int MAX_GOETY_CANDIDATE_WARNINGS = 32;
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
     private static volatile PlanRequestService PLAN_REQUESTS = newDefaultPlanRequestService();
     private static volatile TypedPreviewAdmissionQueue TYPED_PREVIEW_REQUESTS =
@@ -5420,9 +5421,13 @@ public final class GenericCraftPacket {
                 && machineCandidates.stream().noneMatch(candidate ->
                 candidate.state() == MachineCandidateView.State.READY)) {
             feasible = false;
-            blockingPrerequisiteFailure = true;
+            // 未加载祭坛和等待灵魂能量的祭坛都属于可重试状态，不应被当成永久
+            // 前置条件失败；否则每次刷新都会在绑定有效时被当成执行失败请求。
+            blockingPrerequisiteFailure |= !GoetyBatchDelegate.hasTemporaryMachine(machineCandidates);
             modWarnings.add(Component.translatable("rsi.goety.warn.no_ready_altar"));
+            int warningCount = 0;
             for (MachineCandidateView candidate : machineCandidates) {
+                if (warningCount++ >= MAX_GOETY_CANDIDATE_WARNINGS) break;
                 modWarnings.add(Component.translatable(
                         "rsi.goety.warn.altar_candidate_unavailable",
                         candidate.dimension(), candidate.x(), candidate.y(), candidate.z(),
