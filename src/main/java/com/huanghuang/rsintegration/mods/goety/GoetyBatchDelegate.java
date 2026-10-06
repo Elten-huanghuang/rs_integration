@@ -2090,10 +2090,16 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!seen.add(key)) continue;
 
             ServerLevel level = CraftPacketUtils.resolveLevel(player.server, machine.dim(), player);
-            ItemStack icon = ItemStack.EMPTY;
-            if (level != null && level.isLoaded(machine.pos())) {
-                icon = new ItemStack(level.getBlockState(machine.pos()).getBlock());
+            // 未加载的远程祭坛无法完成可靠的灵魂/结构预检。保留绑定记录供执行阶段
+            // 使用，但不要在规划阶段为每个未加载候选创建完整委托并生成临时诊断。
+            if (level == null || !level.isLoaded(machine.pos())) {
+                result.add(new MachineCandidateView(machine.dim().toString(),
+                        machine.pos().getX(), machine.pos().getY(), machine.pos().getZ(),
+                        ItemStack.EMPTY, MachineCandidateView.State.TEMPORARY,
+                        Component.translatable("rsi.machine_candidate.temporary")));
+                continue;
             }
+            ItemStack icon = new ItemStack(level.getBlockState(machine.pos()).getBlock());
 
             MachineCandidateView.State state;
             Component status;
@@ -2156,6 +2162,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     static boolean hasReadyMachine(List<MachineCandidateView> candidates) {
         return firstReadyMachine(candidates) != null;
+    }
+
+    /** 检查是否存在临时不可用的候选祭坛。 */
+    public static boolean hasTemporaryMachine(List<MachineCandidateView> candidates) {
+        return candidates != null && candidates.stream()
+                .anyMatch(candidate -> candidate.state() == MachineCandidateView.State.TEMPORARY);
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
