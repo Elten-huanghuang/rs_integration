@@ -2,9 +2,7 @@ package com.huanghuang.rsintegration.resonance.disk;
 
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
-import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
-import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskContainerContext;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
@@ -25,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, ResonanceStorageView {
 
@@ -35,10 +34,10 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, Reso
 
     private final IStorageDisk<ItemStack> delegate;
     private int abilityMask;
-    private IStorageDiskContainerContext containerContext;
     private int mutationDepth;
     private boolean mutationDirty;
     private long contentRevision;
+    private QuerySnapshot querySnapshot;
 
     public ResonanceDiskWrapper(IStorageDisk<ItemStack> delegate) {
         this(delegate, 0);
@@ -92,12 +91,42 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, Reso
             CompoundTag tag = stored.getTag();
             int slot = tag != null && tag.contains(RSI_SLOT_TAG)
                     ? tag.getInt(RSI_SLOT_TAG) : -1;
-            ItemStack detached = stored.copy();
-            rsi$stripSlotTag(detached);
-            result.add(new ResonanceStorageView.StoredStack(slot, detached));
+            ResonanceStorageView.StoredStack detached =
+                    new ResonanceStorageView.StoredStack(slot, stored);
+            rsi$stripSlotTag(detached.stack());
+            result.add(detached);
         }
         return List.copyOf(result);
     }
+
+    @Override
+    public boolean hasItem(Predicate<ItemStack> predicate) {
+        for (ResonanceStorageView.StoredStack stored : queryStacks()) {
+            if (predicate.test(stored.stack().copy())) return true;
+        }
+        return false;
+    }
+
+    @Override
+    public int countItems(Predicate<ItemStack> predicate) {
+        int count = 0;
+        for (ResonanceStorageView.StoredStack stored : queryStacks()) {
+            ItemStack stack = stored.stack().copy();
+            if (predicate.test(stack)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private List<ResonanceStorageView.StoredStack> queryStacks() {
+        // 事务内的内容版本尚未递增，不能缓存中间状态。
+        if (mutationDirty) return storedStacks();
+        if (querySnapshot == null || querySnapshot.revision() != contentRevision) {
+            querySnapshot = new QuerySnapshot(contentRevision, storedStacks());
+        }
+        return querySnapshot.stacks();
+    }
+
+    private record QuerySnapshot(long revision, List<ResonanceStorageView.StoredStack> stacks) {}
 
     public boolean hasAbility(int ability) {
         return (abilityMask & ability) == ability;
@@ -474,7 +503,6 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, Reso
 
     @Override
     public void setSettings(IStorageDiskListener listener, IStorageDiskContainerContext context) {
-        this.containerContext = context;
         delegate.setSettings(listener, context);
     }
 
@@ -485,25 +513,23 @@ public final class ResonanceDiskWrapper implements IStorageDisk<ItemStack>, Reso
     private void endMutation() {
         if (--mutationDepth == 0 && mutationDirty) {
             mutationDirty = false;
-            invalidatePublicStorageView();
+            invalidateInternalView();
         }
     }
 
     private void markInternalMutation() {
+        querySnapshot = null;
         mutationDirty = true;
         if (mutationDepth == 0) {
             mutationDirty = false;
-            invalidatePublicStorageView();
+            invalidateInternalView();
         }
     }
 
-    private void invalidatePublicStorageView() {
+    private void invalidateInternalView() {
         contentRevision++;
-        if (!(containerContext instanceof INetworkNode node)) return;
-        var network = node.getNetwork();
-        if (network != null && network.getItemStorageCache() != null) {
-            network.getItemStorageCache().invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
-        }
+        querySnapshot = null;
+        // 普通 RS 库存始终看不到共鸣内容；只更新内部版本，避免终端全量重建。
     }
 
     @Override

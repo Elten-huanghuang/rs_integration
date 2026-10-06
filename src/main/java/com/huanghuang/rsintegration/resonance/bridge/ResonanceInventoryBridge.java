@@ -24,9 +24,7 @@ public final class ResonanceInventoryBridge {
 
     public static boolean hasItem(ServerPlayer player, Predicate<ItemStack> predicate) {
         for (ResonanceStorageView view : getViews(player)) {
-            for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
-                if (predicate.test(stored.stack())) return true;
-            }
+            if (view.hasItem(predicate)) return true;
         }
         return false;
     }
@@ -34,10 +32,7 @@ public final class ResonanceInventoryBridge {
     public static int countItems(ServerPlayer player, Predicate<ItemStack> predicate) {
         int count = 0;
         for (ResonanceStorageView view : getViews(player)) {
-            for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
-                ItemStack stack = stored.stack();
-                if (predicate.test(stack)) count += stack.getCount();
-            }
+            count += view.countItems(predicate);
         }
         return count;
     }
