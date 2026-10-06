@@ -15,6 +15,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutoEatBlacklistPacketTest {
 
@@ -50,6 +51,20 @@ class AutoEatBlacklistPacketTest {
         assertEquals(Set.of(removedFood), decoded.removed);
         assertEquals(Set.of(EFFECT), decoded.addedEffects);
         assertEquals(Set.of(removedEffect), decoded.removedEffects);
+    }
+
+    @Test
+    void snapshotUpdateRoundTripsAsFullBlacklistReplacement() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        UpdateBlacklistPacket.encode(new UpdateBlacklistPacket(Set.of(FOOD), Set.of(EFFECT)), buffer);
+
+        UpdateBlacklistPacket decoded = UpdateBlacklistPacket.decode(buffer);
+
+        assertTrue(decoded.snapshot);
+        assertEquals(Set.of(FOOD), decoded.added);
+        assertEquals(Set.of(), decoded.removed);
+        assertEquals(Set.of(EFFECT), decoded.addedEffects);
+        assertEquals(Set.of(), decoded.removedEffects);
     }
 
     @Test

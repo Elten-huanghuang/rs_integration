@@ -47,6 +47,8 @@ public final class UnifiedMountCoordinator {
         private final IStorageDisk<?>[] items, fluids;
         private final ItemStack physical;
         private boolean active = true;
+        /** 区分尚未恢复的方块实体和已挂载后被移除的方块实体。 */
+        private boolean observedBlockEntity;
         Lease(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
               IStorageDisk<?>[] fluids, ItemStack physical) {
             this.root = root; this.node = node; this.slot = slot;
@@ -60,6 +62,7 @@ public final class UnifiedMountCoordinator {
             BlockEntity block = loadedBlockEntity(node);
             boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
             // 节点 read() 会先恢复槽位再进入方块实体；尚未附着期间不可读写。
+            if (same) observedBlockEntity = true;
             return same;
         }
         boolean stale() {
@@ -72,9 +75,11 @@ public final class UnifiedMountCoordinator {
             BlockEntity block = chunk.getBlockEntities().get(node.getPos());
             if (block == null) {
                 // 节点 read() 可能早于方块实体注册；区块仍在加载时保留租约，valid() 会暂时拒绝读写。
-                return false;
+                return observedBlockEntity;
             }
-            return !(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != node;
+            boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
+            if (same) observedBlockEntity = true;
+            return !same;
         }
         /** 区块/服务器重载会重建 ItemStack 对象，必须按持久化身份比较，不能比较对象引用。 */
         private boolean sameDisk(ItemStack current) {

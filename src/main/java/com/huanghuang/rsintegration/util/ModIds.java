@@ -54,6 +54,7 @@ public final class ModIds {
     public static final String SRFIX = "srfix";
     public static final String TETRA = "tetra";
     public static final String HISTORY_STAGES = "historystages";
+    public static final String ENCHANTING_INFUSER = "enchantinginfuser";
 
     // Composite ModType IDs (one mod ->multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";

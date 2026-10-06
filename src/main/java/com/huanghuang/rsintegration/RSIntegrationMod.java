@@ -687,6 +687,17 @@ public final class RSIntegrationMod {
                         List.of(), List.of("minecraft:enchanting_table"),
                         "custom_gui", true));
 
+        if (ModList.get().isLoaded(ModIds.ENCHANTING_INFUSER)) {
+            BindingEventHandler.registerTarget(
+                    new BindingEventHandler.MachineBindingTarget(
+                            ModIds.ENCHANTING_INFUSER, ModType.CUSTOM_GUI,
+                            RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS,
+                            List.of(),
+                            List.of("enchantinginfuser:enchanting_infuser",
+                                    "enchantinginfuser:advanced_enchanting_infuser"),
+                            "custom_gui", true));
+        }
+
         // Tetra 加工台按方块 ID 精确绑定，只提供远程界面。
         if (ModList.get().isLoaded(ModIds.TETRA)) {
             BindingEventHandler.registerTarget(
@@ -817,14 +828,12 @@ public final class RSIntegrationMod {
         // Compile and publish one complete recipe generation before normal server
         // ticks begin. Preview clicks never advance this work or wait behind it.
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
-                RecipeIndex
-                        .warmUp(e.getServer().overworld()));
+                RecipeIndex.warmUp(e.getServer().overworld()));
         // /reload fires this event after the new recipes have been applied and
         // before they are sent to clients. Rebuild against that completed revision.
         MinecraftForge.EVENT_BUS.addListener((OnDatapackSyncEvent e) -> {
             if (e.getPlayer() == null) {
-                RecipeIndex
-                        .warmUp(e.getPlayerList().getServer().overworld());
+                RecipeIndex.warmUp(e.getPlayerList().getServer().overworld());
             }
         });
         MinecraftForge.EVENT_BUS.addListener((TickEvent.ServerTickEvent e) -> {

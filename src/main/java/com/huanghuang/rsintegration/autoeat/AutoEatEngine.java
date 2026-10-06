@@ -176,13 +176,14 @@ public final class AutoEatEngine {
             }
             Request request = entry.getValue();
             boolean again;
+            Request current = request;
             try {
                 int remaining = configuredRequestLimit() - request.eaten();
                 int eaten = request.mode() == AutoEatMode.STACK && remaining > 0
                         ? executeInner(player, request.mode(), request.selectedItems(), Math.min(16, remaining)) : 0;
                 if (request.mode() == AutoEatMode.STACK) {
                     Request updated = new Request(request.mode(), request.selectedItems(), request.eaten() + eaten);
-                    pendingTasks.replace(playerId, request, updated);
+                    if (pendingTasks.replace(playerId, request, updated)) current = updated;
                     again = eaten > 0 && updated.eaten() < configuredRequestLimit();
                 } else {
                     executeInner(player, request.mode(), request.selectedItems(), 16);
@@ -193,7 +194,7 @@ public final class AutoEatEngine {
                 again = false;
             }
             if (!again || !runningTasks.contains(playerId)) {
-                pendingTasks.remove(playerId, request);
+                pendingTasks.remove(playerId, current);
                 runningTasks.remove(playerId);
             }
         }
@@ -290,6 +291,16 @@ public final class AutoEatEngine {
         }
     }
 
+    /**
+     * 两种自动吃模式共用同一份服务端食物黑名单。
+     * 黑名单必须在提取前后都检查，避免模式切换或同步延迟时误吃已拉黑的食物。
+     */
+    private static boolean isFoodBlacklisted(ItemStack stack, Set<ResourceLocation> blacklist) {
+        if (stack.isEmpty()) return true;
+        ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return key == null || blacklist.contains(key);
+    }
+
     // ── Inner execution ─────────────────────────────────────────
 
     private static int executeInner(ServerPlayer player, AutoEatMode mode,
@@ -350,7 +361,6 @@ public final class AutoEatEngine {
         } catch (Throwable e) { return false; }
         if (foodList == null) return false;
 
-        Set<ResourceLocation> blacklist = getBlacklist(player);
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
         int maxPerBatch = 16;
         int eaten = 0;
@@ -372,12 +382,17 @@ public final class AutoEatEngine {
                 if ((boolean) foodList_hasEaten.invoke(foodList, item)) continue;
             } catch (Throwable e) { continue; }
 
-            ResourceLocation key = ForgeRegistries.ITEMS.getKey(item);
-            if (key != null && blacklist.contains(key)) continue;
+            if (isFoodBlacklisted(stack, getBlacklist(player))) continue;
             if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
             ItemStack taken = storage.extract(player, stack, 1, false);
             if (taken.isEmpty()) continue;
+
+            // 黑名单可能在请求排队期间刚刚更新，提取后再做一次服务端校验。
+            if (isFoodBlacklisted(taken, getBlacklist(player))) {
+                returnToStorage(storage, player, taken);
+                continue;
+            }
 
             if (!payCost(storage, player, AutoEatMode.DIVERSITY)) {
                 storage.insert(player, taken, false);
@@ -647,7 +662,6 @@ public final class AutoEatEngine {
             return false;
         }
 
-        Set<ResourceLocation> blacklist = getBlacklist(player);
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
         int maxPerBatch = 16;
         int eaten = 0;
@@ -656,6 +670,8 @@ public final class AutoEatEngine {
         for (var entry : storage.items()) stacks.add(entry.stack());
 
         while (eaten < maxPerBatch && runningTasks.contains(player.getUUID())) {
+            // 不复用模式切换前的快照，确保本轮每次选食物都遵守最新黑名单。
+            Set<ResourceLocation> blacklist = getBlacklist(player);
             String lowestGroup = null;
             float lowestValue = Float.MAX_VALUE;
             for (Map.Entry<String, Float> entry : values.entrySet()) {
@@ -669,8 +685,7 @@ public final class AutoEatEngine {
             ItemStack foodToEat = null;
             for (ItemStack stack : stacks) {
                 if (!stack.getItem().isEdible()) continue;
-                ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                if (key != null && blacklist.contains(key)) continue;
+                if (isFoodBlacklisted(stack, blacklist)) continue;
                 if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
                 try {
@@ -700,8 +715,15 @@ public final class AutoEatEngine {
                 continue;
             }
 
+            // 再次读取服务端状态，防止黑名单更新与本次提取并发到达。
+            if (isFoodBlacklisted(taken, getBlacklist(player))) {
+                returnToStorage(storage, player, taken);
+                values.put(lowestGroup, 1.0f);
+                continue;
+            }
+
             if (hasBlacklistedEffect(taken, player, effectBlacklist)) {
-                storage.insert(player, taken, false);
+                returnToStorage(storage, player, taken);
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
