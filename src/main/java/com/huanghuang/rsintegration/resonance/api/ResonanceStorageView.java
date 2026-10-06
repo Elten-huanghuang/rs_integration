@@ -4,6 +4,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * Backend-neutral view of a resonance disk.
@@ -19,6 +20,23 @@ public interface ResonanceStorageView {
 
     /** Detached snapshot of the stacks and their logical slots. */
     List<StoredStack> storedStacks();
+
+    /** 谓词只接触独立副本；后端可复用私有快照并提前结束查询。 */
+    default boolean hasItem(Predicate<ItemStack> predicate) {
+        for (StoredStack stored : storedStacks()) {
+            if (predicate.test(stored.stack())) return true;
+        }
+        return false;
+    }
+
+    default int countItems(Predicate<ItemStack> predicate) {
+        int count = 0;
+        for (StoredStack stored : storedStacks()) {
+            ItemStack stack = stored.stack();
+            if (predicate.test(stack)) count += stack.getCount();
+        }
+        return count;
+    }
 
     int getStored();
 
