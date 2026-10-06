@@ -10,9 +10,9 @@
 
 不必再手动把材料搬到不同机器之间：在 JEI 选择想做的物品，RSI 会查看现有材料、制作缺少的前置物品、操作已连接的机器，并把成品送回存储网络。
 
-**当前版本：1.4.5.1 | Minecraft 1.20.1**
+**当前版本：1.5.0.3 | Minecraft 1.20.1**
 
-[1.4.5.1 更新公告](docs/RELEASE_NOTES_1.4.5.1.md) | [MC 百科完整介绍](https://www.mcmod.cn/class/29199.html)
+[1.5.0.3 更新报告](docs/RELEASE_NOTES_1.5.0.3.md) | [MC 百科完整介绍](https://www.mcmod.cn/class/29199.html)
 
 ## 运行要求
 
