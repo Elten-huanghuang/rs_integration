@@ -50,6 +50,8 @@ public final class UnifiedDiskManager {
     private final Map<UUID, Integer> tooltipRequests = new HashMap<>();
     private final UnifiedMountCoordinator mounts = new UnifiedMountCoordinator();
     private Pending pending;
+    private int activeBackups;
+    private CompletableFuture<Void> backupsFinished = CompletableFuture.completedFuture(null);
     private final UUID worldId;
     private final boolean enabled;
     private final String identityError;
@@ -75,6 +77,43 @@ public final class UnifiedDiskManager {
     public UUID worldId() { return worldId; }
     public boolean enabled() { return enabled; }
     public UnifiedMountCoordinator mounts() { return mounts; }
+
+    /** 只暂停文件提交，游戏中的存取继续更新内存；备份线程关闭凭据即可解除暂停。 */
+    public final class BackupLease implements AutoCloseable {
+        private boolean closed;
+
+        private BackupLease() {}
+
+        public void prepareFiles() throws IOException { files.prepareBackup(); }
+
+        @Override public void close() {
+            synchronized (UnifiedDiskManager.this) {
+                if (closed) return;
+                closed = true;
+                if (--activeBackups == 0) backupsFinished.complete(null);
+            }
+        }
+    }
+
+    public synchronized BackupLease beginBackup() throws IOException {
+        if (!server.isSameThread()) throw new IllegalStateException("备份检查点必须在服务器主线程冻结");
+        if (identityError != null) throw new IOException(identityError);
+        if (activeBackups == 0) {
+            flush();
+            for (Entry entry : entries.values()) {
+                if (needsSave(entry)) throw new IOException("统一盘保存失败，不能创建不完整备份: " + entry.id);
+            }
+            backupsFinished = new CompletableFuture<>();
+        }
+        activeBackups++;
+        return new BackupLease();
+    }
+
+    private synchronized boolean backingUp() { return activeBackups > 0; }
+
+    private boolean needsSave(Entry entry) {
+        return entry.core != null && (entry.core.dirty() || !entry.manifest.limits().equals(entry.core.limits));
+    }
 
     public List<UUID> savedDiskIds() throws IOException {
         if (identityError != null) throw new IOException(identityError);
@@ -122,7 +161,7 @@ public final class UnifiedDiskManager {
             UnifiedDiskCore loaded = files.load(worldId, id,
                     RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
                     RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES));
-            if (!entry.manifest.limits().equals(loaded.limits)) {
+            if (!entry.manifest.limits().equals(loaded.limits) && !backingUp()) {
                 // 先原子提交容量描述，再对外开放扩容库存；复用原页，不复制库存。
                 entry.manifest = files.save(Snapshot.freeze(loaded), entry.manifest).manifest();
             }
@@ -136,6 +175,7 @@ public final class UnifiedDiskManager {
 
     public UnifiedDiskRoot create(UUID owner) throws IOException {
         if (!enabled) throw new IOException("统一盘已关闭");
+        if (backingUp()) throw new IOException("正在备份存档，请稍后初始化统一盘");
         UUID id = UUID.randomUUID();
         Limits limits = new Limits(RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
                 RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES),
@@ -173,15 +213,15 @@ public final class UnifiedDiskManager {
     public void tick() {
         mounts.sweep();
         if (pending != null && pending.result.isDone()) finish();
-        if (pending == null && server.getTickCount() % 100 == 0) {
+        if (!backingUp() && pending == null && server.getTickCount() % 100 == 0) {
             for (Entry entry : entries.values()) {
-                if (entry.core != null && entry.core.dirty()) { schedule(entry); break; }
+                if (needsSave(entry)) { schedule(entry); break; }
             }
         }
         // 非挂载的干净核心可逐出；UUID 代理及磁盘文件继续保留。
         if (server.getTickCount() % 1200 == 0) {
             for (Entry entry : entries.values()) {
-                if (entry.core != null && !entry.core.dirty() && !mounts.mounted(entry.id)
+                if (entry.core != null && !needsSave(entry) && !mounts.mounted(entry.id)
                         && (pending == null || pending.entry != entry)) {
                     entry.summary = UnifiedDiskSummary.from(entry.core);
                     entry.core = null;
@@ -213,15 +253,20 @@ public final class UnifiedDiskManager {
     }
 
     public void flush() {
+        if (backingUp()) return;
         if (pending != null) finish();
         for (Entry entry : entries.values()) {
-            if (entry.core != null && entry.core.dirty()) { schedule(entry); finish(); }
+            if (needsSave(entry)) { schedule(entry); finish(); }
         }
     }
 
     public static void stop(MinecraftServer server) {
         UnifiedDiskManager manager = SERVERS.get(server);
         if (manager == null) return;
+        CompletableFuture<Void> backups;
+        synchronized (manager) { backups = manager.backupsFinished; }
+        // 备份凭据由后台线程直接释放，不依赖已停止的服务器任务队列。
+        backups.join();
         manager.flush();
         manager.writer.shutdown();
         manager.mounts.clear();

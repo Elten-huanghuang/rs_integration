@@ -15,11 +15,14 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.DirectoryStream;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -36,6 +39,7 @@ public final class DiskFileStore {
     public static final int FORMAT = 1;
     private static final int SEGMENT_BYTES = 4 * 1024 * 1024;
     private static final int MANIFEST_BYTES = 1048576;
+    private static final long PAGE_RETENTION_MILLIS = Duration.ofDays(1).toMillis();
     public record PageFiles(List<String> keys, String amounts) {
         public PageFiles { keys = List.copyOf(keys); }
     }
@@ -76,7 +80,11 @@ public final class DiskFileStore {
     }
 
     public Manifest manifest(UUID id) throws IOException {
-        try (DataInputStream input = input(readChecked(directory(id).resolve("manifest.bin"), MANIFEST_BYTES))) {
+        return manifest(directory(id).resolve("manifest.bin"), id);
+    }
+
+    private Manifest manifest(Path file, UUID id) throws IOException {
+        try (DataInputStream input = input(readChecked(file, MANIFEST_BYTES))) {
             if (input.readInt() != FORMAT) throw new IOException("不支持的统一盘格式");
             UUID world = uuid(input), disk = uuid(input), owner = input.readBoolean() ? uuid(input) : null;
             if (!disk.equals(id)) throw new IOException("统一盘 manifest 身份不一致");
@@ -111,6 +119,10 @@ public final class DiskFileStore {
     public Saved save(Snapshot snapshot, Manifest previous) throws IOException {
         Path directory = directory(snapshot.disk);
         Files.createDirectories(directory);
+        Path current = directory.resolve("manifest.bin");
+        if (Files.exists(current) ? previous == null || !manifest(snapshot.disk).equals(previous) : previous != null) {
+            throw new IOException("统一盘检查点已改变或缺失，拒绝覆盖旧库存");
+        }
         if (previous != null && (!previous.disk.equals(snapshot.disk) || !previous.world.equals(snapshot.world)
                 || !previous.limits.expandEntries(snapshot.limits.items(), snapshot.limits.fluids())
                 .equals(snapshot.limits))) throw new IOException("提交来源身份或容量不一致");
@@ -122,35 +134,70 @@ public final class DiskFileStore {
         Manifest result = new Manifest(snapshot.world, snapshot.disk, snapshot.owner, snapshot.limits,
                 previous == null ? 1 : Math.addExact(previous.commit, 1), items, fluids);
         byte[] encoded = encodeManifest(result);
-        Path current = directory.resolve("manifest.bin");
+        beforeCommit.run();
+        for (Path page : referencedPages(directory, result)) {
+            if (!Files.isRegularFile(page)) throw new NoSuchFileException(page.toString());
+        }
         // 保留上一完整检查点；加载不自动猜测未提交的临时页。
         if (Files.exists(current)) writeAtomic(directory.resolve("manifest.previous.bin"), readChecked(current, MANIFEST_BYTES));
-        beforeCommit.run();
         writeAtomic(current, encoded);
         collectPages(directory, result, previous);
         return new Saved(result, writes[0], writes[1]);
     }
 
     private void collectPages(Path directory, Manifest current, Manifest previous) {
-        Set<String> keep = new HashSet<>();
-        for (Manifest manifest : new Manifest[] {current, previous}) {
-            if (manifest == null) continue;
-            for (List<PageFiles> pages : List.of(manifest.items, manifest.fluids)) {
-                for (PageFiles page : pages) { keep.addAll(page.keys); keep.add(page.amounts); }
-            }
-        }
-        // 保存已成功后再收集，失败只留下可诊断孤页；预算限制每次最多 512 个。
-        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {
-            int removed = 0;
-            for (Path file : files) {
-                String name = file.getFileName().toString();
-                if (!name.matches("(item|fluid)-[0-9]{1,4}-(key|amount)-[0-9a-f]{64}\\.bin") || keep.contains(name)) continue;
-                Files.delete(file);
-                if (++removed >= 512) break;
+        try {
+            Set<Path> keep = referencedPages(directory, current);
+            if (previous != null) keep.addAll(referencedPages(directory, previous));
+            long cutoff = System.currentTimeMillis() - PAGE_RETENTION_MILLIS;
+            // 除备份期间暂停提交外，再延迟回收，给外部复制和历史检查点留下恢复窗口。
+            try (DirectoryStream<Path> paths = Files.newDirectoryStream(directory)) {
+                int removed = 0;
+                for (Path file : paths) {
+                    String name = file.getFileName().toString();
+                    if (!name.matches("(item|fluid)-[0-9]{1,4}-(key|amount)-[0-9a-f]{64}\\.bin")
+                            || keep.contains(file) || Files.getLastModifiedTime(file).toMillis() >= cutoff) continue;
+                    Files.delete(file);
+                    if (++removed >= 512) break;
+                }
             }
         } catch (IOException ignored) {
-            // GC 失败不能将已提交 manifest 报成保存失败；未引用页以后继续回收。
+            // 回收失败不能将已提交检查点报成保存失败。
         }
+    }
+
+    /** 备份期间暂停提交后调用；让按修改时间筛选的增量备份携带完整检查点依赖。 */
+    public void prepareBackup() throws IOException {
+        UUID world = worldIdentity();
+        Set<Path> dependencies = new HashSet<>();
+        dependencies.add(root.resolve("world.bin"));
+        for (UUID id : savedDiskIds()) {
+            Path directory = directory(id);
+            for (String name : List.of("manifest.bin", "manifest.previous.bin")) {
+                Path file = directory.resolve(name);
+                if (!Files.exists(file)) continue;
+                Manifest manifest = manifest(file, id);
+                if (!manifest.world.equals(world)) throw new IOException("备份中的统一盘属于另一个存档: " + id);
+                dependencies.add(file);
+                for (Path page : referencedPages(directory, manifest)) {
+                    reference(directory, page.getFileName().toString());
+                    dependencies.add(page);
+                }
+            }
+        }
+        FileTime timestamp = FileTime.fromMillis(System.currentTimeMillis() + 1);
+        for (Path file : dependencies) Files.setLastModifiedTime(file, timestamp);
+    }
+
+    private Set<Path> referencedPages(Path directory, Manifest manifest) throws IOException {
+        Set<Path> result = new HashSet<>();
+        for (List<PageFiles> pages : List.of(manifest.items, manifest.fluids)) {
+            for (PageFiles page : pages) {
+                for (String name : page.keys) result.add(pagePath(directory, name));
+                result.add(pagePath(directory, page.amounts));
+            }
+        }
+        return result;
     }
 
     public UnifiedDiskCore load(UUID worldId, UUID diskId) throws IOException {
@@ -317,11 +364,15 @@ public final class DiskFileStore {
     }
 
     private Path reference(Path directory, String name) throws IOException {
-        if (!name.matches("(item|fluid)-[0-9]{1,4}-(key|amount)-[0-9a-f]{64}\\.bin")) throw new IOException("非法页面文件名");
-        Path file = directory.resolve(name);
+        Path file = pagePath(directory, name);
         byte[] body = readChecked(file, SEGMENT_BYTES);
         if (!name.endsWith("-" + HexFormat.of().formatHex(digest(body)) + ".bin")) throw new IOException("页面内容地址校验失败");
         return file;
+    }
+
+    private Path pagePath(Path directory, String name) throws IOException {
+        if (!name.matches("(item|fluid)-[0-9]{1,4}-(key|amount)-[0-9a-f]{64}\\.bin")) throw new IOException("非法页面文件名");
+        return directory.resolve(name);
     }
 
     private Path directory(UUID id) { return root.resolve(id.toString()); }
