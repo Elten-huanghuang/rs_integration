@@ -10,14 +10,19 @@ import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import com.refinedmods.refinedstorage.integration.jei.IngredientTracker;
 import com.refinedmods.refinedstorage.util.ItemStackKey;
 import io.netty.buffer.Unpooled;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,6 +33,43 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class UnifiedGridViewTest extends BootstrapTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void idSortKeepsItemsBeforeFluidsAndUsesNumericRegistryOrder(boolean descending) {
+        try (MockedStatic<RSGridSearchCache> search = mockStatic(RSGridSearchCache.class)) {
+            search.when(() -> RSGridSearchCache.beforeForceSort(any(), any())).thenReturn(true);
+            Fixture f = new Fixture();
+            when(f.grid.getSortingType()).thenReturn(IGrid.SORTING_TYPE_ID);
+            when(f.grid.getSortingDirection()).thenReturn(descending
+                    ? IGrid.SORTING_DIRECTION_DESCENDING : IGrid.SORTING_DIRECTION_ASCENDING);
+            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 0, true, true,
+                    new UnifiedGridEntry(1, 5, true, UUID.randomUUID(), null, new ItemStack(Items.DIAMOND), null),
+                    new UnifiedGridEntry(2, 5, true, UUID.randomUUID(), null, new ItemStack(Items.STONE), null),
+                    new UnifiedGridEntry(3, 5, true, UUID.randomUUID(), null, new ItemStack(Items.APPLE), null)));
+            f.view.apply(f.packet(GridResourceKind.FLUID, 1, 0, true, true,
+                    new UnifiedGridEntry(1, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.WATER, 1), null),
+                    new UnifiedGridEntry(2, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.LAVA, 1), null),
+                    new UnifiedGridEntry(3, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.FLOWING_WATER, 1), null)));
+            f.view.forceSort();
+            List<IGridStack> sorted = f.view.getStacks();
+            assertEquals(6, sorted.size());
+            assertTrue(sorted.subList(0, 3).stream().allMatch(stack -> stack.getIngredient() instanceof ItemStack),
+                    "切换排序方向时仍然先显示物品");
+            assertTrue(sorted.subList(3, 6).stream().allMatch(stack -> stack.getIngredient() instanceof FluidStack));
+            // RS 原版 ID 比较器在 DESCENDING 时使用整数正序，ASCENDING 时使用整数倒序。
+            Comparator<Integer> order = descending ? Comparator.naturalOrder() : Comparator.reverseOrder();
+            List<Integer> expectedItems = List.of(Item.getId(Items.DIAMOND), Item.getId(Items.STONE), Item.getId(Items.APPLE))
+                    .stream().sorted(order).toList();
+            List<Integer> expectedFluids = List.of(BuiltInRegistries.FLUID.getId(Fluids.WATER),
+                    BuiltInRegistries.FLUID.getId(Fluids.LAVA), BuiltInRegistries.FLUID.getId(Fluids.FLOWING_WATER))
+                    .stream().sorted(order).toList();
+            assertEquals(expectedItems, sorted.subList(0, 3).stream()
+                    .map(stack -> Item.getId(((ItemStack) stack.getIngredient()).getItem())).toList());
+            assertEquals(expectedFluids, sorted.subList(3, 6).stream()
+                    .map(stack -> BuiltInRegistries.FLUID.getId(((FluidStack) stack.getIngredient()).getFluid())).toList());
+        }
+    }
+
     @Test void bothKindsRenderAndQuantityDeltaKeepsObjectAndOrderingWithoutRebuilding() {
         try (MockedStatic<RSGridSearchCache> search = mockStatic(RSGridSearchCache.class)) {
             search.when(() -> RSGridSearchCache.beforeForceSort(any(), any())).thenReturn(true);

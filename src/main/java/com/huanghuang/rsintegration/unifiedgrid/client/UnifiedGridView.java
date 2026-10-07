@@ -17,6 +17,7 @@ import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import com.refinedmods.refinedstorage.screen.grid.stack.ItemGridStack;
 import com.refinedmods.refinedstorage.screen.grid.stack.FluidGridStack;
 import com.refinedmods.refinedstorage.screen.grid.sorting.IGridSorter;
+import com.refinedmods.refinedstorage.screen.grid.sorting.IdGridSorter;
 import com.refinedmods.refinedstorage.screen.grid.sorting.SortingDirection;
 import com.refinedmods.refinedstorage.screen.grid.view.IGridView;
 import com.refinedmods.refinedstorage.util.StackUtils;
@@ -249,8 +250,10 @@ public final class UnifiedGridView implements IGridView {
             if (direction == SortingDirection.DESCENDING) quantities = quantities.reversed();
             compare = Comparator.comparingInt(this::kindId).thenComparing(quantities);
         } else if (type == IGrid.SORTING_TYPE_ID) {
-            compare = Comparator.comparingInt(this::kindId).thenComparing(this::registryName);
-            if (direction == SortingDirection.DESCENDING) compare = compare.reversed();
+            // 类型分组固定，组内复用 RS 原生注册表整数 ID 排序及方向规则。
+            IGridSorter ids = new IdGridSorter();
+            compare = Comparator.comparingInt(this::kindId)
+                    .thenComparing((left, right) -> ids.compare(left, right, direction));
         } else {
             compare = (left, right) -> GridScreen.getDefaultSorter().compare(left, right, direction);
             for (IGridSorter sorter : GridScreen.getSorters()) if (sorter.isApplicable(grid))
