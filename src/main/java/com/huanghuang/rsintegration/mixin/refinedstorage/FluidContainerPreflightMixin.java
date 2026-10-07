@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidTransfer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -33,8 +33,8 @@ public abstract class FluidContainerPreflightMixin {
     @Inject(method = "onExtract", at = @At("HEAD"), cancellable = true)
     private void rsi$extractInkBottle(ServerPlayer player, UUID id, boolean shift, CallbackInfo ci) {
         FluidStack selected = network.getFluidStorageCache().getList().get(id);
-        if (selected == null || !InkFluidSupport.isInk(selected)) return;
-        // 原生路径要求至少 1000 mB 并且只取桶，墨水必须单独执行完整的权限与菜单校验。
+        if (selected == null || !AlchemistBottleSupport.canBottle(selected)) return;
+        // 原生路径要求至少 1000 mB 并且只取桶，瓶装流体需要单独校验权限与菜单。
         ci.cancel();
         if (!(player.containerMenu instanceof GridContainerMenu menu)
                 || !(menu.getGrid() instanceof INetworkAwareGrid grid) || grid.getNetwork() != network

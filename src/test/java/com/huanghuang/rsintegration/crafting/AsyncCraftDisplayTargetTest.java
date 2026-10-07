@@ -14,7 +14,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistRecipeCatalog;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Constructor;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,6 +73,7 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
     @Test
     void cauldronDisplayResolvesRuntimeCatalogOutsideRecipeManager() throws Exception {
         MinecraftServer server = server();
@@ -83,12 +84,17 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
                 type, new ResourceLocation("test", "machine"));
         IronSpellBooksRecipe recipe = mock(IronSpellBooksRecipe.class);
         // 直接安装运行时目录快照，测试真实 byId 查询；无需启动 Iron 法术注册环境。
-        Field catalogField = IronSpellBooksRecipeCatalog.class.getDeclaredField("catalog");
+        Field catalogField = IronAlchemistRecipeCatalog.class.getDeclaredField("CATALOGS");
         catalogField.setAccessible(true);
-        Object previous = catalogField.get(null);
-        Constructor<?> constructor = catalogField.getType().getDeclaredConstructor(Map.class, Map.class, long.class);
-        constructor.setAccessible(true);
-        catalogField.set(null, constructor.newInstance(Map.of(step.recipeId(), recipe), Map.of(), 1L));
+        Map<RecipeManager, List<IronSpellBooksRecipe>> catalogs =
+                (Map<RecipeManager, List<IronSpellBooksRecipe>>) catalogField.get(null);
+        Map<RecipeManager, List<IronSpellBooksRecipe>> previousCatalogs = new LinkedHashMap<>(catalogs);
+        Field idsField = IronAlchemistRecipeCatalog.class.getDeclaredField("BY_ID");
+        idsField.setAccessible(true);
+        Map<ResourceLocation, IronSpellBooksRecipe> ids = (Map<ResourceLocation, IronSpellBooksRecipe>) idsField.get(null);
+        Map<ResourceLocation, IronSpellBooksRecipe> previousIds = new LinkedHashMap<>(ids);
+        catalogs.put(server.getRecipeManager(), List.of(recipe));
+        ids.put(step.recipeId(), recipe);
         try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
             handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY))
                     .thenReturn(new ItemStack(Items.POTION));
@@ -97,7 +103,10 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
             assertTrue(chain.nextStatusSnapshot().nodes().get(0).displayOutput().is(Items.POTION));
             assertNoExecutionTarget(chain);
         } finally {
-            catalogField.set(null, previous);
+            catalogs.clear();
+            catalogs.putAll(previousCatalogs);
+            ids.clear();
+            ids.putAll(previousIds);
         }
     }
 
@@ -149,6 +158,7 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         when(server.getRecipeManager()).thenReturn(recipes);
         when(recipes.byKey(any())).thenReturn(Optional.empty());
         ServerLevel level = mock(ServerLevel.class);
+        when(level.getRecipeManager()).thenReturn(recipes);
         when(server.overworld()).thenReturn(level);
         when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
         return server;

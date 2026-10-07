@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import com.refinedmods.refinedstorage.RS;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -37,9 +37,9 @@ public final class UnifiedGridFluidTransfer {
         fluid = fluid.copy();
         boolean borrowed = cursor.isEmpty();
         ItemStack source = cursor;
-        Item emptyContainer = InkFluidSupport.isInk(fluid) ? Items.GLASS_BOTTLE : Items.BUCKET;
+        Item emptyContainer = AlchemistBottleSupport.canBottle(fluid) ? Items.GLASS_BOTTLE : Items.BUCKET;
         if (borrowed) {
-            // 空手从网络取一个匹配容器，墨水用玻璃瓶，其余流体沿用桶。
+            // 空手从网络取匹配容器，墨水和药水使用玻璃瓶。
             if (emptyContainer == Items.BUCKET && fluid.getFluid().getBucket() == Items.AIR) return unchanged(cursor);
             ItemStack bucket = network.extractItem(new ItemStack(emptyContainer), 1, Action.SIMULATE);
             if (bucket == null || !bucket.is(emptyContainer) || bucket.getCount() != 1) return unchanged(cursor);

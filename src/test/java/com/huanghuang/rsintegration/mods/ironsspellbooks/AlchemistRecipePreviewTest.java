@@ -9,6 +9,7 @@ import mezz.jei.api.recipe.IFocusGroup;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
@@ -71,6 +72,29 @@ class AlchemistRecipePreviewTest extends BootstrapTest {
                     machine, List.of(new ItemStack(Items.PAPER)), new ItemStack(Items.INK_SAC), "");
             assertEquals(machine == IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON, category().isHandled(recipe));
         }
+    }
+
+    @Test
+    void brewingPreviewUsesExactFluidRatioAndPlacesPhysicalByproductSeparately() {
+        ItemStack inputFluid = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), new FluidStack(Fluids.WATER, 1000));
+        IronSpellBooksRecipe recipe = IronSpellBooksRecipe.brewRecipe(new ResourceLocation("test", "brew"),
+                inputFluid, Ingredient.of(Items.AMETHYST_SHARD), List.of(token(), new ItemStack(Items.GLASS_BOTTLE)));
+        IRecipeLayoutBuilder builder = mock(IRecipeLayoutBuilder.class);
+        IRecipeSlotBuilder fluid = slot(), reagent = slot(), output = slot(), byproduct = slot();
+        when(builder.addInputSlot(8, 8)).thenReturn(fluid);
+        when(builder.addInputSlot(36, 8)).thenReturn(reagent);
+        when(builder.addOutputSlot(118, 8)).thenReturn(output);
+        when(builder.addOutputSlot(90, 30)).thenReturn(byproduct);
+        doReturn(slot()).when(builder).addInvisibleIngredients(any());
+
+        category().setRecipe(builder, recipe, mock(IFocusGroup.class));
+
+        verify(fluid).addIngredient(eq(ForgeTypes.FLUID_STACK), argThat(stack -> stack.getAmount() == 1000));
+        verify(reagent).addIngredients(recipe.inputIngredients().get(1));
+        verify(reagent, never()).addIngredient(eq(ForgeTypes.FLUID_STACK), any());
+        verify(builder, times(2)).addInputSlot(anyInt(), anyInt());
+        verify(output).addIngredient(eq(ForgeTypes.FLUID_STACK), argThat(stack -> stack.getAmount() == 250));
+        verify(byproduct).addItemStack(argThat(stack -> stack.is(Items.GLASS_BOTTLE) && stack.getCount() == 1));
     }
 
     private static AlchemistCauldronRecipeCategory category() {

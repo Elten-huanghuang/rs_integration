@@ -78,6 +78,54 @@ class IronAlchemistJarContractTest {
         }
     }
 
+    @Test
+    void nativeBrewingAndBottlingRecipesKeepRuntimeAccessorContracts() throws Exception {
+        try (ZipFile jar = installedJar()) {
+            String prefix = "io/redspace/ironsspellbooks/recipe_types/alchemist_cauldron/";
+            ClassNode brew = readClass(jar, prefix + "BrewAlchemistCauldronRecipe.class");
+            for (String accessor : List.of("fluidIn", "reagent", "results", "byproduct")) {
+                assertTrue(brew.methods.stream().anyMatch(method -> method.name.equals(accessor)
+                        && method.desc.startsWith("()") && (method.access & Opcodes.ACC_PUBLIC) != 0), accessor);
+            }
+            ClassNode empty = readClass(jar, prefix + "EmptyAlchemistCauldronRecipe.class");
+            for (String accessor : List.of("fluid", "input", "result")) {
+                assertTrue(empty.methods.stream().anyMatch(method -> method.name.equals(accessor)
+                        && method.desc.startsWith("()") && (method.access & Opcodes.ACC_PUBLIC) != 0), accessor);
+            }
+        }
+    }
+
+    @Test
+    void specialPotionRecipesKeepNativeNbtRatioAndDistinctBottledItemIds() throws Exception {
+        try (ZipFile jar = installedJar()) {
+            JsonObject brew = readRecipe(jar, "brew_greater_healing_elixir");
+            JsonObject base = brew.getAsJsonObject("base_fluid");
+            assertEquals("irons_spellbooks:potion", base.get("FluidName").getAsString());
+            assertEquals(1000, base.get("Amount").getAsInt());
+            assertEquals("minecraft:strong_healing", base.getAsJsonObject("Tag").get("Potion").getAsString());
+            assertEquals("REGULAR", base.getAsJsonObject("Tag").get("irons_spellbooks:bottle_type").getAsString());
+            JsonObject output = brew.getAsJsonArray("results").get(0).getAsJsonObject();
+            assertEquals("irons_spellbooks:greater_healing_elixir", output.get("FluidName").getAsString());
+            assertEquals(250, output.get("Amount").getAsInt());
+            for (String item : List.of("greater_healing_potion", "ice_venom_vial")) {
+                JsonObject bottle = readRecipe(jar, "empty_" + item);
+                String fluidId = item.equals("greater_healing_potion") ? "greater_healing_elixir" : "ice_venom";
+                assertEquals("irons_spellbooks:" + fluidId, bottle.getAsJsonObject("fluid").get("FluidName").getAsString());
+                assertEquals(250, bottle.getAsJsonObject("fluid").get("Amount").getAsInt());
+                assertEquals("minecraft:glass_bottle", bottle.getAsJsonObject("input").get("item").getAsString());
+                assertEquals("irons_spellbooks:" + item, bottle.getAsJsonObject("result").get("item").getAsString());
+            }
+        }
+    }
+
+    private JsonObject readRecipe(ZipFile jar, String name) throws Exception {
+        var entry = jar.getEntry("data/irons_spellbooks/recipes/alchemist_cauldron/" + name + ".json");
+        assertNotNull(entry, name);
+        try (var reader = new InputStreamReader(jar.getInputStream(entry), StandardCharsets.UTF_8)) {
+            return JsonParser.parseReader(reader).getAsJsonObject();
+        }
+    }
+
     private ClassNode readClass(ZipFile jar, String path) throws Exception {
         try (var input = jar.getInputStream(jar.getEntry(path))) {
             ClassNode node = new ClassNode();

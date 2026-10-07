@@ -1581,7 +1581,7 @@ public final class GenericCraftPacket {
         recipe = ApotheosisGemCuttingCatalog.byId(recipeId);
         if (recipe != null) return recipe;
         if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
-            recipe = IronSpellBooksRecipeCatalog.byId(recipeId);
+            recipe = IronSpellBooksRecipeCatalog.byId(level, recipeId);
             if (recipe != null) return recipe;
         }
         if (ModList.get().isLoaded(ModIds.PMMO)) {

@@ -1165,7 +1165,7 @@ public final class AsyncCraftChain {
         Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
         if (recipe == null) recipe = FluidContainerCatalog.byId(step.recipeId());
         if (recipe == null && step.modType().id().startsWith("irons_spellbooks")) {
-            recipe = IronSpellBooksRecipeCatalog.byId(step.recipeId());
+            recipe = IronSpellBooksRecipeCatalog.byId(server.overworld(), step.recipeId());
         }
         if (recipe == null && "pmmo_salvage".equals(step.modType().id())) {
             recipe = PmmoSalvageCatalog.byId(step.recipeId());

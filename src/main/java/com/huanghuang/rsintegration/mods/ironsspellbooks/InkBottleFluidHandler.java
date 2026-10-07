@@ -13,6 +13,7 @@ import javax.annotation.Nullable;
 public final class InkBottleFluidHandler implements IFluidHandlerItem {
     private final ItemStack bottle;
     private FluidStack content = FluidStack.EMPTY;
+    private ItemStack filledBottle = ItemStack.EMPTY;
 
     private InkBottleFluidHandler(ItemStack bottle) { this.bottle = bottle; }
 
@@ -25,7 +26,12 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
     @Override public FluidStack getFluidInTank(int tank) { return content.copy(); }
     @Override public int getTankCapacity(int tank) { return InkFluidSupport.BOTTLE_AMOUNT; }
     @Override public boolean isFluidValid(int tank, FluidStack fluid) {
-        return inkItem(fluid) != Items.AIR;
+        return !bottledItem(fluid).isEmpty();
+    }
+
+    private static ItemStack bottledItem(FluidStack fluid) {
+        Item ink = inkItem(fluid);
+        return ink != Items.AIR ? new ItemStack(ink) : AlchemistBottleSupport.bottle(fluid);
     }
 
     private static Item inkItem(FluidStack fluid) {
@@ -42,6 +48,7 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
         if (action.execute()) {
             content = resource.copy();
             content.setAmount(InkFluidSupport.BOTTLE_AMOUNT);
+            filledBottle = bottledItem(resource);
         }
         return InkFluidSupport.BOTTLE_AMOUNT;
     }
@@ -49,6 +56,6 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
     @Override public FluidStack drain(FluidStack resource, FluidAction action) { return FluidStack.EMPTY; }
     @Override public FluidStack drain(int amount, FluidAction action) { return FluidStack.EMPTY; }
     @Override public ItemStack getContainer() {
-        return content.isEmpty() ? bottle.copy() : new ItemStack(inkItem(content));
+        return content.isEmpty() ? bottle.copy() : filledBottle.copy();
     }
 }

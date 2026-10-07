@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
+import java.util.ArrayList;
 
 public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<IronSpellBooksRecipe> {
     public static final RecipeType<IronSpellBooksRecipe> TYPE = RecipeType.create(
@@ -30,9 +31,9 @@ public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<Ir
                 new ResourceLocation("irons_spellbooks", "alchemist_cauldron"))));
     }
     @Override public RecipeType<IronSpellBooksRecipe> getRecipeType() { return TYPE; }
-    @Override public Component getTitle() { return Component.translatable("gui.rs_integration.jei.irons_spellbooks_ink_bottling"); }
+    @Override public Component getTitle() { return Component.translatable("gui.rs_integration.jei.irons_spellbooks_alchemist_cauldron"); }
     @Override public int getWidth() { return 150; }
-    @Override public int getHeight() { return 58; }
+    @Override public int getHeight() { return 78; }
     @Override public IDrawable getIcon() { return icon; }
     @Override public ResourceLocation getRegistryName(IronSpellBooksRecipe recipe) { return recipe.getId(); }
     @Override public boolean isHandled(IronSpellBooksRecipe recipe) {
@@ -45,7 +46,7 @@ public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<Ir
             ItemStack input = inputs.get(i);
             var slot = builder.addInputSlot(8 + i * 28, 8).setStandardSlotBackground();
             if (InkFluidSupport.isToken(input)) {
-                slot.addIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(input)).setFluidRenderer(InkFluidSupport.BOTTLE_AMOUNT, false, 16, 16);
+                slot.addIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(input)).setFluidRenderer(input.getCount(), false, 16, 16);
                 builder.addInvisibleIngredients(RecipeIngredientRole.INPUT).addItemStack(input.copyWithCount(1));
             } else slot.addIngredients(recipe.inputIngredients().get(i));
         }
@@ -54,18 +55,25 @@ public final class AlchemistCauldronRecipeCategory implements IRecipeCategory<Ir
                     .addIngredient(ForgeTypes.FLUID_STACK, new FluidStack(Fluids.WATER, InkFluidSupport.BOTTLE_AMOUNT))
                     .setFluidRenderer(InkFluidSupport.BOTTLE_AMOUNT, false, 16, 16);
         }
-        ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
-        var slot = builder.addOutputSlot(118, 8).setOutputSlotBackground();
-        if (InkFluidSupport.isToken(output)) {
-            slot.addIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(output))
-                    .setFluidRenderer(InkFluidSupport.BOTTLE_AMOUNT, false, 16, 16);
-        } else slot.addItemStack(output);
+        var outputs = new ArrayList<ItemStack>();
+        outputs.add(recipe.getResultItem(RegistryAccess.EMPTY));
+        outputs.addAll(recipe.secondaryOutputs());
+        for (int i = 0; i < outputs.size(); i++) {
+            ItemStack output = outputs.get(i);
+            var slot = builder.addOutputSlot(i == 0 ? 118 : 90 + ((i - 1) % 2) * 28,
+                    i == 0 ? 8 : 30 + ((i - 1) / 2) * 22).setOutputSlotBackground();
+            if (InkFluidSupport.isToken(output)) {
+                slot.addIngredient(ForgeTypes.FLUID_STACK, InkFluidSupport.fluid(output))
+                        .setFluidRenderer(output.getCount(), false, 16, 16);
+            } else slot.addItemStack(output);
+        }
     }
     @Override
     public void draw(IronSpellBooksRecipe recipe, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
         var font = Minecraft.getInstance().font;
         graphics.drawString(font, "→", 83, 12, 0x404040, false);
         graphics.drawString(font, Component.translatable(recipe.isScrollRecycling()
-                ? "rsi.alchemist.recycle_hint" : "rsi.alchemist.bottle_hint"), 4, 37, 0x606060, false);
+                ? "rsi.alchemist.recycle_hint" : recipe.isBrewing()
+                ? "rsi.alchemist.brew_hint" : "rsi.alchemist.bottle_hint"), 4, 63, 0x606060, false);
     }
 }

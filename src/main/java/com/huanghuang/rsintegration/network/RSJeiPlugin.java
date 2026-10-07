@@ -176,8 +176,8 @@ public final class RSJeiPlugin implements IModPlugin {
         registration.addRecipes(FluidContainerRecipeCategory.TYPE,
                 FluidContainerCatalog.allRecipes(Minecraft.getInstance().level));
         if (ironAlchemistEnabled()) registration.addRecipes(AlchemistCauldronRecipeCategory.TYPE,
-                IronSpellBooksRecipeCatalog.allRecipes().stream()
-                        .filter(IronSpellBooksRecipe::isInkBottling).toList());
+                IronSpellBooksRecipeCatalog.allRecipes(Minecraft.getInstance().level).stream()
+                        .filter(IronSpellBooksRecipe::isBottling).toList());
         if (RSIntegrationConfig.ENABLE_DISTANT_WORLDS.get()
                 && ModList.get().isLoaded(ModIds.DISTANT_WORLDS)) {
             registration.addRecipes(LithumAltarFironRecipeCategory.TYPE,

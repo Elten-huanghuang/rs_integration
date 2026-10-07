@@ -535,7 +535,7 @@ public final class RecipePreviewRenderer {
         Recipe<?> recipe = mc.level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe != null) return recipe;
         try {
-            if (isIronSpellBooksRecipe(recipeId)) return IronSpellBooksRecipeCatalog.byId(recipeId);
+            if (isIronSpellBooksRecipe(recipeId)) return IronSpellBooksRecipeCatalog.byId(mc.level, recipeId);
             if (isPmmoSalvageRecipe(recipeId)) return PmmoSalvageCatalog.byId(recipeId);
             if (isSyntheticBrewingRecipe(recipeId)) return VanillaBrewingCatalog.byId(recipeId);
         } catch (RuntimeException | LinkageError ignored) {

@@ -709,7 +709,7 @@ public final class RecipeIndex {
                 || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
         Collection<IronSpellBooksRecipe> recipes;
         try {
-            recipes = IronSpellBooksRecipeCatalog.allRecipes();
+            recipes = IronSpellBooksRecipeCatalog.allRecipes(level);
         } catch (RuntimeException | LinkageError failure) {
             RSIntegrationMod.LOGGER.warn(
                     "[RecipeCatalog] Iron spell dynamic source unavailable; retaining other recipe sources", failure);
