@@ -203,6 +203,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_DISTANT_WORLDS;
     public static ForgeConfigSpec.BooleanValue ENABLE_LYCHEE;
     public static ForgeConfigSpec.BooleanValue ENABLE_BIOMANCY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CTHULHU_CREATURES;
     public static ForgeConfigSpec.BooleanValue ENABLE_PMMO;
     public static ForgeConfigSpec.BooleanValue ENABLE_WISHING_FOUNTAIN;
     public static ForgeConfigSpec.BooleanValue ENABLE_SRFIX;
@@ -495,6 +496,10 @@ public final class RSIntegrationConfig {
                 .comment("启用血肉重铸兼容",
                         "支持生物炼金机器绑定与远程合成。")
                 .define("enableBiomancy", true);
+        ENABLE_CTHULHU_CREATURES = c
+                .comment("启用克苏鲁生物血肉祭坛兼容",
+                        "支持带数量的材料、批量投料、多祭坛并行、远程界面与递归合成。")
+                .define("enableCthulhuCreatures", true);
         ENABLE_PMMO = c
                 .comment("启用 PMMO 回收兼容",
                         "通过配置指定的回收方块递归回收；请求数量为独立尝试次数，不保证相同数量的产物。")

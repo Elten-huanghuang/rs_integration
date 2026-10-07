@@ -32,6 +32,7 @@ public final class ModIds {
     public static final String ARS_NOUVEAU = "ars_nouveau";
     public static final String LYCHEE = "lychee";
     public static final String BIOMANCY = "biomancy";
+    public static final String CTHULHU_CREATURES = "cthulhu_creatures";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -74,6 +75,7 @@ public final class ModIds {
     public static final String ID_BIOMANCY_BIO_LAB = "biomancy_bio_lab";
     public static final String ID_BIOMANCY_DECOMPOSER = "biomancy_decomposer";
     public static final String ID_BIOMANCY_BIO_FORGE = "biomancy_bio_forge";
+    public static final String ID_CTHULHU_FLESH_ALTAR = "cthulhu_creatures_flesh_altar";
 
     // Ars Nouveau (one mod -> three automatable machine types)
     public static final String ID_ARS_IMBUEMENT = "ars_nouveau_imbuement";

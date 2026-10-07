@@ -845,6 +845,11 @@ public final class AltarBindingRegistry {
         if (type.id().startsWith("vanilla_") || "smithing".equals(type.id())) {
             return null;
         }
+        // 两类祭坛都只有一种执行机器，原生或脚本配方目录不能限制机器绑定。
+        if (ModIds.TOUHOU_LITTLE_MAID.equals(type.id())
+                || ModIds.ID_CTHULHU_FLESH_ALTAR.equals(type.id())) {
+            return null;
+        }
         if (ModIds.ID_BIOMANCY_DIGESTER.equals(type.id())
                 || ModIds.ID_BIOMANCY_BIO_LAB.equals(type.id())
                 || ModIds.ID_BIOMANCY_DECOMPOSER.equals(type.id())
