@@ -16,6 +16,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +40,104 @@ class DiskFileStoreTest extends BootstrapTest {
     }
     private void acknowledge(UnifiedDiskCore core, Snapshot snapshot) {
         core.items.acknowledge(snapshot.items()); core.fluids.acknowledge(snapshot.fluids());
+    }
+
+    @Test void staleCheckpointCannotOverwriteRestoredInventory() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(512);
+        FrozenKey key = UnifiedDiskCoreTest.variant(1);
+        core.insert(key, 7, true);
+        Snapshot first = Snapshot.freeze(core);
+        var saved = files.save(first, null); acknowledge(core, first);
+        core.insert(key, 11, true);
+        var next = files.save(Snapshot.freeze(core), saved.manifest());
+        Path manifest = root.resolve(core.diskId.toString()).resolve("manifest.bin");
+        byte[] original = Files.readAllBytes(manifest);
+        assertThrows(IOException.class, () -> files.save(Snapshot.freeze(core), saved.manifest()));
+        assertThrows(IOException.class, () -> files.save(Snapshot.freeze(core), null));
+        assertArrayEquals(original, Files.readAllBytes(manifest));
+        assertEquals(next.manifest(), files.manifest(core.diskId));
+        assertEquals(18, files.load(core.worldId, core.diskId).items.amount(key));
+    }
+
+    @Test void missingReusedKeyPageRejectsCommitAndPreservesManifest() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(512);
+        FrozenKey key = UnifiedDiskCoreTest.variant(1);
+        core.insert(key, 7, true);
+        Snapshot first = Snapshot.freeze(core);
+        var saved = files.save(first, null); acknowledge(core, first);
+        Path directory = root.resolve(core.diskId.toString());
+        byte[] original = Files.readAllBytes(directory.resolve("manifest.bin"));
+        core.insert(key, 1, true);
+        DiskFileStore broken = new DiskFileStore(root, () ->
+                Files.delete(directory.resolve(saved.manifest().items().get(0).keys().get(0))));
+        assertThrows(IOException.class, () -> broken.save(Snapshot.freeze(core), saved.manifest()));
+        assertArrayEquals(original, Files.readAllBytes(directory.resolve("manifest.bin")));
+        assertTrue(core.dirty());
+    }
+
+    @Test void oldPagesSurviveRecentCheckpointRollbackAndExpireOnlyWhenUnreferenced() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(512);
+        FrozenKey key = UnifiedDiskCoreTest.variant(1);
+        core.insert(key, 7, true);
+        Snapshot snapshot = Snapshot.freeze(core);
+        var saved = files.save(snapshot, null); acknowledge(core, snapshot);
+        Path directory = root.resolve(core.diskId.toString());
+        Path oldAmount = directory.resolve(saved.manifest().items().get(0).amounts());
+        byte[] oldManifest = Files.readAllBytes(directory.resolve("manifest.bin"));
+        for (int i = 0; i < 3; i++) {
+            core.insert(key, 1, true);
+            snapshot = Snapshot.freeze(core);
+            saved = files.save(snapshot, saved.manifest()); acknowledge(core, snapshot);
+        }
+        assertTrue(Files.exists(oldAmount));
+        byte[] latestManifest = Files.readAllBytes(directory.resolve("manifest.bin"));
+        Files.write(directory.resolve("manifest.bin"), oldManifest);
+        assertEquals(7, files.load(core.worldId, core.diskId).items.amount(key));
+        Files.write(directory.resolve("manifest.bin"), latestManifest);
+        FileTime expired = FileTime.fromMillis(System.currentTimeMillis() - Duration.ofDays(2).toMillis());
+        Files.setLastModifiedTime(oldAmount, expired);
+        Path keyPage = directory.resolve(saved.manifest().items().get(0).keys().get(0));
+        Files.setLastModifiedTime(keyPage, expired);
+        files.save(Snapshot.freeze(core), saved.manifest());
+        assertFalse(Files.exists(oldAmount));
+        assertTrue(Files.exists(keyPage));
+        assertEquals(10, files.load(core.worldId, core.diskId).items.amount(key));
+    }
+
+    @Test void incrementalBackupIncludesUnchangedPagesWorldIdentityAndPreviousCheckpoint() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UUID world = files.worldIdentity();
+        UnifiedDiskCore core = new UnifiedDiskCore(world, UUID.randomUUID(), UUID.randomUUID(),
+                UnifiedDiskCoreTest.core(512).limits);
+        FrozenKey key = UnifiedDiskCoreTest.variant(1);
+        FrozenKey water = FrozenKey.fluid(new FluidStack(Fluids.WATER, 1));
+        core.insert(key, 7, true); core.insert(water, 34000, true);
+        Snapshot first = Snapshot.freeze(core);
+        var saved = files.save(first, null); acknowledge(core, first);
+        core.insert(key, 1, true);
+        files.save(Snapshot.freeze(core), saved.manifest());
+        List<Path> sources;
+        try (var paths = Files.walk(root)) { sources = paths.filter(Files::isRegularFile).toList(); }
+        for (Path file : sources) Files.setLastModifiedTime(file, FileTime.fromMillis(1));
+        long lastBackup = System.currentTimeMillis() - 1000;
+        files.prepareBackup();
+        Path restored = root.resolve("restored");
+        for (Path source : sources) {
+            if (Files.getLastModifiedTime(source).toMillis() <= lastBackup) continue;
+            Path destination = restored.resolve(root.relativize(source));
+            Files.createDirectories(destination.getParent()); Files.copy(source, destination);
+        }
+        DiskFileStore backup = new DiskFileStore(restored);
+        assertEquals(world, backup.worldIdentity());
+        assertEquals(8, backup.load(world, core.diskId).items.amount(key));
+        assertEquals(34000, backup.load(world, core.diskId).fluids.amount(water));
+        Path directory = restored.resolve(core.diskId.toString());
+        Files.copy(directory.resolve("manifest.previous.bin"), directory.resolve("manifest.bin"),
+                StandardCopyOption.REPLACE_EXISTING);
+        assertEquals(7, backup.load(world, core.diskId).items.amount(key));
     }
 
     @Test void expandedEntriesReuseSavedPagesPreserveInventoryAndAcceptNewKeys() throws Exception {

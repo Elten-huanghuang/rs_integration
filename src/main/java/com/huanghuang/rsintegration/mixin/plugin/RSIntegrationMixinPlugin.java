@@ -32,6 +32,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".simplebackups.")) {
+            return isClassPresent("com.refinedmods.refinedstorage.api.network.INetwork")
+                    && isClassPresent(targetClassName);
+        }
         if (mixinClassName.endsWith(".sophisticatedbackpacks.StorageScreenFluidFilterMixin")) {
             return hasMethod(targetClassName, "renderStack");
         }
