@@ -16,6 +16,7 @@ import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
+import com.huanghuang.rsintegration.mods.cthulhucreatures.CthulhuCreaturesRSModule;
 import com.huanghuang.rsintegration.mods.distantworlds.DistantWorldsRSModule;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRSModule;
@@ -269,6 +270,8 @@ public final class RSIntegrationMod {
                     () -> LycheeRSModule.INSTANCE),
             new ModuleEntry(ModIds.BIOMANCY, RSIntegrationConfig.ENABLE_BIOMANCY,
                     () -> BiomancyRSModule.INSTANCE),
+            new ModuleEntry(ModIds.CTHULHU_CREATURES, RSIntegrationConfig.ENABLE_CTHULHU_CREATURES,
+                    () -> CthulhuCreaturesRSModule.INSTANCE),
             new ModuleEntry(ModIds.PMMO, RSIntegrationConfig.ENABLE_PMMO,
                     () -> PmmoRSModule.INSTANCE),
             new ModuleEntry(ModIds.WISHING_FOUNTAIN, RSIntegrationConfig.ENABLE_WISHING_FOUNTAIN,

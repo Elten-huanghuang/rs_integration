@@ -82,6 +82,8 @@
   "rsi.batch.mod.biomancy_bio_lab": "Bio-Lab",
   "rsi.batch.mod.biomancy_decomposer": "Decomposer",
   "rsi.batch.mod.biomancy_bio_forge": "Bio-Forge",
+  "rsi.batch.mod.cthulhu_creatures_flesh_altar": "Flesh Altar",
+  "gui.rs_integration.jei.cthulhu_flesh_altar_craft": "Craft with Flesh Altar",
   "rsi.recipe.materials.unknown": "Item materials: not checked or unavailable",
   "rsi.recipe.materials.missing": "Item materials: insufficient for one execution",
   "rsi.recipe.materials.ready": "Item materials: enough for one execution",

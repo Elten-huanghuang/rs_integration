@@ -13,6 +13,8 @@ import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -281,6 +283,18 @@ class AltarBindingRegistryTest {
     private static void registerLeafType(String id) {
         if (ModType.byId(id) == ModType.GENERIC) {
             ModType.register(id, new String[0], new String[]{id}, new String[]{id}, () -> null);
+        }
+    }
+
+    @Test
+    void altarRecipeFoldersDoNotOverrideTheirOnlyMachineType() {
+        for (String id : List.of(ModIds.TOUHOU_LITTLE_MAID, ModIds.ID_CTHULHU_FLESH_ALTAR)) {
+            registerLeafType(id);
+            ModType type = ModType.byId(id);
+            assertNull(AltarBindingRegistry.normalizeSubType("altar", type));
+            assertNull(AltarBindingRegistry.normalizeSubType("custom_recipes", type));
+            assertNull(AltarBindingRegistry.recipeMachineSubType(new BiomancyFolderRecipe(
+                    new ResourceLocation("test", "custom_recipes/altar_output")), type));
         }
     }
 

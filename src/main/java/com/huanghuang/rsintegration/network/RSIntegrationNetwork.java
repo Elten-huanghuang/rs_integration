@@ -12,6 +12,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.node.INetworkNode;
+import com.refinedmods.refinedstorage.api.network.node.INetworkNodeProxy;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.core.BlockPos;
@@ -352,6 +353,12 @@ public final class RSIntegrationNetwork {
             INetwork net = node.getNetwork();
             if (net != null) return net;
             RSIntegrationMod.LOGGER.debug("[RSI] resolveNetwork: INetworkNode at {} has null network", controllerPos);
+        }
+        // 磁盘驱动器等 RS 方块实体通过代理提供节点，终端可以绑定到这些坐标。
+        if (be instanceof INetworkNodeProxy<?> proxy) {
+            INetworkNode node = proxy.getNode();
+            INetwork net = node == null ? null : node.getNetwork();
+            if (net != null) return net;
         }
         try {
             Method getNetwork = be.getClass().getMethod("getNetwork");

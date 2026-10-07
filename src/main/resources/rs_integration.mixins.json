@@ -76,6 +76,7 @@
     "sophisticatedbackpacks.StorageContainerMenuBaseMixin",
     "sophisticatedbackpacks.CompactingUpgradeWrapperMixin",
     "crockpot.CrockPotMenuMixin",
+    "cthulhucreatures.FleshAltarMenuMixin",
     "goetydelight.BlockFinderCompatMixin",
     "distantworlds.LithumCoreUpdateTickProcedureMixin",
     "distantworlds.DistantWorldsItemHelperMixin",
