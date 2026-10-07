@@ -15,6 +15,9 @@ import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
@@ -75,6 +78,12 @@ final class EmiCraftButtonResolver {
         Recipe<?> backingRecipe = safeBackingRecipe(emiRecipe);
         Object sourceRecipe = displayRecipe != null ? displayRecipe : backingRecipe;
         if (sourceRecipe == null) sourceRecipe = recipeFromManager(emiRecipe.getId());
+        if (IronAlchemistJeiBridge.isNativeRecipe(sourceRecipe)) {
+            IronSpellBooksRecipe alchemist = IronAlchemistJeiBridge.resolve(sourceRecipe, null, minecraft.level);
+            if (alchemist == null) return Optional.empty();
+            sourceRecipe = alchemist;
+            backingRecipe = alchemist;
+        }
 
         if (sourceRecipe instanceof QuestSubmissionSnapshot quest) {
             ResourceLocation recipeId = QuestSubmissionTargetIds.of(quest.questId());
@@ -200,6 +209,10 @@ final class EmiCraftButtonResolver {
     @Nullable
     private static String resolveFilter(Object source, @Nullable Recipe<?> backing,
                                         @Nullable ResourceLocation categoryId) {
+        if (source instanceof IronSpellBooksRecipe iron
+                && iron.machine() == IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON) {
+            return IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE;
+        }
         if (source instanceof ApotheosisGemCuttingRecipe) {
             return "apotheosis_gem_cutting";
         }
@@ -404,6 +417,9 @@ final class EmiCraftButtonResolver {
 
     private static ItemStack dynamicTargetOutput(EmiRecipe recipe, Object source,
                                                   ResourceLocation recipeId) {
+        if (source instanceof IronSpellBooksRecipe iron) {
+            return iron.getResultItem(Minecraft.getInstance().level.registryAccess());
+        }
         String className = source.getClass().getName();
         boolean dynamic = className.startsWith("io.redspace.ironsspellbooks.jei.")
                 || (ModIds.WIZARDS_REBORN.equals(recipeId.getNamespace())

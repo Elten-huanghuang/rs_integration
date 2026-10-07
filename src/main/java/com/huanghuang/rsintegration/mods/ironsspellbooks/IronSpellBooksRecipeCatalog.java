@@ -7,6 +7,7 @@ import io.redspace.ironsspellbooks.api.spells.ISpellContainer;
 import io.redspace.ironsspellbooks.item.InkItem;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -46,11 +47,26 @@ public final class IronSpellBooksRecipeCatalog {
 
     public static Collection<IronSpellBooksRecipe> allRecipes() { return catalog().byId().values(); }
 
+    public static Collection<IronSpellBooksRecipe> allRecipes(Level level) {
+        List<IronSpellBooksRecipe> recipes = new ArrayList<>(allRecipes());
+        recipes.addAll(IronAlchemistRecipeCatalog.allRecipes(level));
+        return List.copyOf(recipes);
+    }
+
     @Nullable
     public static IronSpellBooksRecipe byId(ResourceLocation id) {
         if (!"rs_integration".equals(id.getNamespace())
                 || !id.getPath().startsWith("irons_spellbooks/")) return null;
+        if (id.getPath().startsWith("irons_spellbooks/alchemist/")) return IronAlchemistRecipeCatalog.byId(id);
         return catalog().byId().get(id);
+    }
+
+    @Nullable
+    public static IronSpellBooksRecipe byId(Level level, ResourceLocation id) {
+        if (id.getNamespace().equals("rs_integration") && id.getPath().startsWith("irons_spellbooks/alchemist/")) {
+            IronAlchemistRecipeCatalog.allRecipes(level);
+        }
+        return byId(id);
     }
 
     @Nullable
@@ -139,6 +155,7 @@ public final class IronSpellBooksRecipeCatalog {
     public static void invalidate() {
         synchronized (IronSpellBooksRecipeCatalog.class) {
             catalog = null;
+            IronAlchemistRecipeCatalog.invalidate();
         }
     }
 
@@ -160,6 +177,7 @@ public final class IronSpellBooksRecipeCatalog {
             }
             catalog = null;
             CraftPlanningRevision.bump();
+            IronAlchemistRecipeCatalog.invalidate();
         }
         if (rarityCachesReset) {
             RSIntegrationMod.LOGGER.info(

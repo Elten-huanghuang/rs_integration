@@ -227,7 +227,7 @@ public class RecipeGuiLayoutsMixin {
             if (IronAlchemistJeiBridge.isNativeRecipe(recipe)) {
                 ItemStack displayed = recipeLayout.getRecipeSlotsView()
                         .findSlotByName("itemIn").flatMap(IRecipeSlotView::getDisplayedItemStack).orElse(null);
-                recipe = IronAlchemistJeiBridge.resolve(recipe, displayed);
+                recipe = IronAlchemistJeiBridge.resolve(recipe, displayed, player.level());
                 if (recipe == null) {
                     skippedNoRecipe++;
                     continue;

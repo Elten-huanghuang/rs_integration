@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.fluids.FluidStack;
 
 import javax.annotation.Nullable;
@@ -32,6 +33,9 @@ public final class IronAlchemistJeiBridge {
             Object byproduct = type.getMethod("resultByproduct").invoke(nativeRecipe);
             if (!(input instanceof Ingredient ingredient) || !(fluid instanceof FluidStack water)
                     || !(outputs instanceof List<?> results) || !(byproduct instanceof ItemStack extra)) return null;
+            IronSpellBooksRecipe brewed = IronAlchemistRecipeCatalog.find(ingredient, water, results, extra,
+                    displayed, IronAlchemistRecipeCatalog.cachedRecipes());
+            if (brewed != null) return brewed;
             return resolve(ingredient, water, results, extra, displayed, scroll -> {
                 var key = IronSpellBooksRecipeCatalog.spellScrollKey(scroll);
                 if (key == null) return null;
@@ -43,6 +47,12 @@ public final class IronAlchemistJeiBridge {
             RSIntegrationMod.LOGGER.debug("[RSI-IronSpells] 原生炼金锅 JEI 配方解析失败", failure);
             return null;
         }
+    }
+
+    @Nullable
+    public static IronSpellBooksRecipe resolve(Object nativeRecipe, @Nullable ItemStack displayed, Level level) {
+        IronAlchemistRecipeCatalog.allRecipes(level);
+        return resolve(nativeRecipe, displayed);
     }
 
     @Nullable

@@ -12,6 +12,7 @@ import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IStackList;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
@@ -40,6 +41,28 @@ class InkBottleNativeTerminalTest extends BootstrapTest {
         assertFalse(cursor.getValue().is(Items.GLASS_BOTTLE));
         assertEquals(1, cursor.getValue().getCount());
         verify(f.tracker).changed(eq(f.player), argThat(fluid -> fluid.isFluidEqual(f.ink) && fluid.getAmount() == 250));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REGULAR", "SPLASH", "LINGERING"})
+    void nativeTerminalBottlesPotionAndShiftMovesItToInventory(String type) throws Exception {
+        InkFluidTestFixtures.ink("potion", 250);
+        Fixture f = new Fixture();
+        ItemStack potion = AlchemistPotionSupportTest.potion(type);
+        FluidStack fluid = AlchemistPotionSupport.fluid(potion);
+        when(f.list.get(f.id)).thenReturn(fluid);
+        when(f.network.extractFluid(any(), eq(250), any())).thenReturn(fluid.copy());
+        Inventory inventory = mock(Inventory.class);
+        when(f.player.getInventory()).thenReturn(inventory);
+        when(inventory.add(any(ItemStack.class))).thenAnswer(call -> {
+            ItemStack stored = call.getArgument(0);
+            assertTrue(ItemStack.isSameItemSameTags(potion, stored));
+            stored.setCount(0);
+            return true;
+        });
+        assertTrue(f.click(true).isCancelled());
+        verify(inventory).add(any(ItemStack.class));
+        verify(f.tracker).changed(eq(f.player), argThat(actual -> actual.isFluidStackIdentical(fluid)));
     }
 
     @ParameterizedTest
@@ -104,11 +127,15 @@ class InkBottleNativeTerminalTest extends BootstrapTest {
         }
 
         CallbackInfo click() throws Exception {
+            return click(false);
+        }
+
+        CallbackInfo click(boolean shift) throws Exception {
             Method method = FluidContainerPreflightMixin.class.getDeclaredMethod("rsi$extractInkBottle",
                     ServerPlayer.class, UUID.class, boolean.class, CallbackInfo.class);
             method.setAccessible(true);
             CallbackInfo callback = new CallbackInfo("onExtract", true);
-            method.invoke(mixin, player, id, false, callback);
+            method.invoke(mixin, player, id, shift, callback);
             return callback;
         }
     }

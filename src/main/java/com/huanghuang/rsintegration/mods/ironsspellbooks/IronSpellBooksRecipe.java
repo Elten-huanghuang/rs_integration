@@ -26,6 +26,8 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     private final ItemStack output;
     private final String spellId;
     private final int spellLevel;
+    private List<ItemStack> secondaryOutputs = List.of();
+    private boolean brewing;
 
     IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
                          ItemStack output, String spellId) {
@@ -56,13 +58,32 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     public int spellLevel() { return spellLevel; }
 
     public boolean isScrollRecycling() {
-        return machine == Machine.ALCHEMIST_CAULDRON && InkFluidSupport.isToken(output);
+        return machine == Machine.ALCHEMIST_CAULDRON && !brewing && InkFluidSupport.isToken(output);
     }
 
     public boolean isInkBottling() {
+        return isBottling() && InkFluidSupport.isInk(InkFluidSupport.fluid(inputs.get(0)));
+    }
+
+    public boolean isBottling() {
         return machine == Machine.ALCHEMIST_CAULDRON && inputs.size() == 2
                 && InkFluidSupport.isToken(inputs.get(0)) && inputs.get(1).is(Items.GLASS_BOTTLE)
                 && !InkFluidSupport.isToken(output);
+    }
+
+    public boolean isBrewing() { return brewing; }
+    public List<ItemStack> secondaryOutputs() { return secondaryOutputs.stream().map(ItemStack::copy).toList(); }
+
+    static IronSpellBooksRecipe brewRecipe(ResourceLocation id, ItemStack fluid, Ingredient reagent,
+                                           List<ItemStack> outputs) {
+        ItemStack[] items = reagent.getItems();
+        if (items.length == 0 || outputs.isEmpty()) throw new IllegalArgumentException("酿造配方缺少材料或产物");
+        IronSpellBooksRecipe recipe = new IronSpellBooksRecipe(id, Machine.ALCHEMIST_CAULDRON,
+                List.of(fluid, items[0].copyWithCount(1)),
+                List.of(StrictNBTIngredient.of(fluid), reagent), outputs.get(0), "", 0);
+        recipe.brewing = true;
+        recipe.secondaryOutputs = outputs.subList(1, outputs.size()).stream().map(ItemStack::copy).toList();
+        return recipe;
     }
 
     static IronSpellBooksRecipe bottleRecipe(ResourceLocation id, ItemStack fluid, ItemStack ink) {

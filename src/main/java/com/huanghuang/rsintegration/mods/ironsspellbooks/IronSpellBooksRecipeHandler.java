@@ -24,6 +24,9 @@ public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
     @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access).copy();
     }
+    @Override public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
+        return ((IronSpellBooksRecipe) recipe).secondaryOutputs();
+    }
     @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         IronSpellBooksRecipe ironRecipe = (IronSpellBooksRecipe) recipe;
         List<ItemStack> displays = ironRecipe.inputs();
