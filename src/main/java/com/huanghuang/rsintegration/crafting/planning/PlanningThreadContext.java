@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.server.ServerLifecycleHooks;
+
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
@@ -9,7 +12,7 @@ public final class PlanningThreadContext {
 
     private PlanningThreadContext() {}
 
-    static <T> T runInBackground(Supplier<T> work) {
+    public static <T> T runInBackground(Supplier<T> work) {
         if (BACKGROUND.get()) return work.get();
         BACKGROUND.set(true);
         try {
@@ -33,6 +36,16 @@ public final class PlanningThreadContext {
         if (isBackgroundPlanningThread()) {
             throw new MainThreadPlanningFallbackException(operation);
         }
+    }
+
+    /** 在读取世界对象之前检查线程，索引采集不能只依赖后台规划标记。 */
+    public static MinecraftServer requireServerThread(String operation) {
+        requireMainThread(operation);
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null || !server.isSameThread()) {
+            throw new MainThreadPlanningFallbackException(operation);
+        }
+        return server;
     }
 
     public static final class MainThreadPlanningFallbackException extends RuntimeException {
