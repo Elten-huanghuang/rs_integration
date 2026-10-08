@@ -1,5 +1,4 @@
 package com.huanghuang.rsintegration.recipe;
-import java.lang.reflect.Field;
 
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -50,27 +49,27 @@ final class RecipeResultMethodSafety {
     private static boolean inspectResultMethod(Class<?> recipeClass) {
         Method contract = findRecipeContractMethod();
         if (contract == null) return false;
-        final Method implementation;
-        try {
-            implementation = recipeClass.getMethod(contract.getName(), RegistryAccess.class);
-        } catch (ReflectiveOperationException | LinkageError failure) {
-            return false;
+        String descriptor = Type.getMethodDescriptor(contract);
+        // 反射查找方法会提前解析无关方法的客户端类型，必须直接读取字节码。
+        for (Class<?> owner = recipeClass; owner != null; owner = owner.getSuperclass()) {
+            if (owner == Recipe.class) return true;
+            String internalName = owner.getName().replace('.', '/');
+            String resource = "/" + internalName + ".class";
+            try (InputStream input = owner.getResourceAsStream(resource)) {
+                if (input == null) return false;
+                ClassNode node = new ClassNode();
+                new ClassReader(input).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                boolean declaresContract = node.methods.stream()
+                        .anyMatch(method -> method.name.equals(contract.getName())
+                                && method.desc.equals(descriptor));
+                if (!declaresContract) continue;
+                return !methodClosureReferencesClient(node, contract.getName(), descriptor);
+            } catch (Exception | LinkageError failure) {
+                // Failing closed is preferable to asking DistCleaner to load a client class.
+                return false;
+            }
         }
-
-        Class<?> owner = implementation.getDeclaringClass();
-        if (owner == Recipe.class) return true;
-        String internalName = owner.getName().replace('.', '/');
-        String resource = "/" + internalName + ".class";
-        try (InputStream input = owner.getResourceAsStream(resource)) {
-            if (input == null) return false;
-            ClassNode node = new ClassNode();
-            new ClassReader(input).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-            return !methodClosureReferencesClient(node, implementation.getName(),
-                    Type.getMethodDescriptor(implementation));
-        } catch (Exception | LinkageError failure) {
-            // Failing closed is preferable to asking DistCleaner to load a client class.
-            return false;
-        }
+        return false;
     }
 
     private static Method findRecipeContractMethod() {

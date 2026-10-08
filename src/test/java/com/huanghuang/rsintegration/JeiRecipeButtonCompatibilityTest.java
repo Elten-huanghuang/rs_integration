@@ -13,6 +13,7 @@ import org.objectweb.asm.Opcodes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -28,9 +29,11 @@ class JeiRecipeButtonCompatibilityTest {
 
     @Test
     void supportedJeiVersionsExposeTheRealTransferButtonArea() throws IOException {
-        List<Path> jars = List.of(
+        List<Path> jars = new ArrayList<>(List.of(
                 Path.of("libs", "jei-1.20.1-forge-15.20.0.129.jar"),
-                Path.of("libs", "[JEI物品管理器] jei-1.20.1-forge-15.49.0.191.jar"));
+                Path.of("libs", "[JEI物品管理器] jei-1.20.1-forge-15.49.0.191.jar")));
+        String additionalJar = System.getProperty("rsintegration.jei.compatibilityJar");
+        if (additionalJar != null) jars.add(Path.of(additionalJar));
 
         for (Path jar : jars) {
             assertTrue(Files.isRegularFile(jar), () -> "Missing JEI compatibility fixture: " + jar);
