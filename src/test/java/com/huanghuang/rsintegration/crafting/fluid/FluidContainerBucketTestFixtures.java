@@ -9,20 +9,26 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidType;
+import net.minecraftforge.fluids.FluidUtil;
 import net.minecraftforge.fluids.ForgeFlowingFluid;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import net.minecraftforge.fluids.capability.wrappers.FluidBucketWrapper;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.ForgeRegistry;
+import org.mockito.MockedStatic;
 
 import java.lang.reflect.Method;
 
-final class FluidContainerBucketTestFixtures {
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mockStatic;
+
+public final class FluidContainerBucketTestFixtures {
     private FluidContainerBucketTestFixtures() {}
 
-    record Buckets(Item empty, Item filled) {}
+    public record Buckets(Item empty, Item filled) {}
 
-    static synchronized Buckets buckets(String name) {
+    public static synchronized Buckets buckets(String name) {
         ResourceLocation emptyId = new ResourceLocation("rs_integration_test", name + "_bucket");
         ResourceLocation filledId = new ResourceLocation("rs_integration_test", name + "_water_bucket");
         if (ForgeRegistries.ITEMS.containsKey(emptyId)) {
@@ -54,7 +60,17 @@ final class FluidContainerBucketTestFixtures {
         return stack.getItem().getClass() == BucketItem.class ? new FluidBucketWrapper(stack) : null;
     }
 
-    static synchronized Buckets subclassBuckets(String name) {
+    public static MockedStatic<FluidUtil> capabilities() {
+        // 单测未运行 Forge 能力转换器，只替代查询边界；桶实现与子类回退仍使用真实代码。
+        MockedStatic<FluidUtil> capabilities = mockStatic(FluidUtil.class);
+        capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(call -> {
+            IFluidHandlerItem handler = handler(call.getArgument(0));
+            return handler == null ? LazyOptional.empty() : LazyOptional.of(() -> handler);
+        });
+        return capabilities;
+    }
+
+    public static synchronized Buckets subclassBuckets(String name) {
         ResourceLocation fluidId = new ResourceLocation("rs_integration_test", name);
         ResourceLocation filledId = new ResourceLocation("rs_integration_test", name + "_bucket");
         if (ForgeRegistries.ITEMS.containsKey(filledId)) {

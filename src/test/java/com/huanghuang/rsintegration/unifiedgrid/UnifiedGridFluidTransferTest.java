@@ -2,18 +2,26 @@ package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidUtil;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -21,6 +29,16 @@ import static org.mockito.Mockito.*;
 
 /** 在容器能力接口边界使用可控实现，验证网络和鼠标库存守恒。 */
 class UnifiedGridFluidTransferTest extends BootstrapTest {
+    private MockedStatic<FluidUtil> capabilities;
+
+    @BeforeEach void supplyCapabilities() {
+        capabilities = FluidContainerBucketTestFixtures.capabilities();
+    }
+
+    @AfterEach void releaseCapabilities() {
+        capabilities.close();
+    }
+
     @Test void waterBucketEmptiesIntoNetworkAndLeavesOneEmptyBucket() {
         Store f = new Store(0, 2000, 0);
         ItemStack bucket = new ItemStack(Items.WATER_BUCKET);
@@ -29,6 +47,75 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
         assertEquals(1000, f.amount);
         assertEquals(1000, result.transferred());
         assertTrue(bucket.is(Items.WATER_BUCKET));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1,999", "1,1000", "1,2000", "3,999", "3,1000", "3,2000"})
+    void bucketSubclassWithoutCapabilitiesEmptiesOnlyOneWholeBucket(int count, int capacity) {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("terminal_poisonwater");
+        FluidStack fluid = new FluidStack(((BucketItem) buckets.filled()).getFluid(), 1000);
+        ItemStack bucket = new ItemStack(buckets.filled(), count);
+        assertTrue(FluidContainerBucketSupport.needsFallback(bucket));
+        Store f = new Store(fluid, 0, capacity, 0);
+        var result = UnifiedGridFluidTransfer.empty(f.network, bucket);
+        assertEquals(count, bucket.getCount());
+        assertFalse(bucket.hasTag());
+        if (capacity < 1000) {
+            assertSame(bucket, result.cursor());
+            assertEquals(0, result.transferred());
+            assertEquals(0, f.amount);
+            assertTrue(result.overflow().isEmpty());
+            verify(f.network, never()).insertFluid(any(), anyInt(), eq(Action.PERFORM));
+            return;
+        }
+        ItemStack empty = count == 1 ? result.cursor() : result.overflow();
+        assertTrue(empty.is(Items.BUCKET));
+        assertEquals(1, empty.getCount());
+        if (count > 1) {
+            assertTrue(result.cursor().is(buckets.filled()));
+            assertEquals(count - 1, result.cursor().getCount());
+        }
+        assertEquals(1000, result.transferred());
+        assertEquals(1000, f.amount);
+        assertTrue(result.resource().isFluidEqual(fluid));
+        assertTrue(result.recovery().isEmpty());
+    }
+
+    @Test void missingCapabilityBucketKeepsFluidWhenActualNetworkCapacityFalls() {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("terminal_poisonwater");
+        FluidStack fluid = new FluidStack(((BucketItem) buckets.filled()).getFluid(), 1000);
+        Store f = new Store(fluid, 0, 2000, 0);
+        f.performInsertLimit = 500;
+        var result = UnifiedGridFluidTransfer.empty(f.network, new ItemStack(buckets.filled()));
+        assertTrue(result.cursor().is(Items.BUCKET));
+        assertEquals(500, f.amount);
+        assertEquals(500, result.recovery().getAmount());
+        assertTrue(result.recovery().isFluidEqual(fluid));
+        assertEquals(1000, f.amount + result.recovery().getAmount());
+    }
+
+    @Test void missingCapabilityBucketReturnsItsDeclaredEmptyContainer() {
+        var buckets = FluidContainerBucketTestFixtures.buckets("terminal_wood");
+        Store f = new Store(0, 2000, 0);
+        var result = UnifiedGridFluidTransfer.empty(f.network, new ItemStack(buckets.filled()));
+        assertTrue(result.cursor().is(buckets.empty()));
+        assertEquals(1000, f.amount);
+    }
+
+    @Test void bucketWithCustomCapabilityKeepsItsPartialDrainAndContainerNbt() {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("terminal_custom");
+        ItemStack cursor = new ItemStack(buckets.filled());
+        cursor.getOrCreateTag().putInt("mB", 250);
+        capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(call ->
+                LazyOptional.of(() -> new Tank(call.getArgument(0))));
+        Store f = new Store(0, 2000, 0);
+        assertFalse(FluidContainerBucketSupport.needsFallback(cursor));
+        var result = UnifiedGridFluidTransfer.empty(f.network, cursor);
+        assertEquals(250, f.amount);
+        assertEquals(250, result.transferred());
+        assertTrue(result.cursor().is(buckets.filled()));
+        assertEquals(0, result.cursor().getTag().getInt("mB"));
+        assertEquals(250, cursor.getTag().getInt("mB"));
     }
 
     @Test void wholeBucketDoesNotDrainWhenNetworkCannotAcceptFullBucket() {
@@ -166,10 +253,15 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
 
     private static final class Store {
         private final INetwork network = mock(INetwork.class);
+        private final FluidStack identity;
         private int amount, capacity, buckets;
         private int performExtractLimit = Integer.MAX_VALUE, performInsertLimit = Integer.MAX_VALUE;
         private boolean rejectInserts, rejectBucketReturn;
         private Store(int amount, int capacity, int buckets) {
+            this(water(1), amount, capacity, buckets);
+        }
+        private Store(FluidStack identity, int amount, int capacity, int buckets) {
+            this.identity = identity.copy();
             this.amount = amount; this.capacity = capacity; this.buckets = buckets;
             when(network.extractFluid(any(), anyInt(), any(Action.class))).thenAnswer(invocation -> {
                 int requested = invocation.getArgument(1);
@@ -179,7 +271,7 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
                     extracted = Math.min(extracted, performExtractLimit);
                     this.amount -= extracted;
                 }
-                return water(extracted);
+                return new FluidStack(this.identity, extracted);
             });
             when(network.insertFluid(any(), anyInt(), any(Action.class))).thenAnswer(invocation -> {
                 int requested = invocation.getArgument(1);
@@ -189,7 +281,7 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
                     accepted = Math.min(accepted, performInsertLimit);
                     this.amount += accepted;
                 }
-                return water(requested - accepted);
+                return new FluidStack(this.identity, requested - accepted);
             });
             when(network.extractItem(any(), anyInt(), any(Action.class))).thenAnswer(invocation -> {
                 if (this.buckets == 0) return ItemStack.EMPTY;
