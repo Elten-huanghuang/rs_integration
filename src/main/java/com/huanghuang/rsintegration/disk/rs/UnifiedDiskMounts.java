@@ -40,6 +40,7 @@ public final class UnifiedDiskMounts {
             }
             UnifiedDiskRoot root = manager.resolve(stack, level);
             if (root == null) {
+                if (manager.worldId().equals(item.worldId(stack))) manager.notifyFailure(item.getId(stack), node.getOwner());
                 LOGGER.warn("[RSI] 统一盘槽位 {} 无法解析持久化代理，稍后重试: dim={} pos={} id={}",
                         slot, level.dimension().location(), node.getPos(), item.getId(stack));
                 manager.mounts().defer(node, slot, retry);
@@ -47,6 +48,7 @@ public final class UnifiedDiskMounts {
             }
             UnifiedDiskManager.Entry entry = manager.entry(root.id());
             if (entry.core == null) {
+                manager.notifyFailure(root.id(), node.getOwner());
                 LOGGER.warn("[RSI] 统一盘槽位 {} 库存尚未加载，稍后重试: dim={} pos={} id={} error={}",
                         slot, level.dimension().location(), node.getPos(), root.id(), entry.error);
                 manager.mounts().defer(node, slot, retry);
