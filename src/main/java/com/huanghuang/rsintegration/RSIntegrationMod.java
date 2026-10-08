@@ -56,6 +56,7 @@ import com.huanghuang.rsintegration.anvilmemory.AnvilMemoryClient;
 import com.huanghuang.rsintegration.anvilmemory.AnvilMemoryEvents;
 import com.huanghuang.rsintegration.anvilmemory.AnvilMemoryNetworkHandler;
 import com.huanghuang.rsintegration.client.ClientEventBootstrap;
+import com.huanghuang.rsintegration.client.UpdateCheckClient;
 import com.huanghuang.rsintegration.client.StorageClientBootstrap;
 import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmService;
 import com.huanghuang.rsintegration.compat.ftbquests.ClaimAllChainService;
@@ -321,6 +322,8 @@ public final class RSIntegrationMod {
                     BDResonanceDiskItem::new);
         }
 
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> MinecraftForge.EVENT_BUS.addListener(UpdateCheckClient::onClientTick));
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                 || ModList.get().isLoaded("beyonddimensions")) {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,

@@ -371,6 +371,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue REQUIRE_RS_NETWORK_FOR_RECIPE_TREE;
 
     //  client-only
+    public static ForgeConfigSpec.BooleanValue ENABLE_UPDATE_CHECK;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_X;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_Y;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_WIDTH;
@@ -1295,6 +1296,13 @@ public final class RSIntegrationConfig {
         //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
+        cl.comment("版本更新").push("updates");
+        ENABLE_UPDATE_CHECK = cl
+                .comment("检测 Modrinth 更新",
+                        "启用后每次启动异步检查一次已发布的 Forge 版本，进入世界后最多提示一次。",
+                        "只提示正式版和 beta 版，不自动下载；关闭后不发起新的检测请求，也不显示提示。")
+                .define("enabled", true);
+        cl.pop();
         cl.comment("侧边面板").push("sidePanel");
         RS_SIDE_PANEL_X = cl.comment("侧边面板水平位置",
                         "侧边面板左边缘的水平屏幕坐标，单位为像素。")
