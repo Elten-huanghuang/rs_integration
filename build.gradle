@@ -228,6 +228,10 @@ check.dependsOn tasks.named('verifyNoForcedChunkLoads')
 
 test {
     useJUnitPlatform()
+    if (providers.gradleProperty('jeiCompatibilityJar').isPresent()) {
+        systemProperty 'rsintegration.jei.compatibilityJar',
+                providers.gradleProperty('jeiCompatibilityJar').get()
+    }
     // ForgeGradle rewrites the run classpath; keep test output quiet but
     // surface failures.
     testLogging {
