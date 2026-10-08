@@ -24,6 +24,20 @@ import java.util.Arrays;
 /** 身份签名和可恢复载荷分离；索引不持有调用方的可变 Stack。 */
 public final class FrozenKey {
     public enum Kind { ITEM, FLUID }
+    /** 保留缺失资源的类型和注册名，供玩家提示使用，避免解析日志文本。 */
+    public static final class MissingResourceException extends IOException {
+        private final Kind kind;
+        private final ResourceLocation resource;
+
+        public MissingResourceException(Kind kind, ResourceLocation resource) {
+            super("资源注册项不存在: " + resource);
+            this.kind = kind;
+            this.resource = resource;
+        }
+
+        public Kind kind() { return kind; }
+        public ResourceLocation resource() { return resource; }
+    }
     public static final int MAX_BYTES = 1048576;
     private final Kind kind;
     private final Object type;
@@ -134,10 +148,11 @@ public final class FrozenKey {
         if (tag.getInt(amountField) != 1) throw new IOException("模板数量必须为 1");
         String name = tag.getString(kind == Kind.ITEM ? "id" : "FluidName");
         ResourceLocation id = ResourceLocation.tryParse(name);
-        if (id == null || (kind == Kind.ITEM
+        if (id == null) throw new IOException("资源注册名非法: " + name);
+        if (kind == Kind.ITEM
                 ? !ForgeRegistries.ITEMS.containsKey(id) || ForgeRegistries.ITEMS.getValue(id) == Items.AIR
-                : !ForgeRegistries.FLUIDS.containsKey(id) || ForgeRegistries.FLUIDS.getValue(id) == Fluids.EMPTY)) {
-            throw new IOException("资源注册项不存在: " + name);
+                : !ForgeRegistries.FLUIDS.containsKey(id) || ForgeRegistries.FLUIDS.getValue(id) == Fluids.EMPTY) {
+            throw new MissingResourceException(kind, id);
         }
         // 不把未知资源或无法稳定比较的载荷变为空库存。
         try {

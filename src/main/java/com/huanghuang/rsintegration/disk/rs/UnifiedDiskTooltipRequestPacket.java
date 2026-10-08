@@ -21,9 +21,13 @@ public record UnifiedDiskTooltipRequestPacket(UUID world, UUID disk) {
             if (player == null || !UnifiedDiskTooltipPackets.visible(player, packet.world, packet.disk)) return;
             UnifiedDiskManager manager = UnifiedDiskManager.get(player.serverLevel());
             if (!manager.allowTooltipRequest(player.getUUID())) return;
-            UnifiedDiskSummary summary = packet.world.equals(manager.worldId()) ? manager.summary(packet.disk) : null;
+            boolean sameWorld = packet.world.equals(manager.worldId());
+            UnifiedDiskSummary summary = sameWorld && manager.enabled() ? manager.summary(packet.disk) : null;
+            UnifiedDiskFailure failure = sameWorld || manager.worldId() == null
+                    ? manager.failure(packet.disk) : UnifiedDiskFailure.wrongWorld();
+            if (failure != null && sameWorld) manager.notifyFailure(packet.disk, player.getUUID());
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new UnifiedDiskTooltipResponsePacket(packet.world, packet.disk, summary));
+                    new UnifiedDiskTooltipResponsePacket(packet.world, packet.disk, summary, failure));
         });
         context.setPacketHandled(true);
     }

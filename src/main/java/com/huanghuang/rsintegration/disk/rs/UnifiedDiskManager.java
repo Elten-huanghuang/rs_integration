@@ -9,8 +9,11 @@ import com.huanghuang.rsintegration.disk.persistence.DiskFileStore.Manifest;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore.Saved;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore.Snapshot;
 import com.refinedmods.refinedstorage.apiimpl.API;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.LevelResource;
 import org.apache.logging.log4j.LogManager;
@@ -18,9 +21,11 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +40,7 @@ public final class UnifiedDiskManager {
         public UnifiedDiskCore core;
         public Manifest manifest;
         public String error;
+        private UnifiedDiskFailure failure;
         private UnifiedDiskSummary summary;
         Entry(UUID id) { this.id = id; }
     }
@@ -48,6 +54,7 @@ public final class UnifiedDiskManager {
     });
     private final Map<UUID, Entry> entries = new HashMap<>();
     private final Map<UUID, Integer> tooltipRequests = new HashMap<>();
+    private final Map<UUID, Set<UUID>> failureNotifications = new HashMap<>();
     private final UnifiedMountCoordinator mounts = new UnifiedMountCoordinator();
     private Pending pending;
     private int activeBackups;
@@ -55,15 +62,21 @@ public final class UnifiedDiskManager {
     private final UUID worldId;
     private final boolean enabled;
     private final String identityError;
+    private final UnifiedDiskFailure identityFailure;
 
     private UnifiedDiskManager(MinecraftServer server) {
         this.server = server;
         files = new DiskFileStore(server.getWorldPath(LevelResource.ROOT).resolve("data/rs_integration/unified_disks"));
         UUID identity = null;
         String failure = null;
+        UnifiedDiskFailure diagnostic = null;
         try { identity = files.worldIdentity(); }
-        catch (IOException e) { failure = e.getMessage(); LOGGER.error("[RSI] 统一盘世界身份不可用，禁用挂载并保留全部文件", e); }
+        catch (IOException e) {
+            failure = e.getMessage(); diagnostic = UnifiedDiskFailure.from(e);
+            LOGGER.error("[RSI] 统一盘世界身份不可用，禁用挂载并保留全部文件", e);
+        }
         worldId = identity; identityError = failure;
+        identityFailure = diagnostic;
         enabled = identity != null && RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK);
     }
 
@@ -141,11 +154,36 @@ public final class UnifiedDiskManager {
         return true;
     }
 
-    public void forgetTooltipPlayer(UUID player) { tooltipRequests.remove(player); }
+    public void forgetTooltipPlayer(UUID player) {
+        tooltipRequests.remove(player);
+        for (Set<UUID> notified : failureNotifications.values()) notified.remove(player);
+    }
+
+    public UnifiedDiskFailure failure(UUID id) {
+        if (identityFailure != null) return identityFailure;
+        if (!enabled()) return UnifiedDiskFailure.disabled();
+        Entry known = entries.get(id);
+        return known == null ? entry(id).failure : known.failure;
+    }
+
+    /** 每次登录、每张盘只提醒一次；离线拥有者在后续 tick 中补发。 */
+    public void notifyFailure(UUID id, UUID recipient) {
+        if (id == null || recipient == null) return;
+        UnifiedDiskFailure failure = failure(id);
+        if (failure == null) return;
+        ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+        if (player == null || !failureNotifications.computeIfAbsent(id, ignored -> new HashSet<>()).add(recipient)) return;
+        player.sendSystemMessage(Component.translatable("rsi.unified_disk.failure.notice", id.toString())
+                .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+        player.sendSystemMessage(failure.reason().copy().withStyle(ChatFormatting.RED));
+        player.sendSystemMessage(failure.action().copy().withStyle(ChatFormatting.YELLOW));
+        player.sendSystemMessage(Component.translatable("item.rs_integration.unified_storage_disk.failure.preserved")
+                .withStyle(ChatFormatting.GRAY));
+    }
 
     public UnifiedDiskSummary summary(UUID id) {
         Entry known = entries.get(id);
-        if (known != null && known.core == null && known.summary != null) return known.summary;
+        if (known != null && known.core == null && known.error == null && known.summary != null) return known.summary;
         Entry entry = entry(id);
         if (entry.core == null) return null;
         entry.summary = UnifiedDiskSummary.from(entry.core);
@@ -154,7 +192,7 @@ public final class UnifiedDiskManager {
 
     public Entry entry(UUID id) {
         Entry entry = entries.computeIfAbsent(id, Entry::new);
-        if (identityError != null) { entry.error = identityError; return entry; }
+        if (identityError != null) { entry.error = identityError; entry.failure = identityFailure; return entry; }
         if (entry.core != null || entry.error != null) return entry;
         try {
             entry.manifest = files.manifest(id);
@@ -168,6 +206,8 @@ public final class UnifiedDiskManager {
             entry.core = loaded;
         } catch (Exception e) {
             entry.error = e.getMessage();
+            entry.failure = UnifiedDiskFailure.from(e);
+            entry.summary = null;
             LOGGER.error("[RSI] 统一盘 {} 不可用，保留原始文件，拒绝创建空库存", id, e);
         }
         return entry;
@@ -212,6 +252,11 @@ public final class UnifiedDiskManager {
 
     public void tick() {
         mounts.sweep();
+        if (server.getTickCount() % 100 == 0) {
+            for (Entry entry : entries.values()) {
+                if (entry.failure != null && entry.manifest != null) notifyFailure(entry.id, entry.manifest.owner());
+            }
+        }
         if (pending != null && pending.result.isDone()) finish();
         if (!backingUp() && pending == null && server.getTickCount() % 100 == 0) {
             for (Entry entry : entries.values()) {

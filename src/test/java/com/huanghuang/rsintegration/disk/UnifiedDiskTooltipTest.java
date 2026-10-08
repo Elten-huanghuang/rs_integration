@@ -4,12 +4,14 @@ import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskFailure;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltip;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipPackets;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipRequestPacket;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipResponsePacket;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -64,14 +67,40 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
             var request = new UnifiedDiskTooltipRequestPacket(world, disk);
             UnifiedDiskTooltipRequestPacket.encode(request, buf);
             assertEquals(request, UnifiedDiskTooltipRequestPacket.decode(buf));
-            for (var response : List.of(new UnifiedDiskTooltipResponsePacket(world, disk, summary),
-                    new UnifiedDiskTooltipResponsePacket(world, disk, null))) {
+            var failure = new UnifiedDiskFailure(Component.translatable("missing.item", "cthulhu_creatures:flesh_altar"),
+                    Component.translatable("restore.mod", "cthulhu_creatures"));
+            for (var response : List.of(new UnifiedDiskTooltipResponsePacket(world, disk, summary, null),
+                    new UnifiedDiskTooltipResponsePacket(world, disk, null, null),
+                    new UnifiedDiskTooltipResponsePacket(world, disk, null, failure))) {
                 buf.clear(); UnifiedDiskTooltipResponsePacket.encode(response, buf);
-                assertTrue(buf.readableBytes() < 100);
+                assertTrue(buf.readableBytes() < 1024);
                 assertEquals(response, UnifiedDiskTooltipResponsePacket.decode(buf));
             }
         } finally { buf.release(); }
         assertThrows(IllegalArgumentException.class, () -> new UnifiedDiskSummary(1, 0, 0, 0, 8, 8));
+    }
+
+    @Test void failureIsRedAndShowsResourceAndRecoveryBeforeIdWithoutShift() {
+        var failure = new UnifiedDiskFailure(Component.translatable("missing.item", "cthulhu_creatures:flesh_altar"),
+                Component.translatable("restore.mod", "cthulhu_creatures"));
+        List<Component> lines = new ArrayList<>();
+        UnifiedDiskTooltip.append(lines, UUID.randomUUID(), new UnifiedDiskTooltip.View(null, true, false, failure));
+        assertEquals(ChatFormatting.RED.getColor(), lines.get(0).getStyle().getColor().getValue());
+        assertTrue(lines.get(0).getStyle().isBold());
+        assertEquals("cthulhu_creatures:flesh_altar", ((TranslatableContents) lines.get(1).getContents()).getArgs()[0]);
+        assertEquals("cthulhu_creatures", ((TranslatableContents) lines.get(2).getContents()).getArgs()[0]);
+        assertEquals("item.rs_integration.unified_storage_disk.failure.preserved",
+                ((TranslatableContents) lines.get(3).getContents()).getKey());
+        assertEquals("item.rs_integration.unified_storage_disk.id", ((TranslatableContents) lines.get(4).getContents()).getKey());
+    }
+
+    @Test void missingFilesSuggestAdministratorRecoveryWithoutSendingFilesystemPaths() {
+        var failure = UnifiedDiskFailure.from(new NoSuchFileException("D:/private/world/manifest.bin"));
+        assertEquals("item.rs_integration.unified_storage_disk.failure.missing_file",
+                ((TranslatableContents) failure.reason().getContents()).getKey());
+        assertEquals("item.rs_integration.unified_storage_disk.failure.contact_admin",
+                ((TranslatableContents) failure.action().getContents()).getKey());
+        assertFalse(failure.reason().getString().contains("private"));
     }
 
     @Test void tooltipAlwaysShowsBothInventoriesAndIdWhileExpanded() {

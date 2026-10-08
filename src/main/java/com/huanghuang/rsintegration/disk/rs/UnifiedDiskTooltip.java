@@ -13,7 +13,11 @@ import java.util.UUID;
 /** 展示与查询分离，便于验证摘要、展开说明和未初始化状态。 */
 public final class UnifiedDiskTooltip {
     private static final String PREFIX = "item.rs_integration.unified_storage_disk.";
-    public record View(UnifiedDiskSummary summary, boolean unavailable, boolean expanded) {}
+    public record View(UnifiedDiskSummary summary, boolean unavailable, boolean expanded, UnifiedDiskFailure failure) {
+        public View(UnifiedDiskSummary summary, boolean unavailable, boolean expanded) {
+            this(summary, unavailable, expanded, null);
+        }
+    }
     private UnifiedDiskTooltip() {}
 
     public static void append(List<Component> tooltip, UUID id, View view) {
@@ -23,10 +27,20 @@ public final class UnifiedDiskTooltip {
         } else {
             UnifiedDiskSummary summary = view == null ? null : view.summary();
             if (summary == null) {
-                tooltip.add(DiskTooltipEffects.tint(PREFIX + (view != null && view.unavailable()
-                        ? "unavailable" : "loading"), DiskTooltipEffects.Theme.GUIXU,
-                        view != null && view.unavailable()
-                                ? DiskTooltipEffects.Tone.WARNING : DiskTooltipEffects.Tone.MUTED));
+                if (view != null && view.unavailable()) {
+                    tooltip.add(Component.translatable(PREFIX + "unavailable")
+                            .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+                    if (view.failure() != null) {
+                        tooltip.add(view.failure().reason().copy().withStyle(ChatFormatting.RED));
+                        tooltip.add(view.failure().action().copy().withStyle(ChatFormatting.YELLOW));
+                    } else {
+                        tooltip.add(Component.translatable(PREFIX + "failure.contact_admin").withStyle(ChatFormatting.YELLOW));
+                    }
+                    tooltip.add(Component.translatable(PREFIX + "failure.preserved").withStyle(ChatFormatting.GRAY));
+                } else {
+                    tooltip.add(DiskTooltipEffects.tint(PREFIX + "loading", DiskTooltipEffects.Theme.GUIXU,
+                            DiskTooltipEffects.Tone.MUTED));
+                }
             } else {
                 tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_items", DiskTooltipEffects.Theme.GUIXU,
                         DiskTooltipEffects.Tone.MAIN, number(summary.items())));
