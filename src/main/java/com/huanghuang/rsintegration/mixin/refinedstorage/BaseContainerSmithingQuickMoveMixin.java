@@ -26,29 +26,10 @@ public abstract class BaseContainerSmithingQuickMoveMixin {
                 || CraftingStationAccess.access(menu).rsi$getCraftingStationMode() == CraftingStationMode.CRAFTING
                 || slotNumber < 0 || slotNumber >= menu.slots.size()) return;
         Slot source = menu.slots.get(slotNumber);
-        if (source instanceof CraftingStationResultSlot) {
-            ItemStack output = source.getItem().copy();
-            if (output.isEmpty() || !rsi$canFitInventory(player, output)) {
-                cir.setReturnValue(ItemStack.EMPTY);
-                return;
-            }
-            if (player.level().isClientSide) {
-                cir.setReturnValue(ItemStack.EMPTY);
-                return;
-            }
-            player.getInventory().add(output.copy());
-            CraftingStationAccess.access(menu).rsi$getCraftingStationState().takeResult(player);
-            cir.setReturnValue(output);
+        if (source instanceof CraftingStationResultSlot result) {
+            cir.setReturnValue(rsi$quickMoveResult(player, result));
         } else if (source instanceof CraftingStationInputSlot input) {
-            ItemStack moving = input.remove(input.getItem().getCount());
-            if (moving.isEmpty()) {
-                cir.setReturnValue(ItemStack.EMPTY);
-                return;
-            }
-            ItemStack remaining = moving.copy();
-            player.getInventory().add(remaining);
-            if (!remaining.isEmpty()) input.set(remaining);
-            cir.setReturnValue(moving);
+            cir.setReturnValue(rsi$quickMoveInput(player, input));
         } else if (source.container == player.getInventory() && source.hasItem()) {
             ItemStack stack = source.getItem();
             ItemStack original = stack.copy();
@@ -67,6 +48,29 @@ public abstract class BaseContainerSmithingQuickMoveMixin {
             }
             cir.setReturnValue(stack.getCount() == original.getCount() ? ItemStack.EMPTY : original);
         }
+    }
+
+    @Unique
+    private static ItemStack rsi$quickMoveResult(Player player, CraftingStationResultSlot result) {
+        ItemStack output = result.getItem().copy();
+        if (output.isEmpty() || !result.mayPickup(player) || !rsi$canFitInventory(player, output)
+                || player.level().isClientSide) return ItemStack.EMPTY;
+        player.getInventory().add(output.copy());
+        result.onTake(player, output);
+        return output;
+    }
+
+    @Unique
+    private static ItemStack rsi$quickMoveInput(Player player, CraftingStationInputSlot input) {
+        ItemStack moving = input.getItem().copy();
+        if (moving.isEmpty()) return ItemStack.EMPTY;
+        ItemStack remaining = moving.copy();
+        player.getInventory().add(remaining);
+        int transferred = moving.getCount() - remaining.getCount();
+        // 原版会根据非空返回值重复 Shift 转移；背包满时必须结束，且保留输入和配方结果。
+        if (transferred == 0) return ItemStack.EMPTY;
+        input.remove(transferred);
+        return moving;
     }
 
     @Unique
