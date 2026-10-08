@@ -224,6 +224,10 @@ final class PlanningLookupCache {
 
     /** Replaces generation-scoped immutable NBT parsing state after a recipe rebuild. */
     static void replaceSharedNbtCache(ImmutableRecipeGraph graph) {
+        publishSharedNbtCache(prepareSharedNbtCache(graph));
+    }
+
+    static SharedNbtCache prepareSharedNbtCache(ImmutableRecipeGraph graph) {
         SharedNbtCache replacement = new SharedNbtCache();
         if (graph != null) {
             for (ImmutableRecipeGraph.RecipeNode recipe : graph.recipesById().values()) {
@@ -235,7 +239,11 @@ final class PlanningLookupCache {
                 }
             }
         }
-        sharedNbtCache = replacement;
+        return replacement;
+    }
+
+    static void publishSharedNbtCache(SharedNbtCache prepared) {
+        sharedNbtCache = prepared;
     }
 
     static void clearSharedNbtCache() {
@@ -346,7 +354,7 @@ final class PlanningLookupCache {
     private record ParsedNbt(CompoundTag tag, boolean valid) {}
 
     /** Atomically replaced on recipe reload; old requests may safely finish on the old instance. */
-    private static final class SharedNbtCache {
+    static final class SharedNbtCache {
         private final Map<String, ParsedNbt> tags = new ConcurrentHashMap<>();
         private int retainedCharacters;
 

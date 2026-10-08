@@ -11,6 +11,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DeferredCraftRequestQueueTest {
     @Test
+    void loadingRequestsExpireWithoutExecutingAndCanBeRetried() {
+        DeferredCraftRequestQueue<Runnable> queue = new DeferredCraftRequestQueue<>(2);
+        UUID player = UUID.randomUUID();
+        Runnable mustNotRun = () -> { throw new AssertionError("到期请求不应执行"); };
+        queue.offer(new DeferredCraftRequestQueue.Entry<>(player, true, 1L, mustNotRun, 100L));
+        queue.offer(new DeferredCraftRequestQueue.Entry<>(player, false, 0L, mustNotRun, 110L));
+
+        assertNull(queue.pollExpired(129L, 30L));
+        assertTrue(queue.pollExpired(130L, 30L).preview());
+        assertFalse(queue.pollExpired(140L, 30L).preview());
+        assertNull(queue.poll());
+        assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(player, false, 0L, mustNotRun, 141L)));
+        assertEquals(1, queue.size());
+    }
+
+    @Test
     void newestPreviewReplacesOlderPreviewForSamePlayer() {
         DeferredCraftRequestQueue<String> queue = new DeferredCraftRequestQueue<>(3);
         UUID player = UUID.randomUUID();

@@ -625,6 +625,8 @@
   "rsi.plan.failure.planner_busy": "The crafting planner is busy. Please try again shortly.",
   "rsi.plan.failure.request_pending": "A crafting preview is already being requested. Please wait a moment.",
   "rsi.plan.failure.catalog_unavailable": "The recipe catalog failed to load. Check the server log and reload recipes before trying again.",
+  "rsi.plan.failure.catalog_loading": "The recipe index is still loading. Please try again later.",
+  "rsi.plan.failure.catalog_wait_timeout": "Waiting for the recipe index timed out. This request was cancelled; please try again later.",
   "rsi.plan.failure.max_craftable_unknown": "The recipe is too complex to determine the maximum craftable amount.",
   "rsi.plan.failure.complexity_limit": "The recipe exceeds the safe branch or step limit. Lock a concrete material or recipe.",
   "rsi.plan.failure.planning_timeout": "Planning is still exploring this recipe; the preview timed out without a safe result. Try again after selecting a concrete material.",

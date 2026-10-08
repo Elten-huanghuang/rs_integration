@@ -33,19 +33,22 @@ class RecipeIndexDynamicIsolationTest extends BootstrapTest {
     }
 
     @Test
-    void runtimeFingerprintDoesNotRunOnTheCallingServerThread() throws Exception {
+    void runtimeFingerprintStaysOnServerThreadAndNeverSubmitsThirdPartyWorker() throws Exception {
         ClassNode node = recipeIndex();
         MethodNode refresh = node.methods.stream()
                 .filter(candidate -> candidate.name.equals("refreshDynamicRuntimeIfNeeded"))
                 .findFirst().orElseThrow();
-        boolean submitsWorker = false;
+        boolean serverGuard = false;
+        boolean probesRuntime = false;
         for (AbstractInsnNode instruction : refresh.instructions) {
             if (instruction instanceof MethodInsnNode call) {
-                assertNotEquals("hasRuntimeDrift", call.name);
-                if (call.name.equals("execute")) submitsWorker = true;
+                assertNotEquals("execute", call.name);
+                if (call.name.equals("requireServerLevel")) serverGuard = true;
+                if (call.name.equals("hasRuntimeDrift")) probesRuntime = true;
             }
         }
-        assertTrue(submitsWorker);
+        assertTrue(serverGuard);
+        assertTrue(probesRuntime);
         boolean backgroundProbe = false;
         for (MethodNode method : node.methods) {
             if (!method.name.startsWith("lambda$refreshDynamicRuntimeIfNeeded$")) continue;
@@ -55,7 +58,7 @@ class RecipeIndexDynamicIsolationTest extends BootstrapTest {
                 }
             }
         }
-        assertTrue(backgroundProbe);
+        assertFalse(backgroundProbe);
     }
 
     @Test

@@ -50,7 +50,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     public static ImmutableRecipeGraph capture(Level level) {
-        PlanningThreadContext.requireMainThread("recipe graph projection");
+        PlanningThreadContext.requireServerThread("recipe graph projection");
         CachedProjection ready = cachedProjection;
         if (ready != null && ready.matches(
                 level.getRecipeManager(), CraftPlanningRevision.current())) {
@@ -58,9 +58,7 @@ public final class ImmutableRecipeGraphProjector {
             return ready.graph();
         }
 
-        // Recipe graph generation is unavailable. Callers must wait for the
-        // async startup warmup to complete. Planning packets already gate on
-        // RecipeIndex.isReady() before reaching this point.
+        // 只读取已发布快照；目录未就绪时，由请求队列等待或返回可重试状态。
         throw new RecipeGraphUnavailableException(
                 "Recipe catalog is still loading; planning requests should wait for RecipeIndex.isReady()");
     }
@@ -75,10 +73,35 @@ public final class ImmutableRecipeGraphProjector {
     public static synchronized void publishCompiled(RecipeManager source, long revision,
                                                      ImmutableRecipeGraph graph,
                                                      long buildNanos) {
-        cachedProjection = new CachedProjection(source, revision, graph);
-        compiledIndexes = CompiledIndexes.build(graph);
-        PlanningLookupCache.replaceSharedNbtCache(graph);
+        publishPrepared(source, revision, prepareCompiled(graph), buildNanos);
+    }
+
+    /** 只整理不可变配方值；不会读取世界、注册表或第三方配方。 */
+    public static PreparedProjection prepareCompiled(ImmutableRecipeGraph graph) {
+        return new PreparedProjection(graph, CompiledIndexes.build(graph),
+                PlanningLookupCache.prepareSharedNbtCache(graph));
+    }
+
+    public static synchronized void publishPrepared(RecipeManager source, long revision,
+                                                      PreparedProjection prepared,
+                                                      long buildNanos) {
+        compiledIndexes = prepared.indexes;
+        PlanningLookupCache.publishSharedNbtCache(prepared.nbtCache);
+        cachedProjection = new CachedProjection(source, revision, prepared.graph);
         PerformanceMonitor.recordRecipeGraphProjection(false, buildNanos);
+    }
+
+    public static final class PreparedProjection {
+        private final ImmutableRecipeGraph graph;
+        private final CompiledIndexes indexes;
+        private final PlanningLookupCache.SharedNbtCache nbtCache;
+
+        private PreparedProjection(ImmutableRecipeGraph graph, CompiledIndexes indexes,
+                                   PlanningLookupCache.SharedNbtCache nbtCache) {
+            this.graph = graph;
+            this.indexes = indexes;
+            this.nbtCache = nbtCache;
+        }
     }
 
     /** Returns the generation-level producer index, or null for an uncompiled test graph. */

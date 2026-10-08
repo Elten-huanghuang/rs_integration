@@ -828,19 +828,21 @@ public final class RSIntegrationMod {
                         .remove(sp.getUUID());
             }
         });
-        // Compile and publish one complete recipe generation before normal server
-        // ticks begin. Preview clicks never advance this work or wait behind it.
+        // 启动分片采集会话；完整配方扫描由后续 tick 逐步推进。
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
                 RecipeIndex.warmUp(e.getServer().overworld()));
         // /reload fires this event after the new recipes have been applied and
         // before they are sent to clients. Rebuild against that completed revision.
         MinecraftForge.EVENT_BUS.addListener((OnDatapackSyncEvent e) -> {
             if (e.getPlayer() == null) {
+                CraftPlanningRevision.bump();
+                RecipeIndex.invalidate();
                 RecipeIndex.warmUp(e.getPlayerList().getServer().overworld());
             }
         });
         MinecraftForge.EVENT_BUS.addListener((TickEvent.ServerTickEvent e) -> {
             if (e.phase == TickEvent.Phase.END) {
+                RecipeIndex.tickWarmUp(e.getServer().overworld());
                 AutoEatEngine.tick(e.getServer());
                 GenericCraftPacket
                         .tickWarmUpRequests(e.getServer());

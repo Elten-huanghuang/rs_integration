@@ -21,10 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeGraphWarmUpContractTest {
     @Test
-    void serverStartupBuildsCompleteGenerationBeforeTicks() throws IOException {
+    void serverStartupSchedulesGenerationAndTicksAdvanceCapture() throws IOException {
         Set<String> calls = methodCalls(RSIntegrationMod.class, null);
 
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
+        assertTrue(calls.contains(owner(RecipeIndex.class) + ".tickWarmUp"));
         assertTrue(calls.contains(owner(GenericCraftPacket.class) + ".tickWarmUpRequests"));
     }
 
@@ -33,7 +34,24 @@ class RecipeGraphWarmUpContractTest {
         Set<String> calls = methodCalls(GenericCraftPacket.class, "warmUpReady");
 
         assertTrue(calls.contains(owner(RecipeIndex.class) + ".isReady"));
+        assertFalse(methodCalls(GenericCraftPacket.class, null)
+                .contains(owner(RecipeIndex.class) + ".warmUpBlocking"));
         assertFalse(calls.contains(owner(ImmutableRecipeGraphProjector.class) + ".isReady"));
+    }
+
+    @Test
+    void graphCaptureCannotSynchronouslyBuildOrScanRecipes() throws IOException {
+        Set<String> calls = methodCalls(ImmutableRecipeGraphProjector.class, "capture");
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUpBlocking"));
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".warmUp"));
+        assertTrue(calls.contains(owner(PlanningThreadContext.class) + ".requireServerThread"));
+    }
+
+    @Test
+    void startupEntryPointNeverFinalizesOrScansCompleteCatalog() throws IOException {
+        Set<String> calls = methodCalls(RecipeIndex.class, "warmUp");
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".buildSynchronously"));
+        assertFalse(calls.contains(owner(RecipeIndex.class) + ".finalizeBuild"));
     }
 
     @Test

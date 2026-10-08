@@ -116,6 +116,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.RecipeGraphUnavailableException;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
@@ -273,6 +274,7 @@ public final class GenericCraftPacket {
         return ModList.get().isLoaded(ModIds.REFINED_STORAGE);
     }
     private static final int MAX_DEFERRED_WARM_UP_REQUESTS = 128;
+    private static final long DEFERRED_CATALOG_TIMEOUT_NANOS = 30_000_000_000L;
     private static final int MAX_DEFERRED_EXECUTION_REQUESTS = 64;
     private static final int MAX_GOETY_CANDIDATE_WARNINGS = 32;
     private static final LogSampler FAILURE_LOG_SAMPLER = new LogSampler(2_000);
@@ -752,6 +754,8 @@ public final class GenericCraftPacket {
             }
             if (packet.preview) {
                 PlanningProgressServer.warmingUp(player.getUUID(), previewGeneration);
+            } else {
+                player.sendSystemMessage(Component.translatable("rsi.plan.failure.catalog_loading"));
             }
             RSIntegrationMod.debug(
                     "[RSI-Generic] deferred until recipe warm-up: recipeId={} preview={} queued={}",
@@ -1411,6 +1415,10 @@ public final class GenericCraftPacket {
     private static void tickExecutionRequests(MinecraftServer server) {
         DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request = EXECUTION_REQUESTS.poll();
         if (request == null) return;
+        if (System.nanoTime() - request.queuedAtNanos() >= DEFERRED_CATALOG_TIMEOUT_NANOS) {
+            failExpiredCatalogRequest(server, request);
+            return;
+        }
         ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
         if (player != null && !player.hasDisconnected() && !player.isRemoved()) {
             request.payload().accept(player);
@@ -1424,8 +1432,12 @@ public final class GenericCraftPacket {
         // packet handler, so the first craft request cannot synchronously rebuild
         // the complete recipe catalog on its network task.
         RecipeIndex.refreshDynamicRuntimeIfNeeded(server.overworld());
+        expireCatalogRequest(server, WARM_UP_REQUESTS);
+        expireCatalogRequest(server, EXECUTION_REQUESTS);
         tickTypedPreviewRequests(server);
-        tickExecutionRequests(server);
+        if (warmUpReady(server.overworld())) {
+            tickExecutionRequests(server);
+        }
         if (RecipeIndex.generationBuildFailed()) {
             // Keep even failure notifications incremental. A full warm-up queue
             // can contain dozens of clicks and draining it here used to create a
@@ -1449,12 +1461,36 @@ public final class GenericCraftPacket {
             DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request =
                     WARM_UP_REQUESTS.poll();
             if (request == null) return;
+            if (System.nanoTime() - request.queuedAtNanos() >= DEFERRED_CATALOG_TIMEOUT_NANOS) {
+                failExpiredCatalogRequest(server, request);
+                return;
+            }
             ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
             if (player == null) continue;
             if (request.preview()
                     && !PLAN_REQUESTS.isCurrent(request.playerId(), request.generation())) continue;
             request.payload().accept(player);
             return;
+        }
+    }
+
+    private static void expireCatalogRequest(MinecraftServer server,
+            DeferredCraftRequestQueue<Consumer<ServerPlayer>> queue) {
+        var request = queue.pollExpired(System.nanoTime(), DEFERRED_CATALOG_TIMEOUT_NANOS);
+        if (request == null) return;
+        failExpiredCatalogRequest(server, request);
+    }
+
+    private static void failExpiredCatalogRequest(MinecraftServer server,
+            DeferredCraftRequestQueue.Entry<Consumer<ServerPlayer>> request) {
+        ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
+        if (player == null || request.preview()
+                && !PLAN_REQUESTS.isCurrent(request.playerId(), request.generation())) return;
+        Component message = Component.translatable("rsi.plan.failure.catalog_wait_timeout");
+        player.sendSystemMessage(message);
+        if (request.preview()) {
+            PlanningProgressServer.fail(player, request.generation(), message);
+            cancelTimedOutPlanning(request.playerId(), request.generation());
         }
     }
 
@@ -1491,6 +1527,11 @@ public final class GenericCraftPacket {
      * JVM messages are not suitable player-facing text and are often English.
      */
     private static Component buildFailureMessage(Throwable failure, ResourceLocation recipeId) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RecipeGraphUnavailableException) {
+                return Component.translatable("rsi.plan.failure.catalog_loading");
+            }
+        }
         if (containsNetworkNullFailure(failure)) {
             return Component.translatable("rsi.generic.error.network_unavailable");
         }

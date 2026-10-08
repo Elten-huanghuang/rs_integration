@@ -25,12 +25,15 @@ import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -43,6 +46,7 @@ import com.huanghuang.rsintegration.util.ItemStackUtils;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.stream.Collectors;
+import java.util.function.LongSupplier;
 import net.minecraft.core.Registry;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
@@ -52,6 +56,7 @@ import net.minecraftforge.fml.ModList;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -80,17 +85,13 @@ public final class RecipeIndex {
         }
     }
 
-    private static volatile Map<Item, List<Entry>> index;
-    private static volatile Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> spellScrollIndex = Map.of();
-    private static volatile Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes = Map.of();
-    private static volatile Set<ResourceLocation> reusableCatalystOutputIds = Set.of();
-    private static volatile Set<ResourceLocation> reusableCatalystRecipeIds = Set.of();
-    private static volatile Set<ResourceLocation> pureIncompatibleOutputIds = Set.of();
-    private static volatile RecipeManager source;
-    private static volatile long sourceRevision;
+    private static volatile PublishedGeneration generation;
     private static volatile boolean generationBuildFailed;
+    private static volatile long failedRevision;
+    private static long buildEpoch;
+    private static BuildSession activeBuild;
+    static final long TICK_BUDGET_NANOS = 8_000_000L;
     private static final AtomicBoolean BUILD_IN_FLIGHT = new AtomicBoolean();
-    private static final AtomicBoolean DRIFT_CHECK_IN_FLIGHT = new AtomicBoolean();
     private static volatile long lastDriftCheckTick = Long.MIN_VALUE;
     private static final ExecutorService WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "RSI-RecipeCatalog");
@@ -101,19 +102,20 @@ public final class RecipeIndex {
     private RecipeIndex() {}
 
     public static boolean isReady(Level level) {
-        Map<Item, List<Entry>> ready = index;
+        PublishedGeneration ready = generation;
         return ready != null
-                && source == level.getRecipeManager()
-                && sourceRevision == CraftPlanningRevision.current()
+                && ready.manager == level.getRecipeManager()
+                && ready.revision == CraftPlanningRevision.current()
                 && ImmutableRecipeGraphProjector.isReady(level);
     }
 
     public static boolean generationBuildFailed() {
-        return generationBuildFailed;
+        return generationBuildFailed && failedRevision == CraftPlanningRevision.current();
     }
 
     /** Rebuilds once when late spell-config synchronization changes ink mappings. */
     public static void refreshDynamicRuntimeIfNeeded(Level level) {
+        requireServerLevel(level);
         if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return;
         // Config publication can invalidate an in-flight generation after its
         // revision was captured. Retry on subsequent ticks until it is rebuilt;
@@ -123,299 +125,352 @@ public final class RecipeIndex {
             return;
         }
         long tick = level.getGameTime();
-        if (!driftCheckDue(tick, lastDriftCheckTick)
-                || !DRIFT_CHECK_IN_FLIGHT.compareAndSet(false, true)) return;
+        if (!driftCheckDue(tick, lastDriftCheckTick)) return;
         lastDriftCheckTick = tick;
-        RecipeManager manager = level.getRecipeManager();
-        long revision = CraftPlanningRevision.current();
-        WARMUP_EXECUTOR.execute(() -> {
-            try {
-                if (!IronSpellBooksRecipeCatalog.hasRuntimeDrift()) return;
-                synchronized (RecipeIndex.class) {
-                    if (source != manager || sourceRevision != revision
-                            || CraftPlanningRevision.current() != revision) return;
-                    RSIntegrationMod.LOGGER.info(
-                            "[RecipeCatalog] Iron spell configuration changed; rebuilding dynamic recipes");
-                    CraftPlanningRevision.bump();
-                    invalidate();
-                }
+        long started = System.nanoTime();
+        try {
+            // 指纹读取第三方法术和注册表，必须留在服务端线程。
+            if (IronSpellBooksRecipeCatalog.hasRuntimeDrift()) {
+                CraftPlanningRevision.bump();
+                invalidate();
                 warmUp(level);
-            } catch (RuntimeException | LinkageError failure) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeCatalog] Iron spell drift check failed; retaining current recipe generation", failure);
-            } finally {
-                DRIFT_CHECK_IN_FLIGHT.set(false);
             }
-        });
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] Iron spell drift check failed; retaining current recipe generation", failure);
+        } finally {
+            logSlowUnit("spell runtime drift", System.nanoTime() - started);
+        }
     }
 
     static boolean driftCheckDue(long tick, long previousTick) {
         return previousTick == Long.MIN_VALUE || tick < previousTick || tick - previousTick >= 100;
     }
 
-    private static boolean isServerThread(Level level) {
-        if (level == null || !level.isClientSide()) {
-            var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-            return server != null && server.isSameThread();
+    private static void requireServerLevel(Level level) {
+        MinecraftServer server = PlanningThreadContext.requireServerThread("recipe catalog capture");
+        if (!(level instanceof ServerLevel serverLevel) || serverLevel.getServer() != server) {
+            throw new IllegalArgumentException("Recipe catalog requires the current server level");
         }
-        return false;
     }
 
     /**
-     * Starts catalog generation without blocking the server thread. The
-     * published maps are immutable, so readers continue using the previous
-     * generation (or remain queued) while this build runs.
+     * 在服务端线程启动采集会话，不在此处扫描配方；后续 tick 分片推进。
+     * 采集完成后后台整理纯数据，主线程校验版本并发布完整快照。
      */
-    public static void warmUp(Level level) {
-        if (level == null || isReady(level)) return;
+    public static synchronized void warmUp(Level level) {
+        if (level == null) return;
+        requireServerLevel(level);
+        if (isReady(level) || generationBuildFailed()) return;
         if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) return;
-
-        // Capture manager + revision on server thread before handing off to worker
-        RecipeManager rm = level.getRecipeManager();
-        long revision = CraftPlanningRevision.current();
-
-        WARMUP_EXECUTOR.execute(() -> {
-            long start = System.currentTimeMillis();
-            try {
-                BuildResult result = buildUnsynchronized(level, rm, revision);
-                if (result == null) return; // Stale manager/revision, skip publication
-
-                synchronized (RecipeIndex.class) {
-                    // Validate manager + revision still match before publishing
-                    if (source == rm && sourceRevision == revision) {
-                        RSIntegrationMod.LOGGER.debug(
-                                "[RecipeCatalog] async build stale: manager or revision changed");
-                        return;
-                    }
-                    publishBuildResult(result, rm, revision);
-                    generationBuildFailed = false;
-                }
-                RSIntegrationMod.LOGGER.info("[RecipeCatalog] async generation ready in {}ms",
-                        System.currentTimeMillis() - start);
-            } catch (RuntimeException | LinkageError e) {
-                synchronized (RecipeIndex.class) {
-                    invalidate();
-                    generationBuildFailed = true;
-                }
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeCatalog] async generation build failed; planning remains unavailable", e);
-            } finally {
-                BUILD_IN_FLIGHT.set(false);
-            }
-        });
+        try {
+            activeBuild = new BuildSession(level, buildEpoch);
+            generationBuildFailed = false;
+        } catch (RuntimeException | LinkageError failure) {
+            BUILD_IN_FLIGHT.set(false);
+            failedRevision = CraftPlanningRevision.current();
+            generationBuildFailed = true;
+            RSIntegrationMod.LOGGER.warn("[RecipeCatalog] could not start generation", failure);
+        }
     }
 
     /**
-     * Compatibility fallback for callers that explicitly require a ready index now.
-     * <p><b>Thread safety:</b> This method accesses Level, RecipeManager, and third-party
-     * Recipe objects that are NOT thread-safe. When called from non-server threads
-     * (e.g. JEI render thread in integrated client), it proceeds with a warning.
-     * <p><b>Performance warning:</b> On first call after startup/reload, this scans every
-     * recipe in the pack and may block the calling thread for hundreds of milliseconds.
-     * Normal startup uses the async {@link #warmUp(Level)} path instead.
+     * 仅供明确要求同步构建的兼容调用；普通启动和合成请求必须使用分片预热。
+     * 非服务端线程在访问 Level 前被拒绝，已有构建时立即返回，绝不等待后台任务。
      */
     public static void warmUpBlocking(Level level) {
-        if (level == null || isReady(level)) return;
-
-        boolean onServerThread = isServerThread();
-        if (!onServerThread) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RecipeCatalog] warmUpBlocking called from non-server thread ({}); " +
-                    "this violates Minecraft threading contract but is required for JEI compatibility",
-                    Thread.currentThread().getName());
-        }
-
-        // Participate in BUILD_IN_FLIGHT to coordinate with warmUp
-        if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) {
-            // Another build is in flight. Wait for it to complete instead of building again.
-            RSIntegrationMod.LOGGER.debug(
-                    "[RecipeCatalog] warmUpBlocking waiting for in-flight build on thread {}",
-                    Thread.currentThread().getName());
-            for (int i = 0; i < 100 && BUILD_IN_FLIGHT.get(); i++) {
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    RSIntegrationMod.LOGGER.warn("[RecipeCatalog] warmUpBlocking interrupted");
-                    return;
-                }
-                if (isReady(level)) {
-                    RSIntegrationMod.LOGGER.debug(
-                            "[RecipeCatalog] warmUpBlocking: in-flight build completed");
-                    return;
-                }
-            }
-            if (BUILD_IN_FLIGHT.get()) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeCatalog] warmUpBlocking timed out waiting for in-flight build");
-                return;
-            }
-            // In-flight build finished but index still not ready - fall through to build
-            if (!BUILD_IN_FLIGHT.compareAndSet(false, true)) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeCatalog] warmUpBlocking giving up: concurrent build started after timeout");
-                return;
-            }
-        }
-
-        long start = System.currentTimeMillis();
+        if (level == null) return;
+        requireServerLevel(level);
+        if (isReady(level) || !BUILD_IN_FLIGHT.compareAndSet(false, true)) return;
+        long start = System.nanoTime();
         try {
-            RecipeManager rm = level.getRecipeManager();
-            long revision = CraftPlanningRevision.current();
-
-            // In integrated client, invalidate spell cache BEFORE building so worker doesn't see stale data
-            synchronized (RecipeIndex.class) {
-                if (!isReady(level) && ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
-                    IronSpellBooksRecipeCatalog.invalidate();
-                }
-            }
-
-            BuildResult result = buildUnsynchronized(level, rm, revision);
-            if (result != null) {
-                synchronized (RecipeIndex.class) {
-                    publishBuildResult(result, rm, revision);
-                    generationBuildFailed = false;
-                }
-            }
-
-            long elapsed = System.currentTimeMillis() - start;
-            if (onServerThread && elapsed > 500) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RecipeCatalog] synchronous generation blocked the server thread for {}ms", elapsed);
-            }
-            RSIntegrationMod.LOGGER.info("[RecipeCatalog] generation ready in {}ms", elapsed);
+            buildSynchronously(level);
         } catch (RuntimeException | LinkageError e) {
-            synchronized (RecipeIndex.class) {
-                invalidate();
-                generationBuildFailed = true;
-            }
+            failedRevision = CraftPlanningRevision.current();
+            generationBuildFailed = true;
             RSIntegrationMod.LOGGER.warn(
                     "[RecipeCatalog] generation build failed; planning remains unavailable", e);
         } finally {
             BUILD_IN_FLIGHT.set(false);
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] explicit synchronous build used {}ms on server thread",
+                    (System.nanoTime() - start) / 1_000_000L);
         }
     }
 
-    private static boolean isServerThread() {
-        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-        return server != null && server.isSameThread();
+    /** 每 tick 只推进有限采集工作，后台结果就绪后才取出，绝不阻塞等待。 */
+    public static synchronized void tickWarmUp(Level level) {
+        requireServerLevel(level);
+        BuildSession session = activeBuild;
+        if (session != null && !session.isCurrent()) {
+            discardBuild();
+            session = null;
+        }
+        if (session == null) {
+            warmUp(level);
+            session = activeBuild;
+        }
+        if (session == null) return;
+        try {
+            if (session.finalized == null) {
+                if (!session.advance(System.nanoTime() + TICK_BUDGET_NANOS)) return;
+                // 数据所有权交给后台后，服务端线程不再修改这些私有容器。
+                BuildInput input = session.input();
+                session.finalized = CompletableFuture.supplyAsync(
+                        () -> PlanningThreadContext.runInBackground(() -> finalizeBuild(input)),
+                        WARMUP_EXECUTOR);
+            }
+            if (!session.finalized.isDone()) return;
+            BuildResult result = session.finalized.getNow(null);
+            publishBuildResult(session, result);
+            discardBuild();
+        } catch (RuntimeException | LinkageError failure) {
+            if (session.isCurrent()) {
+                failedRevision = session.revision;
+                generationBuildFailed = true;
+            }
+            discardBuild();
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] generation build failed; planning remains unavailable", failure);
+        }
+    }
+
+    private static void discardBuild() {
+        if (activeBuild != null && activeBuild.finalized != null) {
+            activeBuild.finalized.cancel(false);
+        }
+        activeBuild = null;
+        BUILD_IN_FLIGHT.set(false);
     }
 
     /**
      * Returns only a complete generation published during startup or reload.
      */
     public static Map<Item, List<Entry>> get(Level level) {
-        RecipeManager manager = level.getRecipeManager();
-        Map<Item, List<Entry>> ready = index;
-        if (ready != null && source == manager
-                && sourceRevision == CraftPlanningRevision.current()
+        return readyGeneration(level).result.index;
+    }
+
+    private static PublishedGeneration readyGeneration(Level level) {
+        PublishedGeneration ready = generation;
+        if (ready != null && ready.manager == level.getRecipeManager()
+                && ready.revision == CraftPlanningRevision.current()
                 && ImmutableRecipeGraphProjector.isReady(level)) return ready;
-        throw new IllegalStateException("Recipe catalog generation is unavailable");
+        throw new ImmutableRecipeGraphProjector.RecipeGraphUnavailableException(
+                "Recipe catalog is still loading; retry later");
     }
 
     private static Map<Item, List<Entry>> buildSynchronously(Level level) {
-        RecipeManager rm = level.getRecipeManager();
-        long revision = CraftPlanningRevision.current();
-        Map<Item, List<Entry>> idx = index;
-        if (idx != null && source == rm && sourceRevision == revision
-                && ImmutableRecipeGraphProjector.isReady(level)) return idx;
-        synchronized (RecipeIndex.class) {
-            idx = index;
-            if (idx != null && source == rm && sourceRevision == revision
-                    && ImmutableRecipeGraphProjector.isReady(level)) return idx;
+        requireServerLevel(level);
+        BuildSession session = new BuildSession(level, buildEpoch);
+        if (!session.advance(Long.MAX_VALUE)) return Map.of();
+        BuildResult result = finalizeBuild(session.input());
+        return publishBuildResult(session, result) ? result.index : Map.of();
+    }
 
+    private record PublishedGeneration(RecipeManager manager, long revision, BuildResult result) {}
+
+    /** 容器由采集会话独占，交给后台后不再写入；其中的 Recipe/Item 仅作为不透明引用。 */
+    record BuildInput(Map<Item, List<Entry>> index,
+                      Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected,
+                      Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
+                      Set<ResourceLocation> catalystOutputs, Set<ResourceLocation> catalystRecipes,
+                      Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls,
+                      Set<ResourceLocation> outputIds) {}
+
+    record BuildResult(Map<Item, List<Entry>> index,
+                       Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
+                       Set<ResourceLocation> catalystOutputs, Set<ResourceLocation> catalystRecipes,
+                       Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls,
+                       Set<ResourceLocation> incompatibleOutputs, ImmutableRecipeGraph graph,
+                       ImmutableRecipeGraphProjector.PreparedProjection prepared,
+                       long finalizeNanos) {}
+
+    static BuildResult finalizeBuild(BuildInput input) {
+        long started = System.nanoTime();
+        Map<Item, List<Entry>> frozen = freezeIndex(input.index);
+        Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls = new HashMap<>();
+        input.scrolls.forEach((key, entries) -> scrolls.put(key, List.copyOf(entries)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(input.projected);
+        Set<ResourceLocation> projectedIds = graph.recipesByOutput().keySet().stream()
+                .map(ImmutableRecipeGraph.MaterialRef::itemId).collect(Collectors.toSet());
+        Set<ResourceLocation> incompatible = new HashSet<>(input.outputIds);
+        incompatible.removeAll(projectedIds);
+        var prepared = ImmutableRecipeGraphProjector.prepareCompiled(graph);
+        return new BuildResult(frozen, freezeCatalystRoutes(input.catalystRoutes),
+                Set.copyOf(input.catalystOutputs), Set.copyOf(input.catalystRecipes),
+                Map.copyOf(scrolls), Set.copyOf(incompatible), graph, prepared,
+                System.nanoTime() - started);
+    }
+
+    static synchronized boolean publishBuildResult(BuildSession session, BuildResult result) {
+        requireServerLevel(session.level);
+        if (!session.isCurrent()) return false;
+        ImmutableRecipeGraphProjector.publishPrepared(session.manager, session.revision,
+                result.prepared, session.timing.graphNanos + result.finalizeNanos);
+        generation = new PublishedGeneration(session.manager, session.revision, result);
+        generationBuildFailed = false;
+        PerformanceMonitor.recordRecipeCatalogBuild(
+                session.captureNanos + result.finalizeNanos,
+                session.timing.graphNanos + result.finalizeNanos, session.recipeCount);
+        Diagnostics.stopTimer("RecipeIndex.build", session.diagTimer);
+        Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
+                result.index.size() + " items, " + session.seen.size() + " entries");
+        RSIntegrationMod.LOGGER.info(
+                "[RecipeCatalog] generation ready: {} items, {} entries, {} pure recipes, {}ms elapsed, "
+                        + "{}ms capture, {}ms finalize; skipped {} unknown/{} empty/{} identity; slowest {} {}ms",
+                result.index.size(), session.seen.size(), result.graph.recipesById().size(),
+                (System.nanoTime() - session.started) / 1_000_000L,
+                session.captureNanos / 1_000_000L, result.finalizeNanos / 1_000_000L,
+                session.skippedUnknown, session.skippedEmptyResult, session.skippedIdentity,
+                session.timing.slowestRecipe, session.timing.slowestRecipeNanos / 1_000_000L);
+        if (!session.unknownRecipeTypes.isEmpty()) {
+            RSIntegrationMod.LOGGER.debug("[RecipeCatalog] unsupported native recipe types: {}",
+                    summarizeUnknownRecipeTypes(session.unknownRecipeTypes));
+        }
+        return true;
+    }
+
+    private static void logSlowUnit(String unit, long elapsedNanos) {
+        if (elapsedNanos > TICK_BUDGET_NANOS) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] capture unit {} took {}ms, exceeding 8ms tick budget; "
+                            + "individual third-party calls cannot be preempted",
+                    unit, elapsedNanos / 1_000_000L);
+        }
+    }
+
+    enum BuildPhase { RECIPES, SOURCES, SPELL_SCROLLS, OUTPUT_IDS, COMPLETE }
+
+    static final class BuildSession {
+        final Level level;
+        final RecipeManager manager;
+        final long revision;
+        final long epoch;
+        final long started = System.nanoTime();
+        final long diagTimer = Diagnostics.startTimer();
+        final int recipeCount;
+        final Iterator<Recipe<?>> recipes;
+        final Map<Item, List<Entry>> index = new HashMap<>();
+        final Set<ResourceLocation> seen = new HashSet<>();
+        final Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected = new HashMap<>();
+        final Map<Item, List<ReusableCatalystRoute>> catalystRoutes = new HashMap<>();
+        final Set<ResourceLocation> catalystOutputs = new LinkedHashSet<>();
+        final Set<ResourceLocation> catalystRecipes = new LinkedHashSet<>();
+        final Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls = new HashMap<>();
+        final Set<ResourceLocation> outputIds = new HashSet<>();
+        final Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
+        final BuildTiming timing = new BuildTiming();
+        BuildPhase phase = BuildPhase.RECIPES;
+        int sourceStep;
+        int skippedUnknown;
+        int skippedEmptyResult;
+        int skippedIdentity;
+        long captureNanos;
+        Iterator<Entry> scrollEntries = Collections.emptyIterator();
+        Iterator<Item> outputItems = Collections.emptyIterator();
+        CompletableFuture<BuildResult> finalized;
+
+        BuildSession(Level level, long epoch) {
+            requireServerLevel(level);
+            this.level = level;
+            this.manager = level.getRecipeManager();
+            this.revision = CraftPlanningRevision.current();
+            this.epoch = epoch;
             CraftPacketUtils.clearIngredientCache();
-            long diagTimer = Diagnostics.startTimer();
-            long start = System.currentTimeMillis();
-            long startedNanos = System.nanoTime();
-            idx = new HashMap<>();
-            Set<ResourceLocation> seen = new HashSet<>();
-            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected =
-                    new HashMap<>();
-            Set<ResourceLocation> catalystOutputIds = new LinkedHashSet<>();
-            Set<ResourceLocation> catalystRecipeIds = new LinkedHashSet<>();
-            Map<Item, List<ReusableCatalystRoute>> catalystRoutes = new HashMap<>();
-            Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
-            BuildTiming timing = new BuildTiming();
-            int skippedUnknown = 0, skippedEmptyResult = 0, skippedIdentity = 0;
+            Collection<Recipe<?>> captured = manager.getRecipes();
+            recipeCount = captured.size();
+            recipes = captured.iterator();
+            captureNanos = System.nanoTime() - started;
+            logSlowUnit("recipe collection", captureNanos);
+        }
 
-            // Keep same-output recipes from different machines. Candidate scoring may prefer
-            // ordinary crafting, but removing an alternative here makes it vanish from recursion.
-            for (Recipe<?> recipe : rm.getRecipes()) {
-                long recipeStarted = System.nanoTime();
-                IndexOutcome outcome = indexRecipe(level, idx, seen, projected,
-                        catalystOutputIds, catalystRecipeIds, catalystRoutes, timing, recipe);
-                timing.recordRecipe(recipe, System.nanoTime() - recipeStarted);
-                if (outcome == IndexOutcome.UNKNOWN) {
-                    skippedUnknown++;
-                    recordUnknownRecipeType(unknownRecipeTypes, recipe);
+        boolean isCurrent() {
+            return epoch == buildEpoch && revision == CraftPlanningRevision.current()
+                    && manager == level.getRecipeManager();
+        }
+
+        boolean advance(long deadline) {
+            return advance(deadline, System::nanoTime);
+        }
+
+        boolean advance(long deadline, LongSupplier nanoTime) {
+            requireServerLevel(level);
+            while (phase != BuildPhase.COMPLETE && nanoTime.getAsLong() < deadline) {
+                long unitStarted = System.nanoTime();
+                String unit = phase.name();
+                switch (phase) {
+                    case RECIPES -> {
+                        if (!recipes.hasNext()) {
+                            phase = BuildPhase.SOURCES;
+                            continue;
+                        }
+                        Recipe<?> recipe = recipes.next();
+                        unit = recipe.getId().toString();
+                        IndexOutcome outcome = indexRecipe(level, index, seen, projected,
+                                catalystOutputs, catalystRecipes, catalystRoutes, timing, recipe);
+                        timing.recordRecipe(recipe, System.nanoTime() - unitStarted);
+                        if (outcome == IndexOutcome.UNKNOWN) {
+                            skippedUnknown++;
+                            recordUnknownRecipeType(unknownRecipeTypes, recipe);
+                        } else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
+                        else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
+                    }
+                    case SOURCES -> {
+                        unit = "source " + sourceStep;
+                        switch (sourceStep++) {
+                            case 0 -> indexFARituals(level, index, seen);
+                            case 1 -> indexMarketEntries(index, seen);
+                            case 2 -> indexGemCutting(level, index, seen);
+                            case 3 -> indexIronSpellBooks(level, index, seen);
+                            case 4 -> indexDistantWorldsFiron(index, seen);
+                            case 5 -> indexPmmoSalvage(index, seen);
+                            case 6 -> VanillaBrewingCatalog.index(level, index, seen, projected);
+                            case 7 -> FluidContainerCatalog.index(level, index, seen, projected);
+                            default -> {
+                                if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+                                    Item scroll = ForgeRegistries.ITEMS.getValue(
+                                            new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
+                                    scrollEntries = index.getOrDefault(scroll, List.of()).iterator();
+                                }
+                                phase = BuildPhase.SPELL_SCROLLS;
+                            }
+                        }
+                    }
+                    case SPELL_SCROLLS -> {
+                        if (!scrollEntries.hasNext()) {
+                            outputItems = index.keySet().iterator();
+                            phase = BuildPhase.OUTPUT_IDS;
+                            continue;
+                        }
+                        Entry entry = scrollEntries.next();
+                        ItemStack output = ModRecipeHandlers.tryGetResultItem(
+                                entry.recipe(), level.registryAccess());
+                        var key = IronSpellBooksRecipeCatalog.spellScrollKey(output);
+                        if (key != null) scrolls.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entry);
+                    }
+                    case OUTPUT_IDS -> {
+                        if (!outputItems.hasNext()) {
+                            phase = BuildPhase.COMPLETE;
+                            continue;
+                        }
+                        ResourceLocation id = ForgeRegistries.ITEMS.getKey(outputItems.next());
+                        if (id != null) outputIds.add(id);
+                    }
+                    case COMPLETE -> { }
                 }
-                else if (outcome == IndexOutcome.EMPTY_RESULT) skippedEmptyResult++;
-                else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
+                long elapsed = System.nanoTime() - unitStarted;
+                captureNanos += elapsed;
+                logSlowUnit(unit, elapsed);
+                // 第三方目录刷新可能改变 revision；下一 tick 必须重新开始采集。
+                if (!isCurrent()) return false;
             }
+            return phase == BuildPhase.COMPLETE;
+        }
 
-            // ── FA rituals (FARegistries.RITUAL, not RecipeManager) ──────
-            int faIndexed = indexFARituals(level, idx, seen);
-
-            // ── Market entries (MarketRegistry, not RecipeManager) ────
-            int marketIndexed = indexMarketEntries(idx, seen);
-            int gemCuttingIndexed = indexGemCutting(level, idx, seen);
-            int ironSpellBooksIndexed = indexIronSpellBooks(level, idx, seen);
-
-            // ── Distant Worlds Firon Lithum Altar definitions ─────────
-            int distantWorldsIndexed = indexDistantWorldsFiron(idx, seen);
-            int pmmoSalvageIndexed = indexPmmoSalvage(idx, seen);
-            int brewingIndexed = VanillaBrewingCatalog.index(level, idx, seen, projected);
-            FluidContainerCatalog.index(level, idx, seen, projected);
-
-            Map<Item, List<Entry>> publishedIndex = freezeIndex(idx);
-            Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> publishedSpellScrollIndex =
-                    buildSpellScrollIndex(level, publishedIndex);
-            ImmutableRecipeGraph graph = new ImmutableRecipeGraph(projected);
-            ImmutableRecipeGraphProjector.publishCompiled(rm, revision, graph, timing.graphNanos);
-            reusableCatalystOutputIds = Set.copyOf(catalystOutputIds);
-            reusableCatalystRecipeIds = Set.copyOf(catalystRecipeIds);
-            reusableCatalystRoutes = freezeCatalystRoutes(catalystRoutes);
-            Set<ResourceLocation> projectedOutputIds = graph.recipesByOutput().keySet().stream()
-                    .map(ImmutableRecipeGraph.MaterialRef::itemId)
-                    .collect(Collectors.toSet());
-            pureIncompatibleOutputIds = publishedIndex.keySet().stream()
-                    .map(ForgeRegistries.ITEMS::getKey)
-                    .filter(Objects::nonNull)
-                    .filter(id -> !projectedOutputIds.contains(id))
-                    .collect(Collectors.toUnmodifiableSet());
-            index = publishedIndex;
-            spellScrollIndex = publishedSpellScrollIndex;
-            source = rm;
-            sourceRevision = revision;
-
-            long elapsed = System.currentTimeMillis() - start;
-            long totalNanos = System.nanoTime() - startedNanos;
-            PerformanceMonitor.recordRecipeCatalogBuild(
-                    totalNanos, timing.graphNanos, rm.getRecipes().size());
-            Diagnostics.stopTimer("RecipeIndex.build", diagTimer);
-            Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
-                    idx.size() + " items, " + seen.size() + " entries, " + elapsed + "ms"
-                    + " (skipped: " + skippedUnknown + " unknown, " + skippedEmptyResult
-                    + " empty-result, " + skippedIdentity + " identity"
-                    + ", " + faIndexed + " FA rituals"
-                    + ", " + marketIndexed + " market"
-                    + ", " + distantWorldsIndexed + " Distant Worlds Firon"
-                    + ", " + pmmoSalvageIndexed + " PMMO salvage"
-                    + ", " + brewingIndexed + " brewing");
-            RSIntegrationMod.LOGGER.info("[RecipeCatalog] built: {} items, {} entries, {} pure recipes"
-                            + " in {}ms (graph {}ms; skipped: {} unknown, {} empty-result, {} identity"
-                            + ", {} FA rituals, {} market, {} Distant Worlds Firon; slowest {} {}ms)",
-                    idx.size(), seen.size(), graph.recipesById().size(), elapsed,
-                    timing.graphNanos / 1_000_000L, skippedUnknown, skippedEmptyResult,
-                    skippedIdentity, faIndexed, marketIndexed, distantWorldsIndexed,
-                    timing.slowestRecipe, timing.slowestRecipeNanos / 1_000_000L);
-            if (!unknownRecipeTypes.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug(
-                        "[RecipeCatalog] unsupported native recipe types ({} types): {}",
-                        unknownRecipeTypes.size(), summarizeUnknownRecipeTypes(unknownRecipeTypes));
-            }
-            return publishedIndex;
+        BuildInput input() {
+            if (phase != BuildPhase.COMPLETE) throw new IllegalStateException("Recipe capture incomplete");
+            return new BuildInput(index, projected, catalystRoutes, catalystOutputs,
+                    catalystRecipes, scrolls, outputIds);
         }
     }
 
@@ -550,37 +605,15 @@ public final class RecipeIndex {
     private static Map<Item, List<Entry>> freezeIndex(Map<Item, List<Entry>> mutable) {
         Map<Item, List<Entry>> frozen = new HashMap<>(mutable.size());
         mutable.forEach((item, entries) -> frozen.put(item, List.copyOf(entries)));
-        // The map is a private snapshot and every value above is immutable. Wrapping it is
-        // sufficient; Map.copyOf would rebuild the entire (potentially very large) index a
-        // second time on the server thread during startup.
+        // 私有快照的列表已冻结，只需包装 Map，避免再次复制大型索引。
         return Collections.unmodifiableMap(frozen);
-    }
-
-    private static Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> buildSpellScrollIndex(
-            Level level, Map<Item, List<Entry>> publishedIndex) {
-        if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return Map.of();
-        Item scroll = ForgeRegistries.ITEMS.getValue(
-                new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
-        List<Entry> entries = scroll == null ? null : publishedIndex.get(scroll);
-        if (entries == null || entries.isEmpty()) return Map.of();
-        Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> mutable = new HashMap<>();
-        for (Entry entry : entries) {
-            ItemStack output = ModRecipeHandlers.tryGetResultItem(
-                    entry.recipe(), level.registryAccess());
-            var key = IronSpellBooksRecipeCatalog.spellScrollKey(output);
-            if (key != null) mutable.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entry);
-        }
-        Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> frozen =
-                new HashMap<>(mutable.size());
-        mutable.forEach((key, recipes) -> frozen.put(key, List.copyOf(recipes)));
-        return Map.copyOf(frozen);
     }
 
     /** Exact spell-level producers, avoiding a scan of every scroll recipe. */
     public static List<Entry> spellScrollCandidates(Level level, ItemStack requested) {
-        get(level);
+        BuildResult ready = readyGeneration(level).result;
         var key = IronSpellBooksRecipeCatalog.spellScrollKey(requested);
-        return key == null ? List.of() : spellScrollIndex.getOrDefault(key, List.of());
+        return key == null ? List.of() : ready.scrolls.getOrDefault(key, List.of());
     }
 
     private static Map<Item, List<ReusableCatalystRoute>> freezeCatalystRoutes(
@@ -592,25 +625,21 @@ public final class RecipeIndex {
 
     /** Outputs with at least one indexed producer that uses a reusable catalyst. */
     public static Set<ResourceLocation> reusableCatalystOutputIds(Level level) {
-        get(level);
-        return reusableCatalystOutputIds;
+        return readyGeneration(level).result.catalystOutputs;
     }
 
     /** Indexed crafting recipes containing at least one reusable catalyst input. */
     public static Set<ResourceLocation> reusableCatalystRecipeIds(Level level) {
-        get(level);
-        return reusableCatalystRecipeIds;
+        return readyGeneration(level).result.catalystRecipes;
     }
 
     /** Outputs that have indexed producers but no producer representable in the pure graph. */
     public static Set<ResourceLocation> pureIncompatibleOutputIds(Level level) {
-        get(level);
-        return pureIncompatibleOutputIds;
+        return readyGeneration(level).result.incompatibleOutputs;
     }
 
     public static Map<Item, List<ReusableCatalystRoute>> reusableCatalystRoutes(Level level) {
-        get(level);
-        return reusableCatalystRoutes;
+        return readyGeneration(level).result.catalystRoutes;
     }
 
     private static final class BuildTiming {
@@ -1060,19 +1089,12 @@ public final class RecipeIndex {
     }
 
     /** Invalidate the cached index (e.g. on recipe reload). */
-    public static void invalidate() {
-        synchronized (RecipeIndex.class) {
-            index = null;
-            spellScrollIndex = Map.of();
-            reusableCatalystRoutes = Map.of();
-            reusableCatalystOutputIds = Set.of();
-            reusableCatalystRecipeIds = Set.of();
-            pureIncompatibleOutputIds = Set.of();
-            source = null;
-            sourceRevision = 0L;
-            lastDriftCheckTick = Long.MIN_VALUE;
-            generationBuildFailed = false;
-        }
+    public static synchronized void invalidate() {
+        buildEpoch++;
+        generation = null;
+        discardBuild();
+        lastDriftCheckTick = Long.MIN_VALUE;
+        generationBuildFailed = false;
         if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
             IronSpellBooksRecipeCatalog.invalidate();
         }
@@ -1088,7 +1110,7 @@ public final class RecipeIndex {
     private static final Map<Class<?>, Field> outputFieldCache = new ConcurrentHashMap<>();
     private static final Field NO_OUTPUT_FIELD;
     static {
-        try { NO_OUTPUT_FIELD = RecipeIndex.class.getDeclaredField("index"); }
+        try { NO_OUTPUT_FIELD = RecipeIndex.class.getDeclaredField("generation"); }
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
     }
 
@@ -1101,6 +1123,7 @@ public final class RecipeIndex {
     private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
 
     public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
+        PlanningThreadContext.requireMainThread("third-party recipe reflection");
         if (recipe == null) return ItemStack.EMPTY;
         if (recipe instanceof CraftingRecipe) {
             return ModRecipeHandlers.tryGetResultItem(recipe, access);
