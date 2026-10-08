@@ -72,6 +72,42 @@ class FluidContainerCatalogTest extends BootstrapTest {
         assertTrue(drain.secondaryOutputs().get(0).is(Items.BUCKET));
     }
 
+    @Test void bucketSubclassWithoutCapabilitiesDiscoversBothConversionsFromFilledSample() {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("poisonwater");
+        ItemStack filled = new ItemStack(buckets.filled(), 3);
+        assertNull(FluidContainerBucketTestFixtures.handler(filled.copyWithCount(1)));
+        var recipes = FluidContainerCatalog.discover(List.of(filled), List.of(),
+                FluidContainerBucketTestFixtures::handler, FluidContainerCatalogTest::token);
+        assertEquals(2, recipes.size());
+        assertTrue(recipes.stream().allMatch(r -> r.filledContainer().is(buckets.filled())
+                && r.emptyContainer().is(Items.BUCKET) && r.fluid().getAmount() == 1000));
+        var drain = recipes.stream().filter(r -> !r.filling()).findFirst().orElseThrow();
+        assertEquals(((BucketItem) buckets.filled()).getFluid(), InkFluidSupport.fluid(drain.output()).getFluid());
+        assertTrue(drain.secondaryOutputs().get(0).is(Items.BUCKET));
+        assertEquals(3, filled.getCount());
+        assertFalse(filled.hasTag());
+    }
+
+    @Test void fluidCandidateCanFillIntoBucketSubclassWithoutCapabilities() {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("candidate_poisonwater");
+        var recipes = FluidContainerCatalog.discover(List.of(new ItemStack(Items.BUCKET)),
+                List.of(new FluidStack(((BucketItem) buckets.filled()).getFluid(), 1)),
+                FluidContainerBucketTestFixtures::handler, FluidContainerCatalogTest::token);
+        assertEquals(2, recipes.size());
+        var fill = recipes.stream().filter(FluidContainerRecipe::filling).findFirst().orElseThrow();
+        assertTrue(fill.output().is(buckets.filled()));
+        assertEquals(1000, fill.specs().get(1).count());
+    }
+
+    @Test void bucketsWithoutCapabilitiesKeepTheirDeclaredEmptyContainers() {
+        var buckets = FluidContainerBucketTestFixtures.buckets("missing_capability_wood");
+        var recipes = FluidContainerCatalog.discover(List.of(new ItemStack(buckets.filled())), List.of(),
+                stack -> null, FluidContainerCatalogTest::token);
+        assertEquals(2, recipes.size());
+        assertTrue(recipes.stream().allMatch(r -> r.filledContainer().is(buckets.filled())
+                && r.emptyContainer().is(buckets.empty())));
+    }
+
     @Test void thirdPartyBucketPairsKeepTheirOwnContainersInBothDirections() {
         var wood = FluidContainerBucketTestFixtures.buckets("wood");
         var bamboo = FluidContainerBucketTestFixtures.buckets("bamboo");

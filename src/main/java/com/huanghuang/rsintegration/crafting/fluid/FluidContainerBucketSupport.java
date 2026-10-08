@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-/** 默认桶能力会返回铁桶；通过物品声明的剩余容器保留第三方桶的种类。 */
+/** 为缺少能力的桶补充标准行为，并通过物品声明的剩余容器保留第三方桶的种类。 */
 final class FluidContainerBucketSupport {
     private FluidContainerBucketSupport() {}
 
@@ -26,14 +26,14 @@ final class FluidContainerBucketSupport {
         for (ItemStack sample : samples) {
             if (sample.isEmpty() || !(sample.getItem() instanceof BucketItem)) continue;
             try {
-                IFluidHandlerItem handler = original.apply(sample.copyWithCount(1));
+                IFluidHandlerItem handler = handler(sample.copyWithCount(1), original);
                 if (handler == null || handler.getClass() != FluidBucketWrapper.class) continue;
                 FluidStack fluid = handler.getFluidInTank(0).copy();
                 if (fluid.isEmpty()) continue;
                 ItemStack empty = sample.getCraftingRemainingItem();
                 if (empty.isEmpty() || empty.getCount() != 1 || empty.is(Items.BUCKET)
                         || ItemStack.isSameItemSameTags(empty, sample)) continue;
-                IFluidHandlerItem emptyHandler = original.apply(empty.copy());
+                IFluidHandlerItem emptyHandler = handler(empty.copy(), original);
                 if (emptyHandler != null && (emptyHandler.getTanks() != 1
                         || !emptyHandler.getFluidInTank(0).isEmpty())) continue;
                 Pair pair = new Pair(empty.copy(), sample.copyWithCount(1), fluid);
@@ -45,7 +45,7 @@ final class FluidContainerBucketSupport {
             }
         }
         return stack -> {
-            IFluidHandlerItem handler = original.apply(stack);
+            IFluidHandlerItem handler = handler(stack, original);
             // 自定义能力可能有容量、损耗等规则，应完整保留。
             if (handler != null && handler.getClass() != FluidBucketWrapper.class) return handler;
             Pair filled = filledPairs.get(key(stack));
@@ -74,6 +74,12 @@ final class FluidContainerBucketSupport {
                 }
             };
         };
+    }
+
+    private static IFluidHandlerItem handler(ItemStack stack, Function<ItemStack, IFluidHandlerItem> original) {
+        IFluidHandlerItem handler = original.apply(stack);
+        // Forge 仅为 BucketItem 本类附加默认能力，未声明能力的桶子类需要回退。
+        return handler == null && stack.getItem() instanceof BucketItem ? new FluidBucketWrapper(stack) : handler;
     }
 
     private static String key(ItemStack stack) {
