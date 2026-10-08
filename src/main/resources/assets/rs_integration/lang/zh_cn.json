@@ -1,4 +1,7 @@
 {
+  "rsi.update.available": "[RS Integration] 新版本 %s 已发布。",
+  "rsi.update.download": "前往 Modrinth 下载",
+  "rsi.update.download_hover": "打开 Modrinth 版本页面",
   "config.rs_integration.title": "RS Integration 配置",
   "config.rs_integration.file.client": "客户端",
   "config.rs_integration.file.common": "通用",

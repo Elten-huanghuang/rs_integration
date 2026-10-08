@@ -99,7 +99,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         int physicalBatch = profile.plannedBatchSize(available);
         plannedOperations = available;
         plannedFactoryLanes = factoryMode
-                ? requiredFactoryLanes(physicalBatch, laneCapacity, rainbowMode) : 1;
+                ? Math.min(profile.laneCount(), requiredFactoryLanes(physicalBatch, laneCapacity, rainbowMode)) : 1;
         RSIntegrationMod.debug(
                 "[RSI-IronFurnaces] batch plan factory={} rainbow={} requested={} physicalBatch={} lanes={} laneCapacity={}",
                 factoryMode, rainbowMode, remainingOperations, physicalBatch,
@@ -436,8 +436,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         queuedOperations = operations;
         plannedOperations = operations;
         plannedFactoryLanes = factoryMode
-                ? requiredFactoryLanes(Math.min(operations, capacity),
-                        batchProfile().laneCapacity(), rainbowMode)
+                ? Math.min(batchProfile().laneCount(), requiredFactoryLanes(Math.min(operations, capacity),
+                        batchProfile().laneCapacity(), rainbowMode))
                 : 1;
         if (startNextPhysicalBatch()) return true;
 
@@ -460,11 +460,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         if (factoryMode) {
-            int requiredLanes = requiredFactoryLanes(operations, laneCapacity, rainbowMode);
+            int requiredLanes = Math.min(batchProfile().laneCount(),
+                    requiredFactoryLanes(operations, laneCapacity, rainbowMode));
             if (!ensureFactoryLeases(requiredLanes)) return false;
-            boolean[] available = new boolean[FACTORY_INPUT.length];
+            boolean[] available = IronFactoryLanePlan.enabledLanes(furnace.getTier());
             for (int lane = 0; lane < available.length; lane++) {
-                available[lane] = initialFactoryInputCounts[lane] == 0
+                available[lane] &= initialFactoryInputCounts[lane] == 0
                         && furnace.getItem(FACTORY_INPUT[lane]).isEmpty()
                         && furnace.getItem(FACTORY_INPUT[lane] + FACTORY_INPUT.length).isEmpty();
             }
@@ -539,7 +540,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     private IronFurnaceBatchProfile batchProfile() {
-        return IronFurnaceBatchProfile.of(factoryMode, rainbowMode, laneInputCapacity());
+        return IronFurnaceBatchProfile.of(factoryMode, rainbowMode, laneInputCapacity(),
+                furnace == null ? 2 : furnace.getTier());
     }
 
     static int physicalCycleCount(int operations, int capacity) {
@@ -924,9 +926,10 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private int reserveFactorySlot(String key, BlockIronFurnaceTileBase f) {
         boolean[] leases = FACTORY_LEASES.computeIfAbsent(key, ignored -> new boolean[FACTORY_INPUT.length]);
+        boolean[] enabled = IronFactoryLanePlan.enabledLanes(f.getTier());
         synchronized (leases) {
             for (int i = 0; i < FACTORY_INPUT.length; i++) {
-                if (!leases[i] && f.getItem(FACTORY_INPUT[i]).isEmpty()
+                if (enabled[i] && !leases[i] && f.getItem(FACTORY_INPUT[i]).isEmpty()
                         && f.getItem(FACTORY_INPUT[i] + 6).isEmpty()) {
                     leases[i] = true;
                     ownedFactoryLanes[i] = true;
@@ -939,7 +942,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private boolean ensureFactoryLeases(int required) {
         if (!factoryMode || furnace == null || factoryLeaseKey == null
-                || required <= 0 || required > FACTORY_INPUT.length) return false;
+                || required <= 0 || required > batchProfile().laneCount()) return false;
+        boolean[] enabled = IronFactoryLanePlan.enabledLanes(furnace.getTier());
+        for (int lane = 0; lane < ownedFactoryLanes.length; lane++) {
+            if (ownedFactoryLanes[lane] && !enabled[lane]) return false;
+        }
         while (ownedFactoryLaneCount() < required) {
             if (reserveFactorySlot(factoryLeaseKey, furnace) < 0) return false;
         }

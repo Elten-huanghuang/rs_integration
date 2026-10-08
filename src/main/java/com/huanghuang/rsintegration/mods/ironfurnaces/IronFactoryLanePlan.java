@@ -18,6 +18,14 @@ public record IronFactoryLanePlan(List<Lane> lanes, int operations) {
         }
     }
 
+    /** 与更多熔炉 4.1.6 的 tick 通道范围一致：等级 0 为中间两格，等级 1 为中间四格。 */
+    public static boolean[] enabledLanes(int tier) {
+        boolean[] enabled = new boolean[LANE_COUNT];
+        int first = tier == 0 ? 2 : tier == 1 ? 1 : 0;
+        for (int index = first; index < LANE_COUNT - first; index++) enabled[index] = true;
+        return enabled;
+    }
+
     public static IronFactoryLanePlan plan(ItemStack material, int operations, int laneCapacity,
                                            boolean spreadAcrossLanes,
                                            boolean[] leased, boolean[] available) {

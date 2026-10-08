@@ -6,6 +6,7 @@ license = "All rights reserved"
 modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
+displayURL = "https://modrinth.com/mod/rs-integration"
 logoFile = "rs_integration_logo.png"
 authors = "Huanghuang"
 description = '''

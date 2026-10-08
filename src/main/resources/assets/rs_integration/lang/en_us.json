@@ -1,4 +1,7 @@
 {
+  "rsi.update.available": "[RS Integration] Version %s is available.",
+  "rsi.update.download": "Download on Modrinth",
+  "rsi.update.download_hover": "Open the Modrinth version page",
   "config.rs_integration.title": "RS Integration Settings",
   "config.rs_integration.file.client": "Client",
   "config.rs_integration.file.common": "Common",

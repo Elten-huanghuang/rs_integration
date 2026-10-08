@@ -20,8 +20,16 @@ public record IronFurnaceBatchProfile(
 
     public static IronFurnaceBatchProfile of(boolean factory, boolean rainbow,
                                              int laneCapacity) {
-        return new IronFurnaceBatchProfile(factory, rainbow,
-                factory ? 6 : 1, laneCapacity);
+        return of(factory, rainbow, laneCapacity, 2);
+    }
+
+    public static IronFurnaceBatchProfile of(boolean factory, boolean rainbow,
+                                             int laneCapacity, int factoryTier) {
+        int lanes = 0;
+        for (boolean enabled : IronFactoryLanePlan.enabledLanes(factoryTier)) {
+            if (enabled) lanes++;
+        }
+        return new IronFurnaceBatchProfile(factory, rainbow, factory ? lanes : 1, laneCapacity);
     }
 
     /** Maximum number of logical operations placed in one physical dispatch. */
