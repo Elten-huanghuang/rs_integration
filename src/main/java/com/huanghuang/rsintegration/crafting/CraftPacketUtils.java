@@ -86,10 +86,18 @@ public final class CraftPacketUtils {
     /** Caches the ingredient-list Field per recipe class for scanAllFieldsForIngredients. */
     private static final Map<Class<?>, Field> ingredientFieldCache = new ConcurrentHashMap<>();
     private static final Field NO_INGREDIENT_FIELD;
+    private static final String INGREDIENT_WITH_COUNT_CLASS =
+            "team.lodestar.lodestone.systems.recipe.IngredientWithCount";
+    private static final IngredientWithCountProbe UNAVAILABLE_INGREDIENT_WITH_COUNT =
+            new IngredientWithCountProbe(null, null, null);
+    /** 可选 Lodestone API 探针，同时缓存成功和缺失结果。 */
+    private static volatile IngredientWithCountProbe ingredientWithCountProbe;
     static {
         try { NO_INGREDIENT_FIELD = CraftPacketUtils.class.getDeclaredField("ingredientCache"); }
         catch (NoSuchFieldException e) { throw new RuntimeException(e); }
     }
+
+    private record IngredientWithCountProbe(Class<?> type, Field ingredientField, Field countField) {}
     /**
      * ThreadLocal guard to prevent re-entrant {@link #extractIngredients(Object)} calls.
      * <p>
@@ -1282,11 +1290,13 @@ public final class CraftPacketUtils {
     @Nullable
     @SuppressWarnings("unchecked")
     private static List<IngredientSpec> tryExtractIngredientSpecsWithCount(Object recipe) {
+        IngredientWithCountProbe probe = resolveIngredientWithCountProbe();
+        if (probe == null) return null;
+
         try {
-            Class<?> iwcClass = Class.forName(
-                    "team.lodestar.lodestone.systems.recipe.IngredientWithCount");
-            Field ingField = iwcClass.getField("ingredient");
-            Field countField = iwcClass.getField("count");
+            Class<?> iwcClass = probe.type();
+            Field ingField = probe.ingredientField();
+            Field countField = probe.countField();
             List<IngredientSpec> result = new ArrayList<>();
 
             Field inputField = findAnyField(recipe.getClass(), "input");
@@ -1333,12 +1343,46 @@ public final class CraftPacketUtils {
             }
 
             return result.isEmpty() ? null : result;
-        } catch (ClassNotFoundException e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed", e);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Lodestone IngredientWithCount parse failed for {}: {}",
+                    recipe.getClass().getName(), e.toString());
             return null;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount parse failed", e);
-            return null;
+        }
+    }
+
+    /**
+     * 只解析一次可选的 Lodestone 类型。没有安装 Lodestone/Malum 时类缺失是正常情况，
+     * 不应为每个配方重复探测或打印堆栈。
+     */
+    @Nullable
+    private static IngredientWithCountProbe resolveIngredientWithCountProbe() {
+        IngredientWithCountProbe cached = ingredientWithCountProbe;
+        if (cached == UNAVAILABLE_INGREDIENT_WITH_COUNT) return null;
+        if (cached != null) return cached;
+
+        synchronized (CraftPacketUtils.class) {
+            cached = ingredientWithCountProbe;
+            if (cached != null) {
+                return cached == UNAVAILABLE_INGREDIENT_WITH_COUNT ? null : cached;
+            }
+            try {
+                Class<?> type = Class.forName(INGREDIENT_WITH_COUNT_CLASS, false,
+                        CraftPacketUtils.class.getClassLoader());
+                Field ingredientField = type.getField("ingredient");
+                Field countField = type.getField("count");
+                ingredientField.setAccessible(true);
+                countField.setAccessible(true);
+                cached = new IngredientWithCountProbe(type, ingredientField, countField);
+            } catch (ClassNotFoundException | LinkageError e) {
+                // 这是未安装相关可选依赖时的正常情况，不记录逐配方告警。
+                cached = UNAVAILABLE_INGREDIENT_WITH_COUNT;
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                RSIntegrationMod.LOGGER.warn("[RSI] Lodestone IngredientWithCount API unavailable: {}",
+                        e.toString());
+                cached = UNAVAILABLE_INGREDIENT_WITH_COUNT;
+            }
+            ingredientWithCountProbe = cached;
+            return cached == UNAVAILABLE_INGREDIENT_WITH_COUNT ? null : cached;
         }
     }
 
