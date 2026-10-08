@@ -20,6 +20,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -130,6 +131,35 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
         assertTrue(drained.get(1).is(buckets.empty()));
+        assertEquals(2, drained.get(1).getCount());
+        assertTrue(drainDelegate.collectAllResults(player).isEmpty());
+    }
+
+    @Test void bucketSubclassWithoutCapabilitiesCanFillAndDrainInBatch() throws Exception {
+        var buckets = FluidContainerBucketTestFixtures.subclassBuckets("execution_poisonwater");
+        var recipes = FluidContainerCatalog.discover(List.of(new ItemStack(buckets.filled())), List.of(),
+                FluidContainerBucketTestFixtures::handler, FluidContainerCatalogTest::token);
+        var fill = recipes.stream().filter(FluidContainerRecipe::filling).findFirst().orElseThrow();
+        var drain = recipes.stream().filter(r -> !r.filling()).findFirst().orElseThrow();
+        assertTrue(FluidContainerCatalog.isValid(fill));
+        assertTrue(FluidContainerCatalog.isValid(drain));
+        ServerPlayer player = player();
+        GenericBatchDelegate fillDelegate = delegate(fill, 2);
+        assertTrue(fillDelegate.tryStartWithMaterials(player,
+                List.of(new ItemStack(Items.BUCKET, 2), FluidContainerCatalogTest.token(
+                        new FluidStack(((BucketItem) buckets.filled()).getFluid(), 2000))), new ExtractionLedger()));
+        var filled = fillDelegate.collectAllResults(player);
+        assertEquals(1, filled.size());
+        assertTrue(filled.get(0).is(buckets.filled()));
+        assertEquals(2, filled.get(0).getCount());
+
+        GenericBatchDelegate drainDelegate = delegate(drain, 2);
+        assertTrue(drainDelegate.tryStartWithMaterials(player, filled, new ExtractionLedger()));
+        var drained = drainDelegate.collectAllResults(player);
+        assertEquals(2, drained.size());
+        assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
+        assertEquals(((BucketItem) buckets.filled()).getFluid(), InkFluidSupport.fluid(drained.get(0)).getFluid());
+        assertTrue(drained.get(1).is(Items.BUCKET));
         assertEquals(2, drained.get(1).getCount());
         assertTrue(drainDelegate.collectAllResults(player).isEmpty());
     }

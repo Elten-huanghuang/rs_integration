@@ -5,7 +5,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidType;
+import net.minecraftforge.fluids.ForgeFlowingFluid;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import net.minecraftforge.fluids.capability.wrappers.FluidBucketWrapper;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -46,6 +50,45 @@ final class FluidContainerBucketTestFixtures {
     }
 
     static IFluidHandlerItem handler(ItemStack stack) {
-        return stack.getItem() instanceof BucketItem ? new FluidBucketWrapper(stack) : null;
+        // 与 Forge 默认能力一致，桶子类需要自行提供能力。
+        return stack.getItem().getClass() == BucketItem.class ? new FluidBucketWrapper(stack) : null;
+    }
+
+    static synchronized Buckets subclassBuckets(String name) {
+        ResourceLocation fluidId = new ResourceLocation("rs_integration_test", name);
+        ResourceLocation filledId = new ResourceLocation("rs_integration_test", name + "_bucket");
+        if (ForgeRegistries.ITEMS.containsKey(filledId)) {
+            return new Buckets(Items.BUCKET, ForgeRegistries.ITEMS.getValue(filledId));
+        }
+        ForgeRegistry<Fluid> fluids = (ForgeRegistry<Fluid>) ForgeRegistries.FLUIDS;
+        ForgeRegistry<Item> items = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
+        boolean fluidsLocked = fluids.isLocked();
+        boolean itemsLocked = items.isLocked();
+        fluids.unfreeze();
+        items.unfreeze();
+        try {
+            for (var registry : new Object[] {BuiltInRegistries.FLUID, BuiltInRegistries.ITEM}) {
+                Method unfreeze = registry.getClass().getMethod("unfreeze");
+                unfreeze.setAccessible(true);
+                unfreeze.invoke(registry);
+            }
+            FluidType type = new FluidType(FluidType.Properties.create());
+            Fluid fluid = new ForgeFlowingFluid.Source(new ForgeFlowingFluid.Properties(() -> type,
+                    () -> ForgeRegistries.FLUIDS.getValue(fluidId),
+                    () -> ForgeRegistries.FLUIDS.getValue(fluidId))
+                    .bucket(() -> ForgeRegistries.ITEMS.getValue(filledId)));
+            fluids.register(fluidId, fluid);
+            Item filled = new BucketItem(() -> fluid,
+                    new Item.Properties().stacksTo(1).craftRemainder(Items.BUCKET)) {};
+            items.register(filledId, filled);
+            return new Buckets(Items.BUCKET, filled);
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("无法注册测试桶子类及流体", failure);
+        } finally {
+            BuiltInRegistries.FLUID.freeze();
+            BuiltInRegistries.ITEM.freeze();
+            if (fluidsLocked) fluids.freeze();
+            if (itemsLocked) items.freeze();
+        }
     }
 }
