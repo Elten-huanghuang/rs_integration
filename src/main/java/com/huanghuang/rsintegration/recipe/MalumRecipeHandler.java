@@ -22,6 +22,7 @@ import java.util.Optional;
 public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
     private static final String IWC_CLASS = "team.lodestar.lodestone.systems.recipe.IngredientWithCount";
+    private static volatile Optional<Class<?>> iwcClassCache;
 
     static {
         registerRecipePrefixes(MalumRecipeHandler.class, "com.sammy.malum.");
@@ -119,7 +120,7 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
-        Optional<Class<?>> iwcClass = Reflect.forName(IWC_CLASS);
+        Optional<Class<?>> iwcClass = ingredientWithCountClass();
         if (iwcClass.isEmpty()) return null;
 
         try {
@@ -167,6 +168,25 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static Optional<Class<?>> ingredientWithCountClass() {
+        Optional<Class<?>> cached = iwcClassCache;
+        if (cached != null) return cached;
+
+        synchronized (MalumRecipeHandler.class) {
+            cached = iwcClassCache;
+            if (cached == null) {
+                try {
+                    cached = Optional.of(Class.forName(IWC_CLASS, false,
+                            MalumRecipeHandler.class.getClassLoader()));
+                } catch (ClassNotFoundException | LinkageError ignored) {
+                    cached = Optional.empty();
+                }
+                iwcClassCache = cached;
+            }
+        }
+        return cached;
     }
 
     /**
