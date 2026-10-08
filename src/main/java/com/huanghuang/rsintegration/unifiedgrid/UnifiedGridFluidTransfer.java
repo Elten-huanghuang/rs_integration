@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import com.refinedmods.refinedstorage.RS;
@@ -77,7 +78,7 @@ public final class UnifiedGridFluidTransfer {
     }
 
     public static Result empty(INetwork network, ItemStack cursor) {
-        return empty(network, cursor, stack -> FluidUtil.getFluidHandler(stack).orElse(null));
+        return empty(network, cursor, FluidContainerBucketSupport::getHandler);
     }
 
     static Result empty(INetwork network, ItemStack cursor, Function<ItemStack, IFluidHandlerItem> containers) {

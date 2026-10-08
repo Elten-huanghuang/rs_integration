@@ -1,19 +1,22 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketTestFixtures;
 import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridClient;
 import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridView;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
-import com.refinedmods.refinedstorage.util.StackUtils;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
-import org.apache.commons.lang3.tuple.Pair;
+import net.minecraftforge.fluids.FluidUtil;
+import net.minecraftforge.fluids.capability.IFluidHandler;
+import net.minecraftforge.fluids.capability.IFluidHandlerItem;
+import net.minecraftforge.common.util.LazyOptional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -66,15 +69,19 @@ class UnifiedGridClickTest extends BootstrapTest {
 
     @Test void filledBucketRightClickOnBlankSpaceDrainsWithoutChangingItsContentsOnClient() {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class);
-             MockedStatic<StackUtils> fluids = mockStatic(StackUtils.class)) {
+             MockedStatic<FluidUtil> fluids = mockStatic(FluidUtil.class, CALLS_REAL_METHODS)) {
             Fixture f = new Fixture(GridResourceKind.ITEM);
             ItemStack bucket = new ItemStack(Items.WATER_BUCKET);
             // 普通单测未运行 Forge capability transformer，在适配边界模拟容器读取。
-            fluids.when(() -> StackUtils.getFluid(any(), eq(true))).thenAnswer(invocation -> {
+            fluids.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(invocation -> {
                 ItemStack copy = invocation.getArgument(0);
                 assertNotSame(bucket, copy);
-                copy.setCount(0);
-                return Pair.of(copy, new FluidStack(Fluids.WATER, 1000));
+                IFluidHandlerItem handler = mock(IFluidHandlerItem.class);
+                when(handler.drain(1000, IFluidHandler.FluidAction.SIMULATE)).thenAnswer(call -> {
+                    copy.setCount(0);
+                    return new FluidStack(Fluids.WATER, 1000);
+                });
+                return LazyOptional.of(() -> handler);
             });
             when(f.menu.getCarried()).thenReturn(bucket);
             when(f.view.getStacks()).thenReturn(List.of());
@@ -83,6 +90,24 @@ class UnifiedGridClickTest extends BootstrapTest {
             verify(f.view).request(GridResourceKind.FLUID, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
             assertTrue(bucket.is(Items.WATER_BUCKET));
             assertEquals(1, bucket.getCount());
+        }
+    }
+
+    @Test void missingCapabilityBucketRightClickSendsFluidInsertionRatherThanItemInsertion() {
+        try (MockedStatic<Screen> keys = mockStatic(Screen.class);
+             MockedStatic<FluidUtil> fluids = FluidContainerBucketTestFixtures.capabilities()) {
+            var buckets = FluidContainerBucketTestFixtures.subclassBuckets("click_poisonwater");
+            Fixture f = new Fixture(GridResourceKind.ITEM);
+            ItemStack cursor = new ItemStack(buckets.filled(), 3);
+            when(f.menu.getCarried()).thenReturn(cursor);
+            when(f.view.getStacks()).thenReturn(List.of());
+            when(f.view.row(null)).thenReturn(null);
+            assertTrue(UnifiedGridClient.click(f.screen, 10, 10, 1));
+            verify(f.view).request(GridResourceKind.FLUID, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
+            verify(f.view, never()).request(eq(GridResourceKind.ITEM), anyInt(), any(), anyInt());
+            assertEquals(3, cursor.getCount());
+            assertTrue(cursor.is(buckets.filled()));
+            assertFalse(cursor.hasTag());
         }
     }
 

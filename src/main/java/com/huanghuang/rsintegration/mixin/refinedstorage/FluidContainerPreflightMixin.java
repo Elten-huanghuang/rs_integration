@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidTransfer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -29,6 +30,23 @@ import java.util.UUID;
 @Mixin(value = FluidGridHandler.class, remap = false)
 public abstract class FluidContainerPreflightMixin {
     @Shadow @Final private INetwork network;
+
+    @Inject(method = "onInsertHeldContainer", at = @At("HEAD"), cancellable = true)
+    private void rsi$insertBucketWithoutCapability(ServerPlayer player, CallbackInfo ci) {
+        if (player.containerMenu == null) {
+            ci.cancel();
+            return;
+        }
+        if (!FluidContainerBucketSupport.needsFallback(player.containerMenu.getCarried())) return;
+        // 原生排空会替换整个鼠标堆叠；兼容桶复用逐个结算和流体余量恢复。
+        ci.cancel();
+        if (!(player.containerMenu instanceof GridContainerMenu menu)
+                || !(menu.getGrid() instanceof INetworkAwareGrid grid) || grid.getNetwork() != network
+                || !menu.stillValid(player) || !menu.getGrid().isGridActive() || !network.canRun()
+                || !network.getSecurityManager().hasPermission(Permission.INSERT, player)) return;
+        UnifiedGridFluidTransfer.apply(player, network,
+                UnifiedGridFluidTransfer.empty(network, menu.getCarried()), false, false);
+    }
 
     @Inject(method = "onExtract", at = @At("HEAD"), cancellable = true)
     private void rsi$extractInkBottle(ServerPlayer player, UUID id, boolean shift, CallbackInfo ci) {

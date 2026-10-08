@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid.client;
 
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.unifiedgrid.GridResourceKind;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridActionPacket;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridEntry;
@@ -20,7 +21,6 @@ import com.refinedmods.refinedstorage.screen.grid.sorting.IGridSorter;
 import com.refinedmods.refinedstorage.screen.grid.sorting.IdGridSorter;
 import com.refinedmods.refinedstorage.screen.grid.sorting.SortingDirection;
 import com.refinedmods.refinedstorage.screen.grid.view.IGridView;
-import com.refinedmods.refinedstorage.util.StackUtils;
 import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -180,7 +180,7 @@ public final class UnifiedGridView implements IGridView {
     }
 
     public boolean canEmptyCarried(ItemStack carried) {
-        return filter != 1 && !StackUtils.getFluid(carried.copy(), true).getRight().isEmpty();
+        return filter != 1 && !FluidContainerBucketSupport.getFluid(carried).isEmpty();
     }
 
     private final Map<UUID, Row> rowIds = new HashMap<>();

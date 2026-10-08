@@ -134,11 +134,11 @@ public final class FluidContainerCatalog {
     static List<FluidContainerRecipe> discover(List<ItemStack> samples, List<FluidStack> candidates,
             Function<ItemStack, IFluidHandlerItem> handlers, Function<FluidStack, ItemStack> tokens) {
         handlers = FluidContainerBucketSupport.handlers(samples, handlers);
-        Map<String, ItemStack> empty = new LinkedHashMap<>();
-        Map<String, FluidStack> fluids = new LinkedHashMap<>();
+        Map<CompoundTag, ItemStack> empty = new LinkedHashMap<>();
+        Map<CompoundTag, FluidStack> fluids = new LinkedHashMap<>();
         Map<ResourceLocation, FluidContainerRecipe> recipes = new LinkedHashMap<>();
         for (FluidStack fluid : candidates) addFluid(fluids, fluid);
-        Set<String> seen = new HashSet<>();
+        Set<CompoundTag> seen = new HashSet<>();
         for (ItemStack sample : samples) {
             if (sample.isEmpty() || !seen.add(stackKey(sample))) continue;
             try {
@@ -218,15 +218,15 @@ public final class FluidContainerCatalog {
         return left.isFluidEqual(right) && left.getAmount() == right.getAmount();
     }
 
-    private static void addFluid(Map<String, FluidStack> fluids, FluidStack fluid) {
+    private static void addFluid(Map<CompoundTag, FluidStack> fluids, FluidStack fluid) {
         if (fluid.isEmpty()) return;
         FluidStack identity = fluid.copy();
         identity.setAmount(1);
-        fluids.putIfAbsent(identity.writeToNBT(new CompoundTag()).toString(), identity);
+        fluids.putIfAbsent(identity.writeToNBT(new CompoundTag()), identity);
     }
 
-    private static String stackKey(ItemStack stack) {
-        return stack.copyWithCount(1).save(new CompoundTag()).toString();
+    private static CompoundTag stackKey(ItemStack stack) {
+        return stack.copyWithCount(1).save(new CompoundTag());
     }
 
     private static void add(Map<ResourceLocation, FluidContainerRecipe> recipes, boolean filling,
