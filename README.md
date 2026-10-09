@@ -10,9 +10,9 @@
 
 Make items from other mods without shuttling materials between machines by hand. Pick a recipe in JEI, let RSI gather what is available, craft missing ingredients, and send the result back to storage.
 
-**Current version: 1.5.0.4 | Minecraft 1.20.1**
+**Current version: 1.5.0.5 | Minecraft 1.20.1**
 
-[1.5.0.4 release notes (Chinese)](docs/RELEASE_NOTES_1.5.0.4.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
+[1.5.0.5 release notes (Chinese)](docs/RELEASE_NOTES_1.5.0.5.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
 
 ## Requirements
 
