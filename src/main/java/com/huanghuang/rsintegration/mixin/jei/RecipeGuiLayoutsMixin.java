@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
 import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.lychee.LycheeBlockInteractingRecipeHandler;
@@ -653,6 +654,11 @@ public class RecipeGuiLayoutsMixin {
                 var data = AltarCraftButtons.getButtonData(i);
                 tooltip = new ArrayList<>();
                 if (data != null) tooltip.add(Component.translatable(data.tooltip()));
+                if (data != null) {
+                    for (String key : EmbersMachineHints.tooltipKeys(data.modType())) {
+                        tooltip.add(Component.translatable(key));
+                    }
+                }
                 if (rsi$availabilityKeys.containsKey(i)) {
                     tooltip.add(Component.translatable(state.translationKey()));
                     tooltip.add(Component.translatable("rsi.recipe.materials.scope"));

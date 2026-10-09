@@ -15,6 +15,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,6 +27,73 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
+    @Test
+    void installedStampContextLeavesCopperShortageVisibleInRecursiveGraph() {
+        ResourceLocation recipeId = new ResourceLocation("embers", "stamping/copper_aspectus");
+        MaterialRef copper = new MaterialRef(new ResourceLocation("minecraft", "copper_ingot"), "");
+        MaterialRef stamp = new MaterialRef(new ResourceLocation("minecraft", "gold_nugget"), "");
+        MaterialRef output = new MaterialRef(new ResourceLocation("minecraft", "diamond"), "");
+        IngredientRef copperInput = new IngredientRef(List.of(copper), 1);
+        IngredientRef stampInput = new IngredientRef(List.of(stamp), 1,
+                NbtMatchMode.ANY, DemandRole.CATALYST);
+        ImmutableRecipeGraph.RecipeNode original = new ImmutableRecipeGraph.RecipeNode(
+                recipeId, output, 1, List.of(copperInput, stampInput),
+                "embers_stamper", new ResourceLocation("embers", "stamping"));
+        ImmutableRecipeGraph published = new ImmutableRecipeGraph(Map.of(output, List.of(original)));
+
+        ImmutableRecipeGraph contextual = ImmutableRecipeGraphProjector.withRecipeInputs(
+                published, Map.of(recipeId, List.of(copperInput)));
+
+        assertEquals(2, published.recipesById().get(recipeId).inputs().size());
+        assertEquals(List.of(copperInput), contextual.recipesById().get(recipeId).inputs());
+        assertEquals("embers_stamper", contextual.recipesById().get(recipeId).modTypeId());
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS,
+                PureDemandTreeInspector.inspect(contextual, Map.of(), recipeId, 1).status());
+        PureRecipePlanner.Result missing = PureRecipePlanner.resolve(
+                contextual, Map.of(), contextual.recipesById().get(recipeId).inputs(), 16);
+        assertFalse(missing.feasible());
+        assertEquals(copper, missing.missing().get(0).alternatives().get(0));
+        assertTrue(PureRecipePlanner.resolve(contextual, Map.of(copper, 1),
+                contextual.recipesById().get(recipeId).inputs(), 16).feasible());
+    }
+
+    @Test
+    void missingCopperBehindMoltenFluidKeepsMixerTreeAvailable() {
+        ResourceLocation mixerId = new ResourceLocation("embers", "mixing/molten_dawnstone");
+        ResourceLocation melterId = new ResourceLocation("embers", "melting/copper_ingot");
+        ResourceLocation fluidItemId = new ResourceLocation("rs_integration", "alchemist_ink_fluid");
+        MaterialRef copper = new MaterialRef(new ResourceLocation("minecraft", "copper_ingot"), "");
+        MaterialRef moltenCopper = new MaterialRef(fluidItemId,
+                "{Amount:1,FluidName:\"embers:molten_copper\"}");
+        MaterialRef moltenGold = new MaterialRef(fluidItemId,
+                "{Amount:1,FluidName:\"embers:molten_gold\"}");
+        MaterialRef dawnstone = new MaterialRef(fluidItemId,
+                "{Amount:1,FluidName:\"embers:molten_dawnstone\"}");
+        ImmutableRecipeGraph.RecipeNode melter = new ImmutableRecipeGraph.RecipeNode(
+                melterId, moltenCopper, 144,
+                List.of(new IngredientRef(List.of(copper), 1, NbtMatchMode.ANY)),
+                "embers_melter", new ResourceLocation("embers", "melting"));
+        ImmutableRecipeGraph.RecipeNode mixer = new ImmutableRecipeGraph.RecipeNode(
+                mixerId, dawnstone, 4000,
+                List.of(new IngredientRef(List.of(moltenCopper), 2000, NbtMatchMode.EXACT),
+                        new IngredientRef(List.of(moltenGold), 2000, NbtMatchMode.EXACT)),
+                "embers_mixer", new ResourceLocation("embers", "mixing"));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                moltenCopper, List.of(melter), dawnstone, List.of(mixer)));
+        Map<MaterialRef, Integer> available = Map.of(moltenGold, 16_000);
+
+        PureDemandTreeInspector.Result route = PureDemandTreeInspector.inspect(
+                graph, available, mixerId, 8);
+        assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS, route.status());
+        assertEquals(copper, route.unresolved());
+        PureRecipePlanner.Result plan = PureRecipePlanner.resolve(graph, available,
+                List.of(mixer.inputs().get(0).withCount(16_000),
+                        mixer.inputs().get(1).withCount(16_000)), 4096);
+        assertFalse(plan.feasible());
+        assertTrue(plan.missing().stream().anyMatch(ingredient ->
+                ingredient.alternatives().contains(copper)));
+    }
+
     @Test
     void projectsReusableCatalystAndPreservesItsRole() {
         IngredientRef projected = ImmutableRecipeGraphProjector.projectIngredient(

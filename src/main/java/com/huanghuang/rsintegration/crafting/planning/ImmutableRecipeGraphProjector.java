@@ -164,6 +164,29 @@ public final class ImmutableRecipeGraphProjector {
                 inputs, modTypeId, recipeTypeId);
     }
 
+    /** 根据当前机器状态替换指定配方的单次输入，不修改已发布的全局配方图。 */
+    public static ImmutableRecipeGraph withRecipeInputs(
+            ImmutableRecipeGraph graph, Map<ResourceLocation, List<IngredientRef>> replacements) {
+        if (replacements.isEmpty()) return graph;
+        Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
+        boolean changed = false;
+        for (Map.Entry<MaterialRef, List<RecipeNode>> entry : graph.recipesByOutput().entrySet()) {
+            List<RecipeNode> recipes = new ArrayList<>(entry.getValue().size());
+            for (RecipeNode recipe : entry.getValue()) {
+                List<IngredientRef> inputs = replacements.get(recipe.recipeId());
+                if (inputs != null && !inputs.equals(recipe.inputs())) {
+                    recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
+                            recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId()));
+                    changed = true;
+                } else {
+                    recipes.add(recipe);
+                }
+            }
+            projected.put(entry.getKey(), recipes);
+        }
+        return changed ? new ImmutableRecipeGraph(projected) : graph;
+    }
+
     public static synchronized void clearCache() {
         cachedProjection = null;
         compiledIndexes = null;

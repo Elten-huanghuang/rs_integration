@@ -858,6 +858,16 @@ public final class BindingEventHandler {
     }
 
     static BlockPos resolveRootPos(Level level, BlockPos pos, Block block, String className) {
+        // 余烬双层机器的加工逻辑位于下半部，两个方块必须共用同一个绑定位置。
+        if (className.equals("com.rekindled.embers.block.MelterBlock")
+                || className.equals("com.rekindled.embers.block.MixerCentrifugeBlock")) {
+            for (var property : level.getBlockState(pos).getProperties()) {
+                if ("half".equals(property.getName())
+                        && "upper".equals(String.valueOf(level.getBlockState(pos).getValue(property)))) {
+                    return pos.below();
+                }
+            }
+        }
         // CrockPot's birdcage is a two-block-tall machine. Its block entity only
         // exists in the lower half, so normalize upper-half clicks before binding.
         if (className.equals("com.sihenzhang.crockpot.block.BirdcageBlock")) {

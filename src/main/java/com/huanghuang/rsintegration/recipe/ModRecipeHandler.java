@@ -72,6 +72,14 @@ public interface ModRecipeHandler {
         return ingredients == null ? List.of() : ingredients;
     }
 
+    /** 根据已绑定机器的实际状态调整递归材料；默认保持配方声明。 */
+    @Nonnull
+    default List<IngredientSpec> getPlanningIngredients(
+            @Nonnull Recipe<?> recipe, @Nullable ServerPlayer player,
+            @Nullable List<IngredientSpec> ingredients) {
+        return ingredients == null ? List.of() : ingredients;
+    }
+
     /**
      * Total quantity required for one input when planning a multi-execution order.
      * Most inputs use their demand role directly; machine handlers may override

@@ -22,6 +22,7 @@ import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRSModule;
 import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachinesRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
 import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
@@ -232,6 +233,8 @@ public final class RSIntegrationMod {
                     () -> SummoningRitualsRSModule.INSTANCE),
             new ModuleEntry(ModIds.EMBERS, RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY,
                     () -> EreAlchemyRSModule.INSTANCE),
+            new ModuleEntry(ModIds.EMBERS, RSIntegrationConfig.ENABLE_EMBERS_MACHINES,
+                    () -> EmbersMachinesRSModule.INSTANCE),
             new ModuleEntry(ModIds.AETHERWORKS, RSIntegrationConfig.ENABLE_AETHERWORKS,
                     () -> AetherworksRSModule.INSTANCE),
             new ModuleEntry(ModIds.AETHER, RSIntegrationConfig.ENABLE_AETHER,

@@ -1966,8 +1966,13 @@ public final class CraftingPlanScreen extends Screen {
         if (dropdownNode == null && (hovered == null || hovered.step == null)) {
             resetHoverIntent();
         }
-        if (hovered != null && (!hovered.warnings.isEmpty() || hovered.prerequisiteBlocked)) {
-            hoveredStepWarnings = hovered.warnings;
+        if (hovered != null && (!hovered.warnings.isEmpty() || hovered.prerequisiteBlocked
+                || !hovered.hints.isEmpty())) {
+            List<Component> tooltip = new ArrayList<>(hovered.warnings);
+            for (Component hint : hovered.hints) {
+                tooltip.add(hint.copy().withStyle(ChatFormatting.AQUA));
+            }
+            hoveredStepWarnings = tooltip;
             hoveredTooltipX = mouseX;
             hoveredTooltipY = mouseY;
             resetHoverIntent();

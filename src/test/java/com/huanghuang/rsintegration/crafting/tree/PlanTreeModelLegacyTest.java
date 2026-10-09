@@ -3,9 +3,12 @@ package com.huanghuang.rsintegration.crafting.tree;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachinesRSModule;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
@@ -84,6 +87,38 @@ class PlanTreeModelLegacyTest extends BootstrapTest {
         assertEquals(altarId, altarNode.step.recipeId());
         assertTrue(altarNode.prerequisiteBlocked);
         assertEquals("Missing altar structure", altarNode.warnings.get(0).getString());
+    }
+
+    @Test
+    void embersStepsShowTheirOwnEnergyAndMachineHints() {
+        EmbersMachinesRSModule.INSTANCE.registerModType();
+        PlanStep melter = new PlanStep(new ResourceLocation("embers", "melting_test"),
+                new ItemStack(Items.IRON_INGOT), 1, List.of(new ItemStack(Items.COAL)),
+                List.of(), ModType.byId(ModIds.ID_EMBERS_MELTER));
+        PlanStep mixer = new PlanStep(new ResourceLocation("embers", "mixing_test"),
+                new ItemStack(Items.EMERALD), 1, List.of(new ItemStack(Items.IRON_INGOT)),
+                List.of(), ModType.byId(ModIds.ID_EMBERS_MIXER));
+        PlanStep stamper = new PlanStep(new ResourceLocation("embers", "stamping_test"),
+                new ItemStack(Items.DIAMOND), 1, List.of(new ItemStack(Items.EMERALD)),
+                List.of(), ModType.byId(ModIds.ID_EMBERS_STAMPER));
+        PlanResponse plan = new PlanResponse(true, "Diamond", stamper.output(),
+                List.of(melter, mixer, stamper), Map.of(), List.of(),
+                stamper.recipeId().toString());
+
+        PlanTreeNode root = PlanTreeModel.from(plan).root;
+        PlanTreeNode mixerNode = root.children.get(0);
+        PlanTreeNode melterNode = mixerNode.children.get(0);
+
+        assertTrue(hintKeys(root).contains("rsi.embers_machine.hint.ember_stamper"));
+        assertTrue(hintKeys(root).contains("rsi.embers_machine.hint.direct_capture"));
+        assertTrue(hintKeys(mixerNode).contains("rsi.embers_machine.hint.ember_mixer"));
+        assertTrue(hintKeys(melterNode).contains("rsi.embers_machine.hint.ember_melter"));
+        assertTrue(root.warnings.isEmpty());
+    }
+
+    private static List<String> hintKeys(PlanTreeNode node) {
+        return node.hints.stream().map(component ->
+                ((TranslatableContents) component.getContents()).getKey()).toList();
     }
 
     @Test

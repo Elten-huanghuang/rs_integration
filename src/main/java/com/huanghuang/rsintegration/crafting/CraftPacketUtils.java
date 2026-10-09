@@ -1134,6 +1134,15 @@ public final class CraftPacketUtils {
                 : handler.getRecursiveIngredients(typedRecipe, ingredients);
     }
 
+    /** 规划时读取已绑定机器的可复用部件，例如压印锤中已安装的正确印模。 */
+    public static List<IngredientSpec> applyPlanningIngredientContext(
+            Recipe<?> recipe, @Nullable ServerPlayer player, @Nullable List<IngredientSpec> ingredients) {
+        if (ingredients == null) return null;
+        var handler = ModRecipeHandlers.handlerFor(recipe);
+        return handler == null ? ingredients
+                : handler.getPlanningIngredients(recipe, player, ingredients);
+    }
+
     public static List<IngredientSpec> extractCraftingIngredientSpecs(CraftingRecipe recipe) {
         // Some machine recipes implement CraftingRecipe only so JEI can display
         // them.  Give their registered handler a chance to preserve semantics

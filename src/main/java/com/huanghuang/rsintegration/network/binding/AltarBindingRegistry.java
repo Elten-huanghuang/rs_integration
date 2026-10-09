@@ -856,6 +856,12 @@ public final class AltarBindingRegistry {
                 || ModIds.ID_BIOMANCY_BIO_FORGE.equals(type.id())) {
             return null;
         }
+        // 余烬配方按金属和材料分目录，目录名不代表机器类型。
+        if (ModIds.ID_EMBERS_MELTER.equals(type.id())
+                || ModIds.ID_EMBERS_MIXER.equals(type.id())
+                || ModIds.ID_EMBERS_STAMPER.equals(type.id())) {
+            return null;
+        }
         // Ars recipe IDs may be grouped by content tier rather than machine
         // type. Ars Extensions, for example, uses greater/ and ultimate/ for
         // recipes that still run on the normal Enchanting Apparatus. The

@@ -699,9 +699,10 @@ public final class AsyncCraftChain {
                                 + observation.detail(), failureMessage);
                         return true;
                     }
+                    Component failureMessage = currentDelegate.craftFailureMessage(observation);
                     abort("Machine craft failed: " + observation.detail(),
-                            Component.translatable("rsi.async.abort.machine_craft_failed",
-                                    observation.detail()));
+                            failureMessage != null ? failureMessage : Component.translatable(
+                                    "rsi.async.abort.machine_craft_failed", observation.detail()));
                     return true;
                 }
                 // World-output capture cancels the spawned ItemEntity before the delegate can observe it.

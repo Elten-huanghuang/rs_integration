@@ -977,8 +977,36 @@ public final class GenericCraftPacket {
 
     private static BindingAwareGraph scopedBindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
-        return bindingAwareGraph(player,
+        BindingAwareGraph filtered = bindingAwareGraph(player,
                 ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId));
+        Map<ResourceLocation, List<ImmutableRecipeGraph.IngredientRef>> replacements =
+                new HashMap<>();
+        for (ImmutableRecipeGraph.RecipeNode node : filtered.graph().recipesById().values()) {
+            if (!ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())) continue;
+            Recipe<?> recipe = resolveRecipe(player.serverLevel(), node.recipeId());
+            if (recipe == null) continue;
+            List<IngredientSpec> declared = CraftPacketUtils.extractRecursiveIngredientSpecs(recipe);
+            if (declared == null || declared.isEmpty()) continue;
+            List<IngredientSpec> contextual = CraftPacketUtils.applyPlanningIngredientContext(
+                    recipe, player, declared);
+            if (contextual == null || contextual.equals(declared)) continue;
+            List<ImmutableRecipeGraph.IngredientRef> inputs = new ArrayList<>();
+            boolean projectable = true;
+            for (IngredientSpec spec : contextual) {
+                if (spec.isEmpty()) continue;
+                ImmutableRecipeGraph.IngredientRef input =
+                        ImmutableRecipeGraphProjector.projectIngredient(spec);
+                if (input == null) {
+                    projectable = false;
+                    break;
+                }
+                inputs.add(input);
+            }
+            if (projectable) replacements.put(node.recipeId(), List.copyOf(inputs));
+        }
+        return replacements.isEmpty() ? filtered : new BindingAwareGraph(
+                ImmutableRecipeGraphProjector.withRecipeInputs(filtered.graph(), replacements),
+                filtered.blockedOutputIds());
     }
 
     /**
@@ -1023,7 +1051,9 @@ public final class GenericCraftPacket {
             entry = PLAN_CACHE.takeForExecution(fallbackKey);
             if (entry == null) entry = PLAN_CACHE.get(fallbackKey, System.nanoTime());
         }
-        if (entry == null || !entry.plan().success()) return null;
+        if (entry == null || !entry.plan().success() || stampStateAffectsPlan(modType, entry.plan())) {
+            return null;
+        }
         ResourceKey<Level> levelKey = dimension != null
                 ? ResourceKey.create(
                 Registries.DIMENSION, dimension)
@@ -1536,7 +1566,7 @@ public final class GenericCraftPacket {
             return Component.translatable("rsi.generic.error.network_unavailable");
         }
         if (containsPlanningTimeout(failure)) {
-            return Component.translatable("rsi.plan.failure.dynamic_plan_unavailable");
+            return Component.translatable("rsi.plan.failure.planning_timeout");
         }
         String detail = failure.getMessage();
         if (detail == null || detail.isBlank()) detail = failure.getClass().getSimpleName();
@@ -2394,6 +2424,7 @@ public final class GenericCraftPacket {
             }
         } else {
             specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+            specs = CraftPacketUtils.applyPlanningIngredientContext(recipe, player, specs);
         }
         if (modType != null && ModIds.ID_MD_COPPER_POT.equals(modType.id())) {
             specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
@@ -3971,6 +4002,7 @@ public final class GenericCraftPacket {
                     recipe, extractedSpecs, targetOutput, repeatCount);
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+            specs = CraftPacketUtils.applyPlanningIngredientContext(recipe, player, specs);
             if (recipeModType != null && ModIds.ID_MD_COPPER_POT.equals(recipeModType.id())) {
                 specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
                         specs, recipe, player.serverLevel().registryAccess());
@@ -4185,6 +4217,10 @@ public final class GenericCraftPacket {
         }
 
         PlanCache.Entry cached = PLAN_CACHE.get(cacheKey, System.nanoTime());
+        // 印模槽属于机器实时状态，旧快照不能决定是否需要递归制作印模。
+        if (stampStateAffectsPlan(previewModType, cached == null ? null : cached.plan())) {
+            cached = null;
+        }
         if (cached != null && cached.plan().success() && cached.plan().graph() != null
                 && PlanningStateValidator.revalidateForExecution(player, cached.snapshot(),
                 cached.plan(), planDimKey, planLookupPos, planStorageReference)) {
@@ -4598,7 +4634,7 @@ public final class GenericCraftPacket {
                 } else {
                     if (missing.isEmpty()) {
                         sink.error(Component.translatable(
-                                "rsi.plan.failure.dynamic_plan_unavailable"));
+                                "rsi.plan.failure.planning_timeout"));
                     } else {
                         sink.error(Component.translatable(
                                 "rsi.generic.error.missing_materials",
@@ -4778,6 +4814,7 @@ public final class GenericCraftPacket {
                 // per-ingredient counts (extractIngredients drops counts and
                 // returns empty for wrappers like FaRitualWrapper).
                 List<IngredientSpec> modSpecs = CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+                modSpecs = CraftPacketUtils.applyPlanningIngredientContext(stepRecipe, player, modSpecs);
                 if (stepRecipe instanceof SmithingTransformRecipe smithing && mergedRs != null) {
                     modSpecs = SmithingRecipeHandler.requireDemandedOutputTag(
                             smithing, modSpecs, mergedRs.syntheticOutput());
@@ -4980,6 +5017,7 @@ public final class GenericCraftPacket {
                 // Mod recipe: linear layout — re-read specs for per-ingredient counts
                 // (displayIngredients is no longer unrolled per-unit).
                 List<IngredientSpec> targetSpecs = CraftPacketUtils.extractIngredientSpecs(recipe);
+                targetSpecs = CraftPacketUtils.applyPlanningIngredientContext(recipe, player, targetSpecs);
                 if (targetSpecs != null
                         && recipe instanceof SmithingTransformRecipe smithingRecipe
                         && !selectedSmithingBase.isEmpty()) {
@@ -5147,6 +5185,7 @@ public final class GenericCraftPacket {
             List<IngredientSpec> specs = stepRecipe instanceof CraftingRecipe craftingRecipe
                     ? CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe)
                     : CraftPacketUtils.extractIngredientSpecs(stepRecipe);
+            specs = CraftPacketUtils.applyPlanningIngredientContext(stepRecipe, player, specs);
             if (specs != null) {
                 ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
                 int stepInputIndex = 0;
@@ -5894,6 +5933,13 @@ public final class GenericCraftPacket {
         return specs == null || specs.isEmpty()
                 ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
                 : specs;
+    }
+
+    private static boolean stampStateAffectsPlan(@Nullable ModType terminalType,
+                                                 @Nullable PlanResponse plan) {
+        if (terminalType != null && ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())) return true;
+        return plan != null && plan.steps().stream().anyMatch(step ->
+                step.modType() != null && ModIds.ID_EMBERS_STAMPER.equals(step.modType().id()));
     }
 
     /**

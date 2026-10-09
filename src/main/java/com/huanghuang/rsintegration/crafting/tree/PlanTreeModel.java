@@ -5,7 +5,9 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
@@ -583,6 +585,8 @@ public final class PlanTreeModel {
             node.needed = a.needed();
         }
         if (node.step != null) {
+            node.hints = EmbersMachineHints.tooltipKeys(node.step.modType()).stream()
+                    .<Component>map(Component::translatable).toList();
             PlanResponse.StepIssue issue = plan.stepIssues().get(node.step.recipeId());
             if (issue != null) {
                 node.warnings = issue.warnings();
