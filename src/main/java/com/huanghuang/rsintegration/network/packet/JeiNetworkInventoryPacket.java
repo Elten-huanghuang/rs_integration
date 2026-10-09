@@ -58,7 +58,7 @@ public final class JeiNetworkInventoryPacket {
         if (reference != null) buf.writeNbt(StorageReferenceCodec.encode(reference));
         buf.writeVarInt(entries.size());
         for (Entry entry : entries) {
-            buf.writeItem(entry.stack().copyWithCount(1));
+            buf.writeItem(entry.stack());
             buf.writeVarLong(entry.amount());
         }
     }

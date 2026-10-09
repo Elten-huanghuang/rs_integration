@@ -15,19 +15,26 @@ import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidUtil;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.wrappers.FluidBucketWrapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
 
 class FluidContainerCatalogTest extends BootstrapTest {
     static ItemStack token(FluidStack fluid) { return InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), fluid); }
@@ -70,6 +77,17 @@ class FluidContainerCatalogTest extends BootstrapTest {
         assertEquals(Fluids.LAVA, InkFluidSupport.fluid(drain.output()).getFluid());
         assertEquals(1, drain.secondaryOutputs().size());
         assertTrue(drain.secondaryOutputs().get(0).is(Items.BUCKET));
+    }
+
+    @Test void duplicateConversionOnlyCreatesOneRecipePerId() {
+        AtomicInteger tokensCreated = new AtomicInteger();
+        var recipes = FluidContainerCatalog.discover(List.of(new ItemStack(Items.WATER_BUCKET)), List.of(),
+                FluidContainerCatalogTest::bucketHandler, fluid -> {
+                    tokensCreated.incrementAndGet();
+                    return token(fluid);
+                });
+        assertEquals(2, recipes.size());
+        assertEquals(recipes.size(), tokensCreated.get());
     }
 
     @Test void bucketSubclassWithoutCapabilitiesDiscoversBothConversionsFromFilledSample() {
@@ -174,6 +192,18 @@ class FluidContainerCatalogTest extends BootstrapTest {
             assertEquals("special", InkFluidSupport.fluid(drain.output()).getTag().getString("variant"));
             assertTrue(ItemStack.isSameItemSameTags(empty, drain.secondaryOutputs().get(0)));
             assertFalse(empty.getTag().contains("content"));
+        }
+    }
+
+    @Test void nonBucketValidationOnlyProbesTheRequiredRuntimeHandler() {
+        FluidContainerRecipe recipe = new FluidContainerRecipe(id("missing_capability"), true,
+                new ItemStack(Items.FLINT), new ItemStack(Items.STICK),
+                new FluidStack(Fluids.WATER, 250), token(new FluidStack(Fluids.WATER, 250)));
+        try (MockedStatic<FluidUtil> capabilities = mockStatic(FluidUtil.class)) {
+            capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class)))
+                    .thenReturn(LazyOptional.empty());
+            assertFalse(FluidContainerCatalog.isValid(recipe));
+            capabilities.verify(() -> FluidUtil.getFluidHandler(any(ItemStack.class)), times(1));
         }
     }
 

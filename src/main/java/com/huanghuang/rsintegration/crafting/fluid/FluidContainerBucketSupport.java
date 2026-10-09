@@ -84,6 +84,11 @@ public final class FluidContainerBucketSupport {
         return handlers(List.of(stack), candidate -> FluidUtil.getFluidHandler(candidate).orElse(null)).apply(stack);
     }
 
+    static IFluidHandlerItem defaultHandler(ItemStack stack,
+            Function<ItemStack, IFluidHandlerItem> original) {
+        return handler(stack, original);
+    }
+
     private static IFluidHandlerItem handler(ItemStack stack,
             Function<ItemStack, IFluidHandlerItem> original) {
         IFluidHandlerItem handler = original.apply(stack);

@@ -119,6 +119,19 @@ class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
     }
 
     @Test
+    void duplicateAlternativesDoNotHideAReallyAddedInventoryVariant() {
+        MaterialRef expected = material("{level:1}");
+        MaterialRef actual = material("{level:1,owner:\"player\"}");
+        IngredientRef input = new IngredientRef(java.util.List.of(expected, expected),
+                1, NbtMatchMode.PARTIAL);
+
+        IngredientRef bound = ImmutableRecipeGraphProjector.bindIngredient(
+                input, java.util.Map.of(actual, 1));
+
+        assertEquals(java.util.List.of(expected, actual), bound.alternatives());
+    }
+
+    @Test
     void findsPartialTagInsideCraftTweakerWrapperJson() {
         assertTrue(ImmutableRecipeGraphProjector.containsPartialTagType(JsonParser.parseString("""
                 {"type":"crafttweaker:transformed","ingredient":{

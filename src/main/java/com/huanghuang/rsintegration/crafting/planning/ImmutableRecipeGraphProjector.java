@@ -347,24 +347,38 @@ public final class ImmutableRecipeGraphProjector {
         Map<IngredientRef, IngredientRef> boundIngredients = new HashMap<>();
         Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
         Map<ResourceLocation, RecipeNode> indexed = new HashMap<>();
+        boolean changed = false;
         for (Map.Entry<MaterialRef, List<RecipeNode>> entry : graph.recipesByOutput().entrySet()) {
-            List<RecipeNode> recipes = new ArrayList<>(entry.getValue().size());
+            List<RecipeNode> recipes = null;
+            int recipeIndex = 0;
             for (RecipeNode recipe : entry.getValue()) {
-                List<IngredientRef> inputs = recipe.inputs().stream()
-                        .map(input -> boundIngredients.computeIfAbsent(input,
-                                key -> bindIngredientIndexed(key, availableByItem)))
-                        .toList();
-                RecipeNode bound = new RecipeNode(recipe.recipeId(), recipe.output(),
-                        recipe.outputCount(), inputs, recipe.modTypeId(),
-                        recipe.recipeTypeId());
-                recipes.add(bound);
+                List<IngredientRef> inputs = null;
+                for (int inputIndex = 0; inputIndex < recipe.inputs().size(); inputIndex++) {
+                    IngredientRef input = recipe.inputs().get(inputIndex);
+                    IngredientRef boundInput = boundIngredients.computeIfAbsent(input,
+                            key -> bindIngredientIndexed(key, availableByItem));
+                    if (!boundInput.equals(input)) {
+                        if (inputs == null) inputs = new ArrayList<>(recipe.inputs());
+                        inputs.set(inputIndex, boundInput);
+                    }
+                }
+                RecipeNode bound = inputs != null
+                        ? new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
+                                inputs, recipe.modTypeId(), recipe.recipeTypeId())
+                        : recipe;
+                if (inputs != null) {
+                    if (recipes == null) recipes = new ArrayList<>(entry.getValue());
+                    recipes.set(recipeIndex, bound);
+                    changed = true;
+                }
                 if (recipe.equals(graph.recipesById().get(recipe.recipeId()))) {
                     indexed.put(recipe.recipeId(), bound);
                 }
+                recipeIndex++;
             }
-            projected.put(entry.getKey(), recipes);
+            projected.put(entry.getKey(), recipes == null ? entry.getValue() : recipes);
         }
-        return new ImmutableRecipeGraph(projected, indexed);
+        return changed ? new ImmutableRecipeGraph(projected, indexed) : graph;
     }
 
     static ImmutableRecipeGraph bindSmithingStates(
@@ -515,7 +529,9 @@ public final class ImmutableRecipeGraphProjector {
                 }
             }
         }
-        return new IngredientRef(List.copyOf(alternatives), ingredient.count(),
+        List<MaterialRef> boundAlternatives = List.copyOf(alternatives);
+        if (boundAlternatives.equals(ingredient.alternatives())) return ingredient;
+        return new IngredientRef(boundAlternatives, ingredient.count(),
                 ingredient.nbtMatchMode(), ingredient.role());
     }
 

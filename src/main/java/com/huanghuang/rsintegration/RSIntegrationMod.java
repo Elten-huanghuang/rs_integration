@@ -65,6 +65,7 @@ import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestCuriosScanEvents;
 import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.craftingstation.SmithingModePacket;
@@ -799,9 +800,10 @@ public final class RSIntegrationMod {
             MinecraftForge.EVENT_BUS.register(AltarBindingRegistry.class);
         }
 
-        // /reload clears recipe output caches so new datapack recipes take effect
+        // 数据包重载时清理配方结果缓存，避免沿用旧配方的产物。
         MinecraftForge.EVENT_BUS.addListener((AddReloadListenerEvent e) -> {
             ModRecipeHandlers.clearResultCaches();
+            CraftingResolver.clearHiddenOutputCache();
             CraftPlanningRevision.bump();
             RecipeIndex.invalidate();
         });

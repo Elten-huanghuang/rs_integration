@@ -285,6 +285,7 @@ public final class RSGridSearchCache {
     private static long prewarmGeneration;
     private static String prewarmContext;
     private static boolean prewarmInitialized;
+    private static boolean prewarmCatalogueEnabled;
     private static boolean prewarmEnumerated;
     private static boolean cataloguePrewarmCompletionLogged;
     private static boolean gridIndexCompletionLogged;
@@ -1008,10 +1009,20 @@ public final class RSGridSearchCache {
         if (diskState != DiskState.READY && diskState != DiskState.DISABLED) return;
         var runtime = RSJeiPlugin.getRuntime();
         if (runtime == null || diskContext == null) return;
-        if (prewarmInitialized && diskContext.equals(prewarmContext)) return;
+        boolean catalogueEnabled = RSIntegrationConfig.GRID_SEARCH_JEI_CATALOGUE_PREWARM.get();
+        if (prewarmInitialized && diskContext.equals(prewarmContext)
+                && prewarmCatalogueEnabled == catalogueEnabled) return;
 
         resetGlobalPrewarm();
         prewarmContext = diskContext;
+        prewarmCatalogueEnabled = catalogueEnabled;
+        if (!catalogueEnabled) {
+            // 网格内物品由独立队列补全，不必提前触发整个 JEI 目录的 tooltip 事件。
+            prewarmInitialized = true;
+            prewarmEnumerated = true;
+            prewarmModTexts();
+            return;
+        }
         try {
             prewarmStacks = List.copyOf(runtime.getIngredientManager().getAllItemStacks());
         } catch (RuntimeException exception) {

@@ -242,6 +242,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue GRID_SEARCH_CANDIDATE_INDEX_MAX_PERCENT;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_CANDIDATE_REBUILD_DELAY_MS;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_PINYIN_WORKERS;
+    public static ForgeConfigSpec.BooleanValue GRID_SEARCH_JEI_CATALOGUE_PREWARM;
     public static ForgeConfigSpec.BooleanValue GRID_SEARCH_DISK_CACHE_ENABLED;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_ENTRIES;
     public static ForgeConfigSpec.IntValue GRID_SEARCH_DISK_CACHE_MAX_MIB;
@@ -1406,6 +1407,11 @@ public final class RSIntegrationConfig {
                         "Minecraft tooltip 本身仍在客户端线程采集；只有纯文本转拼音在后台运行。",
                         "范围：1-4。")
                 .defineInRange("pinyinWorkers", DEFAULT_GRID_SEARCH_PINYIN_WORKERS, 1, 4);
+        GRID_SEARCH_JEI_CATALOGUE_PREWARM = cl
+                .comment("预热整个 JEI 物品目录的搜索缓存",
+                        "默认关闭，避免为未出现在 RS 网格中的物品采集 tooltip 和生成拼音。",
+                        "RS 网格内的物品仍会补全全部搜索数据，并复用磁盘缓存。")
+                .define("jeiCataloguePrewarm", false);
         GRID_SEARCH_DISK_CACHE_ENABLED = cl
                 .comment("启用磁盘搜索缓存",
                         "将已经完成的 RS tooltip 与拼音搜索文本保存到本地磁盘。",
