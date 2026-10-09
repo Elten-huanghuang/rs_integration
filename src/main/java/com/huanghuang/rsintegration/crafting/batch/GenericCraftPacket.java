@@ -4822,6 +4822,7 @@ public final class GenericCraftPacket {
                 modSpecs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
                         stepModType, modSpecs, stepRecipe,
                         player.serverLevel().registryAccess());
+                modSpecs = MaterialLocks.narrowSpecs(stepId, modSpecs, materialLocks);
                 if (modSpecs != null) {
                     ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
                     int stepInputIndex = 0;
@@ -5018,6 +5019,7 @@ public final class GenericCraftPacket {
                 // (displayIngredients is no longer unrolled per-unit).
                 List<IngredientSpec> targetSpecs = CraftPacketUtils.extractIngredientSpecs(recipe);
                 targetSpecs = CraftPacketUtils.applyPlanningIngredientContext(recipe, player, targetSpecs);
+                targetSpecs = MaterialLocks.narrowSpecs(recipeId, targetSpecs, materialLocks);
                 if (targetSpecs != null
                         && recipe instanceof SmithingTransformRecipe smithingRecipe
                         && !selectedSmithingBase.isEmpty()) {
