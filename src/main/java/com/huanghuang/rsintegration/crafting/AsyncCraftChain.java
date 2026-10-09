@@ -175,6 +175,10 @@ public final class AsyncCraftChain {
     private boolean waitingForMachineLease;
     private int machineLeaseWaitTicks;
     @Nullable
+    private Component machineWaitMessage;
+    @Nullable
+    private String machineWaitDetail;
+    @Nullable
     private Component machineStartFailureMessage;
     @Nullable
     private String machineStartFailureDetail;
@@ -915,9 +919,14 @@ public final class AsyncCraftChain {
                     machineLeaseWaitTicks++;
                     int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
                     if (machineLeaseWaitTicks > timeoutTicks) {
-                        abort("Timeout waiting for an available multi-block machine: " + step.recipeId(),
-                                Component.translatable("rsi.async.abort.machine_wait_timeout",
-                                        step.recipeId().toString()));
+                        abort("Timeout waiting for an available multi-block machine: "
+                                        + step.recipeId()
+                                        + (machineWaitDetail == null ? "" : " (" + machineWaitDetail + ")"),
+                                machineWaitMessage == null
+                                        ? Component.translatable("rsi.async.abort.machine_wait_timeout",
+                                                step.recipeId().toString())
+                                        : Component.translatable("rsi.async.abort.machine_wait_reason",
+                                                step.recipeId().toString(), machineWaitMessage));
                         return true;
                     }
                     maybeSendProgress(online, false);
@@ -3193,6 +3202,8 @@ public final class AsyncCraftChain {
     }
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
+        machineWaitMessage = null;
+        machineWaitDetail = null;
         machineStartFailureMessage = null;
         machineStartFailureDetail = null;
         machineStartFailureLabel = "";
@@ -3388,6 +3399,10 @@ public final class AsyncCraftChain {
                 }
                 if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
                     retryableRejection = true;
+                    if (machineWaitDetail == null) {
+                        machineWaitDetail = preparation.detail();
+                        machineWaitMessage = preparation.userMessage();
+                    }
                 } else if (fatalDetail.isEmpty()) {
                     fatalDetail = preparation.detail();
                     fatalMachineLabel = m.dim() + "@" + m.pos().toShortString();
