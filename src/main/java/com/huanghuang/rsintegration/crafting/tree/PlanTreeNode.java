@@ -53,6 +53,8 @@ public final class PlanTreeNode {
     // ---- step prerequisites (server-authoritative) ----
     public List<Component> warnings = List.of();
     public boolean prerequisiteBlocked;
+    // ---- 使用条件提示（客户端翻译，不影响服务端阻断状态） ----
+    public List<Component> hints = List.of();
 
     // ---- structural flags ----
     public boolean cycle;

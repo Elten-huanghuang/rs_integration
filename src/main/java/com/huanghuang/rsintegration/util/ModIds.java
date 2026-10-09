@@ -59,6 +59,9 @@ public final class ModIds {
 
     // Composite ModType IDs (one mod ->multiple machine types)
     public static final String ID_EMBERS_ALCHEMY = "embers_alchemy";
+    public static final String ID_EMBERS_MELTER = "embers_melter";
+    public static final String ID_EMBERS_MIXER = "embers_mixer";
+    public static final String ID_EMBERS_STAMPER = "embers_stamper";
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";
     public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";

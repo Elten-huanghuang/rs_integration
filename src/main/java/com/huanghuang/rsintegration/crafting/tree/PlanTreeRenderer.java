@@ -54,6 +54,7 @@ public final class PlanTreeRenderer {
     private static final int C_CAROUSEL        = 0xFF66CCEE;  // tag-input carousel indicator
     private static final int C_PREREQ_WARNING  = 0xFFFFAA33;
     private static final int C_PREREQ_BLOCKED  = 0xFFFF4444;
+    private static final int C_MACHINE_HINT    = 0xFF66CCEE;
 
     private static final float NODE_RADIUS = 4f;
     private static final int LINE_THICKNESS = 2;
@@ -227,6 +228,8 @@ public final class PlanTreeRenderer {
         if (!node.warnings.isEmpty() || node.prerequisiteBlocked) {
             drawPrerequisiteBadge(gfx, x + w - PlanTreeLayout.ITEM_ICON_SIZE / 2,
                     iconY, node.prerequisiteBlocked);
+        } else if (!node.hints.isEmpty()) {
+            drawHintBadge(gfx, x + w - PlanTreeLayout.ITEM_ICON_SIZE / 2, iconY);
         }
 
         // 6c. Fold indicator on the left edge for foldable nodes (non-root with a subtree). A
@@ -358,6 +361,16 @@ public final class PlanTreeRenderer {
         UIRenderer.rounded(gfx, x + 3, y + 3, size - 6, size - 6,
                 (size - 6) / 2f, 0xFF32100D);
         gfx.drawString(font, "!", x + 6, y + 2, color, true);
+    }
+
+    private void drawHintBadge(GuiGraphics gfx, int x, int y) {
+        int size = PlanTreeLayout.ITEM_ICON_SIZE;
+        UIRenderer.rounded(gfx, x, y, size, size, size / 2f, 0xFF102633);
+        UIRenderer.rounded(gfx, x + 1, y + 1, size - 2, size - 2,
+                (size - 2) / 2f, C_MACHINE_HINT);
+        UIRenderer.rounded(gfx, x + 3, y + 3, size - 6, size - 6,
+                (size - 6) / 2f, 0xFF102633);
+        gfx.drawString(font, "i", x + 7, y + 2, C_MACHINE_HINT, true);
     }
 
     /** Bottom bar of dots under a carousel icon, one dot per tag member (max 5). */

@@ -672,6 +672,7 @@ final class CandidateEngine {
     private static List<IngredientSpec> ingredientSpecs(RecipeIndex.Entry entry,
                                                         ResolutionContext ctx) {
         List<IngredientSpec> specs = CraftPacketUtils.extractRecursiveIngredientSpecs(entry.recipe());
+        specs = CraftPacketUtils.applyPlanningIngredientContext(entry.recipe(), ctx.player, specs);
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());
     }

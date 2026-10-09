@@ -185,6 +185,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_EIDOLON;
     public static ForgeConfigSpec.BooleanValue ENABLE_TOUHOU_LITTLE_MAID;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_MACHINES;
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHERWORKS;
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHER;
     public static ForgeConfigSpec.BooleanValue ENABLE_ARS_NOUVEAU;
@@ -626,6 +627,10 @@ public final class RSIntegrationConfig {
                 .comment("启用余烬炼金兼容",
                         "支持余烬复燃的炼金台远程合成。")
                 .define("enableEmbersAlchemy", true);
+        ENABLE_EMBERS_MACHINES = c
+                .comment("启用余烬机器兼容",
+                        "支持熔炼炉、混合离心器和压印锤的远程合成；流体材料与产物需要 RS 流体存储。")
+                .define("enableEmbersMachines", true);
         ENABLE_EMBERS_ALCHEMY_CALC = c
                 .comment("启用余烬炼金计算模式",
                         "显示确定的基座布局；关闭后仅可使用试错推断模式，需要同时启用余烬炼金兼容。")

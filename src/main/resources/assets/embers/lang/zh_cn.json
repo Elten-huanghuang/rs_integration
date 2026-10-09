@@ -1,0 +1,10 @@
+{
+  "block.embers.bin": "收集箱",
+  "block.embers.melter": "熔炼炉",
+  "block.embers.mixer_centrifuge": "混合离心器",
+  "block.embers.stamp_base": "印模底座",
+  "block.embers.stamper": "压印锤",
+  "embers.jei.recipe.melting": "熔炼",
+  "embers.jei.recipe.mixing": "混合",
+  "embers.jei.recipe.stamping": "压印"
+}

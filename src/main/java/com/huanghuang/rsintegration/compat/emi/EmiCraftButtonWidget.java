@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.compat.emi;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.client.CraftButtonTextures;
 import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
 import dev.emi.emi.api.widget.Bounds;
 import dev.emi.emi.api.widget.Widget;
@@ -14,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.Minecraft;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -71,11 +73,20 @@ final class EmiCraftButtonWidget extends Widget {
         if (!machineButton && !isVisible()) return List.of();
         String key = machineButton ? "rsi.jei.open_machine" : spec.tooltipKey();
         var action = ClientTooltipComponent.create(Component.translatable(key).getVisualOrderText());
-        if (machineButton || spec.availabilityKey() == null) return List.of(action);
-        var state = RecipeAvailabilityClient.get(spec.availabilityKey());
-        return List.of(action,
-                ClientTooltipComponent.create(Component.translatable(state.translationKey()).getVisualOrderText()),
-                ClientTooltipComponent.create(Component.translatable("rsi.recipe.materials.scope").getVisualOrderText()));
+        if (machineButton) return List.of(action);
+        List<ClientTooltipComponent> tooltip = new ArrayList<>();
+        tooltip.add(action);
+        for (String hint : EmbersMachineHints.tooltipKeys(spec.modType())) {
+            tooltip.add(ClientTooltipComponent.create(Component.translatable(hint).getVisualOrderText()));
+        }
+        if (spec.availabilityKey() != null) {
+            var state = RecipeAvailabilityClient.get(spec.availabilityKey());
+            tooltip.add(ClientTooltipComponent.create(
+                    Component.translatable(state.translationKey()).getVisualOrderText()));
+            tooltip.add(ClientTooltipComponent.create(
+                    Component.translatable("rsi.recipe.materials.scope").getVisualOrderText()));
+        }
+        return List.copyOf(tooltip);
     }
 
     private boolean isVisible() {
