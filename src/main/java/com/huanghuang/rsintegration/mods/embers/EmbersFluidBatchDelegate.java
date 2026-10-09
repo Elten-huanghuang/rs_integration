@@ -33,6 +33,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
     protected boolean started;
     protected boolean consumed;
     private long startTick;
+    private long unpoweredTicks;
     private Component failureMessage;
 
     protected abstract boolean isRecipe(Recipe<?> candidate);
@@ -80,7 +81,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
                 player, level.dimension(), target);
         if (!canStoreOutput(player)) return PreparationResult.fatal("RS 流体存储不可用",
                 Component.translatable("rsi.embers_machine.error.fluid_storage"));
-        if (!inputsIdle()) return PreparationResult.fatal("余烬机器输入槽非空",
+        if (!inputsIdle()) return PreparationResult.retry("余烬机器输入槽非空",
                 Component.translatable("rsi.embers_machine.error.inputs_occupied"));
         if (!outputTank().getFluidInTank(0).isEmpty()) return PreparationResult.fatal(
                 "余烬机器产物罐非空",
@@ -88,7 +89,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         if (outputTank().fill(expected.copy(), IFluidHandler.FluidAction.SIMULATE)
                 < expected.getAmount()) return PreparationResult.fatal("余烬机器产物罐容量不足",
                 Component.translatable("rsi.embers_machine.error.output_capacity"));
-        if (!hasPower()) return PreparationResult.fatal("余烬机器缺少 Ember 能量",
+        if (!hasPower()) return PreparationResult.retry("余烬机器缺少 Ember 能量",
                 Component.translatable("rsi.embers_machine.error.no_ember"));
         return PreparationResult.ready();
     }
@@ -151,6 +152,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         if (!placeInputs(materials) || !nativeRecipeMatches()) return false;
         started = true;
         startTick = level.getGameTime();
+        unpoweredTicks = 0;
         markCraftStarted();
         forceMachineChunk(level, pos, true);
         return true;
@@ -177,7 +179,9 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
             failureMessage = Component.translatable("rsi.embers_machine.error.output_removed");
             return failObservation("投入材料已消失，但成品液体不足或已被外部管道抽走");
         }
-        if (level.getGameTime() - startTick > 2400) {
+        // 能量不足时原版机器会保留输入并等待，暂停加工卡死计时。
+        if (!hasPower()) unpoweredTicks++;
+        if (level.getGameTime() - startTick - unpoweredTicks > 2400) {
             failureMessage = Component.translatable("rsi.embers_machine.error.stalled");
             return failObservation("余烬机器加工超时，请检查 Ember 供应和产物流向");
         }

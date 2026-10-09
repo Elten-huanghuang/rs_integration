@@ -54,6 +54,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
     private boolean started;
     private boolean consumed;
     private long startTick;
+    private long unpoweredTicks;
     private long inputMissingTick = -1;
     private Component failureMessage;
     private UUID ownerId;
@@ -111,9 +112,9 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("压印流体材料需要 RS 流体存储",
                     Component.translatable("rsi.embers_machine.error.fluid_storage"));
         }
-        if (!idle()) return PreparationResult.fatal("印模底座仍有材料或压印锤尚未复位",
+        if (!idle()) return PreparationResult.retry("印模底座仍有材料或压印锤尚未复位",
                 Component.translatable("rsi.embers_machine.error.stamper_occupied"));
-        if (!hasPower()) return PreparationResult.fatal("压印锤缺少 Ember 能量",
+        if (!hasPower()) return PreparationResult.retry("压印锤缺少 Ember 能量",
                 Component.translatable("rsi.embers_machine.error.no_ember"));
         return PreparationResult.ready();
     }
@@ -271,6 +272,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
                 stamper.stamp.getStackInSlot(0)), level)) return false;
         started = true;
         startTick = level.getGameTime();
+        unpoweredTicks = 0;
         markCraftStarted();
         forceMachineChunk(level, pos, true);
         return true;
@@ -296,7 +298,9 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
             failureMessage = Component.translatable("rsi.embers_machine.error.stamper_output_removed");
             return failObservation("压印材料已消耗，但未捕获到掉落产物");
         }
-        if (level.getGameTime() - startTick > 600) {
+        // 原版在能量不足时保留底座材料等待供能，不把这段等待算作加工卡死。
+        if (!hasPower()) unpoweredTicks++;
+        if (level.getGameTime() - startTick - unpoweredTicks > 600) {
             failureMessage = Component.translatable("rsi.embers_machine.error.stamper_stalled");
             return failObservation("压印加工超时，请检查余烬能量供应和产物掉落位置");
         }
