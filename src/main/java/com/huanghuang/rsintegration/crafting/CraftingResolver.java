@@ -106,6 +106,11 @@ public final class CraftingResolver {
 
     private CraftingResolver() {}
 
+    /** 配方重载后丢弃按配方 ID 缓存的隐藏产物。 */
+    public static void clearHiddenOutputCache() {
+        HIDDEN_OUTPUT_CACHE.clear();
+    }
+
     public static List<ResourceLocation> resolveStepsFor(
             List<ItemStack> needed,
             Map<Item, Integer> available,

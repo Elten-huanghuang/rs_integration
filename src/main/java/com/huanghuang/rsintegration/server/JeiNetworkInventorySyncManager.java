@@ -177,9 +177,11 @@ public final class JeiNetworkInventorySyncManager {
         }
         StorageSnapshot snapshot = snapshotResult.snapshot().orElseThrow();
         for (var item : snapshot.items()) {
-            if (item.stack().isEmpty() || item.amount() <= 0) continue;
-            var entry = new JeiNetworkInventoryPacket.Entry(item.stack(), item.amount());
-            state.current.put(key(item.stack()), entry);
+            if (item.amount() <= 0) continue;
+            ItemStack stack = item.stack();
+            if (stack.isEmpty()) continue;
+            var entry = new JeiNetworkInventoryPacket.Entry(stack, item.amount());
+            state.current.put(key(stack), entry);
         }
         // No backend event can interleave with this synchronous server-thread snapshot.
         state.pending.clear();
@@ -193,8 +195,10 @@ public final class JeiNetworkInventorySyncManager {
         if (!snapshotResult.successful()) return;
         Map<String, JeiNetworkInventoryPacket.Entry> latest = new LinkedHashMap<>();
         for (var item : snapshotResult.snapshot().orElseThrow().items()) {
-            if (item.stack().isEmpty() || item.amount() <= 0) continue;
-            latest.put(key(item.stack()), new JeiNetworkInventoryPacket.Entry(item.stack(), item.amount()));
+            if (item.amount() <= 0) continue;
+            ItemStack stack = item.stack();
+            if (stack.isEmpty()) continue;
+            latest.put(key(stack), new JeiNetworkInventoryPacket.Entry(stack, item.amount()));
         }
         List<JeiNetworkInventoryPacket.Entry> changes = new ArrayList<>();
         Map<String, JeiNetworkInventoryPacket.Entry> union = new HashMap<>(state.current);

@@ -34,6 +34,21 @@ class StorageItemKeyTest extends BootstrapTest {
     }
 
     @Test
+    void stackIdentityKeepsAnIndependentNormalizedDisplayCopy() {
+        ItemStack source = new ItemStack(Items.DIAMOND, 7);
+        source.getOrCreateTag().putString("variant", "original");
+        StorageItemKey key = StorageItemKey.fromItemStack(new StorageBackendId("test"), source);
+        source.setCount(2);
+        source.getTag().putString("variant", "changed");
+
+        ItemStack display = key.displayStack();
+        assertEquals(1, display.getCount());
+        assertEquals("original", display.getTag().getString("variant"));
+        display.getTag().putString("variant", "returned_changed");
+        assertEquals("original", key.displayStack().getTag().getString("variant"));
+    }
+
+    @Test
     void backendQualificationIsPartOfExactIdentity() {
         ItemStack stack = new ItemStack(Items.DIAMOND);
         assertNotEquals(StorageItemKey.fromItemStack(new StorageBackendId("rs"), stack),

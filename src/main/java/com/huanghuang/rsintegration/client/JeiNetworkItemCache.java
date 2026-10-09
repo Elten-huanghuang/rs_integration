@@ -4,12 +4,15 @@ import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryResyncRequestPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -17,7 +20,11 @@ import java.util.Objects;
 /** Client-side ordered cache of the active RS/BD network inventory. */
 public final class JeiNetworkItemCache {
     public static final JeiNetworkItemCache INSTANCE = new JeiNetworkItemCache();
+    private static final BigInteger MAX_AMOUNT = BigInteger.valueOf(Long.MAX_VALUE);
     private final Map<String, Entry> entries = new HashMap<>();
+    private final Map<Item, Entry> taglessEntries = new IdentityHashMap<>();
+    // 保留真实总量，保证饱和显示后删除或替换变体时仍能准确回退。
+    private final Map<Item, BigInteger> amountsByItem = new IdentityHashMap<>();
     private boolean connected;
     private long epoch = -1L;
     private long sequence = -1L;
@@ -46,6 +53,8 @@ public final class JeiNetworkItemCache {
         List<JeiNetworkInventoryPacket.Entry> completed = pending.flatten();
         if (pending.full) {
             entries.clear();
+            taglessEntries.clear();
+            amountsByItem.clear();
             applyEntries(completed);
             reference = pending.reference;
             connected = reference != null;
@@ -74,9 +83,32 @@ public final class JeiNetworkItemCache {
     private void applyEntries(Iterable<JeiNetworkInventoryPacket.Entry> changes) {
         for (var entry : changes) {
             String key = key(entry.stack());
-            if (entry.amount() <= 0) entries.remove(key);
-            else entries.put(key, new Entry(entry.stack(), entry.amount()));
+            Entry previous = entries.remove(key);
+            if (previous != null) {
+                if (isTagless(previous.stack)) taglessEntries.remove(previous.stack.getItem());
+                subtractAmount(previous.stack, previous.amount);
+            }
+            if (entry.amount() > 0) {
+                Entry updated = new Entry(entry.stack(), entry.amount());
+                entries.put(key, updated);
+                if (isTagless(updated.stack)) taglessEntries.put(updated.stack.getItem(), updated);
+                addAmount(updated.stack, updated.amount);
+            }
         }
+    }
+
+    private void addAmount(ItemStack stack, long amount) {
+        Item item = stack.getItem();
+        amountsByItem.merge(item, BigInteger.valueOf(amount), BigInteger::add);
+    }
+
+    private void subtractAmount(ItemStack stack, long amount) {
+        Item item = stack.getItem();
+        BigInteger current = amountsByItem.get(item);
+        if (current == null) return;
+        BigInteger updated = current.subtract(BigInteger.valueOf(amount));
+        if (updated.signum() <= 0) amountsByItem.remove(item);
+        else amountsByItem.put(item, updated);
     }
 
     private void requestResync() {
@@ -88,8 +120,15 @@ public final class JeiNetworkItemCache {
     }
 
     public synchronized long amount(ItemStack stack) {
-        Entry entry = entries.get(key(stack));
+        if (stack == null || stack.isEmpty()) return 0L;
+        Entry entry = isTagless(stack)
+                ? taglessEntries.get(stack.getItem()) : entries.get(key(stack));
         return entry == null ? 0L : entry.amount;
+    }
+
+    private static boolean isTagless(ItemStack stack) {
+        CompoundTag tag = stack.getTag();
+        return tag == null || tag.isEmpty();
     }
 
     /**
@@ -107,17 +146,16 @@ public final class JeiNetworkItemCache {
 
     /** Sum every stored NBT variant for a plan material that matches by item type. */
     public synchronized long amount(Item item) {
-        long total = 0L;
-        for (Entry entry : entries.values()) {
-            if (!entry.stack.is(item)) continue;
-            if (Long.MAX_VALUE - total < entry.amount) return Long.MAX_VALUE;
-            total += entry.amount;
-        }
-        return total;
+        BigInteger amount = amountsByItem.get(item);
+        if (amount == null) return 0L;
+        return amount.compareTo(MAX_AMOUNT) > 0
+                ? Long.MAX_VALUE : amount.longValue();
     }
 
     public synchronized void clear() {
         entries.clear();
+        taglessEntries.clear();
+        amountsByItem.clear();
         connected = false;
         epoch = -1L;
         sequence = -1L;

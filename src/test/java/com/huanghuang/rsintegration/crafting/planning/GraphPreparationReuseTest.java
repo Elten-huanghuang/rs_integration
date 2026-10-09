@@ -144,6 +144,27 @@ class GraphPreparationReuseTest extends BootstrapTest {
     }
 
     @Test
+    void unchangedInventoryBindingReusesTheOriginalGraph() {
+        ImmutableRecipeGraph graph = graph("generic", 0);
+        ImmutableRecipeGraph bound = ImmutableRecipeGraphProjector.bindAvailability(
+                graph, Map.of(material("unrelated", "{quality:1}"), 1));
+        assertSame(graph, bound);
+        assertSame(graph.recipesById().get(PRODUCER), bound.recipesById().get(PRODUCER));
+    }
+
+    @Test
+    void equalButDistinctInputsDoNotForceANewGraph() {
+        IngredientRef first = new IngredientRef(List.of(RAW), 1, NbtMatchMode.EXACT);
+        IngredientRef second = new IngredientRef(List.of(RAW), 1, NbtMatchMode.EXACT);
+        assertNotSame(first, second);
+        RecipeNode recipe = new RecipeNode(PRODUCER, INTERMEDIATE, 1,
+                List.of(first, second));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(INTERMEDIATE, List.of(recipe)));
+
+        assertSame(graph, ImmutableRecipeGraphProjector.bindAvailability(graph, Map.of()));
+    }
+
+    @Test
     void preparationIsNotRetainedWhenItsInputChangesDuringWork() {
         ImmutableRecipeGraph graph = graph("generic", 0);
         Map<MaterialRef, Integer> stock = stock(1, 0);

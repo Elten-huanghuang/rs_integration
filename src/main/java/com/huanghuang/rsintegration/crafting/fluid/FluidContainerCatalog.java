@@ -13,6 +13,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -199,16 +200,22 @@ public final class FluidContainerCatalog {
 
     public static boolean isValid(FluidContainerRecipe recipe) {
         try {
-            Function<ItemStack, IFluidHandlerItem> handlers = FluidContainerBucketSupport.handlers(
-                    List.of(recipe.emptyContainer(), recipe.filledContainer()), FluidContainerCatalog::handler);
-            if (!recipe.filling()) return ItemStack.isSameItemSameTags(recipe.emptyContainer(),
-                    drain(recipe.filledContainer(), recipe.fluid(), handlers));
-            IFluidHandlerItem handler = handlers.apply(recipe.emptyContainer());
+            ItemStack empty = recipe.emptyContainer();
+            ItemStack filled = recipe.filledContainer();
+            Function<ItemStack, IFluidHandlerItem> handlers =
+                    empty.getItem() instanceof BucketItem || filled.getItem() instanceof BucketItem
+                            ? FluidContainerBucketSupport.handlers(List.of(empty, filled),
+                                    FluidContainerCatalog::handler)
+                            : stack -> FluidContainerBucketSupport.defaultHandler(stack,
+                                    FluidContainerCatalog::handler);
+            if (!recipe.filling()) return ItemStack.isSameItemSameTags(empty,
+                    drain(filled, recipe.fluid(), handlers));
+            IFluidHandlerItem handler = handlers.apply(empty);
             if (handler == null || handler.getTanks() != 1 || !handler.getFluidInTank(0).isEmpty()) return false;
             FluidStack fluid = recipe.fluid();
             if (handler.fill(fluid.copy(), IFluidHandler.FluidAction.SIMULATE) != fluid.getAmount()
                     || handler.fill(fluid.copy(), IFluidHandler.FluidAction.EXECUTE) != fluid.getAmount()) return false;
-            if (!ItemStack.isSameItemSameTags(handler.getContainer(), recipe.filledContainer())) return false;
+            if (!ItemStack.isSameItemSameTags(handler.getContainer(), filled)) return false;
             IFluidHandlerItem result = handlers.apply(handler.getContainer());
             return result != null && result.getTanks() == 1 && sameFluid(result.getFluidInTank(0), fluid);
         } catch (RuntimeException | LinkageError error) { return false; }
@@ -241,7 +248,8 @@ public final class FluidContainerCatalog {
                     .digest(identity.toString().getBytes(StandardCharsets.UTF_8)));
             ResourceLocation id = new ResourceLocation("rs_integration",
                     "fluid_container/" + (filling ? "fill/" : "drain/") + hash);
-            recipes.putIfAbsent(id, new FluidContainerRecipe(id, filling, empty, filled, fluid, tokens.apply(fluid.copy())));
+            recipes.computeIfAbsent(id, ignored ->
+                    new FluidContainerRecipe(id, filling, empty, filled, fluid, tokens.apply(fluid.copy())));
         } catch (NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
 }

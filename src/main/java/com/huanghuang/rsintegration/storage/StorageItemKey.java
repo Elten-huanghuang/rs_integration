@@ -30,6 +30,12 @@ public final class StorageItemKey {
 
     private StorageItemKey(StorageBackendId backendId, CompoundTag backendPayload,
                            byte[] canonicalIdentity, ItemStack displayStack) {
+        this(backendId, backendPayload, canonicalIdentity, displayStack, false);
+    }
+
+    private StorageItemKey(StorageBackendId backendId, CompoundTag backendPayload,
+                           byte[] canonicalIdentity, ItemStack displayStack,
+                           boolean ownedDisplayStack) {
         this.backendId = Objects.requireNonNull(backendId, "backendId");
         Objects.requireNonNull(backendPayload, "backendPayload");
         Objects.requireNonNull(canonicalIdentity, "canonicalIdentity");
@@ -47,7 +53,7 @@ public final class StorageItemKey {
                 .location();
         this.backendPayload = backendPayload.copy();
         this.canonicalIdentity = canonicalIdentity.clone();
-        this.displayStack = displayStack.copyWithCount(1);
+        this.displayStack = ownedDisplayStack ? displayStack : displayStack.copyWithCount(1);
         int hash = 31 * backendId.hashCode() + itemType.hashCode();
         this.hashCode = 31 * hash + Arrays.hashCode(this.canonicalIdentity);
     }
@@ -77,7 +83,10 @@ public final class StorageItemKey {
         Objects.requireNonNull(stack, "stack");
         if (stack.isEmpty()) throw new IllegalArgumentException("stack must not be empty");
         ItemStack normalized = stack.copyWithCount(1);
-        return new StorageItemKey(backendId, normalized.save(new CompoundTag()), normalized);
+        CompoundTag payload = normalized.save(new CompoundTag());
+        // normalized 仅在此处新建，交给键持有后无需再复制一遍。
+        return new StorageItemKey(backendId, payload, StorageIdentityBytes.exact(payload),
+                normalized, true);
     }
 
     public StorageBackendId backendId() { return backendId; }
