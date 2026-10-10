@@ -83,6 +83,8 @@
     "reliquary.PyromancerStaffMixin",
     "enigmaticaddons.AvariceRingMixin",
     "enigmaticaddons.ArtificialFlowerMixin",
+    "untileternity.ImFullInventoryHelperMixin",
+    "untileternity.VibrantAmethystBlessingEventsMixin",
     "moonstone.NineSwordBooksMixin",
     "enigmaticlegacy.SuperpositionHandlerMixin",
     "enigmaticlegacy.AddonEventHandlerMixin",

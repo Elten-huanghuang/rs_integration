@@ -876,6 +876,10 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_AVARITIA_CRAFTING.equals(type.id())) {
             return null;
         }
+        // 终末工作台只有一种机器，end/ 等目录是配方分类。
+        if (ModIds.ID_UNTIL_ETERNITY_END_CRAFTING.equals(type.id())) {
+            return null;
+        }
         // MythicBotany exposes one Mana Infuser recipe type and one physical
         // machine, but its native IDs use the unrelated folder
         // "mythicbotany_infusion/". Once the serializer has selected this leaf

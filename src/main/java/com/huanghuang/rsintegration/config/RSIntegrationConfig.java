@@ -195,6 +195,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
     public static ForgeConfigSpec.BooleanValue ENABLE_SLASHBLADE;
     public static ForgeConfigSpec.BooleanValue ENABLE_AVARITIA;
+    public static ForgeConfigSpec.BooleanValue ENABLE_UNTIL_ETERNITY;
     public static ForgeConfigSpec.BooleanValue ENABLE_CONFLUENCE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IMMORTERS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSDELIGHT;
@@ -463,6 +464,10 @@ public final class RSIntegrationConfig {
                 .comment("启用无尽贪婪兼容",
                         "支持无尽合成台、终极锻造台、中子态素收集器、箱子、超立方体及铁砧。")
                 .define("enableAvaritia", true);
+        ENABLE_UNTIL_ETERNITY = c
+                .comment("启用直至永恒兼容",
+                        "支持终末工作台的远程绑定与递归合成。")
+                .define("enableUntilEternity", true);
         ENABLE_CONFLUENCE = c
                 .comment("启用汇流来世兼容",
                         "支持汇流来世工作坊递归合成。")

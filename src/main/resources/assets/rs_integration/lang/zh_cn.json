@@ -1046,6 +1046,8 @@
   "rsi.batch.mod.aether_incubator": "天境孵化器",
   "rsi.batch.mod.aether_altar": "天境祭坛",
   "rsi.batch.mod.avaritia_crafting": "无尽贪婪合成台",
+  "rsi.batch.mod.until_eternity_end_crafting": "终末工作台",
+  "gui.rs_integration.jei.until_eternity_end_crafting": "通过终末工作台递归合成",
   "rsi.batch.mod.avaritia_smithing": "终极锻造台",
   "gui.rs_integration.jei.avaritia_crafting": "通过无尽合成台制作",
   "gui.rs_integration.jei.avaritia_smithing": "通过终极锻造台制作",

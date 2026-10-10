@@ -32,6 +32,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
+            return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
+                    && hasResonanceBackend();
+        }
+        if (mixinClassName.endsWith(".untileternity.VibrantAmethystBlessingEventsMixin")) {
+            return isClassPresent(targetClassName) && hasMethod(targetClassName, "onPlayerTick")
+                    && hasResonanceBackend();
+        }
         if (mixinClassName.contains(".cthulhucreatures.")) {
             return isClassPresent(targetClassName)
                     && (hasMethod(targetClassName, "m_6875_") || hasMethod(targetClassName, "stillValid"));

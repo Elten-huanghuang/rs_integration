@@ -18,6 +18,7 @@ public final class ModIds {
     public static final String CROCKPOT = "crockpot";
     public static final String TACZ = "tacz";
     public static final String AVARITIA = "avaritia";
+    public static final String UNTIL_ETERNITY = "until_eternity";
     public static final String CONFLUENCE = "confluence";
     /** Terra Curio is the renamed runtime mod id used by newer Confluence builds. */
     public static final String TERRA_CURIO = "terra_curio";
@@ -66,6 +67,7 @@ public final class ModIds {
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";
     public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";
     public static final String ID_AVARITIA_SMITHING = "avaritia_smithing";
+    public static final String ID_UNTIL_ETERNITY_END_CRAFTING = "until_eternity_end_crafting";
     public static final String ID_MALUM_RUNIC = "malum_runic_workbench";
     public static final String ID_FD_SKILLET = "farmersdelight_skillet";
     public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";

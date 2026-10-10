@@ -138,6 +138,14 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void endCraftingRecipeFoldersDoNotRestrictTheOnlyTable() {
+        registerLeafType(ModIds.ID_UNTIL_ETERNITY_END_CRAFTING);
+        ModType table = ModType.byId(ModIds.ID_UNTIL_ETERNITY_END_CRAFTING);
+        assertNull(AltarBindingRegistry.normalizeSubType("end", table));
+        assertNull(AltarBindingRegistry.normalizeSubType("custom", table));
+    }
+
+    @Test
     void kubeJsGeneratedFolderIsNeverTreatedAsMachineSubtype() {
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));
