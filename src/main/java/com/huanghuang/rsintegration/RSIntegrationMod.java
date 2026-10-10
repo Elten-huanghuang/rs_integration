@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisRSModule;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsNouveauRSModule;
 import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
+import com.huanghuang.rsintegration.mods.untileternity.UntilEternityRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
 import com.huanghuang.rsintegration.mods.cthulhucreatures.CthulhuCreaturesRSModule;
@@ -173,6 +174,7 @@ public final class RSIntegrationMod {
             "malum", "malum_runic_workbench", "malum_spirit_crucible",
             "malum_void_favor_virtual", "slashblade", "smithing", "tacz",
             "touhou_little_maid", "vanilla_anvil", "vanilla_blast_furnace",
+            "until_eternity_end_crafting",
             "vanilla_brewing_stand", "vanilla_campfire", "vanilla_furnace",
             "vanilla_smoker", "vanilla_stonecutter", "wizards_reborn",
             "irons_spellbooks_scroll_forge", "irons_spellbooks_arcane_anvil",
@@ -257,6 +259,8 @@ public final class RSIntegrationMod {
                     () -> SlashBladeRSModule.INSTANCE),
             new ModuleEntry(ModIds.AVARITIA, RSIntegrationConfig.ENABLE_AVARITIA,
                     () -> AvaritiaRSModule.INSTANCE),
+            new ModuleEntry(ModIds.UNTIL_ETERNITY, RSIntegrationConfig.ENABLE_UNTIL_ETERNITY,
+                    () -> UntilEternityRSModule.INSTANCE),
             new ModuleEntry(ModIds.CONFLUENCE, RSIntegrationConfig.ENABLE_CONFLUENCE,
                     () -> ConfluenceRSModule.INSTANCE),
             new ModuleEntry(ModIds.IMMORTERS_DELIGHT, RSIntegrationConfig.ENABLE_IMMORTERS_DELIGHT,

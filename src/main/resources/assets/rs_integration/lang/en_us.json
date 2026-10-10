@@ -1040,6 +1040,8 @@
   "rsi.batch.mod.aether_incubator": "Aether Incubator",
   "rsi.batch.mod.aether_altar": "Aether Altar",
   "rsi.batch.mod.avaritia_crafting": "Avaritia Crafting Table",
+  "rsi.batch.mod.until_eternity_end_crafting": "End Crafting Table",
+  "gui.rs_integration.jei.until_eternity_end_crafting": "Recursive crafting via End Crafting Table",
   "rsi.batch.mod.avaritia_smithing": "Extreme Smithing Table",
   "gui.rs_integration.jei.avaritia_crafting": "Craft via Avaritia Table",
   "gui.rs_integration.jei.avaritia_smithing": "Smith via Extreme Smithing Table",

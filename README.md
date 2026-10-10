@@ -216,6 +216,7 @@ The list below is a guide to supported machine automation and add-on features. O
 | Apotheosis | Fletching, Gem Cutting, Enchantment Library, Reforging, and Spawner upgrades |
 | TACZ and compatible gun packs | Gun Smith Table |
 | Avaritia | Compressed through Extreme six-tier crafting tables and Extreme Smithing |
+| Until Eternity | Recursive 5×5 End Crafting Table recipes; “I'm Full!” in a Resonance Disk activates the mod's food and thirst protection, and Vibrant Amethyst grants Amethyst Blessing through the mod's native handler |
 | SlashBlade | Crafting recipes |
 | Confluence | Workshop |
 | Distant Worlds | Lithum Altar and related interactions; crosshair HUD for recipe, energy, recovery, and all eight pedestal states |
