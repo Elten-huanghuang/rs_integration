@@ -1,8 +1,10 @@
 package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftFluidRecovery;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.chat.Component;
@@ -89,6 +91,10 @@ public final class PlayerUtils {
      */
     public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
         if (stack.isEmpty()) return;
+        if (InkFluidSupport.isToken(stack)) {
+            CraftFluidRecovery.retain(player, stack, network);
+            return;
+        }
         if (player.level().hasChunkAt(player.blockPosition())) {
             List<ItemStack> before = snapshotInventory(player);
             // Split large stacks into max-size chunks to avoid spawning an

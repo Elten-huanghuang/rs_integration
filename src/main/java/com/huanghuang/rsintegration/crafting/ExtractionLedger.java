@@ -25,6 +25,7 @@ import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageCapability;
@@ -38,6 +39,7 @@ import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -69,6 +71,8 @@ public final class ExtractionLedger implements AutoCloseable {
     private final Map<ResonanceReservationKey, Integer> pendingResonance = new HashMap<>();
     private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
     private State state = State.IDLE;
+    @Nullable private UUID refundOwner;
+    @Nullable private MinecraftServer refundServer;
 
     @Nullable
     private CraftLogContext logContext;
@@ -721,6 +725,8 @@ public final class ExtractionLedger implements AutoCloseable {
     // Three-phase atomic commit: pre-check, batch extract, confirm.
     public boolean commit(@Nullable INetwork network, @Nonnull ServerPlayer player) {
         if (state == State.COMMITTED) return true;
+        refundOwner = player.getUUID();
+        refundServer = player.server;
         // Allow IDLE only for no-op commit (no entries)
         if (state == State.IDLE && entries.isEmpty()) {
             transition(State.COMMITTED);
@@ -936,6 +942,17 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void rollbackFragment(ExtractRecord rec, ItemStack s, ServerPlayer player) {
         if (s.isEmpty()) return;
+        if (InkFluidSupport.isToken(s)) {
+            CraftStorageEndpoint destination = rec.sourceNetwork != null
+                    ? CraftStorageEndpoints.fromLegacyNetwork(rec.sourceNetwork) : storageEndpoint;
+            ItemStack leftover = destination == null ? s : refundRemainder(
+                    destination.insert(player, s, false), rec.entryId, s);
+            if (!leftover.isEmpty()) {
+                CraftFluidRecovery.retain(player.server, player.getUUID(), player,
+                        leftover, destination, rec.sourceNetwork);
+            }
+            return;
+        }
         switch (rec.source) {
             case ALTAR_BINDING -> {
                 if (rec.sourceNetwork != null) {
@@ -1159,6 +1176,8 @@ public final class ExtractionLedger implements AutoCloseable {
         preferredResonanceIngredients.clear();
         networkEntryCache.clear();
         clearReservationSnapshot();
+        refundOwner = null;
+        refundServer = null;
         // A chain reuses its master ledger across vanilla steps. The settlement
         // mirror is a per-commit scope and must be reset with the legacy ledger;
         // otherwise the next step calls beginCommit() on COMMITTED state.
@@ -1909,6 +1928,20 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void refundFragment(Entry e, ItemStack refund, @Nullable INetwork network,
                                 @Nullable ServerPlayer player) {
+        if (InkFluidSupport.isToken(refund)) {
+            INetwork source = e.sourceNetwork != null ? e.sourceNetwork : network;
+            CraftStorageEndpoint destination = e.sourceNetwork != null
+                    ? CraftStorageEndpoints.fromLegacyNetwork(e.sourceNetwork) : storageEndpoint;
+            ItemStack leftover = refund;
+            if (destination != null) {
+                StorageOperationResult result = player != null
+                        ? destination.insert(player, refund, false)
+                        : destination.insert(refund, false);
+                leftover = refundRemainder(result, e.id, refund);
+            }
+            refundLeftoverToPlayerOrNetwork(leftover, player, source);
+            return;
+        }
         switch (e.source) {
             case NETWORK, ALTAR_BINDING -> {
                 if (storageEndpoint != null && player != null) {
@@ -1957,9 +1990,18 @@ public final class ExtractionLedger implements AutoCloseable {
      * full or missing, DROP the item as a physical ItemEntity at the network's
      * controller position so the material is never silently destroyed.
      */
-    private static void refundLeftoverToPlayerOrNetwork(ItemStack stack, @Nullable ServerPlayer player,
-                                                        @Nullable INetwork network) {
+    private void refundLeftoverToPlayerOrNetwork(ItemStack stack, @Nullable ServerPlayer player,
+                                                 @Nullable INetwork network) {
         if (stack.isEmpty()) return;
+        if (InkFluidSupport.isToken(stack)) {
+            MinecraftServer server = player != null ? player.server : refundServer;
+            UUID owner = player != null ? player.getUUID() : refundOwner;
+            if (server == null || owner == null) {
+                throw new IllegalStateException("流体退款缺少玩家或服务器上下文");
+            }
+            CraftFluidRecovery.retain(server, owner, player, stack, storageEndpoint, network);
+            return;
+        }
         if (player != null) {
             PlayerUtils.safeGiveToPlayer(player, stack, network);
             return;

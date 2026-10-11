@@ -45,7 +45,6 @@ public final class UnifiedGridSession {
     private boolean closed;
     private boolean canCraft;
     private INetwork network;
-    private int lastRecoveryTick = -20;
     private final Channel<ItemStack> items = new Channel<>(GridResourceKind.ITEM);
     private final Channel<FluidStack> fluids = new Channel<>(GridResourceKind.FLUID);
 
@@ -75,11 +74,6 @@ public final class UnifiedGridSession {
             network = current;
             items.bind(current == null ? null : current.getItemStorageCache());
             fluids.bind(current == null ? null : current.getFluidStorageCache());
-        }
-        if (current != null && player.server != null && player.tickCount - lastRecoveryTick >= 20
-                && permitted(Permission.INSERT)) {
-            lastRecoveryTick = player.tickCount;
-            UnifiedGridFluidRecovery.get(player).retry(player.getUUID(), current);
         }
         boolean allowed = current != null && current.getSecurityManager().hasPermission(Permission.AUTOCRAFTING, player);
         if (allowed != canCraft) {
