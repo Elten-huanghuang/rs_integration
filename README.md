@@ -127,6 +127,7 @@ Open an RS crafting grid to consume food directly from the network:
 The Resonance Disk is an RS storage disk whose contents can act as if carried by the player.
 
 - Supplies compatible attributes, inventory-tick effects, event-driven passives, and item/resource lookups.
+- TaCZ loose ammunition in the disk supplies matching guns during reloads, preserving NBT and consuming real rounds. The HUD includes matching disk ammunition and receives an updated snapshot after reload consumption. Shift transfers debit the player inventory only after a successful disk write.
 - Persists mutation for configured items instead of ticking disposable copies.
 - Includes default passive support for Apotheosis potion charms, Muyimeng fused potion charms, Reliquary's Pyromancer Staff, Enigmatic Addons' Artificial Flower, and Forbidden & Arcanus' Spectral Eye Amulet.
 - Supports Chapter of Yuusha/Moonstone Nine Sword Books, Wizard Terra Curios `BuffItem` items, and Terra Equipment stacked infinite potions.
