@@ -1,9 +1,11 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftFluidRecovery;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.refinedmods.refinedstorage.RS;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -140,11 +142,11 @@ public final class UnifiedGridFluidTransfer {
                 remainder.isEmpty() ? ItemStack.EMPTY : converted, recovery, resource, amount);
     }
 
-    /** 混合终端与原生流体终端共用结算，异常余量进入持久化恢复队列。 */
+    /** 混合终端与原生流体终端共用结算，异常余量封装为退款物品。 */
     public static void apply(ServerPlayer player, INetwork network, Result result, boolean filling, boolean shift) {
         if (!result.recovery().isEmpty()) {
-            UnifiedGridFluidRecovery.get(player).retain(player.getUUID(), result.recovery());
-            RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已保存并等待归还网络", result.recovery().getAmount());
+            CraftFluidRecovery.retain(player, InkFluidSupport.token(result.recovery()), network);
+            RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已封装为退款物品", result.recovery().getAmount());
         }
         player.containerMenu.setCarried(result.cursor());
         if (!result.overflow().isEmpty()) player.getInventory().placeItemBackInInventory(result.overflow());

@@ -12,6 +12,7 @@ import java.lang.reflect.Method;
 
 public final class InkFluidTestFixtures {
     private static final ResourceLocation ID = new ResourceLocation("rs_integration_test", "ink_fluid");
+    private static final ResourceLocation REFUND_ID = new ResourceLocation("rs_integration_test", "fluid_refund");
 
     private InkFluidTestFixtures() {}
 
@@ -30,6 +31,27 @@ public final class InkFluidTestFixtures {
             return token;
         } catch (ReflectiveOperationException failure) {
             throw new IllegalStateException("无法注册测试流体物品", failure);
+        } finally {
+            BuiltInRegistries.ITEM.freeze();
+            if (locked) registry.freeze();
+        }
+    }
+
+    public static synchronized FluidRefundItem refundItem() {
+        Item existing = ForgeRegistries.ITEMS.getValue(REFUND_ID);
+        if (existing instanceof FluidRefundItem refund) return refund;
+        ForgeRegistry<Item> registry = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
+        boolean locked = registry.isLocked();
+        registry.unfreeze();
+        try {
+            Method unfreeze = BuiltInRegistries.ITEM.getClass().getMethod("unfreeze");
+            unfreeze.setAccessible(true);
+            unfreeze.invoke(BuiltInRegistries.ITEM);
+            FluidRefundItem refund = new FluidRefundItem();
+            registry.register(REFUND_ID, refund);
+            return refund;
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("无法注册测试流体退款物品", failure);
         } finally {
             BuiltInRegistries.ITEM.freeze();
             if (locked) registry.freeze();

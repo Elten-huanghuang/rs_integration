@@ -1,16 +1,25 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -52,6 +61,59 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         ledger.refundCommitted(null, player);
         ledger.refundCommitted(null, player);
         assertStacks(actual, refunds);
+    }
+
+    @Test
+    void partialFluidRefundKeepsOnlyTheUnstoredAmountInRecovery() {
+        when(player.getUUID()).thenReturn(UUID.randomUUID());
+        ItemStack fluid = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250));
+        Ingredient fluidIngredient = Ingredient.of(fluid.copyWithCount(1));
+        StorageSnapshot fluidSnapshot = new StorageSnapshot(backend, List.of(stored(fluid)));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(fluidSnapshot));
+        assertEquals(250, ledger.reserveFromEndpoint(fluidIngredient, 250, endpoint, player).getCount());
+        when(session.extractMatching(player, fluidIngredient, 250, false)).thenReturn(
+                StorageOperationResult.extracted(StorageOperationMode.PERFORM, 250, List.of(fluid)));
+        assertTrue(ledger.commit(null, player));
+
+        ItemStack remainder = fluid.copyWithCount(100);
+        doReturn(StorageOperationResult.inserted(StorageOperationMode.PERFORM, fluid, remainder))
+                .when(session).insert(eq(player), argThat(InkFluidSupport::isToken), eq(false));
+        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
+        try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
+            savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
+            ledger.refundCommitted(null, player);
+            ledger.refundCommitted(null, player);
+        }
+        ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
+        verify(recovery).retainRaw(eq(player.getUUID()), captured.capture(), isNull());
+        assertEquals(100, captured.getValue().getInt("Amount"));
+        verify(session, times(1)).insert(eq(player), argThat(InkFluidSupport::isToken), eq(false));
+    }
+
+    @Test
+    void offlineFluidRefundUsesTheOriginalOwnerInsteadOfDroppingAToken() {
+        UUID owner = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(owner);
+        ItemStack fluid = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250));
+        Ingredient fluidIngredient = Ingredient.of(fluid.copyWithCount(1));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(stored(fluid)))));
+        assertEquals(250, ledger.reserveFromEndpoint(fluidIngredient, 250, endpoint, player).getCount());
+        when(session.extractMatching(player, fluidIngredient, 250, false)).thenReturn(
+                StorageOperationResult.extracted(StorageOperationMode.PERFORM, 250, List.of(fluid)));
+        assertTrue(ledger.commit(null, player));
+
+        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
+        try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
+            savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
+            ledger.refundCommitted(null, null);
+        }
+        ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
+        verify(recovery).retainRaw(eq(owner), captured.capture(), isNull());
+        assertEquals(250, captured.getValue().getInt("Amount"));
+        verify(session, never()).insert(eq(player), argThat(InkFluidSupport::isToken), eq(false));
     }
 
     @Test

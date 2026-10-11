@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -37,6 +38,8 @@ public final class ModItems {
     public static RegistryObject<Item> UNIFIED_STORAGE_DISK;
     public static final RegistryObject<Item> ALCHEMIST_INK_FLUID =
             ITEMS.register("alchemist_ink_fluid", InkFluidItem::new);
+    public static final RegistryObject<Item> FLUID_REFUND =
+            ITEMS.register("fluid_refund", FluidRefundItem::new);
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));

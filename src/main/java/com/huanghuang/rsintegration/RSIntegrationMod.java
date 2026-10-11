@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.disk.UnifiedDiskEnabledCondition;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridUpdatePacket;
+import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -121,6 +122,7 @@ import java.util.Set;
 import java.util.function.Supplier;
             // Anvil (JEI-only, opens remote GUI)
 import net.minecraft.client.gui.screens.MenuScreens;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraftforge.api.distmarker.Dist;
@@ -825,6 +827,14 @@ public final class RSIntegrationMod {
                 if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
                     RSOptionalBootstrap.onPlayerLoggedIn(sp);
                 }
+                sp.server.execute(() -> {
+                    if (sp.hasDisconnected()) return;
+                    int claimed = UnifiedGridFluidRecovery.get(sp.server).claim(sp);
+                    if (claimed > 0) {
+                        sp.sendSystemMessage(Component.translatable(
+                                "rsi.fluid_recovery.claimed", claimed));
+                    }
+                });
                 sp.server.execute(() -> RecipeIndex
                         .refreshDynamicRuntimeIfNeeded(sp.server.overworld()));
             }

@@ -4619,6 +4619,10 @@ public final class AsyncCraftChain {
             if (stillLeft.isEmpty()) return true;
             stack = stillLeft;
         }
+        if (InkFluidSupport.isToken(stack)) {
+            CraftFluidRecovery.retain(server, playerId, resolvePlayer(), stack, storageEndpoint, network);
+            return true;
+        }
         if (dropThrottleTripped) {
             RSIntegrationMod.LOGGER.warn("[RSI] Drop throttle tripped -discarding {} x{} for player {}",
                     ItemStackUtils.registryId(stack), stack.getCount(), playerId);
