@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
@@ -30,6 +31,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -555,6 +557,15 @@ public final class RecipePreviewRenderer {
             ItemStack output = previewOutput(recipe, fallback);
             String name = inputs.isEmpty() ? output.getHoverName().getString()
                     : inputs.get(0).getHoverName().getString() + " → " + output.getHoverName().getString();
+            if (LongTravailCrownRecipes.isRecipeId(id)
+                    && recipe instanceof CraftingRecipe crown
+                    && crown.getIngredients().size() > 4) {
+                ItemStack[] flowers = crown.getIngredients().get(4).getItems();
+                if (flowers.length > 0 && !flowers[0].isEmpty()) {
+                    name = flowers[0].getHoverName().getString()
+                            + " → " + output.getHoverName().getString();
+                }
+            }
             if (recipe instanceof IronSpellBooksRecipe iron && iron.isScrollRecycling()) {
                 ResourceLocation spell = ResourceLocation.tryParse(iron.spellId());
                 if (spell != null) {

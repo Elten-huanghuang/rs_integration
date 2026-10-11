@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.client.JeiCraftingPlanContext;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
@@ -57,6 +58,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Recipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import net.minecraftforge.api.distmarker.Dist;
@@ -108,7 +110,7 @@ public final class CraftingPlanScreen extends Screen {
     private static final int C_SLOT_HOVER = 0x80FFFFFF;
     private PlanResponse plan;
     private int currentRepeat = 1;
-    private long activeRequestId;
+    private final PlanResponseRequestState responseRequests;
     private int scrollOffset;
     private int maxScroll;
     private boolean dragging;
@@ -301,11 +303,11 @@ public final class CraftingPlanScreen extends Screen {
     private int hoveredTooltipX, hoveredTooltipY;
     private int hoveredTooltipAvail, hoveredTooltipNeeded;
 
-    protected CraftingPlanScreen(PlanResponse plan) {
+    protected CraftingPlanScreen(PlanResponse plan, long requestId) {
         super(Component.translatable("rsi.plan.title",
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
-        this.activeRequestId = 0L;
+        this.responseRequests = new PlanResponseRequestState(requestId, plan.recipeId());
         this.outputDestination = hasStorageBackend()
                 ? CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH)
                 : OutputDestination.PLAYER_INVENTORY;
@@ -326,16 +328,16 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     public long activeRequestId() {
-        return activeRequestId;
+        return responseRequests.activeRequestId();
     }
 
     public void acceptResponse(long requestId, PlanResponse newPlan) {
-        if (requestId == 0L) {
-            if (activeRequestId != 0L) return;
-        } else if (requestId < activeRequestId) {
+        if (!responseRequests.accept(requestId, newPlan.recipeId())) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-PlanPkt] Dropping unrelated response: request={} recipe={} expectedRequest={} expectedRecipe={}",
+                    requestId, newPlan.recipeId(), responseRequests.activeRequestId(),
+                    responseRequests.expectedRecipeId());
             return;
-        } else {
-            activeRequestId = requestId;
         }
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
             if (minecraft != null && minecraft.player != null && !newPlan.modWarnings().isEmpty()) {
@@ -745,7 +747,7 @@ public final class CraftingPlanScreen extends Screen {
             // PlanResponsePacket. Starting the ordinary planning HUD here would
             // leave it waiting forever because GenericCraftPacket never handles
             // synthetic quest target IDs.
-            activeRequestId = 0L;
+            responseRequests.beginPreview(0L, rid.toString());
             PlanningProgressTracker.clear();
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(
@@ -766,10 +768,21 @@ public final class CraftingPlanScreen extends Screen {
                     : new BlockPos(selected.x(), selected.y(), selected.z());
         }
         long requestId = PlanningRequestIds.next();
-        if (preview) activeRequestId = requestId;
+        if (preview) responseRequests.beginPreview(requestId, rid.toString());
+        ItemStack requestTarget = executionTarget(plan.clickedOutput(), plan.targetResult());
+        if (LongTravailCrownRecipes.isRecipeId(rid)
+                && !rid.toString().equals(plan.recipeId())
+                && minecraft.level != null) {
+            Recipe<?> selectedRecipe = minecraft.level.getRecipeManager()
+                    .byKey(rid).orElse(null);
+            ItemStack selectedOutput = selectedRecipe == null ? ItemStack.EMPTY
+                    : selectedRecipe.getResultItem(minecraft.level.registryAccess());
+            requestTarget = LongTravailCrownRecipes.targetForSelectedRecipe(
+                    rid, selectedOutput, requestTarget);
+        }
         GenericCraftPacket packet = new GenericCraftPacket(rid, preview, forced, execDim, execPos,
                         repeatCount, inferMode, plan.baseItem(),
-                        executionTarget(plan.clickedOutput(), plan.targetResult()), requestId,
+                        requestTarget, requestId,
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
                 .withMaterialLocks(materialLocks)
                 .withStorageReference(storageReference);
