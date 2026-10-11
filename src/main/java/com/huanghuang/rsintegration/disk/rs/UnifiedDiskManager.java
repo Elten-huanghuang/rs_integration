@@ -173,11 +173,17 @@ public final class UnifiedDiskManager {
         if (failure == null) return;
         ServerPlayer player = server.getPlayerList().getPlayer(recipient);
         if (player == null || !failureNotifications.computeIfAbsent(id, ignored -> new HashSet<>()).add(recipient)) return;
-        player.sendSystemMessage(Component.translatable("rsi.unified_disk.failure.notice", id.toString())
-                .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
-        player.sendSystemMessage(failure.reason().copy().withStyle(ChatFormatting.RED));
+        Entry entry = entries.get(id);
+        boolean quarantined = identityFailure == null && enabled() && entry != null && entry.error == null;
+        ChatFormatting color = quarantined ? ChatFormatting.YELLOW : ChatFormatting.RED;
+        player.sendSystemMessage(Component.translatable(quarantined
+                ? "rsi.unified_disk.quarantine.notice" : "rsi.unified_disk.failure.notice", id.toString())
+                .withStyle(color, ChatFormatting.BOLD));
+        player.sendSystemMessage(failure.reason().copy().withStyle(color));
         player.sendSystemMessage(failure.action().copy().withStyle(ChatFormatting.YELLOW));
-        player.sendSystemMessage(Component.translatable("item.rs_integration.unified_storage_disk.failure.preserved")
+        player.sendSystemMessage(Component.translatable(quarantined
+                ? "item.rs_integration.unified_storage_disk.failure.quarantine_preserved"
+                : "item.rs_integration.unified_storage_disk.failure.preserved")
                 .withStyle(ChatFormatting.GRAY));
     }
 
@@ -204,6 +210,14 @@ public final class UnifiedDiskManager {
                 entry.manifest = files.save(Snapshot.freeze(loaded), entry.manifest).manifest();
             }
             entry.core = loaded;
+            entry.failure = UnifiedDiskFailure.quarantined(loaded);
+            if (entry.failure != null) {
+                LOGGER.warn("[RSI] 统一盘 {} 已隔离 {} 项缺失物品、{} 项缺失流体，正常库存仍可使用",
+                        id, loaded.items.quarantinedSize(), loaded.fluids.quarantinedSize());
+                LOGGER.warn("[RSI] 缺失物品注册名（最多 16 项）: {}；缺失流体注册名（最多 16 项）: {}",
+                        loaded.items.quarantinedIds().stream().limit(16).toList(),
+                        loaded.fluids.quarantinedIds().stream().limit(16).toList());
+            }
         } catch (Exception e) {
             entry.error = e.getMessage();
             entry.failure = UnifiedDiskFailure.from(e);
@@ -324,6 +338,7 @@ public final class UnifiedDiskManager {
         return "盘=" + id + "，世界=" + worldId + "，物品种类=" + entry.core.items.size()
                 + "，流体种类=" + entry.core.fluids.size() + "，载荷=" + entry.core.payloadBytes()
                 + "，dirty=" + entry.core.dirty() + "，保存中=" + (pending != null && pending.entry == entry)
+                + "，隔离物品=" + entry.core.items.quarantinedSize() + "，隔离流体=" + entry.core.fluids.quarantinedSize()
                 + "，提交=" + entry.manifest.commit() + "，挂载=" + mounts.location(id);
     }
 }

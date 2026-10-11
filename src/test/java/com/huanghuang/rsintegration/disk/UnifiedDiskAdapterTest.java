@@ -20,6 +20,7 @@ import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.DiskDriveNe
 import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.ItemDriveWrapperStorageDisk;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerChunkCache;
@@ -34,6 +35,7 @@ import net.minecraftforge.items.IItemHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -137,6 +139,49 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         assertTrue(item.insert(new ItemStack(Items.DIAMOND), 3, Action.PERFORM).isEmpty());
         assertEquals(20, wrapper.getStored());
         verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void mountedViewsKeepHealthyContentsUsableAndPreserveMissingItemAcrossWrites() throws Exception {
+        setup();
+        var original = manager.entry(root.id()).core;
+        FrozenKey missing = FrozenKey.item(new ItemStack(Items.STONE));
+        original.insert(missing, 17, true);
+        original.insertItem(new ItemStack(Items.DIAMOND), 5, true);
+        original.insertFluid(new FluidStack(Fluids.WATER, 1), 91, true);
+        UnifiedDiskManager.stop(server);
+        byte[] payload = missing.payload();
+        try (MockedStatic<FrozenKey> keys = mockStatic(FrozenKey.class, CALLS_REAL_METHODS)) {
+            keys.when(() -> FrozenKey.load(FrozenKey.Kind.ITEM, payload)).thenThrow(
+                    new FrozenKey.MissingResourceException(FrozenKey.Kind.ITEM, new ResourceLocation("minecraft:stone")));
+            manager = UnifiedDiskManager.get(level);
+            root = new UnifiedDiskRoot(manager, original.diskId, original.worldId, original.owner);
+            var core = manager.entry(root.id()).core;
+            assertNotNull(core); assertNull(manager.entry(root.id()).error);
+            var lease = lease();
+            var item = new UnifiedBoundDisk<ItemStack>(lease, core, FrozenKey.Kind.ITEM);
+            var fluid = new UnifiedBoundDisk<FluidStack>(lease, core, FrozenKey.Kind.FLUID);
+            items[0] = item; fluids[0] = fluid;
+            var wrapper = new ItemDriveWrapperStorageDisk(node, item);
+            assertTrue(lease.valid());
+            assertEquals(5, wrapper.getStored());
+            assertEquals(1, item.getStacks().size());
+            assertEquals(Items.DIAMOND, item.getStacks().iterator().next().getItem());
+            assertEquals(91, fluid.getStored()); assertEquals(1, fluid.getStacks().size());
+            assertTrue(item.insert(new ItemStack(Items.DIAMOND), 3, Action.PERFORM).isEmpty());
+            assertEquals(2, item.extract(new ItemStack(Items.DIAMOND), 2, IComparer.COMPARE_NBT, Action.PERFORM).getCount());
+            assertTrue(fluid.insert(new FluidStack(Fluids.WATER, 1), 1000, Action.PERFORM).isEmpty());
+            assertEquals(500, fluid.extract(new FluidStack(Fluids.WATER, 1), 500, IComparer.COMPARE_NBT, Action.PERFORM).getAmount());
+            manager.flush();
+            assertEquals(17, core.items.amount(0)); assertEquals(1, core.items.quarantinedSize());
+            assertArrayEquals(payload, core.items.quarantined(0).payload());
+            UnifiedDiskManager.stop(server);
+        }
+        var files = new DiskFileStore(world.resolve("data/rs_integration/unified_disks"));
+        var restored = files.load(original.worldId, original.diskId);
+        assertEquals(17, restored.items.amount(missing));
+        assertEquals(6, restored.items.total() - restored.items.amount(missing));
+        assertEquals(591, restored.fluids.total());
+        assertEquals(0, restored.items.quarantinedSize());
     }
 
     @Test void pendingBlockEntityIsNotRestoredAndRemovedBlockRevokesBothViews() throws Exception {

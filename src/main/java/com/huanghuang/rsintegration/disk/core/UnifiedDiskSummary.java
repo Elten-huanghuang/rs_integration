@@ -14,7 +14,7 @@ public record UnifiedDiskSummary(long items, long fluids, int itemTypes, int flu
 
     public static UnifiedDiskSummary from(UnifiedDiskCore core) {
         core.checkThread();
-        return new UnifiedDiskSummary(core.items.displayTotal(), core.fluids.displayTotal(),
-                core.items.size(), core.fluids.size(), core.limits.items(), core.limits.fluids());
+        return new UnifiedDiskSummary(core.items.storedTotal(), core.fluids.storedTotal(),
+                core.items.occupiedSize(), core.fluids.occupiedSize(), core.limits.items(), core.limits.fluids());
     }
 }

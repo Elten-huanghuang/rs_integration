@@ -1,13 +1,26 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import net.minecraft.network.chat.Component;
 
 import java.nio.file.NoSuchFileException;
+import java.util.stream.Stream;
 
-/** 故障原因和恢复建议共用于悬浮提示与聊天，翻译留给玩家客户端。 */
+/** 故障或隔离警告与恢复建议共用于悬浮提示和聊天，翻译留给玩家客户端。 */
 public record UnifiedDiskFailure(Component reason, Component action) {
     private static final String PREFIX = "item.rs_integration.unified_storage_disk.failure.";
+
+    public static UnifiedDiskFailure quarantined(UnifiedDiskCore core) {
+        int items = core.items.quarantinedSize(), fluids = core.fluids.quarantinedSize();
+        if (items == 0 && fluids == 0) return null;
+        String mods = Stream.concat(core.items.quarantinedIds().stream(), core.fluids.quarantinedIds().stream())
+                .map(resource -> resource.getNamespace()).distinct().sorted().limit(16)
+                .reduce((left, right) -> left + ", " + right).orElse("");
+        return new UnifiedDiskFailure(
+                Component.translatable(PREFIX + "quarantined", items, fluids),
+                Component.translatable(PREFIX + "restore_missing_mods", mods));
+    }
 
     public static UnifiedDiskFailure from(Exception error) {
         if (error instanceof FrozenKey.MissingResourceException missing) {

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.disk.core.ResourceTable.PageSnapshot;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -67,11 +69,14 @@ class UnifiedDiskFailureTest extends BootstrapTest {
         assertEquals(missing.resource().getNamespace(), ((TranslatableContents) failure.action().getContents()).getArgs()[0]);
     }
 
-    @Test void missingItemPreservesBothInventoriesAndNotifiesOwnerOncePerLogin() throws Exception {
+    @Test void missingItemIsQuarantinedWithoutDisablingHealthyInventoriesAndNotifiesOwnerOncePerLogin() throws Exception {
         DiskFileStore files = new DiskFileStore(world.resolve("data/rs_integration/unified_disks"));
         UUID worldId = files.worldIdentity(), disk = UUID.randomUUID(), owner = UUID.randomUUID();
-        UnifiedDiskCore core = new UnifiedDiskCore(worldId, disk, owner, new UnifiedDiskCore.Limits(512, 512, 1048576, 268435456));
+        UnifiedDiskCore core = new UnifiedDiskCore(worldId, disk, owner, new UnifiedDiskCore.Limits(
+                RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
+                RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES), 1048576, 268435456));
         core.insertItem(new ItemStack(Items.STONE), 2, true);
+        core.insertItem(new ItemStack(Items.DIAMOND), 5, true);
         core.insertFluid(new FluidStack(Fluids.WATER, 1), 548000, true);
         Snapshot snapshot = Snapshot.freeze(core);
         PageSnapshot page = snapshot.items().get(0);
@@ -93,14 +98,25 @@ class UnifiedDiskFailureTest extends BootstrapTest {
         PlayerList players = mock(PlayerList.class); when(server.getPlayerList()).thenReturn(players);
         ServerPlayer player = mock(ServerPlayer.class);
         UnifiedDiskManager manager = UnifiedDiskManager.get(level);
-        assertNull(manager.summary(disk));
-        assertEquals("cthulhu_creatures:flesh_altar",
-                ((TranslatableContents) manager.failure(disk).reason().getContents()).getArgs()[0]);
+        assertEquals(7, manager.summary(disk).items());
+        assertEquals(548000, manager.summary(disk).fluids());
+        assertNull(manager.entry(disk).error);
+        assertEquals(1, manager.entry(disk).core.items.quarantinedSize());
+        assertEquals(5, manager.entry(disk).core.items.total());
+        assertEquals("item.rs_integration.unified_storage_disk.failure.quarantined",
+                ((TranslatableContents) manager.failure(disk).reason().getContents()).getKey());
+        assertEquals("cthulhu_creatures",
+                ((TranslatableContents) manager.failure(disk).action().getContents()).getArgs()[0]);
         manager.tick();
         verifyNoInteractions(player);
         when(players.getPlayer(owner)).thenReturn(player);
         manager.tick(); manager.tick(); manager.notifyFailure(disk, owner);
-        verify(player, times(4)).sendSystemMessage(any(Component.class));
+        ArgumentCaptor<Component> messages = ArgumentCaptor.forClass(Component.class);
+        verify(player, times(4)).sendSystemMessage(messages.capture());
+        assertEquals("rsi.unified_disk.quarantine.notice",
+                ((TranslatableContents) messages.getAllValues().get(0).getContents()).getKey());
+        assertEquals("item.rs_integration.unified_storage_disk.failure.quarantine_preserved",
+                ((TranslatableContents) messages.getAllValues().get(3).getContents()).getKey());
         manager.forgetTooltipPlayer(owner);
         manager.tick();
         verify(player, times(8)).sendSystemMessage(any(Component.class));

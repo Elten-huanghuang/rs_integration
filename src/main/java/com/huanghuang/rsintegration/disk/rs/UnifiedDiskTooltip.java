@@ -52,6 +52,12 @@ public final class UnifiedDiskTooltip {
                 tooltip.add(DiskTooltipEffects.tint(PREFIX + "fluid_types", DiskTooltipEffects.Theme.GUIXU,
                         DiskTooltipEffects.Tone.FLUID, number(summary.fluidTypes()),
                         number(summary.fluidCapacity())));
+                if (view.failure() != null) {
+                    tooltip.add(view.failure().reason().copy().withStyle(ChatFormatting.YELLOW));
+                    tooltip.add(view.failure().action().copy().withStyle(ChatFormatting.YELLOW));
+                    tooltip.add(Component.translatable(PREFIX + "failure.quarantine_preserved")
+                            .withStyle(ChatFormatting.GRAY));
+                }
             }
             tooltip.add(DiskTooltipEffects.tint(PREFIX + "id", DiskTooltipEffects.Theme.GUIXU,
                     DiskTooltipEffects.Tone.MUTED, id.toString()));
