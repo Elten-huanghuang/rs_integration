@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
+import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
@@ -5060,7 +5061,7 @@ public final class GenericCraftPacket {
             if (targetEntries != null) {
                 for (RecipeIndex.Entry e : targetEntries) {
                     if (e.recipe().getId().equals(recipeId)) continue;
-                    // NBT guard: skip alternatives whose output NBT differs from target
+                    // 花冠根节点可切换花朵；中间步骤仍须保持产物 NBT 一致。
                     if (targetHasTag) {
                         ItemStack altOut;
                         if (e.recipe() instanceof CraftingRecipe cr) {
@@ -5068,7 +5069,12 @@ public final class GenericCraftPacket {
                         } else {
                             altOut = ModRecipeHandlers.tryGetResultItem(e.recipe(), player.serverLevel().registryAccess());
                         }
-                        if (!sameRecipeOutput(altOut, planTargetOutput)) continue;
+                        boolean crownVariant = recipe instanceof CraftingRecipe
+                                && e.recipe() instanceof CraftingRecipe
+                                && LongTravailCrownRecipes.isVariantAlternative(
+                                        recipeId, e.recipe().getId(), planTargetOutput, altOut);
+                        if (!sameRecipeOutput(altOut, planTargetOutput)
+                                && !crownVariant) continue;
                     }
                     // Gate by machine binding too — same rule the resolver and the
                     // intermediate-step alternatives use (hasBindingForRecipe: vanilla

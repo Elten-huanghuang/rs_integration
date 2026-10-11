@@ -103,6 +103,12 @@ public final class AltarCraftButtons {
 
     public static List<int[]> getPositions() { return POSITIONS; }
 
+    public static void setRecipeId(int index, ResourceLocation recipeId) {
+        if (index >= 0 && index < RECIPE_IDS.size() && recipeId != null) {
+            RECIPE_IDS.set(index, recipeId);
+        }
+    }
+
     public static void addTransferPos(int x, int y, int w, int h) {
         TRANSFER_POSITIONS.add(new int[]{x, y, w, h});
     }

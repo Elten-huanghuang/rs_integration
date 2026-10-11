@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResol
 import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
+import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipeIdResolver;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
@@ -313,6 +314,7 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipeId++;
                 continue;
             }
+            boolean longTravailCrown = LongTravailCrownRecipeIdResolver.isDisplay(recipe, recipeId);
             ModType recipeModType = computeModType(recipe);
             boolean isVirtual = recipeModType != null && recipeModType.isVirtual();
 
@@ -414,8 +416,11 @@ public class RecipeGuiLayoutsMixin {
                         recipeId, concreteTargetOutput != null
                                 ? concreteTargetOutput.getHoverName().getString() : "null");
             }
-            Runnable handler = createHandler(recipe, recipeId, bindingDim, machinePos, filter,
-                    faSmithingBase, concreteTargetOutput);
+            Runnable handler = longTravailCrown
+                    ? rsi$createLongTravailCrownHandler((CraftingRecipe) recipe,
+                            recipeLayout, recipeId, bindingDim, machinePos, filter)
+                    : createHandler(recipe, recipeId, bindingDim, machinePos, filter,
+                            faSmithingBase, concreteTargetOutput);
             if (handler == null) continue;
 
             ModType filteredType = ModType.findById(filter);
@@ -460,9 +465,11 @@ public class RecipeGuiLayoutsMixin {
             rsi$positions.add(new int[]{0, 0, 10, 10});
 
             rsi$recipeIds.add(recipeId);
-            rsi$availabilityKeys.put(rsi$positions.size() - 1,
-                    RecipeAvailabilityKey.of(recipeId, bindingDim, machinePos,
-                            faSmithingBase, concreteTargetOutput));
+            if (!longTravailCrown) {
+                rsi$availabilityKeys.put(rsi$positions.size() - 1,
+                        RecipeAvailabilityKey.of(recipeId, bindingDim, machinePos,
+                                faSmithingBase, concreteTargetOutput));
+            }
             AltarCraftButtons.add(0, 0, 10, 10, handler, tooltipKey, recipeId,
                     bindingDim, machinePos, modType);
 
@@ -644,6 +651,7 @@ public class RecipeGuiLayoutsMixin {
             // transient entry instead of drawing a stale/misaligned button.
             if (i >= rsi$availabilityKeys.size() && i >= AltarCraftButtons.getPositions().size()) continue;
             if (!AltarCraftButtons.isVisible(i)) continue;
+            rsi$refreshLongTravailAvailability(i);
             int[] pos = rsi$positions.get(i);
             int bx = pos[0], by = pos[1], bw = pos[2], bh = pos[3];
             boolean hovered = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh;
@@ -677,6 +685,33 @@ public class RecipeGuiLayoutsMixin {
             if (hovered) tooltip = List.of(Component.translatable("rsi.jei.open_machine"));
         }
         if (tooltip != null) guiGraphics.renderComponentTooltip(Minecraft.getInstance().font, tooltip, mouseX, mouseY);
+    }
+
+    @Unique
+    private void rsi$refreshLongTravailAvailability(int index) {
+        if (index >= rsi$recipeIds.size()) return;
+        ResourceLocation displayId = rsi$recipeIds.get(index);
+        if (!LongTravailCrownRecipeIdResolver.isDisplayId(displayId)) {
+            // 非合并展示的按钮无需逐帧重算。
+            return;
+        }
+        rsi$availabilityKeys.remove(index);
+        AltarCraftButtons.setRecipeId(index, displayId);
+        if (index >= rsi$layoutIndices.size()) return;
+        int layoutIndex = rsi$layoutIndices.get(index);
+        if (layoutIndex >= recipeLayoutsWithButtons.size()) return;
+        IRecipeLayoutDrawable<?> layout = rsi$getRecipeLayout(
+                recipeLayoutsWithButtons.get(layoutIndex));
+        if (layout == null || !(getRecipeFromLayout(layout) instanceof CraftingRecipe recipe)) return;
+        ResourceLocation selected = LongTravailCrownRecipeIdResolver.resolve(recipe, layout);
+        var level = Minecraft.getInstance().level;
+        if (selected == null || level == null
+                || level.getRecipeManager().byKey(selected).isEmpty()) return;
+        var button = AltarCraftButtons.getButtonData(index);
+        if (button == null || button.dim() == null || button.machinePos() == null) return;
+        AltarCraftButtons.setRecipeId(index, selected);
+        rsi$availabilityKeys.put(index, RecipeAvailabilityKey.of(
+                selected, button.dim(), button.machinePos(), null, null));
     }
 
     @Unique
@@ -1488,6 +1523,30 @@ public class RecipeGuiLayoutsMixin {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] Birdcage egg display ID recovery failed", e);
             return null;
         }
+    }
+
+    @Unique
+    private static Runnable rsi$createLongTravailCrownHandler(
+            CraftingRecipe display, IRecipeLayoutDrawable<?> layout,
+            ResourceLocation displayId, ResourceLocation dim,
+            BlockPos machinePos, String filter) {
+        return () -> {
+            ResourceLocation selected = LongTravailCrownRecipeIdResolver.resolve(display, layout);
+            var player = Minecraft.getInstance().player;
+            var level = Minecraft.getInstance().level;
+            if (selected == null || level == null
+                    || level.getRecipeManager().byKey(selected).isEmpty()) {
+                if (player != null) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.recipe_not_found",
+                            selected == null ? displayId.toString() : selected.toString()));
+                }
+                return;
+            }
+            Runnable realHandler = createHandler(display, selected, dim, machinePos,
+                    filter, null, null);
+            if (realHandler != null) realHandler.run();
+        };
     }
 
     @Unique

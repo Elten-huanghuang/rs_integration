@@ -119,31 +119,15 @@ final class PlanResponseClientPacketHandler {
             RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
             return;
         }
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && requestId != 0L && requestId < existing.activeRequestId()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale request response {} < {}",
-                    requestId, existing.activeRequestId());
-            return;
-        }
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && plan.recipeId() != null
-                && !plan.recipeId().isEmpty()
-                && !plan.recipeId().equals(existing.getRecipeId())) {
-            RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] Dropping stale response: received={} active={}",
-                    plan.recipeId(), existing.getRecipeId());
-            return;
-        }
-        if (mc.screen instanceof CraftingPlanScreen existing
-                && requestId != 0L
-                && (plan.recipeId() == null || plan.recipeId().isEmpty()
-                || plan.recipeId().equals(existing.getRecipeId()))) {
+        if (mc.screen instanceof CraftingPlanScreen existing) {
+            // 页面按待处理请求校验响应；根节点切换后，响应 ID 会不同于旧方案。
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
             existing.acceptResponse(requestId, plan);
             return;
         }
         try {
-            mc.setScreen(new CraftingPlanScreen(plan));
+            mc.setScreen(new CraftingPlanScreen(plan, requestId));
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-PlanPkt] Failed to open CraftingPlanScreen:", e);
