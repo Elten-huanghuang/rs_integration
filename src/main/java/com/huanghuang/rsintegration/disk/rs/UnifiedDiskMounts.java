@@ -54,6 +54,7 @@ public final class UnifiedDiskMounts {
                 manager.mounts().defer(node, slot, retry);
                 return true;
             }
+            manager.notifyFailure(root.id(), node.getOwner());
             UnifiedMountCoordinator.Lease lease = manager.mounts().acquire(root, node, slot, items, fluids, stack, retry);
             if (lease == null) {
                 LOGGER.debug("[RSI] 统一盘槽位等待其他挂载释放: dim={} pos={} slot={} id={}",

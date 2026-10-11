@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore.Limits;
 import com.huanghuang.rsintegration.disk.core.ResourceTable.PageSnapshot;
+import com.huanghuang.rsintegration.disk.core.ResourceTable.QuarantinedResource;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -261,7 +262,7 @@ public final class DiskFileStore {
         return result;
     }
 
-    private record Record(int slot, int generation, long order, FrozenKey key, int amount) {}
+    private record Record(int slot, int generation, long order, FrozenKey key, QuarantinedResource missing, int amount) {}
 
     private int loadPages(ResourceTable table, FrozenKey.Kind kind, List<PageFiles> pages, Path directory,
                           Limits limits) throws IOException {
@@ -299,7 +300,13 @@ public final class DiskFileStore {
                         byte[] payload = input.readNBytes(length);
                         if (payload.length != length) throw new IOException("资源载荷截断");
                         totalBytes += length;
-                        records.add(new Record(slot, generation, order, FrozenKey.load(kind, payload), amount));
+                        try {
+                            records.add(new Record(slot, generation, order, FrozenKey.load(kind, payload), null, amount));
+                        } catch (FrozenKey.MissingResourceException missing) {
+                            // 注册项缺失不等于文件损坏；保留槽位和原始载荷，重载时再尝试恢复。
+                            records.add(new Record(slot, generation, order, null,
+                                    new QuarantinedResource(kind, missing.resource(), payload), amount));
+                        }
                     }
                 }
             }
@@ -311,7 +318,9 @@ public final class DiskFileStore {
             for (Record record : records) {
                 if (previousOrder == record.order) throw new IOException("资源插入顺序重复");
                 previousOrder = record.order;
-                table.restore(record.slot, record.key, record.generation, record.order, record.amount);
+                if (record.missing != null) {
+                    table.restoreQuarantined(record.slot, record.missing, record.generation, record.order, record.amount);
+                } else table.restore(record.slot, record.key, record.generation, record.order, record.amount);
             }
             table.finishRestore(slots, generations);
         } catch (IllegalArgumentException e) { throw new IOException("磁盘资源记录非法", e); }

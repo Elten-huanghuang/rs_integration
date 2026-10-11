@@ -71,6 +71,7 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
                     Component.translatable("restore.mod", "cthulhu_creatures"));
             for (var response : List.of(new UnifiedDiskTooltipResponsePacket(world, disk, summary, null),
                     new UnifiedDiskTooltipResponsePacket(world, disk, null, null),
+                    new UnifiedDiskTooltipResponsePacket(world, disk, summary, failure),
                     new UnifiedDiskTooltipResponsePacket(world, disk, null, failure))) {
                 buf.clear(); UnifiedDiskTooltipResponsePacket.encode(response, buf);
                 assertTrue(buf.readableBytes() < 1024);
@@ -120,6 +121,22 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
         lines.clear(); UnifiedDiskTooltip.append(lines, null, new UnifiedDiskTooltip.View(null, false, false));
         assertEquals("item.rs_integration.unified_storage_disk.uninitialized",
                 ((TranslatableContents) lines.get(0).getContents()).getKey());
+    }
+
+    @Test void quarantineWarningKeepsSummaryVisibleWithoutReportingDiskUnavailable() {
+        var summary = new UnifiedDiskSummary(17, 23, 1, 1, 8, 8);
+        var warning = new UnifiedDiskFailure(Component.translatable("quarantine.warning", 1),
+                Component.translatable("quarantine.action"));
+        List<Component> lines = new ArrayList<>();
+        UnifiedDiskTooltip.append(lines, UUID.randomUUID(), new UnifiedDiskTooltip.View(summary, false, false, warning));
+        assertEquals("item.rs_integration.unified_storage_disk.stored_items",
+                ((TranslatableContents) lines.get(0).getContents()).getKey());
+        assertEquals("quarantine.warning", ((TranslatableContents) lines.get(4).getContents()).getKey());
+        assertEquals(ChatFormatting.YELLOW.getColor(), lines.get(4).getStyle().getColor().getValue());
+        assertEquals("item.rs_integration.unified_storage_disk.failure.quarantine_preserved",
+                ((TranslatableContents) lines.get(6).getContents()).getKey());
+        assertTrue(lines.stream().noneMatch(line -> line.getContents() instanceof TranslatableContents content
+                && content.getKey().equals("item.rs_integration.unified_storage_disk.unavailable")));
     }
 
     @Test void tooltipRequestsOnlyResolveDisksActuallyVisibleToPlayer() {
