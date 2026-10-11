@@ -204,8 +204,8 @@ The list below is a guide to supported machine automation and add-on features. O
 | Wizards Reborn | Crystallizer, Arcane Iterator, Workbench, and Crystal Ritual |
 | Touhou Little Maid | Maid Altar, including automatic P-point replenishment from RS |
 | Wishing Fountain | Built fountain binding and biome/structure map wishes; weather wishes without item outputs remain manual |
-| Embers Rekindled | Alchemy Tablet, including automatic trial-and-error code inference, saved inference results, and deterministic layouts |
-| Aetherworks | Aetherium Anvil and Forge Tool Station, including automatic hammering, material refilling, forge-lever temperature control, and temperature/ember/hit-progress HUDs |
+| Embers Rekindled | Alchemy Tablet, Melter, Mixer Centrifuge, Stamper, and Mini Boiler; the Alchemy Tablet supports automatic trial-and-error code inference, saved inference results, and deterministic layouts |
+| Aetherworks | Aetherium Anvil, Forge Tool Station, and Metal Former, including automatic hammering, material refilling, forge-lever temperature control, and temperature/ember/hit-progress HUDs. Metal forming supports recursive item and RS fluid inputs; attach it to a complete forge, supply ember, and empty its item slot and fluid tank first |
 | The Aether | Freezer, Incubator, and Altar |
 | Crock Pot | Crock Pot, Portable Crock Pot, and Birdcage parrot feeding/egg recipes |
 | Farmer's Delight | Cooking Pot, Skillet, Cutting Board, and compatible Arcane Stove recipes |
@@ -235,6 +235,8 @@ The list below is a guide to supported machine automation and add-on features. O
 | History Stages | Recipe availability respects stage locks during planning |
 | Construction Wand | Blocks in connected storage count toward wand building |
 | Easy Villagers / Trade Cycling / Trade Refresh / Retraining | Favourite JEI items can prevent a villager trade from being rerolled |
+
+Mini Boiler boiling recipes support recursive crafting through RS fluid storage. Existing batch execution fills multiple recipe inputs at once, bounded by the input tank, gas tank, and remaining operations, and reduces the batch when materials are limited. Bind the boiler itself and keep its connected machine consuming or producing Ember energy to supply waste heat. Disable output extraction pipes during crafting. Built-in conversions are 1 mB water → 5 mB steam and 1 mB dwarven oil → 1 mB dwarven gas.
 
 Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apotheosis, and Ancient Reforging. They can be bound and opened remotely even when RSI does not automate their recipes.
 

@@ -10,7 +10,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.List;
 
-/** 余烬三种物理加工机器，各自只接受对应的配方和绑定方块。 */
+/** 余烬物理加工机器各自只接受对应的配方和绑定方块。 */
 public final class EmbersMachinesRSModule implements IModIntegration {
     public static final EmbersMachinesRSModule INSTANCE = new EmbersMachinesRSModule();
 
@@ -29,6 +29,8 @@ public final class EmbersMachinesRSModule implements IModIntegration {
                 EmbersMixerBatchDelegate.class.getName());
         register(ModIds.ID_EMBERS_STAMPER, "IStampingRecipe", "stamper", "stamping",
                 EmbersStamperBatchDelegate.class.getName());
+        register(ModIds.ID_EMBERS_MINI_BOILER, "IBoilingRecipe", "mini_boiler", "boiling",
+                EmbersMiniBoilerBatchDelegate.class.getName());
     }
 
     private static void register(String id, String recipeName, String blockName,
@@ -37,6 +39,7 @@ public final class EmbersMachinesRSModule implements IModIntegration {
         String implementation = "com.rekindled.embers.recipe." + switch (jeiName) {
             case "melting" -> "MeltingRecipe";
             case "mixing" -> "MixingRecipe";
+            case "boiling" -> "BoilingRecipe";
             default -> "StampingRecipe";
         };
         ModType.register(id, new String[]{implementation}, new String[]{blockName},
@@ -52,6 +55,7 @@ public final class EmbersMachinesRSModule implements IModIntegration {
         target(ModIds.ID_EMBERS_MELTER, "com.rekindled.embers.block.MelterBlock");
         target(ModIds.ID_EMBERS_MIXER, "com.rekindled.embers.block.MixerCentrifugeBlock");
         target(ModIds.ID_EMBERS_STAMPER, "com.rekindled.embers.block.StamperBlock");
+        target(ModIds.ID_EMBERS_MINI_BOILER, "com.rekindled.embers.block.MiniBoilerBlock");
     }
 
     private static void target(String type, String blockClass) {
@@ -64,6 +68,7 @@ public final class EmbersMachinesRSModule implements IModIntegration {
         ModRecipeHandlers.register(new EmbersMeltingRecipeHandler());
         ModRecipeHandlers.register(new EmbersMixingRecipeHandler());
         ModRecipeHandlers.register(new EmbersStampingRecipeHandler());
+        ModRecipeHandlers.register(new EmbersBoilingRecipeHandler());
     }
 
     @Override public void registerNetworkPackets() {}

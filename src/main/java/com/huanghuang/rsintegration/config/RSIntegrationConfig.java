@@ -610,7 +610,7 @@ public final class RSIntegrationConfig {
                 .define("enableIssCsw", true);
         ENABLE_AETHERWORKS = c
                 .comment("启用天华工艺兼容",
-                        "支持天华砧远程合成及自动敲击。")
+                        "支持天华砧、锻造工具站及金属成型台远程与递归合成。")
                 .define("enableAetherworks", true);
         ENABLE_AETHER = c
                 .comment("启用天境兼容",
@@ -634,7 +634,7 @@ public final class RSIntegrationConfig {
                 .define("enableEmbersAlchemy", true);
         ENABLE_EMBERS_MACHINES = c
                 .comment("启用余烬机器兼容",
-                        "支持熔炼炉、混合离心器和压印锤的远程合成；流体材料与产物需要 RS 流体存储。")
+                        "支持熔炼炉、混合离心器、压印锤和微型锅炉的远程合成；流体材料与产物需要 RS 流体存储。")
                 .define("enableEmbersMachines", true);
         ENABLE_EMBERS_ALCHEMY_CALC = c
                 .comment("启用余烬炼金计算模式",

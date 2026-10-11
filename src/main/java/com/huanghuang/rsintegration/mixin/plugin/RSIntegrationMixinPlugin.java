@@ -32,6 +32,9 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".aetherworks.")) {
+            return isClassPresent(targetClassName);
+        }
         if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
                     && hasResonanceBackend();

@@ -217,8 +217,8 @@
 | Wizards Reborn | 秘蕴晶化器、奥术迭代器、工作台、水晶仪式 |
 | Touhou Little Maid | 女仆祭坛，可从 RS 网络自动补充 P 点物品 |
 | Wishing Fountain | 已建成许愿喷泉的绑定，以及群系/结构地图许愿；没有物品产出的天气许愿仍需手动完成 |
-| Embers Rekindled | 炼金台；支持自动试错猜测炼金编码、保存推断结果和确定性布局 |
-| Aetherworks | 天华砧、锻造工具站；支持自动锤炼、自动补料、锻造炉拉杆控温，以及温度/余烬/锤击进度 HUD |
+| Embers Rekindled | 炼金台、熔炼炉、混合离心器、压印锤、微型锅炉；炼金台支持自动试错猜测炼金编码、保存推断结果和确定性布局 |
+| Aetherworks | 天华砧、锻造工具站、金属成型台；支持自动锤炼、自动补料、锻造炉拉杆控温，以及温度/余烬/锤击进度 HUD。金属成型台支持物品与 RS 流体递归供料，需连接完整锻造炉、提供余烬并清空物品槽和流体罐 |
 | The Aether | 冷冻器、孵化器、祭坛 |
 | Crock Pot | 锅釜、便携锅釜，以及鸟笼的鹦鹉喂养/产蛋配方 |
 | Farmer's Delight | 烹饪锅、煎锅、切菜板，以及兼容的奥术炉配方 |
@@ -248,6 +248,8 @@
 | History Stages | 配方规划遵守阶段锁定 |
 | Construction Wand | 建造魔杖可使用网络库存中的方块 |
 | Easy Villagers / Trade Cycling / Trade Refresh / Retraining | JEI 收藏可防止村民交易被刷新重置 |
+
+微型锅炉支持沸腾配方递归合成，液体原料与气体产物使用 RS 流体存储。接入现有批量执行流程，按输入罐、气体罐容量和剩余任务数量一次灌入多份原料，材料不足时自动缩小批次。直接绑定锅炉本体，并让锅炉所连接的设备持续消耗或产生余烬能量提供余热；合成期间停用成品抽取管道。内置配方为 1 mB 水 → 5 mB 蒸汽、1 mB 矮人油 → 1 mB 矮人气体。
 
 自定义 GUI 默认包含 Crabber's Delight、Metal Barrels、PGP、EMX Arms、Apotheosis 和 Ancient Reforging。即使 RSI 不负责自动制作这些配方，也仍可绑定并远程打开它们的界面。
 

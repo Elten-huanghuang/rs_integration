@@ -26,6 +26,10 @@ public final class EmbersMachineHints {
                     "rsi.embers_machine.hint.direct_capture",
                     "rsi.embers_machine.hint.ember_stamper",
                     "rsi.embers_machine.hint.stamper_fluid");
+            case ModIds.ID_EMBERS_MINI_BOILER -> List.of(
+                    "rsi.embers_machine.hint.boiler_heat",
+                    "rsi.embers_machine.hint.fluid_storage",
+                    "rsi.embers_machine.hint.output_pipe");
             default -> List.of();
         };
     }

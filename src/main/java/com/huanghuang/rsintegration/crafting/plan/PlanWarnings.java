@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerBatchDelegate;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsPlanWarnings;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonBatchDelegate;
@@ -18,6 +19,7 @@ import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSu
 import com.huanghuang.rsintegration.mods.farmersdelight.SkilletBatchDelegate;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
+import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.ClibanoBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate;
@@ -171,11 +173,19 @@ public final class PlanWarnings {
             case ModIds.ID_EMBERS_ALCHEMY:
                 warnings.addAll(EreAlchemyBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
+            case ModIds.ID_EMBERS_MINI_BOILER:
+                for (String key : EmbersMachineHints.tooltipKeys(ModType.byId(typeId))) {
+                    warnings.add(Component.translatable(key));
+                }
+                break;
             case ModIds.ID_AETHERWORKS_ANVIL:
                 warnings.addAll(AetherworksBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.ID_AETHERWORKS_TOOL_STATION:
                 warnings.addAll(AetherworksToolStationBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
+                break;
+            case ModIds.ID_AETHERWORKS_METAL_FORMER:
+                warnings.addAll(AetherworksMetalFormerBatchDelegate.getPlanWarnings(recipe));
                 break;
             case ModIds.CROCKPOT:
                 warnings.addAll(CrockPotBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
