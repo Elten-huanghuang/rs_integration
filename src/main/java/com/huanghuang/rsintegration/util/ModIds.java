@@ -63,8 +63,10 @@ public final class ModIds {
     public static final String ID_EMBERS_MELTER = "embers_melter";
     public static final String ID_EMBERS_MIXER = "embers_mixer";
     public static final String ID_EMBERS_STAMPER = "embers_stamper";
+    public static final String ID_EMBERS_MINI_BOILER = "embers_mini_boiler";
     public static final String ID_AETHERWORKS_ANVIL = "aetherworks_anvil";
     public static final String ID_AETHERWORKS_TOOL_STATION = "aetherworks_tool_station";
+    public static final String ID_AETHERWORKS_METAL_FORMER = "aetherworks_metal_former";
     public static final String ID_AVARITIA_CRAFTING = "avaritia_crafting";
     public static final String ID_AVARITIA_SMITHING = "avaritia_smithing";
     public static final String ID_UNTIL_ETERNITY_END_CRAFTING = "until_eternity_end_crafting";

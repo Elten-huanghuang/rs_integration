@@ -859,7 +859,8 @@ public final class AltarBindingRegistry {
         // 余烬配方按金属和材料分目录，目录名不代表机器类型。
         if (ModIds.ID_EMBERS_MELTER.equals(type.id())
                 || ModIds.ID_EMBERS_MIXER.equals(type.id())
-                || ModIds.ID_EMBERS_STAMPER.equals(type.id())) {
+                || ModIds.ID_EMBERS_STAMPER.equals(type.id())
+                || ModIds.ID_EMBERS_MINI_BOILER.equals(type.id())) {
             return null;
         }
         // Ars recipe IDs may be grouped by content tier rather than machine
@@ -943,6 +944,8 @@ public final class AltarBindingRegistry {
         if (ModIds.ID_SUMMONING_RITUALS.equals(type.id())) {
             return null;
         }
+        // 金属成型配方路径只是内容分组，不能限制同一种机器的绑定。
+        if (ModIds.ID_AETHERWORKS_METAL_FORMER.equals(type.id())) return null;
         // Aetherworks names its recipe category "aetherium_anvil" but the
         // block description ID uses "forge_anvil".
         if (ModType.byId(ModIds.ID_AETHERWORKS_ANVIL) == type && "aetherium_anvil".equals(hint)) {

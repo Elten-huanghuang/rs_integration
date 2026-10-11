@@ -13,12 +13,12 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-final class EmbersFluidIngredients {
+public final class EmbersFluidIngredients {
     private EmbersFluidIngredients() {}
 
     /** 所有备选液体必须消耗同一数量，才能安全进入物品数量账本。 */
     @Nullable
-    static IngredientSpec spec(FluidIngredient source) {
+    public static IngredientSpec spec(FluidIngredient source) {
         List<FluidStack> fluids = source.getFluids();
         if (fluids.isEmpty()) return null;
         int amount = fluids.get(0).getAmount();

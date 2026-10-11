@@ -22,7 +22,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 熔炼炉和离心器共享的流体产物事务；只接管本次投入的材料。 */
+/** 余烬机器共享的流体产物事务；只接管本次投入的材料。 */
 abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
     protected ServerLevel level;
     protected BlockPos pos;
@@ -45,6 +45,12 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
     protected abstract boolean placeInputs(List<ItemStack> materials);
     protected abstract boolean nativeRecipeMatches();
     protected abstract List<ItemStack> recoverInputs();
+
+    /** 默认只执行一份；支持原生批量的机器按已准备的执行次数扩大投料。 */
+    protected int requiredMaterialCount(IngredientSpec spec) { return spec.count(); }
+
+    /** 批量加工有真实产物增加时刷新停滞计时。 */
+    protected boolean hasProcessingProgress() { return false; }
 
     @Override
     public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
@@ -125,7 +131,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : required) {
             ItemStack material = CraftPacketUtils.ensureMaterialAvailable(player, level.dimension(), pos,
-                    spec.ingredient(), spec.count(), ledger);
+                    spec.ingredient(), requiredMaterialCount(spec), ledger);
             if (material.isEmpty()) { ledger.rollback(player); return false; }
             materials.add(material.copy());
         }
@@ -140,14 +146,16 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
-        if (started || materials.size() != required.size() || !validateExecutionContext(player)) return false;
+        if (started) return false;
         remaining.clear();
+        // 提交后的启动检查失败也必须保留整份未投材料，供共享账本精确退款。
+        materials.forEach(material -> remaining.add(material.copy()));
+        if (materials.size() != required.size() || !validateExecutionContext(player)) return false;
         for (int i = 0; i < materials.size(); i++) {
             ItemStack material = materials.get(i);
             IngredientSpec spec = required.get(i);
-            if (material.isEmpty() || material.getCount() != spec.count()
+            if (material.isEmpty() || material.getCount() != requiredMaterialCount(spec)
                     || !spec.ingredient().test(material)) return false;
-            remaining.add(material.copy());
         }
         if (!placeInputs(materials) || !nativeRecipeMatches()) return false;
         started = true;
@@ -178,6 +186,10 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
             consumed = true;
             failureMessage = Component.translatable("rsi.embers_machine.error.output_removed");
             return failObservation("投入材料已消失，但成品液体不足或已被外部管道抽走");
+        }
+        if (hasProcessingProgress()) {
+            startTick = level.getGameTime();
+            unpoweredTicks = 0;
         }
         // 能量不足时原版机器会保留输入并等待，暂停加工卡死计时。
         if (!hasPower()) unpoweredTicks++;

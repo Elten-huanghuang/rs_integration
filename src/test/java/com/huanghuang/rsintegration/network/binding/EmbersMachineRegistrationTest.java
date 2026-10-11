@@ -23,6 +23,7 @@ class EmbersMachineRegistrationTest {
         assertMapping(ModIds.ID_EMBERS_MELTER, "melter", "melting", "MeltingRecipe");
         assertMapping(ModIds.ID_EMBERS_MIXER, "mixer_centrifuge", "mixing", "MixingRecipe");
         assertMapping(ModIds.ID_EMBERS_STAMPER, "stamper", "stamping", "StampingRecipe");
+        assertMapping(ModIds.ID_EMBERS_MINI_BOILER, "mini_boiler", "boiling", "BoilingRecipe");
     }
 
     private static void assertMapping(String id, String block, String category, String recipeClass) {

@@ -23,6 +23,7 @@ final class AetherworksMachineSafety {
             for (int dz = -5; dz <= 5; dz++) {
                 for (int dy = -2; dy <= 2; dy++) {
                     cursor.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    if (!level.hasChunkAt(cursor)) continue;
                     BlockEntity candidate = level.getBlockEntity(cursor);
                     if (candidate != null
                             && AetherworksReflection.forgeBEClass.isInstance(candidate)

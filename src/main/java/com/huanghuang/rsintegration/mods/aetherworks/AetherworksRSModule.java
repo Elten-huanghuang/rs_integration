@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
 import com.huanghuang.rsintegration.recipe.AetherworksToolStationRecipeHandler;
+import com.huanghuang.rsintegration.recipe.AetherworksMetalFormerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
@@ -44,6 +45,18 @@ public final class AetherworksRSModule implements IModIntegration {
                 new String[][]{{"net.sirplop.aetherworks.", "aetherworks"}},
                 null);
 
+        // 金属成型台与锻造炉共享热量、余烬及外接流体，使用串行机器执行。
+        ModType.register(ModIds.ID_AETHERWORKS_METAL_FORMER,
+                new String[]{"net.sirplop.aetherworks.recipe.MetalFormerRecipe"},
+                new String[]{"forge_metal_former"},
+                new String[]{ModIds.ID_AETHERWORKS_METAL_FORMER},
+                ModType.delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerBatchDelegate"))
+                .requireFlatExecution("金属成型台与锻造炉共享能量和流体，输入与产物共用槽位");
+        ModType.configureJei(ModIds.ID_AETHERWORKS_METAL_FORMER,
+                new String[][]{{"aetherworks:metal_forming", ModIds.ID_AETHERWORKS_METAL_FORMER}},
+                new String[][]{{"net.sirplop.aetherworks.recipe.MetalFormerRecipe", ModIds.ID_AETHERWORKS_METAL_FORMER}},
+                "gui.rs_integration.jei.aetherworks_metal_former_craft");
+
         // Forge Tool Station
         ModType.register(ModIds.ID_AETHERWORKS_TOOL_STATION,
                 new String[]{"net.sirplop.aetherworks.recipe.ToolStationRecipe"},
@@ -58,6 +71,12 @@ public final class AetherworksRSModule implements IModIntegration {
 
     @Override
     public void registerBindingTargets() {
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                ModIds.AETHERWORKS, ModType.byId(ModIds.ID_AETHERWORKS_METAL_FORMER),
+                RSIntegrationConfig.ENABLE_AETHERWORKS,
+                List.of("net.sirplop.aetherworks.block.forge.MetalFormerBlock"),
+                ModIds.ID_AETHERWORKS_METAL_FORMER, false
+        ));
         // Aetherium Anvil: hammer right-click interaction on in-world items, no container GUI.
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "aetherworks", ModType.byId(ModIds.ID_AETHERWORKS_ANVIL),
@@ -78,6 +97,7 @@ public final class AetherworksRSModule implements IModIntegration {
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new AetherworksRecipeHandler());
         ModRecipeHandlers.register(new AetherworksToolStationRecipeHandler());
+        ModRecipeHandlers.register(new AetherworksMetalFormerRecipeHandler());
     }
 
     @Override
