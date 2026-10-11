@@ -3,10 +3,12 @@ package com.huanghuang.rsintegration.storage.rs;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,15 +25,29 @@ class RefinedStorageSnapshotMapperTest extends BootstrapTest {
     }
 
     @Test
-    void malformedNanIdentityFailsClosed() {
-        ItemStack malformed = new ItemStack(Items.DIAMOND);
-        malformed.getOrCreateTag().putDouble("value", Double.NaN);
+    void nanFoodIdentityDoesNotHideOtherMaterials() {
+        ItemStack malformed = new ItemStack(Items.BREAD);
+        CompoundTag dish = new CompoundTag();
+        dish.putFloat("nutrition", Float.NaN);
+        malformed.getOrCreateTag().put("dish_attribute", dish);
+        ItemStack iron = new ItemStack(Items.IRON_INGOT, 4);
+        ItemStack gold = new ItemStack(Items.GOLD_INGOT, 2);
+        List<ItemStack> skipped = new ArrayList<>();
 
         var result = RefinedStorageSnapshotMapper.map(
-                RefinedStorageSnapshotRead.available(List.of(malformed)));
+                RefinedStorageSnapshotRead.available(List.of(iron, malformed, gold)),
+                (stack, failure) -> {
+                    assertTrue(failure.getMessage().contains("NaN"));
+                    skipped.add(stack);
+                });
 
-        assertEquals(StorageSnapshotStatus.INVALID_RESPONSE, result.status());
-        assertTrue(result.snapshot().isEmpty());
+        assertEquals(StorageSnapshotStatus.SUCCESS, result.status());
+        assertEquals(List.of(Items.IRON_INGOT, Items.GOLD_INGOT), result.snapshot().orElseThrow()
+                .items().stream().map(item -> item.stack().getItem()).toList());
+        assertEquals(List.of(4L, 2L), result.snapshot().orElseThrow()
+                .items().stream().map(item -> item.amount()).toList());
+        assertEquals(1, skipped.size());
+        assertTrue(Float.isNaN(malformed.getTag().getCompound("dish_attribute").getFloat("nutrition")));
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.StackListEntry;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -83,6 +84,24 @@ class LegacyRsMatchingTest extends BootstrapTest {
                 endpoint.extractMatching(player, Ingredient.of(Items.IRON_INGOT), 5, true).status());
         assertEquals(2, first.getCount());
         assertEquals(3, second.getCount());
+    }
+
+    @Test
+    void legacySnapshotSkipsNanFoodButKeepsOtherMaterials() {
+        ItemStack bread = new ItemStack(Items.BREAD);
+        CompoundTag dish = new CompoundTag();
+        dish.putFloat("nutrition", Float.NaN);
+        bread.getOrCreateTag().put("dish_attribute", dish);
+        when(network.getItemStorageCache().getList().getStacks()).thenReturn(List.of(
+                new StackListEntry<>(first), new StackListEntry<>(bread),
+                new StackListEntry<>(second)));
+
+        var result = endpoint.snapshot(player);
+
+        assertTrue(result.successful());
+        assertEquals(List.of("first", "second"), result.snapshot().orElseThrow().items().stream()
+                .map(item -> item.stack().getTag().getString("variant")).toList());
+        assertTrue(Float.isNaN(bread.getTag().getCompound("dish_attribute").getFloat("nutrition")));
     }
 
     private static ItemStack named(String variant, int count) {

@@ -22,10 +22,14 @@ import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
+import com.huanghuang.rsintegration.util.LogSampler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nonnull;
 import java.util.Objects;
@@ -103,6 +107,8 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     }
 
     private static final class LegacyRsStorageSession implements StorageSession {
+        private static final Logger LOGGER = LogManager.getLogger(LegacyRsStorageSession.class);
+        private static final LogSampler SKIPPED_ITEM_WARNINGS = new LogSampler(60_000L);
         private final INetwork network;
         private StorageSession matchingSession;
         LegacyRsStorageSession(INetwork network) { this.network = network; }
@@ -147,14 +153,28 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                 ItemStack stack = entry.getStack();
                 if (!stack.isEmpty() && stack.getCount() > 0
                         && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
-                    items.add(new StoredItem(itemKey(stack), stack.getCount()));
+                    addSnapshotItem(items, stack);
                 }
             }
             for (ItemStack token : InkFluidSupport.snapshot(network, itemTypes)) {
-                items.add(new StoredItem(itemKey(token), token.getCount()));
+                addSnapshotItem(items, token);
             }
             return StorageSnapshotResult.success(new StorageSnapshot(
                     reference().backendId(), items));
+        }
+
+        private void addSnapshotItem(List<StoredItem> items, ItemStack stack) {
+            try {
+                items.add(new StoredItem(itemKey(stack), stack.getCount()));
+            } catch (IllegalArgumentException failure) {
+                // 单个食物的异常 NBT 不应让整个 RS 网络的合成材料消失。
+                var itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                if (SKIPPED_ITEM_WARNINGS.allow(reference().networkId() + ":" + itemId)) {
+                    LOGGER.warn(
+                            "[RSI-Storage] legacy RS snapshot skipped unsupported item network={} item={} cause={}; other items remain available",
+                            reference().networkId(), itemId, failure.toString());
+                }
+            }
         }
 
         @Override public StoragePermissionResult checkPermission(

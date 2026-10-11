@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageInsertObserver;
@@ -19,6 +20,7 @@ import com.huanghuang.rsintegration.storage.StorageThreadGuard;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.crafting.Ingredient;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import java.util.Set;
@@ -28,9 +30,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** StorageSession backed by one RS network. Native RS types do not escape the driver. */
 final class RefinedStorageSession implements StorageSession {
+    private static final Logger LOGGER = LogManager.getLogger(RefinedStorageSession.class);
+    private static final LogSampler SKIPPED_ITEM_WARNINGS = new LogSampler(60_000L);
     private final RefinedStorageDriver driver;
     private final StorageReference reference;
     private final StorageInsertObserver insertObserver;
@@ -69,13 +75,22 @@ final class RefinedStorageSession implements StorageSession {
             return StorageSnapshotResult.failure(toSnapshotStatus(permission), permission.diagnosticCode());
         }
         try {
-            return RefinedStorageSnapshotMapper.map(driver.snapshotItems(itemTypes));
+            return RefinedStorageSnapshotMapper.map(driver.snapshotItems(itemTypes),
+                    (stack, failure) -> warnSkippedItem(stack, failure));
         } catch (RefinedStorageUnavailableException e) {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);
         } catch (RuntimeException | LinkageError e) {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
+    }
+
+    private void warnSkippedItem(ItemStack stack, IllegalArgumentException failure) {
+        var itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (!SKIPPED_ITEM_WARNINGS.allow(reference.networkId() + ":" + itemId)) return;
+        LOGGER.warn(
+                "[RSI-Storage] RS snapshot skipped unsupported item network={} item={} cause={}; other items remain available",
+                reference.networkId(), itemId, failure.toString());
     }
 
     @Override

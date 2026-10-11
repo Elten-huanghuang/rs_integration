@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.storage.*;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -49,6 +50,23 @@ class RefinedStorageSessionTest extends BootstrapTest {
         driver.available = false;
         assertEquals(StorageSnapshotStatus.UNAVAILABLE, session.snapshotItems(player).status());
         assertEquals(2, driver.reads);
+    }
+
+    @Test
+    void fullSnapshotRetainsUsableMaterialsBesideNanFood() {
+        ItemStack bread = new ItemStack(Items.BREAD);
+        CompoundTag dish = new CompoundTag();
+        dish.putFloat("nutrition", Float.NaN);
+        bread.getOrCreateTag().put("dish_attribute", dish);
+        driver.items.addAll(List.of(new ItemStack(Items.IRON_INGOT, 5), bread,
+                new ItemStack(Items.GOLD_INGOT, 3)));
+
+        var result = session.snapshotItems(player);
+
+        assertTrue(result.successful());
+        assertEquals(List.of(Items.IRON_INGOT, Items.GOLD_INGOT), result.snapshot().orElseThrow()
+                .items().stream().map(item -> item.stack().getItem()).toList());
+        assertTrue(Float.isNaN(bread.getTag().getCompound("dish_attribute").getFloat("nutrition")));
     }
 
     @Test
