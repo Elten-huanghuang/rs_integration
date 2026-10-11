@@ -14,7 +14,8 @@ public final class ResonanceStackRules {
         if (stack.isEmpty()) return false;
         if (stack.getMaxStackSize() <= 1 || stack.isDamageableItem()) return true;
         if (stack.getTag() != null && stack.getTag().getAllKeys().stream()
-                .anyMatch(key -> !SLOT_TAG.equals(key))) return true;
+                .anyMatch(key -> !SLOT_TAG.equals(key))
+                && !isTaczAmmo(stack)) return true;
         try {
             var modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
             if (modifiers.containsKey(Attributes.ATTACK_DAMAGE)
@@ -26,6 +27,21 @@ public final class ResonanceStackRules {
             if ("mods.flammpfeil.slashblade.item.ItemSlashBlade".equals(type.getName())) return true;
         }
         return false;
+    }
+
+    /** TaCZ 的散装弹药带有类型 NBT；按接口名判断，避免可选模组成为硬依赖。 */
+    public static boolean isTaczAmmo(ItemStack stack) {
+        return !stack.isEmpty()
+                && implementsInterface(stack.getItem().getClass(), "com.tacz.guns.api.item.IAmmo");
+    }
+
+    private static boolean implementsInterface(Class<?> type, String name) {
+        if (type == null) return false;
+        if (name.equals(type.getName())) return true;
+        for (Class<?> implemented : type.getInterfaces()) {
+            if (implementsInterface(implemented, name)) return true;
+        }
+        return implementsInterface(type.getSuperclass(), name);
     }
 
     public static boolean isSameVariant(ItemStack first, ItemStack second) {

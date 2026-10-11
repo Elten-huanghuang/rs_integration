@@ -17,6 +17,9 @@ import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPack
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceDiskInventory;
 import com.huanghuang.rsintegration.resonance.backpack.ResonanceSlot;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
+import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.network.packet.ResonanceSyncPacket;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -190,6 +193,14 @@ class OptionalDependencyBytecodeTest {
                     "com/huanghuang/rsintegration/resonance/disk", "RS resonance disk");
             assertNoTypeReference(type,
                     "com/huanghuang/rsintegration/resonance/bd", "Beyond Dimensions backend");
+        }
+    }
+
+    @Test
+    void sharedResonanceAmmoSyncDoesNotRequireTaczToBeInstalled() throws IOException {
+        for (Class<?> type : List.of(ResonanceStackRules.class, PassiveEffectEngine.class,
+                ClientDiskData.class, ResonanceSyncPacket.class)) {
+            assertNoTypeReference(type, "com/tacz/guns", "TaCZ");
         }
     }
 

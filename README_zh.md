@@ -140,6 +140,7 @@
 共振磁盘是一种特殊 RS 存储磁盘，盘内物品可以像玩家随身携带一样参与效果与资源查找。
 
 - 支持属性、`inventoryTick`、事件驱动被动效果和兼容资源查询。
+- 支持 TaCZ 散装子弹在共振盘内按口径参与换弹，保留弹药 NBT 并实际扣除数量；HUD 备弹数包含盘内匹配子弹，换弹扣弹后立即同步；Shift 快速存入会按成功写入的数量扣除背包物品。
 - 对配置为可变的物品保存 NBT/耐久变化，而不是只模拟一次副本。
 - 默认支持 Apotheosis 药水护符、Muyimeng 混合药水护符、Reliquary 烈焰术士法杖、Enigmatic Addons 石英花、Forbidden & Arcanus 幽灵之眼护符。
 - 支持勇三/月之石九剑书、Wizard Terra Curios 的 `BuffItem`、Terra Equipment 成组无限药水。

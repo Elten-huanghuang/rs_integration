@@ -7,6 +7,8 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
   "mixins": [
+    "tacz.AbstractGunItemAmmoMixin",
+    "tacz.ModernKineticGunScriptAmmoMixin",
     "aetherworks.MetalFormerRecipeMixin",
     "refinedstorage.ConnectionStorageRefreshMixin",
     "refinedstorage.StorageRefreshDeduplicationMixin",
@@ -108,6 +110,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "tacz.GunHudOverlayAmmoMixin",
     "sophisticatedbackpacks.StorageGhostIngredientHandlerMixin",
     "sophisticatedbackpacks.StorageScreenFluidFilterMixin",
     "constructionwand.ConstructionWandClientNetworkMixin",

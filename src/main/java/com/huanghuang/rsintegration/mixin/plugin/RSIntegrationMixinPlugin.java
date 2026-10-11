@@ -32,6 +32,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".tacz.")) {
+            return isClassPresent(targetClassName)
+                    && isClassPresent("com.tacz.guns.api.item.IAmmo") && hasResonanceBackend();
+        }
         if (mixinClassName.contains(".aetherworks.")) {
             return isClassPresent(targetClassName);
         }

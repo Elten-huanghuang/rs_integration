@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageMenu;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.TickEvent;
@@ -16,6 +17,7 @@ import net.minecraftforge.common.Tags;
 import net.minecraftforge.network.NetworkDirection;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,11 +70,17 @@ public final class PassiveEffectEngine {
     private static void syncDiskState(ServerPlayer player, List<ResonanceStorageView> views) {
         int gemCount = 0;
         int abilityMask = 0;
+        List<ItemStack> taczAmmo = new ArrayList<>();
+        boolean includeAmmo = RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()
+                && RSIntegrationConfig.ENABLE_TACZ.get();
         for (ResonanceStorageView disk : views) {
             for (ResonanceStorageView.StoredStack stored : disk.storedStacks()) {
                 ItemStack stack = stored.stack();
                 if (!stack.isEmpty() && stack.is(Tags.Items.GEMS)) {
                     gemCount += stack.getCount();
+                }
+                if (includeAmmo && ResonanceStackRules.isTaczAmmo(stack)) {
+                    taczAmmo.add(stack.copy());
                 }
             }
             abilityMask |= disk.abilityMask();
@@ -82,20 +90,29 @@ public final class PassiveEffectEngine {
         long revision = previous == null ? 0L : previous.revision();
         boolean changed = previous == null || previous.gemCount() != gemCount
                 || previous.lycheeCatalystMask() != catalystMask
-                || previous.abilityMask() != abilityMask;
+                || previous.abilityMask() != abilityMask
+                || !sameAmmo(previous.taczAmmo(), taczAmmo);
         if (changed) {
             revision++;
         }
         SYNC_CACHE.put(player.getUUID(),
-                new DiskSyncState(gemCount, catalystMask, abilityMask, revision));
+                new DiskSyncState(gemCount, catalystMask, abilityMask, revision, List.copyOf(taczAmmo)));
         if (!changed) return;
         NetworkHandler.CHANNEL.sendTo(
-                new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision),
+                new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision, taczAmmo),
                 player.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
     }
 
+    private static boolean sameAmmo(List<ItemStack> first, List<ItemStack> second) {
+        if (first.size() != second.size()) return false;
+        for (int i = 0; i < first.size(); i++) {
+            if (!ItemStack.matches(first.get(i), second.get(i))) return false;
+        }
+        return true;
+    }
+
     private record DiskSyncState(int gemCount, int lycheeCatalystMask,
-                                 int abilityMask, long revision) {}
+                                 int abilityMask, long revision, List<ItemStack> taczAmmo) {}
 
 }

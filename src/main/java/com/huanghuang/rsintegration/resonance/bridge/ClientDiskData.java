@@ -1,17 +1,18 @@
 package com.huanghuang.rsintegration.resonance.bridge;
 
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
+import net.minecraft.world.item.ItemStack;
 
-/**
- * Client-side cache for resonance disk data synced from the server.
- * Stores the gem count so the Avarice Ring tooltip can include disk gems.
- */
+import java.util.List;
+
+/** 服务端同步的共振盘客户端缓存，供资源提示和 TaCZ 换弹预检查使用。 */
 public final class ClientDiskData {
 
     private static int gemCount;
     private static int lycheeCatalystMask;
     private static int abilityMask;
     private static long revision = -1L;
+    private static List<ItemStack> taczAmmo = List.of();
 
     private ClientDiskData() {}
 
@@ -55,11 +56,21 @@ public final class ClientDiskData {
 
     public static void apply(int count, int catalystMask, int newAbilityMask,
                              long newRevision) {
+        apply(count, catalystMask, newAbilityMask, newRevision, List.of());
+    }
+
+    public static List<ItemStack> getTaczAmmo() {
+        return taczAmmo.stream().map(ItemStack::copy).toList();
+    }
+
+    public static void apply(int count, int catalystMask, int newAbilityMask,
+                             long newRevision, List<ItemStack> ammo) {
         if (newRevision < revision) return;
         gemCount = count;
         lycheeCatalystMask = catalystMask;
         abilityMask = newAbilityMask;
         revision = newRevision;
+        taczAmmo = ammo.stream().map(ItemStack::copy).toList();
     }
 
     public static void clear() {
@@ -67,5 +78,6 @@ public final class ClientDiskData {
         lycheeCatalystMask = 0;
         abilityMask = 0;
         revision = -1L;
+        taczAmmo = List.of();
     }
 }

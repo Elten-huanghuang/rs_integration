@@ -10,6 +10,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
@@ -25,7 +26,12 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu implements
 
     public ResonanceBackpackContainer(int containerId, Inventory playerInv,
                                       ResonanceStorageView disk) {
-        super(ModItems.RESONANCE_BACKPACK.get(), containerId);
+        this(containerId, playerInv, disk, ModItems.RESONANCE_BACKPACK.get());
+    }
+
+    ResonanceBackpackContainer(int containerId, Inventory playerInv,
+                              ResonanceStorageView disk, MenuType<?> menuType) {
+        super(menuType, containerId);
         this.disk = disk;
         this.diskInventory = new ResonanceDiskInventory(disk,
                 playerInv.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
@@ -110,7 +116,13 @@ public class ResonanceBackpackContainer extends AbstractContainerMenu implements
             return debited.copyWithCount(debited.getCount() - remainder.getCount());
         }
 
-        if (!moveItemStackTo(stack, 0, DISK_SLOTS, false)) return ItemStack.EMPTY;
+        if (diskInventory instanceof ResonanceDiskInventory resonanceInventory) {
+            ItemStack remaining = resonanceInventory.insertFromInventory(stack);
+            if (remaining.getCount() == original.getCount()) return ItemStack.EMPTY;
+            stack.setCount(remaining.getCount());
+        } else if (!moveItemStackTo(stack, 0, DISK_SLOTS, false)) {
+            return ItemStack.EMPTY;
+        }
         if (stack.isEmpty()) this.slots.get(index).set(ItemStack.EMPTY);
         else this.slots.get(index).setChanged();
         return original;
