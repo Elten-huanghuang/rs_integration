@@ -50,6 +50,8 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     private ServerPlayer player;
     private ResourceKey<Level> altarDimension;
     private BlockPos altarPos;
+    @Nullable
+    private BlockEntity preparationAltar;
     private Recipe<?> recipe;
     private Ingredient catalyst = Ingredient.EMPTY;
     private List<IngredientSpec> recipeInputs = List.of();
@@ -105,6 +107,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         this.preparedExecutions = 1;
         this.inserted.clear();
         this.prepared = false;
+        this.preparationAltar = null;
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-SummoningRituals] Prepared recipe={} altar={} slots={} missing={}",
                 recipeId, pos, handler.getSlots(), missingMaterials.size());
@@ -201,6 +204,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             return false;
         }
 
+        this.preparationAltar = blockEntity;
         // 先回收与目标配方冲突的旧物品。同配方材料和同 NBT 催化剂保持原位。
         if (!recycleConflicts(handler)) return false;
 
@@ -306,9 +310,11 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level,
                                                    @Nonnull BlockEntity blockEntity) {
         if (!prepared) return failObservation("altar preparation was not committed");
-        if (!isAltar(blockEntity) || itemHandler(blockEntity) == null) {
-            return failObservation("altar item handler disappeared");
+        if (blockEntity != preparationAltar) {
+            return failObservation("altar block entity replaced");
         }
+        // 完整投料即完成准备。仪式启动后原模组会关闭 ITEM_HANDLER，
+        // 不能将运行中的接口关闭当成投料失败，也不能触发材料回滚。
         player.sendSystemMessage(Component.translatable(
                 "rsi.summoning_rituals.prepared"));
         return doneObservation();
@@ -317,7 +323,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     @Override
     protected boolean isMachineCraftFinished(@Nonnull ServerLevel level,
                                              @Nonnull BlockEntity blockEntity) {
-        return prepared;
+        return prepared && blockEntity == preparationAltar;
     }
 
     @Nonnull
@@ -333,15 +339,18 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, ServerPlayer player) {
-        IItemHandler handler = itemHandler(blockEntity);
-        if (handler != null) rollbackPreparedItems(handler);
+        // 只回收实际投料的祭坛，不能从同坐标的新方块中取走物品。
+        if (blockEntity == preparationAltar) {
+            IItemHandler handler = itemHandler(blockEntity);
+            if (handler != null) rollbackPreparedItems(handler);
+        }
         resetLocalState();
     }
 
     @Override
     public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        // 成功仅表示物品已准备好。物品留在祭坛，等待玩家手动启动或取回。
+        // 成功仅表示物品已投放；不回收，也不干预祭坛后续的仪式。
         inserted.clear();
         resetLocalState();
     }
@@ -355,6 +364,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
 
     private void resetLocalState() {
         prepared = false;
+        preparationAltar = null;
         recipe = null;
         catalyst = Ingredient.EMPTY;
         recipeInputs = List.of();
