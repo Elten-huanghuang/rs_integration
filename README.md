@@ -210,6 +210,7 @@ The list below is a guide to supported machine automation and add-on features. O
 | The Aether | Freezer, Incubator, and Altar |
 | Crock Pot | Crock Pot, Portable Crock Pot, and Birdcage parrot feeding/egg recipes |
 | Farmer's Delight | Cooking Pot, Skillet, Cutting Board, and compatible Arcane Stove recipes |
+| Dungeon's Delight | Monster Pot recipes with serving-container planning, input buffering, and concurrent pots using native monster heat sources |
 | Farmer's Respite | Kettle |
 | Youkai's Homecoming | Moka Pot, Fermentation Tank, single- or multi-layer Steamer, Kettle, cooking pots, Cuisine Board |
 | Gensokyo Delight | Fermentation Tank, Steamer, Kettle, cooking pots, and Cuisine Board across renamed field layouts |

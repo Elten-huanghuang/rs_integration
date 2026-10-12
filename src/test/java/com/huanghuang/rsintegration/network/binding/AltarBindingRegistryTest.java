@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -58,6 +59,9 @@ class AltarBindingRegistryTest {
             ModType.register(ModIds.ID_MD_COPPER_POT, new String[0],
                     new String[]{"copper_pot"},
                     new String[]{ModIds.ID_MD_COPPER_POT}, () -> null);
+        }
+        if (ModType.byId(ModIds.ID_DD_MONSTER_POT) == ModType.GENERIC) {
+            DungeonsDelightRSModule.INSTANCE.registerModType();
         }
         if (ModType.byId(ModIds.ID_FD_CUTTING_BOARD) == ModType.GENERIC) {
             ModType.register(ModIds.ID_FD_CUTTING_BOARD, new String[0],
@@ -272,6 +276,21 @@ class AltarBindingRegistryTest {
         assertNull(AltarBindingRegistry.normalizeSubType(
                 AltarBindingRegistry.recipeSubTypeHint(recipeId),
                 ModType.byId(ModIds.ID_MD_COPPER_POT)));
+    }
+
+    @Test
+    void monsterCookingAndIntegrationFoldersKeepMonsterPotBindings() {
+        ModType type = ModType.byId(ModIds.ID_DD_MONSTER_POT);
+        for (String path : List.of("cooking/meals/monster_stew",
+                "integration/twilightforest/cooking/drinks/liveroot_beer")) {
+            ResourceLocation recipeId = new ResourceLocation("dungeonsdelight", path);
+            assertNull(AltarBindingRegistry.normalizeSubType(
+                    AltarBindingRegistry.recipeSubTypeHint(recipeId), type));
+        }
+        assertTrue(AltarBindingRegistry.isExecutableBinding(type,
+                "dungeonsdelight_monster_pot||block.dungeonsdelight.monster_pot"));
+        assertEquals(ModIds.ID_FD_COOKING_POT, ModType.fromBlockKey(
+                "farmersdelight_cooking_pot||block.farmersdelight.cooking_pot").id());
     }
 
     @Test

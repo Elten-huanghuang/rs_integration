@@ -199,6 +199,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_CONFLUENCE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IMMORTERS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSDELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_DUNGEONS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
@@ -307,6 +308,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue ENCHANTAL_COOLER_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MONSTER_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue MONSTER_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MOKA_POT_INPUT_BUFFER;
@@ -480,6 +483,10 @@ public final class RSIntegrationConfig {
                 .comment("启用农夫乐事兼容",
                         "支持烹饪锅和煎锅远程合成。")
                 .define("enableFarmersDelight", true);
+        ENABLE_DUNGEONS_DELIGHT = c
+                .comment("启用地牢乐事兼容",
+                        "支持怪物锅递归合成、批量预载及多台机器并发。")
+                .define("enableDungeonsDelight", true);
         ENABLE_YOUKAISHOMECOMING = c
                 .comment("启用妖怪归家兼容",
                         "支持摩卡壶、蒸锅等机器的远程合成。")
@@ -912,6 +919,14 @@ public final class RSIntegrationConfig {
                 .comment("农夫乐事烹饪锅输入预载操作上限",
                         "单台机器一次预载的最大逻辑操作数。预载食材和盛装容器，每周期仍只烹饪一份；有材料返还的配方及奥术烹饪锅仍走原路径。")
                 .defineInRange("farmersDelightCookingPotInputBufferLimit", 64, 1, 64);
+        ENABLE_MONSTER_POT_INPUT_BUFFER = s
+                .comment("启用地牢乐事怪物锅输入预载",
+                        "预载食材和盛装容器，保留原生烹饪周期与怪物热源要求；有材料返还的配方按单次操作执行。")
+                .define("enableMonsterPotInputBuffer", true);
+        MONSTER_POT_INPUT_BUFFER_LIMIT = s
+                .comment("怪物锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数，实际批次受食材、容器和输出槽容量限制。")
+                .defineInRange("monsterPotInputBufferLimit", 64, 1, 64);
         ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER = s
                 .comment("启用矿工乐事铜锅输入预载",
                         "预载食材和铜杯，有材料返还的配方仍走原路径；批次和结算使用原生铜杯双倍产量，受四个输入槽及容器输出槽限制。")

@@ -223,6 +223,7 @@
 | The Aether | 冷冻器、孵化器、祭坛 |
 | Crock Pot | 锅釜、便携锅釜，以及鸟笼的鹦鹉喂养/产蛋配方 |
 | Farmer's Delight | 烹饪锅、煎锅、切菜板，以及兼容的奥术炉配方 |
+| Dungeon's Delight | 怪物锅配方，支持容器规划、批量预载及多台锅并发，保留原生怪物热源要求 |
 | Farmer's Respite | 茶壶 |
 | Youkai's Homecoming | 摩卡壶、发酵罐、单层或多层蒸笼、水壶、各类烹饪锅、料理台 |
 | Gensokyo Delight | 发酵罐、蒸笼、水壶、各类烹饪锅和料理台，兼容重命名后的字段结构 |
