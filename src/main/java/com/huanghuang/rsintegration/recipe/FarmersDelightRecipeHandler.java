@@ -84,7 +84,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         if (recipe instanceof CampfireCookingRecipe ccr) {
             return ccr.getCookingTime();
         }
-        if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
+        if (isCookingPotRecipe(recipe)) {
             try {
                 return (int) recipe.getClass().getMethod("getCookTime").invoke(recipe);
             } catch (Exception e) {
@@ -96,7 +96,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     /** Get the output container item for a CookingPotRecipe (e.g., bowl). */
     public static ItemStack getOutputContainer(Recipe<?> recipe) {
-        if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
+        if (isCookingPotRecipe(recipe)) {
             try {
                 ItemStack container = (ItemStack) recipe.getClass()
                         .getMethod("getOutputContainer").invoke(recipe);
@@ -108,6 +108,13 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             }
         }
         return ItemStack.EMPTY;
+    }
+
+    private static boolean isCookingPotRecipe(Recipe<?> recipe) {
+        if (recipe == null) return false;
+        String name = recipe.getClass().getName();
+        return COOKING_POT_CLASS.equals(name)
+                || DungeonsDelightRecipeHandler.RECIPE_CLASS.equals(name);
     }
 
     @Override

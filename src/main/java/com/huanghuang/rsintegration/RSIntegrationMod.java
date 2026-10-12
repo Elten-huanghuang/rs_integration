@@ -22,6 +22,7 @@ import com.huanghuang.rsintegration.mods.cthulhucreatures.CthulhuCreaturesRSModu
 import com.huanghuang.rsintegration.mods.distantworlds.DistantWorldsRSModule;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRSModule;
+import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRSModule;
 import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.embers.EmbersMachinesRSModule;
@@ -269,6 +270,8 @@ public final class RSIntegrationMod {
                     () -> ImmortalersDelightRSModule.INSTANCE),
             new ModuleEntry(ModIds.FARMERSDELIGHT, RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
                     () -> FarmersDelightRSModule.INSTANCE),
+            new ModuleEntry(ModIds.DUNGEONS_DELIGHT, RSIntegrationConfig.ENABLE_DUNGEONS_DELIGHT,
+                    () -> DungeonsDelightRSModule.INSTANCE),
             new ModuleEntry(ModIds.YOUKAISHOMECOMING, RSIntegrationConfig.ENABLE_YOUKAISHOMECOMING,
                     () -> YoukaisHomecomingRSModule.INSTANCE),
             new ModuleEntry(ModIds.FARMERSRESPITE, RSIntegrationConfig.ENABLE_FARMERSRESPITE,

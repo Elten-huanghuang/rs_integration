@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.dungeonsdelight.MonsterPotBatchDelegate;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.vanilla.CookingMachineBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineBatchDelegate;
@@ -73,6 +75,22 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         assertFalse(crockPot.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
                 crockPot.capabilities().outputOwnership());
+    }
+
+    @Test
+    void monsterPotsCanRunConcurrentlyWithOwnedSlotsAndSharedReservations() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                ModIds.ID_DD_MONSTER_POT, new MonsterPotBatchDelegate(), List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                decision.capabilities().materials());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
+        assertEquals(BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                decision.capabilities().cleanup());
+        assertTrue(GraphConcurrencyPolicy.decide(ModIds.ID_DD_MONSTER_POT,
+                new MonsterPotBatchDelegate(), List.of(ModIds.ID_DD_MONSTER_POT), List.of()).exclusive());
     }
 
     @Test

@@ -24,6 +24,7 @@ public final class ModIds {
     public static final String TERRA_CURIO = "terra_curio";
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
     public static final String FARMERSDELIGHT = "farmersdelight";
+    public static final String DUNGEONS_DELIGHT = "dungeonsdelight";
     public static final String MINERS_DELIGHT = "miners_delight";
     public static final String FARMERSRESPITE = "farmersrespite";
     public static final String IRON_FURNACES = "ironfurnaces";
@@ -73,6 +74,7 @@ public final class ModIds {
     public static final String ID_MALUM_RUNIC = "malum_runic_workbench";
     public static final String ID_FD_SKILLET = "farmersdelight_skillet";
     public static final String ID_FD_COOKING_POT = "farmersdelight_cooking_pot";
+    public static final String ID_DD_MONSTER_POT = "dungeonsdelight_monster_pot";
     public static final String ID_FD_CUTTING_BOARD = "farmersdelight_cutting_board";
     public static final String ID_MD_COPPER_POT = "miners_delight_copper_pot";
     public static final String ID_FR_KETTLE = "farmersrespite_kettle";

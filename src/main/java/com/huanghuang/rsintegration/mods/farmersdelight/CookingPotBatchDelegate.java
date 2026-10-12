@@ -90,7 +90,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
-        if (FarmersDelightReflection.cookingPotRecipeClass == null || !FarmersDelightReflection.cookingPotRecipeClass.isInstance(found)) {
+        if (!isSupportedRecipe(found)) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
@@ -222,7 +222,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack prototype = ingredientPrototype(spec);
             if (spec == null || spec.isEmpty() || spec.role() != DemandRole.CONSUMED
                     || spec.count() <= 0 || prototype.isEmpty()) return false;
-            if (i < ingredientCount && hasIngredientRemainderRisk(spec)) return false;
+            if (i < ingredientCount && hasIngredientRemainderRisk(machine, spec)) return false;
         }
         return !getExpectedRecipeResult(recipe, myLevel.registryAccess()).isEmpty();
     }
@@ -631,9 +631,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return Math.max(1, Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize()));
     }
 
-    private static boolean hasIngredientRemainderRisk(IngredientSpec spec) {
+    private boolean hasIngredientRemainderRisk(BlockEntity machine, IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return true;
-        Class<?> blockEntityClass = FarmersDelightReflection.cookingPotBEClass;
+        Class<?> blockEntityClass = ingredientRemainderOverridesClass(machine);
         if (blockEntityClass == null) return true;
         try {
             Object value = blockEntityClass.getField("INGREDIENT_REMAINDER_OVERRIDES").get(null);
@@ -653,6 +653,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     protected boolean inputBufferEnabled() {
         return RSIntegrationConfig.ENABLE_FARMERS_DELIGHT_COOKING_POT_INPUT_BUFFER.get();
+    }
+
+    /** 衍生锅可指定自己的材料返还规则，避免套用普通烹饪锅的返还表。 */
+    @Nullable
+    protected Class<?> ingredientRemainderOverridesClass(BlockEntity machine) {
+        return FarmersDelightReflection.cookingPotBEClass;
     }
 
     protected int inputBufferLimit() {
@@ -912,6 +918,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     private void forceChunkLoad(boolean load) {
         forceMachineChunk(myLevel, myPos, load);
+    }
+
+    protected boolean isSupportedRecipe(Recipe<?> candidate) {
+        return FarmersDelightReflection.cookingPotRecipeClass != null
+                && FarmersDelightReflection.cookingPotRecipeClass.isInstance(candidate);
     }
 
     protected boolean isSupportedBlockEntity(BlockEntity blockEntity) {
