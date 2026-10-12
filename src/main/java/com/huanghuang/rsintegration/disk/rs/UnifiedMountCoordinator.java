@@ -40,6 +40,11 @@ public final class UnifiedMountCoordinator {
         return chunk == null ? null : chunk.getBlockEntities().get(node.getPos());
     }
 
+    private static boolean attached(NetworkNode node) {
+        BlockEntity block = loadedBlockEntity(node);
+        return block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
+    }
+
     public static final class Lease {
         public final UnifiedDiskRoot root;
         public final NetworkNode node;
@@ -49,6 +54,8 @@ public final class UnifiedMountCoordinator {
         private boolean active = true;
         /** 区分尚未恢复的方块实体和已挂载后被移除的方块实体。 */
         private boolean observedBlockEntity;
+        /** 启动时读到的空视图，需要在节点附着且连接网络后刷新一次。 */
+        private boolean pendingCacheRefresh;
         Lease(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
               IStorageDisk<?>[] fluids, ItemStack physical) {
             this.root = root; this.node = node; this.slot = slot;
@@ -71,7 +78,8 @@ public final class UnifiedMountCoordinator {
                     : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
             if (!sameDisk(current)) return true;
             LevelChunk chunk = loadedChunk(node);
-            if (chunk == null) return true;
+            // 首次恢复期间区块尚未进入缓存，不代表磁盘仓已经卸载。
+            if (chunk == null) return observedBlockEntity;
             BlockEntity block = chunk.getBlockEntities().get(node.getPos());
             if (block == null) {
                 // 节点 read() 可能早于方块实体注册；区块仍在加载时保留租约，valid() 会暂时拒绝读写。
@@ -89,14 +97,26 @@ public final class UnifiedMountCoordinator {
         void revoke() { active = false; items[slot] = null; fluids[slot] = null; }
         public String location() { return node.getLevel().dimension().location() + " " + node.getPos() + " 槽=" + slot; }
     }
-    private record Candidate(UnifiedDiskRoot root, NetworkNode node, int slot, Runnable retry) {}
+    private static final class Candidate {
+        final UnifiedDiskRoot root;
+        final NetworkNode node;
+        final int slot;
+        final Runnable retry;
+        boolean observedBlockEntity;
+        Candidate(UnifiedDiskRoot root, NetworkNode node, int slot, Runnable retry) {
+            this.root = root; this.node = node; this.slot = slot; this.retry = retry;
+            observedBlockEntity = attached(node);
+        }
+    }
     private static final class Deferred {
         final NetworkNode node;
         final int slot;
         final Runnable retry;
         long nextAttempt;
+        boolean observedBlockEntity;
         Deferred(NetworkNode node, int slot, Runnable retry, long nextAttempt) {
             this.node = node; this.slot = slot; this.retry = retry; this.nextAttempt = nextAttempt;
+            observedBlockEntity = attached(node);
         }
     }
     private final Map<UUID, Lease> leases = new HashMap<>();
@@ -124,6 +144,7 @@ public final class UnifiedMountCoordinator {
             return null;
         }
         Lease lease = new Lease(root, node, slot, items, fluids, physical);
+        lease.pendingCacheRefresh = !lease.valid();
         leases.put(root.id(), lease);
         return lease;
     }
@@ -146,19 +167,27 @@ public final class UnifiedMountCoordinator {
         ticks++;
         Map<NetworkNode, Boolean> changed = new IdentityHashMap<>();
         leases.values().removeIf(lease -> {
-            if (!lease.stale()) return false;
+            if (!lease.stale()) {
+                // valid() 的其他调用可能先观察到附着，因此缓存刷新要独立记账。
+                if (lease.pendingCacheRefresh && lease.valid() && lease.node.getNetwork() != null) {
+                    lease.pendingCacheRefresh = false;
+                    changed.put(lease.node, true);
+                }
+                return false;
+            }
             lease.revoke(); changed.put(lease.node, true); return true;
         });
         for (Candidate candidate : List.copyOf(waiting)) {
             LevelChunk chunk = loadedChunk(candidate.node);
-            if (chunk == null) {
+            BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
+            if (block == null) {
+                if (candidate.observedBlockEntity) waiting.remove(candidate);
+                continue;
+            }
+            if (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node) {
                 waiting.remove(candidate); continue;
             }
-            BlockEntity block = chunk.getBlockEntities().get(candidate.node.getPos());
-            if (block != null && (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node)) {
-                waiting.remove(candidate); continue;
-            }
-            if (block == null) continue;
+            candidate.observedBlockEntity = true;
             if (!leases.containsKey(candidate.root.id())) {
                 waiting.remove(candidate);
                 candidate.retry.run();
@@ -167,16 +196,17 @@ public final class UnifiedMountCoordinator {
         }
         for (Deferred candidate : List.copyOf(deferred)) {
             LevelChunk chunk = loadedChunk(candidate.node);
-            if (chunk == null) {
+            BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
+            if (block == null) {
+                if (candidate.observedBlockEntity) deferred.remove(candidate);
+                continue;
+            }
+            if (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node) {
                 deferred.remove(candidate);
                 continue;
             }
-            BlockEntity block = chunk.getBlockEntities().get(candidate.node.getPos());
-            if (block != null && (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node)) {
-                deferred.remove(candidate);
-                continue;
-            }
-            if (block == null || ticks < candidate.nextAttempt) continue;
+            candidate.observedBlockEntity = true;
+            if (ticks < candidate.nextAttempt) continue;
             deferred.remove(candidate);
             candidate.retry.run();
             changed.put(candidate.node, true);

@@ -10,8 +10,10 @@ import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
 import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.node.INetworkNodeProxy;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
+import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDiskListener;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -35,6 +37,8 @@ import net.minecraftforge.items.IItemHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.nio.file.Path;
@@ -42,6 +46,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -138,6 +143,135 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         assertEquals(17, wrapper.getStored());
         assertTrue(item.insert(new ItemStack(Items.DIAMOND), 3, Action.PERFORM).isEmpty());
         assertEquals(20, wrapper.getStored());
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void startupSweepPreservesPendingViewsAndRefreshesBothCachesAfterAttachment(boolean missingChunk) throws Exception {
+        setup();
+        var core = manager.entry(root.id()).core;
+        core.insertItem(new ItemStack(Items.DIAMOND), 17, true);
+        core.insertFluid(new FluidStack(Fluids.WATER, 1), 1000, true);
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(node.getNetwork()).thenReturn(network);
+        BlockEntity block = blocks.remove(BlockPos.ZERO);
+        if (missingChunk) when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        var lease = lease();
+        var item = new UnifiedBoundDisk<ItemStack>(lease, core, FrozenKey.Kind.ITEM);
+        var fluid = new UnifiedBoundDisk<FluidStack>(lease, core, FrozenKey.Kind.FLUID);
+        var wrapper = new ItemDriveWrapperStorageDisk(node, item);
+        items[0] = wrapper; fluids[0] = fluid;
+        assertEquals(0, wrapper.getStored()); assertEquals(0, fluid.getStored());
+        assertTrue(item.getStacks().isEmpty()); assertTrue(fluid.getStacks().isEmpty());
+
+        // 进入世界后会先执行服务器 tick，区块和方块实体此时可能仍未恢复。
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertSame(wrapper, items[0]); assertSame(fluid, fluids[0]);
+        assertTrue(manager.mounts().mounted(root.id()));
+        verify(network.getItemStorageCache(), never()).invalidate(any());
+        verify(network.getFluidStorageCache(), never()).invalidate(any());
+
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        blocks.put(BlockPos.ZERO, block);
+        // 其他 RS 查询先观察到节点恢复，也不能吃掉下一次 tick 的缓存刷新。
+        assertTrue(lease.valid());
+        manager.mounts().sweep();
+        assertEquals(17, wrapper.getStored()); assertEquals(1000, fluid.getStored());
+        assertEquals(17, item.getStacks().iterator().next().getCount());
+        assertEquals(1000, fluid.getStacks().iterator().next().getAmount());
+        assertSame(wrapper, items[0]); assertSame(fluid, fluids[0]);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        verify(network.getItemStorageCache(), times(1)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(network.getFluidStorageCache(), times(1)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void deferredMountSurvivesStartupUntilChunkAndBlockEntityAreReady() throws Exception {
+        setup();
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(node.getNetwork()).thenReturn(network);
+        BlockEntity block = blocks.remove(BlockPos.ZERO);
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        AtomicInteger retries = new AtomicInteger();
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(0, retries.get());
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        manager.mounts().sweep();
+        assertEquals(0, retries.get());
+        blocks.put(BlockPos.ZERO, block);
+        manager.mounts().sweep();
+        assertEquals(1, retries.get());
+        manager.mounts().sweep();
+        assertEquals(1, retries.get());
+        verify(network.getItemStorageCache()).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(network.getFluidStorageCache()).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void startupCacheRefreshWaitsForNetworkConnection() throws Exception {
+        setup();
+        BlockEntity block = blocks.remove(BlockPos.ZERO);
+        var lease = lease();
+        blocks.put(BlockPos.ZERO, block);
+        manager.mounts().sweep();
+        assertTrue(lease.valid());
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(node.getNetwork()).thenReturn(network);
+        manager.mounts().sweep();
+        manager.mounts().sweep();
+        verify(network.getItemStorageCache(), times(1)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(network.getFluidStorageCache(), times(1)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void waitingDuplicateSurvivesStartupAndMountsAfterOriginalIsReleased() throws Exception {
+        setup();
+        var first = lease(); assertTrue(first.valid());
+        DiskDriveNetworkNode other = mock(DiskDriveNetworkNode.class);
+        BlockPos otherPos = new BlockPos(16, 0, 0);
+        when(other.getLevel()).thenReturn(level); when(other.getPos()).thenReturn(otherPos);
+        IItemHandler otherInventory = node.getDisks();
+        when(other.getDisks()).thenReturn(otherInventory);
+        AtomicInteger retries = new AtomicInteger();
+        IStorageDisk<?>[] otherItems = new IStorageDisk<?>[8], otherFluids = new IStorageDisk<?>[8];
+        AtomicReference<UnifiedMountCoordinator.Lease> replacement = new AtomicReference<>();
+        Runnable retry = () -> {
+            retries.incrementAndGet();
+            replacement.set(manager.mounts().acquire(root, other, 0, otherItems, otherFluids, current.get(), () -> {}));
+        };
+        assertNull(manager.mounts().acquire(root, other, 0, otherItems, otherFluids, current.get(), retry));
+        manager.mounts().sweep();
+        assertTrue(first.valid()); assertEquals(0, retries.get());
+        LevelChunk otherChunk = mock(LevelChunk.class);
+        BlockEntity otherBlock = mock(BlockEntity.class, withSettings().extraInterfaces(INetworkNodeProxy.class));
+        when(((INetworkNodeProxy<?>) otherBlock).getNode()).thenReturn(other);
+        when(otherChunk.getBlockEntities()).thenReturn(Map.of(otherPos, otherBlock));
+        when(chunks.getChunkNow(1, 0)).thenReturn(otherChunk);
+        manager.mounts().sweep();
+        assertEquals(0, retries.get());
+        manager.mounts().releaseSlot(node, 0);
+        manager.mounts().sweep();
+        assertFalse(first.valid()); assertEquals(1, retries.get());
+        assertNotNull(replacement.get()); assertTrue(replacement.get().valid());
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void deferredMountIsCancelledWhenAttachedNodeUnloadsOrIsReplaced(boolean unloaded) throws Exception {
+        setup();
+        AtomicInteger retries = new AtomicInteger();
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        BlockEntity block = blocks.get(BlockPos.ZERO);
+        if (unloaded) when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        else blocks.put(BlockPos.ZERO, mock(BlockEntity.class));
+        manager.mounts().sweep();
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        blocks.put(BlockPos.ZERO, block);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(0, retries.get());
         verify(level, never()).getBlockEntity(any());
     }
 
