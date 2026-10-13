@@ -361,6 +361,75 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         verify(level, never()).getBlockEntity(any());
     }
 
+    @Test void unloadedDiskRemountsWhenRsReusesTheSameNodeAfterChunkReload() throws Exception {
+        setup();
+        var core = manager.entry(root.id()).core;
+        core.insertItem(new ItemStack(Items.DIAMOND), 17, true);
+        core.insertFluid(new FluidStack(Fluids.WATER, 1), 1000, true);
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(node.getNetwork()).thenReturn(network);
+        AtomicInteger retries = new AtomicInteger();
+        AtomicReference<UnifiedMountCoordinator.Lease> replacement = new AtomicReference<>();
+        Runnable retry = () -> {
+            retries.incrementAndGet();
+            var restored = manager.mounts().acquire(root, node, 0, items, fluids, current.get(), () -> {});
+            replacement.set(restored);
+            if (restored != null) {
+                items[0] = new UnifiedBoundDisk<ItemStack>(restored, core, FrozenKey.Kind.ITEM);
+                fluids[0] = new UnifiedBoundDisk<FluidStack>(restored, core, FrozenKey.Kind.FLUID);
+            }
+        };
+        var first = manager.mounts().acquire(root, node, 0, items, fluids, current.get(), retry);
+        var oldItem = new UnifiedBoundDisk<ItemStack>(first, core, FrozenKey.Kind.ITEM);
+        var oldFluid = new UnifiedBoundDisk<FluidStack>(first, core, FrozenKey.Kind.FLUID);
+        items[0] = oldItem; fluids[0] = oldFluid;
+        assertTrue(first.valid());
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertFalse(first.valid()); assertNull(items[0]); assertNull(fluids[0]);
+        assertEquals(0, retries.get());
+
+        // RS 将槽位保留在节点管理器中，区块重载会复用节点，不会再次 read() 或触发插拔。
+        LevelChunk reloadedChunk = mock(LevelChunk.class);
+        Map<BlockPos, BlockEntity> reloadedBlocks = new HashMap<>();
+        when(reloadedChunk.getBlockEntities()).thenReturn(reloadedBlocks);
+        when(chunks.getChunkNow(0, 0)).thenReturn(reloadedChunk);
+        manager.mounts().sweep();
+        assertEquals(0, retries.get());
+        BlockEntity reloadedBlock = mock(BlockEntity.class, withSettings().extraInterfaces(INetworkNodeProxy.class));
+        when(((INetworkNodeProxy<?>) reloadedBlock).getNode()).thenReturn(node);
+        reloadedBlocks.put(BlockPos.ZERO, reloadedBlock);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(1, retries.get()); assertNotNull(replacement.get());
+        assertTrue(replacement.get().valid()); assertFalse(first.valid());
+        assertEquals(17, items[0].getStored()); assertEquals(1000, fluids[0].getStored());
+        assertTrue(oldItem.extract(new ItemStack(Items.DIAMOND), 1, 0, Action.PERFORM).isEmpty());
+        assertTrue(oldFluid.extract(new FluidStack(Fluids.WATER, 1), 1, 0, Action.PERFORM).isEmpty());
+        assertEquals(17, core.items.total()); assertEquals(1000, core.fluids.total());
+        verify(network.getItemStorageCache(), times(2)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(network.getFluidStorageCache(), times(2)).invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void unloadedDiskRetryDoesNotMountRemovedOrReplacedPhysicalDisk(boolean removed) throws Exception {
+        setup();
+        AtomicInteger retries = new AtomicInteger();
+        var first = manager.mounts().acquire(root, node, 0, items, fluids, current.get(), retries::incrementAndGet);
+        assertTrue(first.valid());
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        manager.mounts().sweep();
+        if (removed) current.set(ItemStack.EMPTY);
+        else ((UnifiedDiskItem) current.get().getItem()).setIdentity(current.get(), UUID.randomUUID(), root.worldId());
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(0, retries.get()); assertFalse(first.valid());
+        assertFalse(manager.mounts().mounted(root.id()));
+        assertNull(items[0]); assertNull(fluids[0]);
+        verify(level, never()).getBlockEntity(any());
+    }
+
     @Test void itemAndFluidViewsPreservePermissionsSimulationAndIndependentListeners() throws Exception {
         setup(); var lease = lease(); assertTrue(lease.valid());
         var core = manager.entry(root.id()).core;

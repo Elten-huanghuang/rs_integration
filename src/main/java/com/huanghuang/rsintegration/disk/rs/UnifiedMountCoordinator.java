@@ -10,6 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +23,7 @@ import java.util.function.Supplier;
 
 /** 整个服务器唯一挂载；验证物理槽位与节点实例，旧 wrapper 自动失效。 */
 public final class UnifiedMountCoordinator {
+    private static final Logger LOGGER = LogManager.getLogger(UnifiedMountCoordinator.class);
     private static final ThreadLocal<NetworkNode> CALLER = new ThreadLocal<>();
     public static <T> T withCaller(NetworkNode node, Supplier<T> action) {
         NetworkNode old = CALLER.get(); CALLER.set(node);
@@ -51,21 +54,20 @@ public final class UnifiedMountCoordinator {
         public final int slot;
         private final IStorageDisk<?>[] items, fluids;
         private final ItemStack physical;
+        private final Runnable retry;
         private boolean active = true;
         /** 区分尚未恢复的方块实体和已挂载后被移除的方块实体。 */
         private boolean observedBlockEntity;
         /** 启动时读到的空视图，需要在节点附着且连接网络后刷新一次。 */
         private boolean pendingCacheRefresh;
         Lease(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
-              IStorageDisk<?>[] fluids, ItemStack physical) {
+              IStorageDisk<?>[] fluids, ItemStack physical, Runnable retry) {
             this.root = root; this.node = node; this.slot = slot;
-            this.items = items; this.fluids = fluids; this.physical = physical;
+            this.items = items; this.fluids = fluids; this.physical = physical; this.retry = retry;
         }
         public boolean valid() {
             if (!active || !root.manager().enabled()) return false;
-            ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
-                    : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
-            if (!sameDisk(current)) return false;
+            if (!hasPhysicalDisk()) return false;
             BlockEntity block = loadedBlockEntity(node);
             boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
             // 节点 read() 会先恢复槽位再进入方块实体；尚未附着期间不可读写。
@@ -74,9 +76,7 @@ public final class UnifiedMountCoordinator {
         }
         boolean stale() {
             if (!active) return true;
-            ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
-                    : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
-            if (!sameDisk(current)) return true;
+            if (!hasPhysicalDisk()) return true;
             LevelChunk chunk = loadedChunk(node);
             // 首次恢复期间区块尚未进入缓存，不代表磁盘仓已经卸载。
             if (chunk == null) return observedBlockEntity;
@@ -88,6 +88,11 @@ public final class UnifiedMountCoordinator {
             boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
             if (same) observedBlockEntity = true;
             return !same;
+        }
+        private boolean hasPhysicalDisk() {
+            ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
+                    : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
+            return sameDisk(current);
         }
         /** 区块/服务器重载会重建 ItemStack 对象，必须按持久化身份比较，不能比较对象引用。 */
         private boolean sameDisk(ItemStack current) {
@@ -136,14 +141,14 @@ public final class UnifiedMountCoordinator {
         if (node == null) return null;
         releaseSlot(node, slot);
         Lease existing = leases.get(root.id());
-        if (existing != null && existing.stale()) { existing.revoke(); leases.remove(root.id()); existing = null; }
+        if (existing != null && existing.stale()) { retire(existing); leases.remove(root.id()); existing = null; }
         if (existing != null) {
             waiting.removeIf(candidate -> candidate.root.id().equals(root.id())
                     && candidate.node == node && candidate.slot == slot);
             waiting.add(new Candidate(root, node, slot, retry));
             return null;
         }
-        Lease lease = new Lease(root, node, slot, items, fluids, physical);
+        Lease lease = new Lease(root, node, slot, items, fluids, physical, retry);
         lease.pendingCacheRefresh = !lease.valid();
         leases.put(root.id(), lease);
         return lease;
@@ -163,6 +168,21 @@ public final class UnifiedMountCoordinator {
     public String location(UUID id) { Lease lease = leases.get(id); return lease == null ? "无" : lease.location(); }
     public void clear() { leases.values().forEach(Lease::revoke); leases.clear(); waiting.clear(); deferred.clear(); }
 
+    private void retire(Lease lease) {
+        lease.revoke();
+        if (!lease.hasPhysicalDisk() || loadedChunk(lease.node) != null) return;
+        // RS 在区块重载后复用原节点，不会重新读取槽位；旧视图撤销后必须保留重挂载入口。
+        LOGGER.info("[RSI] 统一盘 {} 所在区块卸载，等待区块恢复后重新挂载: dim={} pos={} slot={}",
+                lease.root.id(), lease.node.getLevel().dimension(), lease.node.getPos(), lease.slot);
+        defer(lease.node, lease.slot, () -> {
+            // 等待期间可能发生插拔；只恢复原盘，不能用捕获的旧 ItemStack 覆盖新槽位。
+            if (!lease.hasPhysicalDisk()) return;
+            LOGGER.info("[RSI] 统一盘 {} 所在区块已恢复，尝试自动重建物品与流体视图: dim={} pos={} slot={}",
+                    lease.root.id(), lease.node.getLevel().dimension(), lease.node.getPos(), lease.slot);
+            lease.retry.run();
+        });
+    }
+
     public void sweep() {
         ticks++;
         Map<NetworkNode, Boolean> changed = new IdentityHashMap<>();
@@ -175,7 +195,7 @@ public final class UnifiedMountCoordinator {
                 }
                 return false;
             }
-            lease.revoke(); changed.put(lease.node, true); return true;
+            retire(lease); changed.put(lease.node, true); return true;
         });
         for (Candidate candidate : List.copyOf(waiting)) {
             LevelChunk chunk = loadedChunk(candidate.node);
