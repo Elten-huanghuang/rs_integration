@@ -2,6 +2,10 @@ package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -23,10 +27,13 @@ import net.minecraftforge.fluids.capability.IFluidHandler.FluidAction;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -50,7 +57,12 @@ class IronAlchemistBrewingTest extends BootstrapTest {
                 && InkFluidSupport.fluid(recipe.getResultItem(RegistryAccess.EMPTY)).isFluidEqual(awkward))
                 .findFirst().orElseThrow();
         assertFalse(brew.isBottling());
-        assertEquals(250, new IronSpellBooksRecipeHandler().getIngredients(brew).get(0).count());
+        assertTrue(brew.isPotionBrewing());
+        assertEquals(1000, new IronSpellBooksRecipeHandler().getIngredients(brew).get(0).count());
+        assertEquals(1, new IronSpellBooksRecipeHandler().getIngredients(brew).get(1).count());
+        assertEquals(1000, brew.getResultItem(RegistryAccess.EMPTY).getCount());
+        assertTrue(IronAlchemistBatchDelegate.canPrepareBrew(new FluidTank(1000), brew));
+        assertFalse(IronAlchemistBatchDelegate.canPrepareBrew(new FluidTank(750), brew));
         assertTrue(new IronSpellBooksRecipeHandler().hasDeterministicPrimaryOutput(brew));
         assertTrue(recipes.values().stream().anyMatch(recipe -> recipe.isBrewing()
                 && recipe.inputIngredients().get(1).test(new ItemStack(Items.GUNPOWDER))
@@ -59,6 +71,50 @@ class IronAlchemistBrewingTest extends BootstrapTest {
         IronAlchemistRecipeCatalog.indexPotionRecipes(disabled, IronAlchemistBrewingTest::token, false);
         assertFalse(disabled.values().stream().anyMatch(IronSpellBooksRecipe::isBrewing));
         assertTrue(disabled.values().stream().anyMatch(IronSpellBooksRecipe::isBottling));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 4, 5, 8})
+    void planningBottledPotionsConsumesOneReagentPerFourBottles(int bottles) {
+        var recipes = new LinkedHashMap<ResourceLocation, IronSpellBooksRecipe>();
+        IronAlchemistRecipeCatalog.indexPotionRecipes(recipes, IronAlchemistBrewingTest::token, true);
+        ItemStack awkwardBottle = PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.AWKWARD);
+        FluidStack awkward = AlchemistPotionSupport.fluid(awkwardBottle);
+        IronSpellBooksRecipe brew = recipes.values().stream().filter(recipe -> recipe.isBrewing()
+                && recipe.inputIngredients().get(1).test(new ItemStack(Items.NETHER_WART))
+                && InkFluidSupport.fluid(recipe.inputs().get(0)).getFluid() == Fluids.WATER
+                && InkFluidSupport.fluid(recipe.getResultItem(RegistryAccess.EMPTY)).isFluidEqual(awkward))
+                .findFirst().orElseThrow();
+        IronSpellBooksRecipe bottle = recipes.values().stream().filter(recipe -> recipe.isBottling()
+                && ItemStack.isSameItemSameTags(recipe.getResultItem(RegistryAccess.EMPTY), awkwardBottle))
+                .findFirst().orElseThrow();
+        IronSpellBooksRecipeHandler handler = new IronSpellBooksRecipeHandler();
+        ResourceLocation type = new ResourceLocation("irons_spellbooks", "alchemist_cauldron");
+        var brewNode = ImmutableRecipeGraphProjector.projectRecipe(brew.getId(),
+                handler.getResultItem(brew, RegistryAccess.EMPTY), handler.getIngredients(brew), "alchemist", type);
+        var bottleNode = ImmutableRecipeGraphProjector.projectRecipe(bottle.getId(),
+                handler.getResultItem(bottle, RegistryAccess.EMPTY), handler.getIngredients(bottle), "alchemist", type);
+        assertNotNull(brewNode);
+        assertNotNull(bottleNode);
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                brewNode.output(), List.of(brewNode), bottleNode.output(), List.of(bottleNode)));
+        int batches = (bottles + 3) / 4;
+        var stock = Map.of(
+                ImmutableRecipeGraphProjector.material(brew.inputs().get(0), true), batches * 1000,
+                ImmutableRecipeGraphProjector.material(new ItemStack(Items.NETHER_WART), true), batches,
+                ImmutableRecipeGraphProjector.material(new ItemStack(Items.GLASS_BOTTLE), true), bottles);
+
+        var plan = PureRecipePlanner.resolve(graph, stock,
+                List.of(new IngredientRef(List.of(bottleNode.output()), bottles)), 10);
+
+        assertTrue(plan.feasible(), plan.toString());
+        assertEquals(batches, plan.steps().stream().filter(step -> step.recipeId().equals(brew.getId()))
+                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
+        assertEquals(bottles, plan.steps().stream().filter(step -> step.recipeId().equals(bottle.getId()))
+                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
+        assertEquals((batches * 4 - bottles) * 250, plan.remaining().getOrDefault(brewNode.output(), 0));
+        assertEquals(250, handler.getIngredients(bottle).get(0).count());
+        assertEquals(1, handler.getIngredients(bottle).get(1).count());
     }
 
     @Test void brewIngredientRetainsFluidNbtAndNative1000To250Ratio() {
@@ -73,8 +129,13 @@ class IronAlchemistBrewingTest extends BootstrapTest {
         assertTrue(specs.get(0).ingredient().test(token(input)));
         assertFalse(specs.get(0).ingredient().test(token(AlchemistPotionSupport.fluid(AlchemistPotionSupportTest.potion("SPLASH")))));
         assertEquals(250, recipe.getResultItem(RegistryAccess.EMPTY).getCount());
+        assertFalse(recipe.isPotionBrewing());
         assertEquals(1, new IronSpellBooksRecipeHandler().getSecondaryOutputs(recipe, RegistryAccess.EMPTY).size());
         assertSame(recipe, IronAlchemistRecipeCatalog.find(Ingredient.of(Items.AMETHYST_SHARD), input,
+                List.of(output), new ItemStack(Items.GLASS_BOTTLE), new ItemStack(Items.AMETHYST_SHARD), List.of(recipe)));
+        FluidStack singleBottle = input.copy();
+        singleBottle.setAmount(250);
+        assertNull(IronAlchemistRecipeCatalog.find(Ingredient.of(Items.AMETHYST_SHARD), singleBottle,
                 List.of(output), new ItemStack(Items.GLASS_BOTTLE), new ItemStack(Items.AMETHYST_SHARD), List.of(recipe)));
     }
 
@@ -99,13 +160,47 @@ class IronAlchemistBrewingTest extends BootstrapTest {
         display.getOrCreateTag().putString("Potion", "minecraft:water");
         display.getOrCreateTag().putString("irons_spellbooks:bottle_type", "REGULAR");
         FluidStack output = AlchemistPotionSupport.fluid(PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.AWKWARD));
-        IronSpellBooksRecipe recipe = IronSpellBooksRecipe.brewRecipe(new ResourceLocation("test", "water_brew"),
-                token(new FluidStack(Fluids.WATER, 250)), Ingredient.of(Items.NETHER_WART), List.of(token(output)));
+        IronSpellBooksRecipe recipe = IronSpellBooksRecipe.potionBrewRecipe(new ResourceLocation("test", "water_brew"),
+                token(new FluidStack(Fluids.WATER, 250)), Ingredient.of(Items.NETHER_WART), token(output));
 
         assertSame(recipe, IronAlchemistRecipeCatalog.find(Ingredient.of(Items.NETHER_WART), display,
                 List.of(output), ItemStack.EMPTY, new ItemStack(Items.NETHER_WART), List.of(recipe)));
         assertNull(IronAlchemistRecipeCatalog.find(Ingredient.of(Items.NETHER_WART), display,
                 List.of(output), ItemStack.EMPTY, new ItemStack(Items.GUNPOWDER), List.of(recipe)));
+        FluidStack wrongAmount = output.copy();
+        wrongAmount.setAmount(500);
+        assertNull(IronAlchemistRecipeCatalog.find(Ingredient.of(Items.NETHER_WART), display,
+                List.of(wrongAmount), ItemStack.EMPTY, new ItemStack(Items.NETHER_WART), List.of(recipe)));
+        FluidStack fullInput = new FluidStack(Fluids.WATER, 1000);
+        FluidStack fullOutput = output.copy();
+        fullOutput.setAmount(1000);
+        assertSame(recipe, IronAlchemistRecipeCatalog.find(Ingredient.of(Items.NETHER_WART), fullInput,
+                List.of(fullOutput), ItemStack.EMPTY, new ItemStack(Items.NETHER_WART), List.of(recipe)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REGULAR", "SPLASH", "LINGERING"})
+    void nativeSingleBottlePreviewResolvesFullBatchAndPreservesPotionNbt(String bottleType) {
+        ItemStack inputBottle = AlchemistPotionSupportTest.potion(bottleType);
+        PotionUtils.setPotion(inputBottle, Potions.HEALING);
+        ItemStack outputBottle = inputBottle.copy();
+        PotionUtils.setPotion(outputBottle, Potions.STRONG_HEALING);
+        FluidStack input = AlchemistPotionSupport.fluid(inputBottle);
+        FluidStack output = AlchemistPotionSupport.fluid(outputBottle);
+        Ingredient reagent = Ingredient.of(Items.GLOWSTONE_DUST);
+        IronSpellBooksRecipe recipe = IronSpellBooksRecipe.potionBrewRecipe(new ResourceLocation("test", "potion_brew"),
+                token(input), reagent, token(output));
+
+        assertSame(recipe, IronAlchemistRecipeCatalog.find(reagent, input, List.of(output), ItemStack.EMPTY,
+                new ItemStack(Items.GLOWSTONE_DUST), List.of(recipe)));
+        assertEquals(1000, recipe.inputs().get(0).getCount());
+        assertEquals(1000, recipe.getResultItem(RegistryAccess.EMPTY).getCount());
+        assertTrue(ItemStack.isSameItemSameTags(inputBottle,
+                AlchemistPotionSupport.bottle(InkFluidSupport.fluid(recipe.inputs().get(0)))));
+        assertTrue(ItemStack.isSameItemSameTags(outputBottle,
+                AlchemistPotionSupport.bottle(InkFluidSupport.fluid(recipe.getResultItem(RegistryAccess.EMPTY)))));
+        assertNull(IronAlchemistRecipeCatalog.find(reagent, input, List.of(input), ItemStack.EMPTY,
+                new ItemStack(Items.GLOWSTONE_DUST), List.of(recipe)));
     }
 
     @Test void fullRsDoesNotDrainOldFluidAndPartialRealInsertReturnsRemainder() {
