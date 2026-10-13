@@ -114,8 +114,8 @@ public final class IronAlchemistRecipeCatalog {
                     FluidStack produced = AlchemistPotionSupport.fluid(output);
                     if (produced.isEmpty() || produced.isFluidEqual(fluid)) continue;
                     ResourceLocation id = potionId("brew", input, reagent, output);
-                    recipes.put(id, IronSpellBooksRecipe.brewRecipe(id, tokens.apply(fluid),
-                            Ingredient.of(reagent), List.of(tokens.apply(produced))));
+                    recipes.put(id, IronSpellBooksRecipe.potionBrewRecipe(id, tokens.apply(fluid),
+                            Ingredient.of(reagent), tokens.apply(produced)));
                 }
             }
         }
@@ -157,7 +157,9 @@ public final class IronAlchemistRecipeCatalog {
         for (IronSpellBooksRecipe recipe : recipes) {
             if (!recipe.isBrewing()) continue;
             List<ItemStack> materials = recipe.inputs();
-            if (!InkFluidSupport.fluid(materials.get(0)).isFluidStackIdentical(fluid)) continue;
+            // 原生 JEI 用一瓶展示普通药水酿造，RS 实际按整锅执行。
+            boolean singleBottlePreview = recipe.isPotionBrewing() && fluid.getAmount() == InkFluidSupport.BOTTLE_AMOUNT;
+            if (!matchesBrewFluid(InkFluidSupport.fluid(materials.get(0)), fluid, singleBottlePreview)) continue;
             if (displayed != null && !displayed.isEmpty()) {
                 if (!input.test(displayed) || !recipe.inputIngredients().get(1).test(displayed)) continue;
             } else if (List.of(input.getItems()).stream().noneMatch(recipe.inputIngredients().get(1)::test)) continue;
@@ -169,10 +171,16 @@ public final class IronAlchemistRecipeCatalog {
             if (fluids.size() != outputs.size() || items.size() != (extra.isEmpty() ? 0 : 1)) continue;
             boolean same = true;
             for (int i = 0; i < fluids.size(); i++) {
-                if (!(outputs.get(i) instanceof FluidStack output) || !fluids.get(i).isFluidStackIdentical(output)) same = false;
+                if (!(outputs.get(i) instanceof FluidStack output)
+                        || !matchesBrewFluid(fluids.get(i), output, singleBottlePreview)) same = false;
             }
             if (same && (items.isEmpty() || ItemStack.matches(items.get(0), extra))) return recipe;
         }
         return null;
+    }
+
+    private static boolean matchesBrewFluid(FluidStack expected, FluidStack displayed, boolean singleBottlePreview) {
+        return expected.isFluidEqual(displayed)
+                && displayed.getAmount() == (singleBottlePreview ? InkFluidSupport.BOTTLE_AMOUNT : expected.getAmount());
     }
 }

@@ -28,6 +28,7 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     private final int spellLevel;
     private List<ItemStack> secondaryOutputs = List.of();
     private boolean brewing;
+    private boolean potionBrewing;
 
     IronSpellBooksRecipe(ResourceLocation id, Machine machine, List<ItemStack> inputs,
                          ItemStack output, String spellId) {
@@ -72,7 +73,18 @@ public final class IronSpellBooksRecipe implements Recipe<Container> {
     }
 
     public boolean isBrewing() { return brewing; }
+    public boolean isPotionBrewing() { return potionBrewing; }
     public List<ItemStack> secondaryOutputs() { return secondaryOutputs.stream().map(ItemStack::copy).toList(); }
+
+    static IronSpellBooksRecipe potionBrewRecipe(ResourceLocation id, ItemStack fluid, Ingredient reagent,
+                                                 ItemStack output) {
+        // 原生锅一次用一份酿造材料转换整锅药水，容量为四瓶；装瓶仍按每瓶 250 mB 计。
+        int amount = InkFluidSupport.BOTTLE_AMOUNT * 4;
+        IronSpellBooksRecipe recipe = brewRecipe(id, fluid.copyWithCount(amount), reagent,
+                List.of(output.copyWithCount(amount)));
+        recipe.potionBrewing = true;
+        return recipe;
+    }
 
     static IronSpellBooksRecipe brewRecipe(ResourceLocation id, ItemStack fluid, Ingredient reagent,
                                            List<ItemStack> outputs) {
