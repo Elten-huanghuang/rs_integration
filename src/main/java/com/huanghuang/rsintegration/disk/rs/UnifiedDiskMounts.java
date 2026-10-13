@@ -63,6 +63,9 @@ public final class UnifiedDiskMounts {
             }
             items[slot] = itemWrapper.apply(new UnifiedBoundDisk<>(lease, entry.core, FrozenKey.Kind.ITEM));
             fluids[slot] = fluidWrapper.apply(new UnifiedBoundDisk<>(lease, entry.core, FrozenKey.Kind.FLUID));
+            LOGGER.info("[RSI] 统一盘已创建物品与流体视图: dim={} pos={} slot={} id={} items={} fluids={} attached={}",
+                    level.dimension().location(), node.getPos(), slot, root.id(),
+                    entry.core.items.total(), entry.core.fluids.total(), lease.valid());
         } catch (RuntimeException e) {
             items[slot] = null; fluids[slot] = null;
             UnifiedDiskManager failed = UnifiedDiskManager.existing(level.getServer());
