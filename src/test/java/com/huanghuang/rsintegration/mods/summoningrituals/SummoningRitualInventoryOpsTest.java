@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.summoningrituals;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
@@ -19,6 +20,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -217,7 +219,7 @@ class SummoningRitualInventoryOpsTest {
     }
 
     @Test
-    void catalystMisroutedByHandlerIsRepairedToDynamicLastSlot() {
+    void catalystBypassesHandlersThatMisrouteInteractiveInsertion() {
         FakeHandler handler = new FakeHandler(5, 4096, true);
         ItemStack catalyst = new ItemStack(Items.GOLD_INGOT);
         List<SummoningRitualInventoryOps.Inserted> inserted = new ArrayList<>();
@@ -230,7 +232,125 @@ class SummoningRitualInventoryOpsTest {
         assertEquals(1, inserted.get(0).amount());
     }
 
-    private static final class FakeHandler implements IItemHandlerModifiable {
+    @Test
+    void occupiedCatalystCannotBeOverwrittenByAnotherOrder() {
+        FakeHandler handler = new FakeHandler(3, 4096);
+        handler.stacks[2] = new ItemStack(Items.STICK);
+        List<SummoningRitualInventoryOps.Inserted> inserted = new ArrayList<>();
+
+        ItemStack remainder = SummoningRitualInventoryOps.insertCatalyst(
+                handler, new ItemStack(Items.BONE), inserted);
+
+        assertTrue(remainder.is(Items.BONE));
+        assertTrue(handler.getStackInSlot(2).is(Items.STICK));
+        assertTrue(inserted.isEmpty());
+    }
+
+    @Test
+    void preparationNeverCallsInteractiveInsertOrMutatingSimulation() {
+        FakeHandler handler = new FakeHandler(3, 4096) {
+            @Override
+            public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+                throw new AssertionError("召唤祭坛的 insertItem 会在模拟时写库存，或转入右键启动仪式");
+            }
+        };
+        List<SummoningRitualInventoryOps.Inserted> inserted = new ArrayList<>();
+
+        assertTrue(SummoningRitualInventoryOps.insertCatalyst(
+                handler, new ItemStack(Items.BONE), inserted).isEmpty());
+        assertTrue(SummoningRitualInventoryOps.insertMaterial(
+                handler, new ItemStack(Items.DIAMOND, 8), inserted).isEmpty());
+
+        assertEquals(8, handler.getStackInSlot(0).getCount());
+        assertTrue(handler.getStackInSlot(2).is(Items.BONE));
+    }
+
+    @Test
+    void catalystCanBeRecycledWhenNativeExtractionAlwaysReturnsEmpty() {
+        FakeHandler handler = new FakeHandler(3, 4096) {
+            @Override
+            public ItemStack extractItem(int slot, int amount, boolean simulate) {
+                return ItemStack.EMPTY;
+            }
+        };
+        ItemStack catalyst = new ItemStack(Items.STICK);
+        catalyst.getOrCreateTag().putString("ritual", "A");
+        handler.stacks[2] = catalyst.copy();
+
+        List<ItemStack> preview = SummoningRitualInventoryOps.extractSlot(handler, 2, true);
+        assertEquals(1, preview.size());
+        assertTrue(ItemStack.matches(catalyst, preview.get(0)));
+        assertTrue(ItemStack.matches(catalyst, handler.getStackInSlot(2)));
+
+        List<ItemStack> extracted = SummoningRitualInventoryOps.extractSlot(handler, 2, false);
+        assertEquals(1, extracted.size());
+        assertTrue(ItemStack.matches(catalyst, extracted.get(0)));
+        assertTrue(handler.getStackInSlot(2).isEmpty());
+    }
+
+    @Test
+    void compressedMaterialsAreCountedMergedAndRolledBackWithoutDisplayNbt() {
+        FakeHandler handler = new FakeHandler(3, 4096);
+        ItemStack material = new ItemStack(Items.DIAMOND);
+        material.getOrCreateTag().putString("grade", "ritual");
+        ItemStack compressed = material.copy();
+        compressed.getOrCreateTag().putInt("YuushaAmount", 400);
+        compressed.setHoverName(Component.literal("压缩数量"));
+        handler.stacks[0] = compressed;
+
+        List<IngredientSpec> missing = SummoningRitualAltarBatchDelegate.calculateMissing(
+                handler, Ingredient.EMPTY,
+                List.of(new IngredientSpec(StrictNBTIngredient.of(material), 500)));
+        assertEquals(100, missing.get(0).count());
+        List<SummoningRitualInventoryOps.Inserted> inserted = new ArrayList<>();
+        assertTrue(SummoningRitualInventoryOps.insertMaterial(
+                handler, material.copyWithCount(100), inserted).isEmpty());
+        assertEquals(500, SummoningRitualInventoryOps.stackInSlot(handler, 0).getCount());
+        ItemStack reloaded = ItemStack.of(handler.getStackInSlot(0).save(new CompoundTag()));
+        assertEquals(1, reloaded.getCount());
+        assertEquals(500, reloaded.getTag().getInt("YuushaAmount"));
+        assertTrue(handler.getStackInSlot(1).isEmpty());
+
+        List<ItemStack> recovered = SummoningRitualInventoryOps.rollbackInsertions(handler, inserted);
+        assertEquals(100, recovered.stream().mapToInt(ItemStack::getCount).sum());
+        ItemStack restored = SummoningRitualInventoryOps.stackInSlot(handler, 0);
+        assertEquals(400, restored.getCount());
+        assertTrue(ItemStack.isSameItemSameTags(material, restored));
+        assertFalse(restored.getTag().contains("YuushaAmount"));
+    }
+
+    @Test
+    void compressedNamedMaterialPreservesOriginalNbtAcrossPlanningAndRecycling() {
+        FakeHandler handler = new FakeHandler(3, 4096);
+        ItemStack material = new ItemStack(Items.DIAMOND);
+        material.setHoverName(Component.literal("祝福钻石"));
+        material.getOrCreateTag().putString("grade", "ritual");
+        String originalName = Component.Serializer.toJson(material.getHoverName());
+        ItemStack compressed = material.copy();
+        compressed.getOrCreateTag().putInt("YuushaAmount", 400);
+        compressed.getOrCreateTag().putString("srfix_original_name", originalName);
+        compressed.setHoverName(Component.literal("压缩数量"));
+        handler.stacks[0] = compressed;
+
+        List<IngredientSpec> missing = SummoningRitualAltarBatchDelegate.calculateMissing(
+                handler, List.of(new IngredientSpec(StrictNBTIngredient.of(material), 500)),
+                Ingredient.EMPTY);
+        assertEquals(100, missing.get(0).count());
+        assertTrue(SummoningRitualInventoryOps.insertMaterial(handler,
+                material.copyWithCount(100), new ArrayList<>()).isEmpty());
+        assertEquals(originalName, handler.getStackInSlot(0).getTag().getString("srfix_original_name"));
+
+        List<ItemStack> preview = SummoningRitualInventoryOps.extractSlot(handler, 0, true);
+        assertEquals(500, preview.stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(preview.stream().allMatch(stack -> ItemStack.isSameItemSameTags(material, stack)));
+        assertEquals(500, handler.getStackInSlot(0).getTag().getInt("YuushaAmount"));
+        List<ItemStack> recycled = SummoningRitualInventoryOps.extractSlot(handler, 0, false);
+        assertEquals(500, recycled.stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(recycled.stream().allMatch(stack -> ItemStack.isSameItemSameTags(material, stack)));
+        assertTrue(handler.getStackInSlot(0).isEmpty());
+    }
+
+    private static class FakeHandler implements IItemHandlerModifiable {
         private final ItemStack[] stacks;
         private final int limit;
         private final boolean misrouteLastSlot;

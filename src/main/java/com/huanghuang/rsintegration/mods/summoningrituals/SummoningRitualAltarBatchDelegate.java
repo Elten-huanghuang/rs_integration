@@ -205,6 +205,14 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         }
 
         this.preparationAltar = blockEntity;
+        try {
+            return prepareInventory(handler, orderedMaterials);
+        } finally {
+            syncAltar(blockEntity);
+        }
+    }
+
+    private boolean prepareInventory(IItemHandler handler, List<PreparedMaterial> orderedMaterials) {
         // 先回收与目标配方冲突的旧物品。同配方材料和同 NBT 催化剂保持原位。
         if (!recycleConflicts(handler)) return false;
 
@@ -241,7 +249,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     private boolean recycleConflicts(IItemHandler handler) {
         int catalystSlot = SummoningRitualInventoryOps.catalystSlot(handler);
         for (int slot = 0; slot < catalystSlot; slot++) {
-            ItemStack existing = handler.getStackInSlot(slot);
+            ItemStack existing = SummoningRitualInventoryOps.stackInSlot(handler, slot);
             if (existing.isEmpty() || matchesAnyInput(existing)) continue;
             if (!recycleSlot(handler, slot, false)) return false;
         }
@@ -256,7 +264,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     private boolean hasConflictingItems(IItemHandler handler) {
         int catalystSlot = SummoningRitualInventoryOps.catalystSlot(handler);
         for (int slot = 0; slot < catalystSlot; slot++) {
-            ItemStack existing = handler.getStackInSlot(slot);
+            ItemStack existing = SummoningRitualInventoryOps.stackInSlot(handler, slot);
             if (!existing.isEmpty() && !matchesAnyInput(existing)) return true;
         }
         if (catalystSlot >= 0) {
@@ -280,17 +288,23 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             }
         }
 
-        for (ItemStack extracted : SummoningRitualInventoryOps.extractSlot(handler, slot, false)) {
+        List<ItemStack> extractedStacks = SummoningRitualInventoryOps.extractSlot(handler, slot, false);
+        for (int index = 0; index < extractedStacks.size(); index++) {
+            ItemStack extracted = extractedStacks.get(index);
             ItemStack remainder = insertIntoStorage(player, extracted, false);
             if (remainder.isEmpty()) continue;
             List<SummoningRitualInventoryOps.Inserted> restored = new ArrayList<>();
-            ItemStack restoreRemainder = catalystSlot
-                    ? SummoningRitualInventoryOps.insertCatalyst(handler, remainder, restored)
-                    : SummoningRitualInventoryOps.insertMaterial(handler, remainder, restored);
-            if (!restoreRemainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI-SummoningRituals] Failed restoring recycle remainder at {} slot={} stack={}x{}",
-                        altarPos, slot, restoreRemainder.getItem(), restoreRemainder.getCount());
+            // 整槽提取已经取出了所有堆叠，回收失败时也必须恢复尚未提交网络的后续物品。
+            for (int restoreIndex = index; restoreIndex < extractedStacks.size(); restoreIndex++) {
+                ItemStack toRestore = restoreIndex == index ? remainder : extractedStacks.get(restoreIndex);
+                ItemStack restoreRemainder = catalystSlot
+                        ? SummoningRitualInventoryOps.insertCatalyst(handler, toRestore, restored)
+                        : SummoningRitualInventoryOps.insertMaterial(handler, toRestore, restored);
+                if (!restoreRemainder.isEmpty()) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-SummoningRituals] Failed restoring recycle remainder at {} slot={} stack={}x{}",
+                            altarPos, slot, restoreRemainder.getItem(), restoreRemainder.getCount());
+                }
             }
             player.sendSystemMessage(Component.translatable(
                     "rsi.summoning_rituals.error.recycle_full"));
@@ -342,7 +356,10 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         // 只回收实际投料的祭坛，不能从同坐标的新方块中取走物品。
         if (blockEntity == preparationAltar) {
             IItemHandler handler = itemHandler(blockEntity);
-            if (handler != null) rollbackPreparedItems(handler);
+            if (handler != null) {
+                rollbackPreparedItems(handler);
+                syncAltar(blockEntity);
+            }
         }
         resetLocalState();
     }
@@ -382,6 +399,16 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     private static IItemHandler itemHandler(BlockEntity blockEntity) {
         if (blockEntity == null || blockEntity.isRemoved()) return null;
         return blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
+    }
+
+    private static void syncAltar(BlockEntity blockEntity) {
+        // 原祭坛 setStackInSlot 的催化剂分支不会标脏或发包，必须显式同步。
+        blockEntity.setChanged();
+        Level level = blockEntity.getLevel();
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(blockEntity.getBlockPos(),
+                    blockEntity.getBlockState(), blockEntity.getBlockState(), 3);
+        }
     }
 
     private static boolean isAltar(BlockEntity blockEntity) {
@@ -427,7 +454,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
                         (long) spec.count() * multiplier))
                 .toArray();
         for (int slot = 0; slot < catalystSlot; slot++) {
-            ItemStack existing = handler.getStackInSlot(slot);
+            ItemStack existing = SummoningRitualInventoryOps.stackInSlot(handler, slot);
             if (existing.isEmpty()) continue;
             int available = existing.getCount();
             for (int index = 0; index < inputs.size() && available > 0; index++) {
@@ -487,7 +514,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             remaining[index] = spec.count();
         }
         for (int slot = 0; slot < catalystSlot; slot++) {
-            ItemStack existing = handler.getStackInSlot(slot);
+            ItemStack existing = SummoningRitualInventoryOps.stackInSlot(handler, slot);
             if (existing.isEmpty()) continue;
             int available = existing.getCount();
             for (int index = 0; index < requested.size() && available > 0; index++) {
