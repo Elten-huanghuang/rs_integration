@@ -8,6 +8,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
@@ -15,6 +16,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraft.world.inventory.ClickType;
 
 import javax.annotation.Nullable;
+
+import java.util.Optional;
 
 @OnlyIn(Dist.CLIENT)
 public final class LeverBinder {
@@ -44,10 +47,20 @@ public final class LeverBinder {
     public static void setAutoRefill(boolean v) { autoRefillEnabled = v; }
 
     private static boolean isLeverActuallyOn() {
-        if (boundLeverPos == null) return false;
+        return leverState().map(LeverBinder::isPoweredLever).orElse(false);
+    }
+
+    static boolean isPoweredLever(BlockState state) {
+        return state.getBlock() instanceof LeverBlock && state.getValue(LeverBlock.POWERED);
+    }
+
+    /** 绑定位置已不是拉杆时返回空，避免空气方块没有 powered 属性导致崩溃。 */
+    private static Optional<BlockState> leverState() {
+        if (boundLeverPos == null) return Optional.empty();
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return false;
-        return mc.level.getBlockState(boundLeverPos).getValue(LeverBlock.POWERED);
+        if (mc.level == null) return Optional.empty();
+        BlockState state = mc.level.getBlockState(boundLeverPos);
+        return state.getBlock() instanceof LeverBlock ? Optional.of(state) : Optional.empty();
     }
 
     private static boolean tryAutoSetTempFromAnvil(Minecraft mc) {
@@ -88,12 +101,24 @@ public final class LeverBinder {
     }
 
     public static void unbind() {
+        clearBinding();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) mc.player.displayClientMessage(Component.literal("§c已解绑拉杆"), true);
+    }
+
+    private static void unbindMissingLever() {
+        clearBinding();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(Component.literal("§e拉杆已消失，自动解除绑定"), true);
+        }
+    }
+
+    private static void clearBinding() {
         boundLeverPos = null;
         lastSeenItem = ItemStack.EMPTY;
         lastTrackedItem = ItemStack.EMPTY;
         justRefilled = false;
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) mc.player.displayClientMessage(Component.literal("§c已解绑拉杆"), true);
     }
 
     public static void onTick() {
@@ -119,8 +144,10 @@ public final class LeverBinder {
         }
         if (currentItem.isEmpty()) lastTrackedItem = ItemStack.EMPTY;
 
-        // 2. Temperature control via lever
-        if (boundLeverPos != null && leverControlEnabled && forge != null) {
+        // 2. 拉杆控温。被拆掉的拉杆没有 POWERED 属性，必须先解绑。
+        if (boundLeverPos != null && leverState().isEmpty()) {
+            unbindMissingLever();
+        } else if (boundLeverPos != null && leverControlEnabled && forge != null) {
             double heat = AetherworksHelper.getForgeHeat(forge);
             boolean actuallyOn = isLeverActuallyOn();
             if (heat > tempMax && actuallyOn) {
@@ -159,7 +186,7 @@ public final class LeverBinder {
     }
 
     private static void toggleLever() {
-        if (boundLeverPos == null) return;
+        if (leverState().isEmpty()) return;
         Minecraft mc = Minecraft.getInstance();
         BlockHitResult hit = new BlockHitResult(
                 new Vec3(boundLeverPos.getX() + 0.5, boundLeverPos.getY() + 0.5, boundLeverPos.getZ() + 0.5),
@@ -168,7 +195,12 @@ public final class LeverBinder {
     }
 
     private static void turnOffHeatingIfOn() {
-        if (boundLeverPos == null || !isLeverActuallyOn()) return;
+        if (boundLeverPos == null) return;
+        if (leverState().isEmpty()) {
+            unbindMissingLever();
+            return;
+        }
+        if (!isLeverActuallyOn()) return;
         toggleLever();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.displayClientMessage(Component.literal("§e加热拉杆已关闭"), true);
