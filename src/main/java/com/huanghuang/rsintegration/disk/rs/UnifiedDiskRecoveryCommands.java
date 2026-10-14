@@ -4,10 +4,13 @@ import com.huanghuang.rsintegration.ModItems;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.UuidArgument;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -38,12 +41,27 @@ public final class UnifiedDiskRecoveryCommands {
             int end = (int) Math.min(start + 20, ids.size());
             for (int index = (int) start; index < end; index++) {
                 UUID id = ids.get(index);
-                source.sendSuccess(() -> Component.literal(id.toString()), false);
+                source.sendSuccess(() -> diskEntry(id), false);
             }
             return end - (int) start;
         } catch (IOException e) {
             source.sendFailure(Component.translatable("rsi.unified_disk.recovery.failed", e.getMessage())); return 0;
         }
+    }
+
+    private static Component diskEntry(UUID id) {
+        String diskId = id.toString();
+        Component copyId = Component.literal(diskId).withStyle(style -> style
+                .withColor(ChatFormatting.AQUA).withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, diskId))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.translatable("rsi.unified_disk.recovery.copy_id_hover"))));
+        Component recover = Component.translatable("rsi.unified_disk.recovery.recover_action").withStyle(style -> style
+                .withColor(ChatFormatting.GREEN)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/rsi_unified_disk recover " + diskId))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.translatable("rsi.unified_disk.recovery.recover_hover"))));
+        return Component.empty().append(copyId).append(" ").append(recover);
     }
 
     static int recover(CommandSourceStack source, UUID id) throws CommandSyntaxException {
