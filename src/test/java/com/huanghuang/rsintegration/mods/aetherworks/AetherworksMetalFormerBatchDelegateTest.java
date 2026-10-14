@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.rekindled.embers.api.power.IEmberCapability;
@@ -132,6 +133,15 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         fixture.tank.setFluid(new FluidStack(Fluids.WATER, 90));
         assertEquals(PreparationState.RETRY, fixture.prepare().state());
         assertEquals(90, fixture.tank.getFluidAmount());
+    }
+
+    @Test
+    void bdFluidEndpointCanPrepareMetalForming() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.attachPoweredForge();
+        assertEquals(PreparationState.READY, fixture.prepare("beyonddimensions", true).state());
+        assertEquals(PreparationState.FATAL, fixture.prepare("beyonddimensions", false).state());
+        assertTrue(fixture.tank.isEmpty());
     }
 
     @Test
@@ -280,6 +290,10 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         }
 
         IBatchDelegate.PreparationResult prepare() {
+            return prepare("refinedstorage", false);
+        }
+
+        IBatchDelegate.PreparationResult prepare(String backend, boolean fluidStorage) {
             ServerPlayer player = mock(ServerPlayer.class);
             FluidIngredient fluid = mock(FluidIngredient.class);
             when(fluid.getFluids()).thenReturn(List.of(new FluidStack(Fluids.WATER, 360)));
@@ -292,7 +306,8 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
             when(level.dimension()).thenReturn(Level.OVERWORLD);
             CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class, RETURNS_DEEP_STUBS);
             when(endpoint.session().reference()).thenReturn(new StorageReference(
-                    new StorageBackendId("refinedstorage"), "test"));
+                    new StorageBackendId(backend), "test"));
+            when(endpoint.session().supports(StorageCapability.FLUID_STORAGE)).thenReturn(fluidStorage);
             delegate.setStorageEndpoint(endpoint);
             try (MockedStatic<CraftPacketUtils> context = mockStatic(CraftPacketUtils.class);
                  MockedStatic<AetherworksMachineSafety> structure = mockStatic(AetherworksMachineSafety.class);

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
+import com.huanghuang.rsintegration.storage.StorageCapability;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.material.Fluids;
@@ -18,6 +19,11 @@ import java.util.function.IntFunction;
 
 public final class MachineWaterSupply {
     private MachineWaterSupply() {}
+
+    public static boolean supportsFluidStorage(CraftStorageEndpoint endpoint) {
+        return endpoint != null && (endpoint.session().supports(StorageCapability.FLUID_STORAGE)
+                || "refinedstorage".equals(endpoint.session().reference().backendId().value()));
+    }
 
     public static boolean isFree(String machine) {
         return isFree(machine, RSIntegrationConfig.SERVER_SPEC.isLoaded()
@@ -94,7 +100,7 @@ public final class MachineWaterSupply {
 
     private static FluidStack extractWater(CraftStorageEndpoint endpoint, ServerPlayer player, int amount, boolean simulate) {
         if (endpoint == null || player == null || amount <= 0
-                || !endpoint.session().reference().backendId().value().equals("refinedstorage")) return FluidStack.EMPTY;
+                || !supportsFluidStorage(endpoint)) return FluidStack.EMPTY;
         ItemStack template = InkFluidSupport.token(new FluidStack(Fluids.WATER, 1));
         var result = endpoint.extractExact(player, template, amount, simulate);
         if (simulate && result.status() != StorageOperationStatus.SUCCESS) return FluidStack.EMPTY;

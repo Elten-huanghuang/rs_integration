@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -107,9 +109,8 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(
                 player, level.dimension(), target);
         if (!stamping.getDisplayInputFluid().getFluids().isEmpty()
-                && (storageEndpoint() == null || !"refinedstorage".equals(
-                storageEndpoint().session().reference().backendId().value()))) {
-            return PreparationResult.fatal("压印流体材料需要 RS 流体存储",
+                && (storageEndpoint() == null || !MachineWaterSupply.supportsFluidStorage(storageEndpoint()))) {
+            return PreparationResult.fatal("压印流体材料需要流体存储",
                     Component.translatable("rsi.embers_machine.error.fluid_storage"));
         }
         if (!idle()) return PreparationResult.retry("印模底座仍有材料或压印锤尚未复位",

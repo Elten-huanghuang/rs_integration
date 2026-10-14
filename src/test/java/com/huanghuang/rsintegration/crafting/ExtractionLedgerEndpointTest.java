@@ -20,6 +20,7 @@ import org.mockito.MockedStatic;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -50,6 +51,27 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         }).when(session).insert(eq(player), any(ItemStack.class), eq(false));
         endpoint = () -> session;
         ledger = new ExtractionLedger();
+    }
+
+    @Test
+    void fluidBackendCannotReserveTheSameStoredBucketTwice() {
+        when(session.capabilities()).thenReturn(Set.of(StorageCapability.FLUID_STORAGE));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.WATER_BUCKET))))));
+        Ingredient bucket = Ingredient.of(Items.WATER_BUCKET);
+        assertEquals(1, ledger.reserveFromEndpoint(bucket, 1, endpoint, player).getCount());
+        assertTrue(ledger.reserveFromEndpoint(bucket, 1, endpoint, player).isEmpty());
+        verify(session, never()).extractContainerFluid(any(), any(), any(), anyLong(), anyBoolean());
+    }
+
+    @Test
+    void filledBucketsAreRecheckedBeforeAnyExtraction() {
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.WATER_BUCKET))))));
+        assertEquals(1, ledger.reserveFromEndpoint(Ingredient.of(Items.WATER_BUCKET), 1, endpoint, player).getCount());
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(new StorageSnapshot(backend, List.of())));
+        assertFalse(ledger.commit(null, player));
+        verify(session, never()).extractMatching(any(), any(), anyLong(), eq(false));
     }
 
     @Test

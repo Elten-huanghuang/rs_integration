@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.AetherworksMetalFormerRecipeHandler;
 import net.minecraft.core.BlockPos;
@@ -80,9 +81,8 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         machineServer = player.server;
         if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(
                 player, level.dimension(), target);
-        if (storageEndpoint() == null || !"refinedstorage".equals(
-                storageEndpoint().session().reference().backendId().value())) {
-            return PreparationResult.fatal("金属成型流体材料需要 RS 流体存储",
+        if (!MachineWaterSupply.supportsFluidStorage(storageEndpoint())) {
+            return PreparationResult.fatal("金属成型流体材料需要 RS 或 BD 流体存储",
                     Component.translatable("rsi.embers_machine.error.fluid_storage"));
         }
         if (required.get(1).count() > machine.getTank().getCapacity()) {

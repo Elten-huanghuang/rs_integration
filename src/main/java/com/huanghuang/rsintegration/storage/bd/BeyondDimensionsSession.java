@@ -4,20 +4,17 @@ import java.lang.reflect.Method;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.huanghuang.rsintegration.storage.*;
+import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.fluids.FluidStack;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import java.util.Optional;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Items;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -86,7 +83,7 @@ final class BeyondDimensionsSession implements StorageSession {
         try {
             Object nativeStorage = storage();
             Object list = nativeStorage.getClass().getMethod("getStorage").invoke(nativeStorage);
-            return StorageSnapshotResult.success(readItemSnapshot(reference.backendId(), list, itemTypes,
+            return StorageSnapshotResult.success(readSnapshot(reference.backendId(), list, itemTypes,
                     (stack, failure) -> warnSkippedItem(player, stack, failure)));
         } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.warn(
@@ -95,6 +92,31 @@ final class BeyondDimensionsSession implements StorageSession {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED,
                     StorageDiagnosticCode.BACKEND_EXCEPTION);
         }
+    }
+
+    static StorageSnapshot readSnapshot(StorageBackendId backendId, Object nativeEntries,
+                                        Set<Item> itemTypes,
+                                        BiConsumer<ItemStack, IllegalArgumentException> skipped) throws Exception {
+        StorageSnapshot items = readItemSnapshot(backendId, nativeEntries, itemTypes, skipped);
+        if (!ModItems.ALCHEMIST_INK_FLUID.isPresent()
+                || itemTypes != null && !itemTypes.contains(ModItems.ALCHEMIST_INK_FLUID.get())) return items;
+        return withFluids(items, nativeEntries, ModItems.ALCHEMIST_INK_FLUID.get());
+    }
+
+    static StorageSnapshot withFluids(StorageSnapshot items, Object nativeEntries, Item tokenItem) throws Exception {
+        List<StoredItem> combined = new ArrayList<>(items.items());
+        for (Object entry : (Iterable<?>) nativeEntries) {
+            Object key = BeyondDimensionsReflection.key(entry);
+            if (!BeyondDimensionsReflection.isFluidKey(key)) continue;
+            long amount = BeyondDimensionsReflection.amount(entry);
+            FluidStack fluid = BeyondDimensionsReflection.fluidStack(key);
+            if (amount <= 0 || fluid.isEmpty()) continue;
+            // mB 总量只从 KeyAmount 的 long 字段读取，不能再乘只读堆叠的数量。
+            fluid.setAmount(1);
+            ItemStack token = InkFluidSupport.token(tokenItem, fluid);
+            combined.add(new StoredItem(BeyondDimensionsItemKeys.fromStack(items.backendId(), token), amount));
+        }
+        return new StorageSnapshot(items.backendId(), combined);
     }
 
     static StorageSnapshot readItemSnapshot(StorageBackendId backendId, Object nativeEntries,
@@ -136,86 +158,6 @@ final class BeyondDimensionsSession implements StorageSession {
                 "[RSI-Storage] BD snapshot skipped unsupported item player={} network={} item={} cause={}; "
                         + "native item unchanged, other items remain available (once per minute per network/item)",
                 player.getGameProfile().getName(), reference.networkId(), itemId, failure.toString());
-    }
-
-    @Override
-    public long countDerivedContainer(ServerPlayer player, ItemStack filledContainer) {
-        StorageThreadGuard.requireServerThread(player);
-        if (filledContainer.isEmpty()
-                || (filledContainer.getItem() != Items.WATER_BUCKET
-                && filledContainer.getItem() != Items.LAVA_BUCKET)) {
-            return 0L;
-        }
-        StoragePermissionResult permission = checkPermission(player, StoragePermission.VIEW);
-        if (!permission.allowedAccess()) return 0L;
-        try {
-            Object nativeStorage = storage();
-            Object values = nativeStorage.getClass().getMethod("getStorage").invoke(nativeStorage);
-            long emptyBuckets = 0L;
-            long ironForBuckets = 0L;
-            long fluidMilliBuckets = 0L;
-            ItemStack empty = new ItemStack(Items.BUCKET);
-            Fluid wanted = filledContainer.getItem() == Items.WATER_BUCKET
-                    ? Fluids.WATER : Fluids.LAVA;
-            if (values instanceof Iterable<?> entries) {
-                for (Object value : entries) {
-                    Object key = BeyondDimensionsReflection.key(value);
-                    long amount = Math.max(0L, BeyondDimensionsReflection.amount(value));
-                    if (amount <= 0L) continue;
-                    if (BeyondDimensionsReflection.isItemKey(key)) {
-                        ItemStack stack = BeyondDimensionsReflection.keyStack(key);
-                        if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, empty)) {
-                            emptyBuckets = saturatedAdd(emptyBuckets, amount);
-                        } else if (!stack.isEmpty() && stack.is(Items.IRON_INGOT)) {
-                            ironForBuckets = saturatedAdd(ironForBuckets, amount);
-                        }
-                    } else {
-                        // Do not rely solely on getStackClass(): BD revisions
-                        // have returned the API interface class there while
-                        // still exposing a normal FluidStack read-only value.
-                        FluidStack fluidStack;
-                        try {
-                            fluidStack = BeyondDimensionsReflection.fluidStack(key);
-                        } catch (ReflectiveOperationException | ClassCastException ignored) {
-                            fluidStack = null;
-                        }
-                        if (fluidStack != null && !fluidStack.isEmpty()
-                                && ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
-                                != null
-                                && ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid())
-                                .equals(ForgeRegistries.FLUIDS.getKey(wanted))) {
-                            // BD 0.7.x stores fluid entries as milliBuckets;
-                            // tolerate older key-count representations where
-                            // the entry count is the number of key stacks.
-                            long perKey = Math.max(1, fluidStack.getAmount());
-                            long contribution = amount >= perKey ? amount : saturatedMultiply(amount, perKey);
-                            fluidMilliBuckets = saturatedAdd(fluidMilliBuckets, contribution);
-                        }
-                    }
-                }
-            }
-            long derived = Math.min(saturatedAdd(emptyBuckets, ironForBuckets / 3L), fluidMilliBuckets / 1000L);
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Storage] BD derived container={} emptyBuckets={} ironForBuckets={} fluidMb={} derived={}",
-                    ForgeRegistries.ITEMS.getKey(filledContainer.getItem()),
-                    emptyBuckets, ironForBuckets / 3L, fluidMilliBuckets, derived);
-            return derived;
-        } catch (Exception | LinkageError e) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Storage] BD derived container count failed network={}",
-                    reference.networkId(), e);
-            return 0L;
-        }
-    }
-
-    private static long saturatedAdd(long left, long right) {
-        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
-    }
-
-    private static long saturatedMultiply(long left, long right) {
-        return left == 0 || right == 0 || left > Long.MAX_VALUE / right
-                ? (left == 0 || right == 0 ? 0 : Long.MAX_VALUE)
-                : left * right;
     }
 
     @Override public StoragePermissionResult checkPermission(ServerPlayer player, StoragePermission permission) {
@@ -316,100 +258,11 @@ final class BeyondDimensionsSession implements StorageSession {
         }
     }
 
-    @Override
-    public StorageOperationResult extractContainerFluid(ServerPlayer player, ItemStack emptyContainer,
-                                                         ItemStack filledContainer, long amount,
-                                                         boolean simulate) {
-        StorageThreadGuard.requireServerThread(player);
-        if (amount < 0 || emptyContainer.isEmpty() || filledContainer.isEmpty()) {
-            return StorageOperationResult.failedExtraction(mode(simulate), amount,
-                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
-        }
-        if (amount == 0) return StorageOperationResult.extracted(mode(simulate), 0, List.of());
-        boolean waterBucket = filledContainer.is(Items.WATER_BUCKET);
-        boolean lavaBucket = filledContainer.is(Items.LAVA_BUCKET);
-        if (!waterBucket && !lavaBucket) {
-            return StorageOperationResult.failedExtraction(mode(simulate), amount,
-                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
-        }
-        Fluid fluid = BuiltInRegistries.FLUID.get(new ResourceLocation("minecraft",
-                waterBucket ? "water" : "lava"));
-        if (fluid == null || fluid == Fluids.EMPTY) {
-            return StorageOperationResult.failedExtraction(mode(simulate), amount,
-                    StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
-        }
-        StoragePermissionResult permission = checkPermission(player, StoragePermission.EXTRACT);
-        if (!permission.allowedAccess()) return permissionFailureExtraction(mode(simulate), amount, permission);
-        try {
-            // A filled bucket may be stored as a normal item in BD.  Prefer
-            // that representation before attempting the derived
-            // empty-bucket + fluid conversion.  The reservation path calls
-            // this method in simulate mode and the commit path calls it in
-            // perform mode, so both phases make the same choice.
-            StorageItemKey filledKey = itemKey(filledContainer);
-            StorageOperationResult directProbe = extractNative(
-                    player, filledKey, amount, true, false);
-            if (directProbe.status() == StorageOperationStatus.SUCCESS) {
-                if (simulate) return directProbe;
-                // Probe first so a partially stocked item can still use the
-                // derived conversion without consuming that partial amount.
-                StorageOperationResult direct = extractNative(
-                        player, filledKey, amount, false, false);
-                if (direct.status() != StorageOperationStatus.NOT_FOUND) return direct;
-            }
-
-            Object nativeStorage = storage();
-            Class<?> keyType = Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey");
-            var extract = nativeStorage.getClass().getMethod("extract", keyType, long.class, boolean.class, boolean.class);
-            Object bucketKey = BeyondDimensionsReflection.itemKey(emptyContainer);
-            Object bucket = extract.invoke(nativeStorage, bucketKey, amount, simulate, false);
-            long bucketAmount = BeyondDimensionsReflection.amount(bucket);
-            long ironBuckets = amount - bucketAmount;
-            Object ironKey = null;
-            long ironExtracted = 0L;
-            if (ironBuckets > 0) {
-                ironKey = BeyondDimensionsReflection.itemKey(new ItemStack(Items.IRON_INGOT));
-                Object iron = extract.invoke(nativeStorage, ironKey, 3L * ironBuckets, simulate, false);
-                ironExtracted = BeyondDimensionsReflection.amount(iron);
-                if (ironExtracted < 3L * ironBuckets) {
-                    if (!simulate && bucketAmount > 0) {
-                        nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
-                                .invoke(nativeStorage, bucketKey, bucketAmount, false);
-                    }
-                    return StorageOperationResult.extracted(mode(simulate), amount, List.of());
-                }
-            }
-            Object fluidKey = BeyondDimensionsReflection.fluidKey(fluid, 1000L);
-            Object fluidResult = extract.invoke(nativeStorage, fluidKey, 1000L * amount, simulate, false);
-            long fluidAmount = BeyondDimensionsReflection.amount(fluidResult);
-            if (fluidAmount != 1000L * amount) {
-                if (!simulate) {
-                    Object remainder = nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
-                            .invoke(nativeStorage, bucketKey, bucketAmount, false);
-                    if (BeyondDimensionsReflection.amount(remainder) > 0) {
-                        RSIntegrationMod.LOGGER.error("[RSI-Storage] BD container conversion rollback left buckets unrecovered");
-                    }
-                    if (ironExtracted > 0 && ironKey != null) {
-                        nativeStorage.getClass().getMethod("insert", keyType, long.class, boolean.class)
-                                .invoke(nativeStorage, ironKey, ironExtracted, false);
-                    }
-                }
-                return StorageOperationResult.extracted(mode(simulate), amount, List.of());
-            }
-            return StorageOperationResult.extracted(mode(simulate), amount,
-                    List.of(filledContainer.copyWithCount(Math.toIntExact(amount))));
-        } catch (Exception | LinkageError e) {
-            return simulate
-                    ? StorageOperationResult.failedExtraction(mode(simulate), amount,
-                    StorageOperationStatus.FAILED, List.of(), List.of(), StorageDiagnosticCode.BACKEND_EXCEPTION)
-                    : StorageOperationResult.indeterminateExtraction(amount, List.of(), List.of(),
-                    StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
-        }
-    }
-
     private StorageOperationResult extractNative(ServerPlayer player, StorageItemKey key, long amount, boolean simulate, boolean fuzzy) {
         StorageThreadGuard.requireServerThread(player);
         if (amount < 0) throw new IllegalArgumentException("amount must not be negative");
+        if (amount > Integer.MAX_VALUE) return StorageOperationResult.failedExtraction(mode(simulate), amount,
+                StorageOperationStatus.UNAVAILABLE, List.of(), List.of());
         if (!reference.backendId().equals(key.backendId())) return StorageOperationResult.failedExtraction(mode(simulate), amount, StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
         StoragePermissionResult permission = checkPermission(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return permissionFailureExtraction(mode(simulate), amount, permission);
@@ -422,7 +275,10 @@ final class BeyondDimensionsSession implements StorageSession {
                     Set.of(BuiltInRegistries.ITEM.get(key.itemType()))).snapshot()
                     .map(snapshot -> storedPayloadKey(snapshot, key))
                     .orElse(key);
-            nativeKey = BeyondDimensionsReflection.itemKey(ItemStack.of(storedKey.backendPayload()));
+            ItemStack template = ItemStack.of(storedKey.backendPayload());
+            nativeKey = InkFluidSupport.isToken(template)
+                    ? BeyondDimensionsReflection.fluidKey(InkFluidSupport.fluid(template))
+                    : BeyondDimensionsReflection.itemKey(template);
             extract = nativeStorage.getClass().getMethod("extract", Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey"), long.class, boolean.class, boolean.class);
         } catch (Exception | LinkageError e) {
             return StorageOperationResult.failedExtraction(mode(simulate), amount,
@@ -449,7 +305,7 @@ final class BeyondDimensionsSession implements StorageSession {
                         StorageDiagnosticCode.NATIVE_LIMIT_EXCEEDED);
             }
             ItemStack template = transferred <= 0 ? ItemStack.EMPTY
-                    : BeyondDimensionsReflection.keyStack(BeyondDimensionsReflection.key(got));
+                    : nativeStack(BeyondDimensionsReflection.key(got), key.displayStack());
             if (transferred > 0 && (template.isEmpty() || !key.equals(itemKey(template)))) {
                 List<ItemStack> recovery = template.isEmpty() ? List.of() : split(template, transferred);
                 return simulate
@@ -481,7 +337,9 @@ final class BeyondDimensionsSession implements StorageSession {
         Method insert;
         try {
             storage = storage();
-            nativeKey = BeyondDimensionsReflection.itemKey(stack);
+            nativeKey = InkFluidSupport.isToken(stack)
+                    ? BeyondDimensionsReflection.fluidKey(InkFluidSupport.fluid(stack))
+                    : BeyondDimensionsReflection.itemKey(stack);
             insert = storage.getClass().getMethod("insert", Class.forName("com.wintercogs.beyonddimensions.api.storage.key.IStackKey"), long.class, boolean.class);
         } catch (Exception | LinkageError e) {
             return StorageOperationResult.failedInsert(mode(simulate), stack,
@@ -498,8 +356,8 @@ final class BeyondDimensionsSession implements StorageSession {
                         StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
             }
             if (left > 0) {
-                ItemStack remainderStack = BeyondDimensionsReflection.keyStack(
-                        BeyondDimensionsReflection.key(remainder));
+                ItemStack remainderStack = nativeStack(
+                        BeyondDimensionsReflection.key(remainder), stack);
                 if (remainderStack.isEmpty() || !itemKey(stack).equals(itemKey(remainderStack))) {
                     return simulate
                             ? StorageOperationResult.failedInsert(mode(simulate), stack,
@@ -518,6 +376,12 @@ final class BeyondDimensionsSession implements StorageSession {
                     : StorageOperationResult.indeterminateInsert(stack,
                     StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
         }
+    }
+
+    private static ItemStack nativeStack(Object nativeKey, ItemStack template) throws Exception {
+        return InkFluidSupport.isToken(template)
+                ? InkFluidSupport.token(template.getItem(), BeyondDimensionsReflection.fluidStack(nativeKey))
+                : BeyondDimensionsReflection.keyStack(nativeKey);
     }
 
     private static List<ItemStack> split(ItemStack template, long amount) {

@@ -176,8 +176,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean usesFluidStorage() {
-        return storageEndpoint() != null && "refinedstorage".equals(
-                storageEndpoint().session().reference().backendId().value());
+        return MachineWaterSupply.supportsFluidStorage(storageEndpoint());
     }
 
     private boolean canStoreFluid(ServerPlayer player) {

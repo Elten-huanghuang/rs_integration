@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -106,7 +107,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
     }
 
     @Test
-    void aNonRsEndpointCannotBeSilentlyReplacedByRsForPaidWater() {
+    void itemOnlyBdCannotSupplyPaidWater() {
         when(endpoint.session().reference()).thenReturn(new StorageReference(new StorageBackendId("beyonddimensions"), "test"));
         FluidTank tank = tankWithWater(750);
         assertFalse(MachineWaterSupply.canFill("eidolon_crucible", tank, 250, endpoint, player));
@@ -114,6 +115,32 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         assertEquals(750, tank.getFluidAmount());
         verify(endpoint, never()).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
         tokens.verifyNoInteractions();
+    }
+
+    @Test
+    void paidWaterUsesTheSelectedBdFluidStorageAndRefundsStorageRaces() {
+        when(endpoint.session().reference()).thenReturn(new StorageReference(new StorageBackendId("beyonddimensions"), "42"));
+        when(endpoint.session().supports(StorageCapability.FLUID_STORAGE)).thenReturn(true);
+        extracted(250, new FluidStack(Fluids.WATER, 250), true);
+        extracted(250, new FluidStack(Fluids.WATER, 100), false);
+        acceptRefund();
+        FluidTank tank = tankWithWater(750);
+        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(750, tank.getFluidAmount());
+        assertEquals(100, refund().getCount());
+        verify(endpoint).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
+    }
+
+    @Test
+    void bdFluidStorageFillsOnlyTheMissingWater() {
+        when(endpoint.session().reference()).thenReturn(new StorageReference(new StorageBackendId("beyonddimensions"), "42"));
+        when(endpoint.session().supports(StorageCapability.FLUID_STORAGE)).thenReturn(true);
+        extracted(250, new FluidStack(Fluids.WATER, 250), true);
+        extracted(250, new FluidStack(Fluids.WATER, 250), false);
+        FluidTank tank = tankWithWater(750);
+        assertEquals(250, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(1000, tank.getFluidAmount());
+        verify(endpoint, never()).insert(eq(player), any(ItemStack.class), eq(false));
     }
 
     private void extracted(int amount, FluidStack extracted, boolean simulate) {

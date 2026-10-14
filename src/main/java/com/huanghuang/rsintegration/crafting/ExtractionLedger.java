@@ -28,7 +28,6 @@ import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
-import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageReservationSource;
 import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
@@ -435,18 +434,6 @@ public final class ExtractionLedger implements AutoCloseable {
                 Ingredient.of(template.copyWithCount(1)), template, count, endpoint, player);
         if (!resonance.isEmpty()) return resonance;
         var snapshot = reservationSnapshot(endpoint, player);
-        if (storageSupportsFluidContainers(endpoint)
-                && (template.is(Items.WATER_BUCKET)
-                || template.is(Items.LAVA_BUCKET))) {
-            var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(Items.BUCKET), template, count, true);
-            if (converted.status() == StorageOperationStatus.SUCCESS) {
-                Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
-                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
-                        null, null, null, true));
-                return template.copyWithCount(count);
-            }
-        }
         CraftingResolver.StackKey pendingKey = CraftingResolver.StackKey.of(template, true);
         long available = snapshot == null ? 0L
                 : snapshot.countExact(endpoint.session().itemKey(template));
@@ -519,34 +506,7 @@ public final class ExtractionLedger implements AutoCloseable {
         ItemStack resonance = reserveFromPreferredResonance(
                 ingredient, ItemStack.EMPTY, count, endpoint, player);
         if (!resonance.isEmpty()) return resonance;
-        // A filled vanilla bucket is a derived material in BD: reserve it
-        // against one empty bucket plus 1000 mB of the matching fluid. This
-        // must run on the Ingredient path as well as the exact-item path,
-        // because generic recipe planning normally reaches this method.
-        if (storageSupportsFluidContainers(endpoint)
-                && IngredientMatcher.test(ingredient,
-                        new ItemStack(Items.WATER_BUCKET))) {
-            ItemStack template = new ItemStack(Items.WATER_BUCKET);
-            var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(Items.BUCKET), template, count, true);
-            if (converted.status() == StorageOperationStatus.SUCCESS) {
-                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
-                        null, null, null, false));
-                return template.copyWithCount(count);
-            }
-        }
-        if (storageSupportsFluidContainers(endpoint)
-                && IngredientMatcher.test(ingredient,
-                        new ItemStack(Items.LAVA_BUCKET))) {
-            ItemStack template = new ItemStack(Items.LAVA_BUCKET);
-            var converted = endpoint.session().extractContainerFluid(player,
-                    new ItemStack(Items.BUCKET), template, count, true);
-            if (converted.status() == StorageOperationStatus.SUCCESS) {
-                recordEntry(new Entry(Source.NETWORK, ingredient, template.copyWithCount(count), null,
-                        null, null, null, false));
-                return template.copyWithCount(count);
-            }
-        }
+        // 装桶、装瓶由容器配方分开预留空容器和流体，成品只按真实库存预留。
         var snapshot = reservationSnapshot(endpoint, player);
         if (snapshot == null) return ItemStack.EMPTY;
         EndpointReservation reservation = reserveEndpointMatches(
@@ -866,7 +826,6 @@ public final class ExtractionLedger implements AutoCloseable {
                             IngredientMatcher.itemTypesForAll(neededByIngredient.keySet())).snapshot().orElse(null);
                     if (snapshot == null) return false;
                     for (var ingEntry : neededByIngredient.entrySet()) {
-                        if (isContainerFluidIngredient(ingEntry.getKey())) continue;
                         StorageSnapshot.MatchResult match = snapshot.match(ingEntry.getKey());
                         if (!match.successful()) return false;
                         long available = 0L;
@@ -1042,17 +1001,6 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingResonance.clear();
         networkEntryCache.clear();
         clearReservationSnapshot();
-    }
-
-    private static boolean storageSupportsFluidContainers(@Nullable CraftStorageEndpoint endpoint) {
-        return endpoint != null && endpoint.session().supports(StorageCapability.FLUID_STORAGE);
-    }
-
-    private static boolean isContainerFluidIngredient(Ingredient ingredient) {
-        return IngredientMatcher.test(ingredient,
-                new ItemStack(Items.WATER_BUCKET))
-                || IngredientMatcher.test(ingredient,
-                new ItemStack(Items.LAVA_BUCKET));
     }
 
     private void resetSettlementMirror() {
@@ -1286,13 +1234,6 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private StorageOperationResult extractOne(Entry entry, INetwork network, ServerPlayer player) {
         if (entry.source == Source.NETWORK && storageEndpoint != null) {
-            if (storageSupportsFluidContainers(storageEndpoint)
-                    && (entry.template.is(Items.WATER_BUCKET)
-                    || entry.template.is(Items.LAVA_BUCKET))) {
-                return storageEndpoint.session().extractContainerFluid(player,
-                        new ItemStack(Items.BUCKET), entry.template,
-                        entry.count, false);
-            }
             return entry.exactIdentity && entry.template.getTag() != null
                     ? storageEndpoint.extractExact(player, entry.template, entry.count, false)
                     : storageEndpoint.extractMatching(player, entry.originalIngredient, entry.count, false);
