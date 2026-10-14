@@ -45,8 +45,20 @@ minecraft {
     }
 }
 
+// 将带中文前缀的本地文件归一为模块名，供 ForgeGradle 映射原生工厂测试依赖。
+def ironFurnacesTestSource = providers.gradleProperty('ironFurnacesCompatibilityJar')
+        .map { file(it) }.getOrElse(fileTree(dir: 'libs', include: ['*ironfurnaces-*.jar']).singleFile)
+def ironFurnacesTestVersion = (ironFurnacesTestSource.name =~ /ironfurnaces-(.+)\.jar$/)[0][1]
+def ironFurnacesTestDirectory = layout.buildDirectory.dir('ironfurnaces-test-libs').get().asFile
+copy {
+    from ironFurnacesTestSource
+    into ironFurnacesTestDirectory
+    rename { "ironfurnaces-${ironFurnacesTestVersion}.jar" }
+}
+
 repositories {
     flatDir { dirs 'libs' }
+    flatDir { dirs ironFurnacesTestDirectory }
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com' }
     maven { url = 'https://maven.terraformersmc.com/releases/' }
@@ -121,7 +133,8 @@ dependencies {
     testImplementation 'io.github.llamalad7:mixinextras-common:0.3.6'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
     testImplementation fg.deobf("local:sophisticatedcore:1.20.1-1.2.55.975")
-    testImplementation fg.deobf(fileTree(dir: 'libs', include: ['*ironfurnaces-*.jar']))
+    // 原生工厂分配逻辑会调用 Minecraft 字段，必须通过模块依赖完成名称映射。
+    testImplementation fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
     // 原生沸腾配方会调用 Minecraft 方法，测试依赖必须实际完成名称映射。
     testImplementation fg.deobf('local:embersrekindled:1.20.1-1.3.9')
     testImplementation fg.deobf('local:aetherworks:1.20.1-1.1.2')

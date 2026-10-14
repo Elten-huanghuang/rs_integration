@@ -42,7 +42,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** Batch delegate for Iron Furnaces ordinary furnace mode. */
 public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
@@ -58,7 +57,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private static final int FUEL = 1;
     private static final int OUTPUT = 2;
     private static final int[] FACTORY_INPUT = {7, 8, 9, 10, 11, 12};
-    private static final Map<String, boolean[]> FACTORY_LEASES = new ConcurrentHashMap<>();
+    private static final Map<String, boolean[]> FACTORY_LEASES = IronFurnaceFactoryLeases.LANES;
 
     /** Server-lifecycle safety net after active craft delegates have been aborted. */
     public static void clearFactoryLeases() {
@@ -242,7 +241,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         this.plannedFactoryLanes = 1;
         clearInternalBatchState();
         if (factoryMode) {
-            factoryLeaseKey = target.dimension().location() + ":" + pos.asLong();
+            factoryLeaseKey = IronFurnaceFactoryLeases.key(target, pos);
             factorySlot = reserveFactorySlot(factoryLeaseKey, ironFurnace);
             if (factorySlot < 0) return PreparationResult.retry("Iron Furnace factory has no free slot");
         } else if (ironFurnace.cookTime > 0) {

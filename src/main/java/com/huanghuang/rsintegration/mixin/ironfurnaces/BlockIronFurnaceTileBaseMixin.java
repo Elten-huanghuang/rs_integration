@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.mixin.ironfurnaces;
-import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceBindingUpdater;
+import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceFactoryLeases;
 import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -17,6 +18,14 @@ public abstract class BlockIronFurnaceTileBaseMixin {
 
     @Unique
     private RecipeType<? extends AbstractCookingRecipe> rsi$previousRecipeType;
+
+    @Inject(method = "split(ZII)V", at = @At("HEAD"), cancellable = true, require = 1)
+    private void rsi$keepReservedFactoryLanes(CallbackInfo ci) {
+        // 原生自动分配会把输入移到未预留通道，导致产物无法按租约回收。
+        if (IronFurnaceFactoryLeases.hasActiveLease((BlockEntity) (Object) this)) {
+            ci.cancel();
+        }
+    }
 
     @Inject(method = "checkRecipeType", at = @At("HEAD"))
     private void rsi$captureRecipeType(CallbackInfo ci) {
