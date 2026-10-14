@@ -130,6 +130,23 @@ public final class AnvilTerminalState implements CraftingStationState {
         }
     }
 
+    static void clearDisplayedMatrix(CraftingContainer matrix) {
+        if (matrix == null) return;
+        // clearContent 会删掉格子本身，客户端仍按旧的九格快照显示。
+        // removeItemNoUpdate 只取走物品，格子数量保持不变。
+        for (int i = 0; i < matrix.getContainerSize(); i++) {
+            matrix.removeItemNoUpdate(i);
+        }
+    }
+
+    /** 只清空九格，不插入网络。代理槽退回后用来去掉客户端仍显示的旧物品。 */
+    @Override
+    public void clearCraftingMatrix() {
+        if (menu.getGrid() == null || menu.getGrid().getCraftingMatrix() == null) return;
+        clearDisplayedMatrix(menu.getGrid().getCraftingMatrix());
+    }
+
+
     @Override
     public void fillFromJei(Player player, List<List<ItemStack>> options) {
         if (player.level().isClientSide || options == null) return;

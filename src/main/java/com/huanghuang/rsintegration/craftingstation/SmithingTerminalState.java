@@ -103,6 +103,14 @@ public final class SmithingTerminalState implements CraftingStationState {
         }
     }
 
+    /** 只清空九格，不插入网络。代理槽退回后用来去掉客户端仍显示的旧物品。 */
+    @Override
+    public void clearCraftingMatrix() {
+        if (menu.getGrid() == null) return;
+        AnvilTerminalState.clearDisplayedMatrix(menu.getGrid().getCraftingMatrix());
+    }
+
+
     /** JEI 一键填充：候选物品仍由服务端提取，放入时使用原版槽位语义。 */
     @Override
     public void fillFromJei(Player player, List<List<ItemStack>> options) {
