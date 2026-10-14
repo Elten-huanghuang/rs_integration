@@ -121,6 +121,14 @@ public final class StonecutterTerminalState implements CraftingStationState {
         }
     }
 
+    /** 只清空九格，不插入网络。代理槽退回后用来去掉客户端仍显示的旧物品。 */
+    @Override
+    public void clearCraftingMatrix() {
+        if (menu.getGrid() == null) return;
+        AnvilTerminalState.clearDisplayedMatrix(menu.getGrid().getCraftingMatrix());
+    }
+
+
     @Override
     public void fillFromJei(Player player, List<List<ItemStack>> options) {
         if (player.level().isClientSide) return;

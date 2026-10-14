@@ -56,6 +56,9 @@ public final class CraftingStationModePacket {
             if (clear) {
                 if (access.rsi$getCraftingStationMode() != CraftingStationMode.CRAFTING) {
                     access.rsi$getCraftingStationState().returnInputs(player);
+                    // 铁砧等代理槽显示的是独立容器，退回后必须把玩家仍看到的
+                    // RS 九格矩阵同步清空，否则关闭时原版会再退回一次。
+                    access.rsi$getCraftingStationState().clearCraftingMatrix();
                     menu.broadcastChanges();
                 }
                 return;
