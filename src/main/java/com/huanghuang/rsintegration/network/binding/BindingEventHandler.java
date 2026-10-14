@@ -673,6 +673,10 @@ public final class BindingEventHandler {
 
     public static boolean supportsGuiAt(Level level, BlockPos pos) {
         if (level == null || pos == null) return false;
+        // 规划和远程预览不能为了判断 GUI 能力而加载远处区块。
+        // ServerLevel#getBlockState 会通过 getChunk 强制加载区块，导致规划快照
+        // 与回调复核看到的状态不一致，最终把正常结果误判为过期请求。
+        if (!level.hasChunkAt(pos)) return false;
         MachineBindingTarget target = findTarget(level.getBlockState(pos).getBlock());
         return target != null && target.supportsGui;
     }
