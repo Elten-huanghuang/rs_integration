@@ -738,7 +738,8 @@ public final class RSIntegrationMod {
         }
 
         // Subsystems
-        if (RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()
+        if (RSIntegrationConfig.enabled(RSIntegrationConfig.COMMON_SPEC,
+                RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER)
                 && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                 || ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)
                 || ModList.get().isLoaded("beyonddimensions"))) {

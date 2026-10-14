@@ -1545,6 +1545,16 @@ public final class RSIntegrationConfig {
         if (clientModConfig != null) clientModConfig.save();
     }
 
+    /** 构造阶段配置尚未加载；开发环境直接取值会抛异常，正式环境则返回默认值。 */
+    public static boolean enabled(ForgeConfigSpec spec, ForgeConfigSpec.BooleanValue value) {
+        return spec.isLoaded() ? value.get() : value.getDefault();
+    }
+
+    /** 按键码在 RegisterKeyMappingsEvent 前读取，未加载时使用定义中的默认键。 */
+    public static int keyCode(ForgeConfigSpec spec, ForgeConfigSpec.IntValue value) {
+        return spec.isLoaded() ? value.get() : value.getDefault();
+    }
+
     /**
      * Returns the minimum reserve count for items matching the given ingredient,
      * or 0 if the item is not in the protected list.

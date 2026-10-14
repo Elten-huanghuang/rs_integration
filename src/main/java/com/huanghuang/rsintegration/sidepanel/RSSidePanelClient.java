@@ -186,7 +186,8 @@ public final class RSSidePanelClient {
                 "key.rsi.side_panel",
                 KeyConflictContext.UNIVERSAL,
                 InputConstants.Type.KEYSYM,
-                RSIntegrationConfig.RS_SIDE_PANEL_KEY.get(),
+                RSIntegrationConfig.keyCode(RSIntegrationConfig.SERVER_SPEC,
+                        RSIntegrationConfig.RS_SIDE_PANEL_KEY),
                 "key.categories.rsi"
         );
 
