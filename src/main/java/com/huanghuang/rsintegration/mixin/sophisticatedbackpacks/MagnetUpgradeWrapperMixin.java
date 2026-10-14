@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.util.ExternalItemProgressSuppression;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.RsOperationPlayerContext;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.rs.StorageCacheChangeBatch;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -158,10 +159,12 @@ public abstract class MagnetUpgradeWrapperMixin
         if (CraftOutputInterceptor.intersectsActiveZone(level, scanArea)) return 0;
         ServerPlayer player = entity instanceof ServerPlayer serverPlayer ? serverPlayer
                 : rsi$getPlacedBackpackPlayer(level, pos);
-        if (player == null) return original.call(instance, entity, level, pos);
-        try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
-            return original.call(instance, entity, level, pos);
-        }
+        return StorageCacheChangeBatch.call(() -> {
+            if (player == null) return original.call(instance, entity, level, pos);
+            try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
+                return original.call(instance, entity, level, pos);
+            }
+        });
     }
 
     @Unique

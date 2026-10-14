@@ -12,6 +12,7 @@
     "aetherworks.MetalFormerRecipeMixin",
     "refinedstorage.ConnectionStorageRefreshMixin",
     "refinedstorage.StorageRefreshDeduplicationMixin",
+    "refinedstorage.StorageCacheBatchMixin",
     "refinedstorage.VerifiedStorageSaveMixin",
     "refinedstorage.GridSnapshotRefreshMixin",
     "refinedstorage.GridSnapshotTransferMixin",

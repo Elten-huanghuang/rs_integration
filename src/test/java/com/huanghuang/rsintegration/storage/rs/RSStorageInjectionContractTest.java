@@ -71,6 +71,13 @@ class RSStorageInjectionContractTest {
     }
 
     @Test
+    void itemCacheCanDeferImmediateGridNotifications() throws IOException {
+        method(read(RS + "apiimpl/storage/cache/ItemStorageCache"), "add",
+                "(Lnet/minecraft/world/item/ItemStack;IZZ)V");
+        method(read(RS + "api/storage/cache/IStorageCache"), "flush", "()V");
+    }
+
+    @Test
     void storageAndGridHooksExistForBothResourceTypesAndPortableGrids() throws IOException {
         for (String type : List.of("Item", "Fluid")) {
             method(read(RS + "apiimpl/storage/cache/" + type + "StorageCache"), "invalidate",
