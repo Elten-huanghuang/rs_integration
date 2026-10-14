@@ -32,6 +32,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerMixin")) {
+            return hasMethod(targetClassName, "customClickHandler")
+                    && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
+        }
         if (mixinClassName.contains(".tacz.")) {
             return isClassPresent(targetClassName)
                     && isClassPresent("com.tacz.guns.api.item.IAmmo") && hasResonanceBackend();

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -85,7 +86,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         machineServer = player.server;
         if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(
                 player, level.dimension(), target);
-        if (!canStoreOutput(player)) return PreparationResult.fatal("RS 流体存储不可用",
+        if (!canStoreOutput(player)) return PreparationResult.fatal("流体存储不可用",
                 Component.translatable("rsi.embers_machine.error.fluid_storage"));
         if (!inputsIdle()) return PreparationResult.retry("余烬机器输入槽非空",
                 Component.translatable("rsi.embers_machine.error.inputs_occupied"));
@@ -106,8 +107,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected final boolean canStoreOutput(ServerPlayer player) {
-        if (storageEndpoint() == null || !"refinedstorage".equals(
-                storageEndpoint().session().reference().backendId().value())) return false;
+        if (storageEndpoint() == null || !MachineWaterSupply.supportsFluidStorage(storageEndpoint())) return false;
         return storageEndpoint().insert(player, InkFluidSupport.token(expected), true).status()
                 == StorageOperationStatus.SUCCESS;
     }

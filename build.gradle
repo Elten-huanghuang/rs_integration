@@ -132,6 +132,8 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'io.github.llamalad7:mixinextras-common:0.3.6'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
+    // 验证 BD 原生 Key、流体库存以及终端交互，不启动完整游戏。
+    testImplementation fg.deobf("local:beyonddimensions:1.20.1-forge-0.7.30")
     testImplementation fg.deobf("local:sophisticatedcore:1.20.1-1.2.55.975")
     // 原生工厂分配逻辑会调用 Minecraft 字段，必须通过模块依赖完成名称映射。
     testImplementation fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")

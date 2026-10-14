@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
@@ -71,6 +74,13 @@ public final class FluidRefundItem extends Item {
         if (!(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResultHolder.sidedSuccess(held, level.isClientSide);
         }
+        CraftStorageEndpoint endpoint = selectedBdEndpoint(serverPlayer);
+        if (endpoint != null) {
+            RestoreResult result = restoreEndpoint(serverPlayer, held, endpoint);
+            showResult(serverPlayer, result);
+            return result == RestoreResult.UNAVAILABLE || result == RestoreResult.INVALID
+                    ? InteractionResultHolder.fail(held) : InteractionResultHolder.consume(held);
+        }
         INetwork network = networkAtLookedBlock(serverPlayer);
         if (network == null) network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(serverPlayer);
         RestoreResult result = restore(serverPlayer, held, network);
@@ -91,6 +101,44 @@ public final class FluidRefundItem extends Item {
     }
 
     enum RestoreResult { STORED, PARTIAL, NO_SPACE, NO_PERMISSION, INVALID, UNAVAILABLE }
+
+    @Nullable
+    private static CraftStorageEndpoint selectedBdEndpoint(ServerPlayer player) {
+        try {
+            CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
+            return endpoint != null && "beyonddimensions".equals(endpoint.session().reference().backendId().value())
+                    ? endpoint : null;
+        } catch (RuntimeException | LinkageError unavailable) {
+            return null;
+        }
+    }
+
+    static RestoreResult restoreEndpoint(ServerPlayer player, ItemStack voucher, CraftStorageEndpoint endpoint) {
+        if (!(voucher.getItem() instanceof FluidRefundItem)) return RestoreResult.INVALID;
+        CompoundTag raw = rawFluid(voucher);
+        FluidStack fluid = FluidStack.loadFluidStackFromNBT(raw);
+        if (fluid.isEmpty() || raw.getInt("Amount") <= 0) return RestoreResult.INVALID;
+        if (endpoint == null) return RestoreResult.UNAVAILABLE;
+        try {
+            if (!endpoint.session().hasPermission(player, StoragePermission.INSERT)) return RestoreResult.NO_PERMISSION;
+            ItemStack token = InkFluidSupport.token(fluid);
+            var result = endpoint.insert(player, token, false);
+            ItemStack remainder = result.remainder().orElse(null);
+            if (remainder == null || remainder.getCount() > token.getCount()
+                    || !remainder.isEmpty() && !InkFluidSupport.fluid(remainder).isFluidEqual(fluid)) {
+                return RestoreResult.UNAVAILABLE;
+            }
+            if (remainder.getCount() == token.getCount()) return RestoreResult.NO_SPACE;
+            if (remainder.isEmpty()) voucher.setCount(0);
+            else raw.putInt("Amount", remainder.getCount());
+            MaterialSources.invalidateFor(player);
+            player.getInventory().setChanged();
+            if (player.containerMenu != null) player.containerMenu.broadcastChanges();
+            return remainder.isEmpty() ? RestoreResult.STORED : RestoreResult.PARTIAL;
+        } catch (RuntimeException | LinkageError unavailable) {
+            return RestoreResult.UNAVAILABLE;
+        }
+    }
 
     static RestoreResult restore(ServerPlayer player, ItemStack voucher, @Nullable INetwork network) {
         if (!(voucher.getItem() instanceof FluidRefundItem)) return RestoreResult.INVALID;

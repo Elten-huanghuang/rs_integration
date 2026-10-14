@@ -1,6 +1,11 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StoragePermission;
+import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -32,6 +37,8 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.doAnswer;
 
 class FluidRefundItemTest extends BootstrapTest {
     @Test
@@ -98,6 +105,50 @@ class FluidRefundItemTest extends BootstrapTest {
         assertEquals(FluidRefundItem.RestoreResult.NO_PERMISSION,
                 FluidRefundItem.restore(player, voucher, network));
         verify(network, never()).insertFluid(any(), anyInt(), any());
+        assertEquals(250, voucher.getTag().getCompound("Fluid").getInt("Amount"));
+    }
+
+    @Test
+    void bdPartialRefundPreservesFluidNbtAndOnlyConsumesTheAcceptedAmount() {
+        FluidStack fluid = new FluidStack(Fluids.WATER, 1000);
+        fluid.getOrCreateTag().putString("variant", "original");
+        ItemStack voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(),
+                fluid.writeToNBT(new CompoundTag()), null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(mock(Inventory.class));
+        StorageSession session = mock(StorageSession.class);
+        when(session.hasPermission(player, StoragePermission.INSERT)).thenReturn(true);
+        CraftStorageEndpoint endpoint = () -> session;
+        when(session.insert(eq(player), any(ItemStack.class), eq(false))).thenAnswer(call -> {
+            ItemStack token = call.getArgument(1);
+            assertTrue(InkFluidSupport.fluid(token).isFluidEqual(fluid));
+            return StorageOperationResult.inserted(StorageOperationMode.PERFORM, token,
+                    token.copyWithCount(400));
+        });
+        try (MockedStatic<InkFluidSupport> tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS);
+             MockedStatic<MaterialSources> materials = mockStatic(MaterialSources.class)) {
+            tokens.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call ->
+                    InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), call.getArgument(0)));
+            assertEquals(FluidRefundItem.RestoreResult.PARTIAL,
+                    FluidRefundItem.restoreEndpoint(player, voucher, endpoint));
+            assertEquals(400, voucher.getTag().getCompound("Fluid").getInt("Amount"));
+            assertEquals("original", voucher.getTag().getCompound("Fluid").getCompound("Tag").getString("variant"));
+            doAnswer(call -> StorageOperationResult.inserted(StorageOperationMode.PERFORM,
+                    call.getArgument(1), ItemStack.EMPTY)).when(session).insert(eq(player), any(ItemStack.class), eq(false));
+            assertEquals(FluidRefundItem.RestoreResult.STORED,
+                    FluidRefundItem.restoreEndpoint(player, voucher, endpoint));
+            assertTrue(voucher.isEmpty());
+        }
+    }
+
+    @Test
+    void bdDeniedRefundLeavesTheVoucherUntouched() {
+        ItemStack voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(), raw(250), null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        StorageSession session = mock(StorageSession.class);
+        assertEquals(FluidRefundItem.RestoreResult.NO_PERMISSION,
+                FluidRefundItem.restoreEndpoint(player, voucher, () -> session));
+        verify(session, never()).insert(eq(player), any(), eq(false));
         assertEquals(250, voucher.getTag().getCompound("Fluid").getInt("Amount"));
     }
 

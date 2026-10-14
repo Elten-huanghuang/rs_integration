@@ -100,7 +100,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean validateExecutionContext(@Nullable ServerPlayer player) {
         if (player == null || recipe == null || storageEndpoint() == null
-                || !"refinedstorage".equals(storageEndpoint().session().reference().backendId().value())
+                || !MachineWaterSupply.supportsFluidStorage(storageEndpoint())
                 || !level.hasChunkAt(pos) || !isCauldron(level.getBlockEntity(pos))) return false;
         if (consumed) return recycleFailure.isEmpty();
         if (!producesFluid()) return true;
@@ -143,7 +143,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
 
     static boolean canStoreOutput(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack output) {
         return endpoint != null && player != null && !output.isEmpty()
-                && "refinedstorage".equals(endpoint.session().reference().backendId().value())
+                && MachineWaterSupply.supportsFluidStorage(endpoint)
                 && endpoint.insert(player, output.copy(), true).status() == StorageOperationStatus.SUCCESS;
     }
 

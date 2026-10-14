@@ -37,6 +37,7 @@
     "constructionwand.ConstructionWandNetworkMixin",
     "constructionwand.SupplierInventoryNetworkMixin",
     "beyonddimensions.NetMagnetItemMixin",
+    "beyonddimensions.BDFluidContainerMixin",
     "minecraft.SmithingTransformRecipeAccessor",
     "minecraft.SmithingTrimRecipeAccessor",
     "refinedstorage.CraftingGridBehaviorMixin",

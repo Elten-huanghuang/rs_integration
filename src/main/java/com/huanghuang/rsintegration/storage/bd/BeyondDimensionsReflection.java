@@ -225,9 +225,16 @@ public final class BeyondDimensionsReflection {
     }
 
     static Object fluidKey(Fluid fluid, long amount) throws Exception {
+        return fluidKey(new FluidStack(fluid, Math.toIntExact(amount)));
+    }
+
+    static Object fluidKey(FluidStack fluid) throws Exception {
+        if (fluid.isEmpty()) throw new IllegalArgumentException("流体身份不能为空");
         Class<?> type = Class.forName(FLUID_KEY, false, BeyondDimensionsReflection.class.getClassLoader());
         Constructor<?> constructor = type.getConstructor(FluidStack.class);
-        return constructor.newInstance(new FluidStack(fluid, Math.toIntExact(amount)));
+        FluidStack identity = fluid.copy();
+        identity.setAmount(1);
+        return constructor.newInstance(identity);
     }
 
     static FluidStack fluidStack(Object key) throws Exception {
@@ -294,6 +301,10 @@ public final class BeyondDimensionsReflection {
             }
             if (!"onDelta".equals(method.getName()) || args == null || args.length < 1) return null;
             Object nativeKey = args[0];
+            if (isFluidKey(nativeKey)) {
+                listener.onInvalidated();
+                return null;
+            }
             if (!isItemKey(nativeKey)) return null;
             try {
                 ItemStack stack = keyStack(nativeKey);

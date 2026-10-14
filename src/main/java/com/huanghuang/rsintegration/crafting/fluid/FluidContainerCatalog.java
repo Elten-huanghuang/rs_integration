@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -129,7 +130,8 @@ public final class FluidContainerCatalog {
     }
 
     private static IFluidHandlerItem handler(ItemStack stack) {
-        return FluidUtil.getFluidHandler(stack.copyWithCount(1)).orElse(null);
+        IFluidHandlerItem bottle = InkBottleFluidHandler.create(stack.copyWithCount(1));
+        return bottle != null ? bottle : FluidUtil.getFluidHandler(stack.copyWithCount(1)).orElse(null);
     }
 
     static List<FluidContainerRecipe> discover(List<ItemStack> samples, List<FluidStack> candidates,
