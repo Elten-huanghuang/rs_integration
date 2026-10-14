@@ -121,7 +121,8 @@ public final class ContainerTransferClient {
                 "key.rsi.store_all",
                 KeyConflictContext.GUI,
                 InputConstants.Type.KEYSYM,
-                RSIntegrationConfig.CONTAINER_TRANSFER_KEY.get(),
+                RSIntegrationConfig.keyCode(RSIntegrationConfig.SERVER_SPEC,
+                        RSIntegrationConfig.CONTAINER_TRANSFER_KEY),
                 "key.categories.rsi"
         );
 

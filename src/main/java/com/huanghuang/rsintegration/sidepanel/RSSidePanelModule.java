@@ -12,7 +12,8 @@ public final class RSSidePanelModule {
         // The side panel is an RS-only UI. Its availability must be decided at
         // the boundary, while the rest of RSI remains fully usable without RS.
         return ModList.get().isLoaded(ModIds.REFINED_STORAGE)
-                && RSIntegrationConfig.ENABLE_RS_SIDE_PANEL.get();
+                && RSIntegrationConfig.enabled(RSIntegrationConfig.COMMON_SPEC,
+                        RSIntegrationConfig.ENABLE_RS_SIDE_PANEL);
     }
 
     public static void initCommon() {
