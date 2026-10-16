@@ -61,7 +61,8 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
 
     @Test void packetsRoundTripLargeTotalsAndUnavailableWithoutChangingDiskIdentity() {
         UUID world = UUID.randomUUID(), disk = UUID.randomUUID();
-        var summary = new UnifiedDiskSummary(562949953159168L, 4294967294L, 262144, 2, 262144, 262144);
+        var summary = new UnifiedDiskSummary(
+                562949953159168L, 4294967294L, new int[3], 262144, 2, 262144, 262144);
         var buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
             var request = new UnifiedDiskTooltipRequestPacket(world, disk);
@@ -78,7 +79,8 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
                 assertEquals(response, UnifiedDiskTooltipResponsePacket.decode(buf));
             }
         } finally { buf.release(); }
-        assertThrows(IllegalArgumentException.class, () -> new UnifiedDiskSummary(1, 0, 0, 0, 8, 8));
+        assertThrows(IllegalArgumentException.class,
+                () -> new UnifiedDiskSummary(1, 0, new int[3], 0, 0, 8, 8));
     }
 
     @Test void failureIsRedAndShowsResourceAndRecoveryBeforeIdWithoutShift() {
@@ -106,7 +108,7 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
 
     @Test void tooltipAlwaysShowsBothInventoriesAndIdWhileExpanded() {
         UUID disk = UUID.randomUUID();
-        var summary = new UnifiedDiskSummary(4294967294L, 2500, 2, 1, 8, 8);
+        var summary = new UnifiedDiskSummary(4294967294L, 2500, new int[3], 2, 1, 8, 8);
         List<Component> lines = new ArrayList<>();
         UnifiedDiskTooltip.append(lines, disk, new UnifiedDiskTooltip.View(summary, false, true));
         var stored = (TranslatableContents) lines.get(0).getContents();
@@ -124,7 +126,7 @@ class UnifiedDiskTooltipTest extends BootstrapTest {
     }
 
     @Test void quarantineWarningKeepsSummaryVisibleWithoutReportingDiskUnavailable() {
-        var summary = new UnifiedDiskSummary(17, 23, 1, 1, 8, 8);
+        var summary = new UnifiedDiskSummary(17, 23, new int[3], 1, 1, 8, 8);
         var warning = new UnifiedDiskFailure(Component.translatable("quarantine.warning", 1),
                 Component.translatable("quarantine.action"));
         List<Component> lines = new ArrayList<>();

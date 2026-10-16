@@ -41,11 +41,11 @@ class UnifiedGridSessionTest extends BootstrapTest {
     @Test void dualSubscriptionsMergeStoredAndCraftableAndDoNotScanOnIdleTicks() {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridEntry item = f.entry(GridResourceKind.ITEM);
+        UnifiedGridEntry item = f.entry(GridResourceKind.item());
         assertEquals(f.storedItemId, item.storedId());
         assertEquals(f.craftableItemId, item.craftableId());
         assertEquals(17, item.amount());
-        assertEquals(1000, f.entry(GridResourceKind.FLUID).amount());
+        assertEquals(1000, f.entry(GridResourceKind.fluid()).amount());
         f.session.tick();
         verify(f.items.list, times(1)).getStacks();
         verify(f.craftItems.list, times(1)).getStacks();
@@ -61,13 +61,13 @@ class UnifiedGridSessionTest extends BootstrapTest {
     @Test void repeatedChangesCoalesceIntoAbsoluteDeltaWithoutTemplate() {
         Fixture f = new Fixture();
         f.session.tick();
-        int serial = f.entry(GridResourceKind.ITEM).serial();
+        int serial = f.entry(GridResourceKind.item()).serial();
         f.frames.clear();
         f.items.put(f.storedItemId, new ItemStack(Items.DIAMOND, Integer.MAX_VALUE));
         f.itemListener.onChanged(new StackListResult<>(new ItemStack(Items.DIAMOND), f.storedItemId, 2));
         f.itemListener.onChanged(new StackListResult<>(new ItemStack(Items.DIAMOND), f.storedItemId, 3));
         f.session.tick();
-        UnifiedGridEntry update = f.entry(GridResourceKind.ITEM);
+        UnifiedGridEntry update = f.entry(GridResourceKind.item());
         assertEquals(serial, update.serial());
         assertEquals(Integer.MAX_VALUE, update.amount());
         assertFalse(update.metadata());
@@ -80,12 +80,12 @@ class UnifiedGridSessionTest extends BootstrapTest {
     @Test void storedDeletionRetainsCraftableRowAndTotalDeletionNeverReusesSerial() {
         Fixture f = new Fixture();
         f.session.tick();
-        int serial = f.entry(GridResourceKind.ITEM).serial();
+        int serial = f.entry(GridResourceKind.item()).serial();
         f.frames.clear();
         f.items.clear();
         f.notifyItem();
         f.session.tick();
-        UnifiedGridEntry craftable = f.entry(GridResourceKind.ITEM);
+        UnifiedGridEntry craftable = f.entry(GridResourceKind.item());
         assertEquals(serial, craftable.serial());
         assertNull(craftable.storedId());
         assertEquals(f.craftableItemId, craftable.craftableId());
@@ -94,24 +94,24 @@ class UnifiedGridSessionTest extends BootstrapTest {
         f.craftItems.clear();
         f.notifyItem();
         f.session.tick();
-        assertTrue(f.entry(GridResourceKind.ITEM).removed());
+        assertTrue(f.entry(GridResourceKind.item()).removed());
         f.frames.clear();
         UUID reinserted = UUID.randomUUID();
         f.items.put(reinserted, new ItemStack(Items.DIAMOND, 9));
         f.itemListener.onChanged(new StackListResult<>(new ItemStack(Items.DIAMOND), reinserted, 9));
         f.session.tick();
-        assertTrue(f.entry(GridResourceKind.ITEM).serial() > serial);
+        assertTrue(f.entry(GridResourceKind.item()).serial() > serial);
     }
 
     @Test void requestValidatesSessionKindEpochPermissionsAndCurrentNetwork() {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridEntry item = f.entry(GridResourceKind.ITEM);
-        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.ITEM);
-        var good = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.ITEM, frame.epoch(),
+        UnifiedGridEntry item = f.entry(GridResourceKind.item());
+        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.item());
+        var good = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.item(), frame.epoch(),
                 item.serial(), UnifiedGridActionPacket.Action.EXTRACT, 0);
         f.session.handle(new UnifiedGridActionPacket(0, UUID.randomUUID(), good.kind(), good.epoch(), good.serial(), good.action(), 0));
-        f.session.handle(new UnifiedGridActionPacket(0, good.session(), GridResourceKind.FLUID, good.epoch(), good.serial(), good.action(), 0));
+        f.session.handle(new UnifiedGridActionPacket(0, good.session(), GridResourceKind.fluid(), good.epoch(), good.serial(), good.action(), 0));
         f.session.handle(new UnifiedGridActionPacket(0, good.session(), good.kind(), good.epoch() + 1, good.serial(), good.action(), 0));
         verifyNoInteractions(f.itemHandler, f.fluidHandler);
         f.session.handle(good);
@@ -129,17 +129,17 @@ class UnifiedGridSessionTest extends BootstrapTest {
     @Test void categoryInvalidationRejectsOldHandlesAndDoesNotResendOtherKind() {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridEntry old = f.entry(GridResourceKind.ITEM);
-        UnifiedGridUpdatePacket before = f.frame(GridResourceKind.ITEM);
+        UnifiedGridEntry old = f.entry(GridResourceKind.item());
+        UnifiedGridUpdatePacket before = f.frame(GridResourceKind.item());
         f.frames.clear();
         f.itemListener.onInvalidated();
-        f.session.handle(new UnifiedGridActionPacket(0, before.session(), GridResourceKind.ITEM,
+        f.session.handle(new UnifiedGridActionPacket(0, before.session(), GridResourceKind.item(),
                 before.epoch(), old.serial(), UnifiedGridActionPacket.Action.EXTRACT, 0));
         verifyNoInteractions(f.itemHandler);
         f.session.tick();
-        assertTrue(f.frames.stream().allMatch(packet -> packet.kind() == GridResourceKind.ITEM));
-        assertTrue(f.entry(GridResourceKind.ITEM).serial() > old.serial());
-        assertTrue(f.frame(GridResourceKind.ITEM).epoch() > before.epoch());
+        assertTrue(f.frames.stream().allMatch(packet -> packet.kind() == GridResourceKind.item()));
+        assertTrue(f.entry(GridResourceKind.item()).serial() > old.serial());
+        assertTrue(f.frame(GridResourceKind.item()).epoch() > before.epoch());
     }
 
     @ParameterizedTest
@@ -147,9 +147,9 @@ class UnifiedGridSessionTest extends BootstrapTest {
     void itemExtractionPreservesNativeTargetSlotAndMouseFlags(int flags) {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridEntry item = f.entry(GridResourceKind.ITEM);
-        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.ITEM);
-        f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.ITEM, frame.epoch(),
+        UnifiedGridEntry item = f.entry(GridResourceKind.item());
+        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.item());
+        f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.item(), frame.epoch(),
                 item.serial(), UnifiedGridActionPacket.Action.EXTRACT, flags));
         verify(f.itemHandler).onExtract(f.player, f.storedItemId, -1, flags);
         verifyNoInteractions(f.fluidHandler);
@@ -159,11 +159,11 @@ class UnifiedGridSessionTest extends BootstrapTest {
         try (MockedStatic<UnifiedGridFluidTransfer> transfers = mockStatic(UnifiedGridFluidTransfer.class)) {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridEntry fluid = f.entry(GridResourceKind.FLUID);
-        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.FLUID);
-        var extract = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch(),
+        UnifiedGridEntry fluid = f.entry(GridResourceKind.fluid());
+        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.fluid());
+        var extract = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.fluid(), frame.epoch(),
                 fluid.serial(), UnifiedGridActionPacket.Action.FILL_FLUID, 0);
-        var insert = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch(),
+        var insert = new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.fluid(), frame.epoch(),
                 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
         var result = new UnifiedGridFluidTransfer.Result(ItemStack.EMPTY, ItemStack.EMPTY,
                 FluidStack.EMPTY, FluidStack.EMPTY, 0);
@@ -196,15 +196,15 @@ class UnifiedGridSessionTest extends BootstrapTest {
             if (!full) result.setCount(0);
             return !full;
         });
-        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.FLUID);
+        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.fluid());
         var result = new UnifiedGridFluidTransfer.Result(new ItemStack(Items.WATER_BUCKET), ItemStack.EMPTY,
                 FluidStack.EMPTY, new FluidStack(Fluids.WATER, 1000), 1000);
         try (MockedStatic<UnifiedGridFluidTransfer> transfers = mockStatic(UnifiedGridFluidTransfer.class)) {
             transfers.when(() -> UnifiedGridFluidTransfer.fill(eq(f.network), eq(ItemStack.EMPTY), any())).thenReturn(result);
             transfers.when(() -> UnifiedGridFluidTransfer.apply(f.player, f.network, result, true, true))
                     .thenCallRealMethod();
-            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch(),
-                    f.entry(GridResourceKind.FLUID).serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
+            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.fluid(), frame.epoch(),
+                    f.entry(GridResourceKind.fluid()).serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
                     IItemGridHandler.EXTRACT_SHIFT));
         }
         verify(inventory).add(any(ItemStack.class));
@@ -220,15 +220,15 @@ class UnifiedGridSessionTest extends BootstrapTest {
     @Test void fillingRejectsWrongKindOldEpochAndDeletedStoredIdentity() {
         Fixture f = new Fixture();
         f.session.tick();
-        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.FLUID);
-        int serial = f.entry(GridResourceKind.FLUID).serial();
+        UnifiedGridUpdatePacket frame = f.frame(GridResourceKind.fluid());
+        int serial = f.entry(GridResourceKind.fluid()).serial();
         try (MockedStatic<UnifiedGridFluidTransfer> transfers = mockStatic(UnifiedGridFluidTransfer.class)) {
-            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.ITEM, frame.epoch(),
+            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.item(), frame.epoch(),
                     serial, UnifiedGridActionPacket.Action.FILL_FLUID, 0));
-            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch() + 1,
+            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.fluid(), frame.epoch() + 1,
                     serial, UnifiedGridActionPacket.Action.FILL_FLUID, 0));
             f.fluids.clear();
-            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.FLUID, frame.epoch(),
+            f.session.handle(new UnifiedGridActionPacket(0, frame.session(), GridResourceKind.fluid(), frame.epoch(),
                     serial, UnifiedGridActionPacket.Action.FILL_FLUID, 0));
             transfers.verifyNoInteractions();
         }
@@ -244,18 +244,18 @@ class UnifiedGridSessionTest extends BootstrapTest {
             f.items.put(UUID.randomUUID(), variant);
         }
         f.session.tick();
-        assertFalse(f.frames.stream().anyMatch(packet -> packet.kind() == GridResourceKind.ITEM && packet.end()));
+        assertFalse(f.frames.stream().anyMatch(packet -> packet.kind() == GridResourceKind.item() && packet.end()));
         ItemStack changed = new ItemStack(Items.DIAMOND, 77);
         changed.getOrCreateTag().putInt("variant", 0);
-        UUID changedId = f.items.rows.get(GridResourceKey.of(GridResourceKind.ITEM, changed)).getId();
+        UUID changedId = f.items.rows.get(GridResourceKey.of(GridResourceKind.item(), changed)).getId();
         f.items.put(changedId, changed);
         f.itemListener.onChanged(new StackListResult<>(changed, changedId, 75));
         int ticks = 1;
-        while (f.frames.stream().noneMatch(packet -> packet.kind() == GridResourceKind.ITEM && packet.end()) && ticks++ < 30)
+        while (f.frames.stream().noneMatch(packet -> packet.kind() == GridResourceKind.item() && packet.end()) && ticks++ < 30)
             f.session.tick();
         f.session.tick();
         assertTrue(ticks < 30);
-        long count = f.frames.stream().filter(packet -> packet.kind() == GridResourceKind.ITEM)
+        long count = f.frames.stream().filter(packet -> packet.kind() == GridResourceKind.item())
                 .flatMap(packet -> packet.entries().stream()).filter(UnifiedGridEntry::metadata).count();
         assertEquals(50000, count);
         assertTrue(f.frames.stream().flatMap(packet -> packet.entries().stream())
@@ -274,10 +274,10 @@ class UnifiedGridSessionTest extends BootstrapTest {
         private final IFluidGridHandler fluidHandler = mock(IFluidGridHandler.class);
         private final IStorageCache<ItemStack> itemCache = mock(IStorageCache.class);
         private final IStorageCache<FluidStack> fluidCache = mock(IStorageCache.class);
-        private final FakeList<ItemStack> items = new FakeList<>(GridResourceKind.ITEM);
-        private final FakeList<ItemStack> craftItems = new FakeList<>(GridResourceKind.ITEM);
-        private final FakeList<FluidStack> fluids = new FakeList<>(GridResourceKind.FLUID);
-        private final FakeList<FluidStack> craftFluids = new FakeList<>(GridResourceKind.FLUID);
+        private final FakeList<ItemStack> items = new FakeList<>(GridResourceKind.item());
+        private final FakeList<ItemStack> craftItems = new FakeList<>(GridResourceKind.item());
+        private final FakeList<FluidStack> fluids = new FakeList<>(GridResourceKind.fluid());
+        private final FakeList<FluidStack> craftFluids = new FakeList<>(GridResourceKind.fluid());
         private final UUID storedItemId = UUID.randomUUID();
         private final UUID craftableItemId = UUID.randomUUID();
         private final List<UnifiedGridUpdatePacket> frames = new ArrayList<>();

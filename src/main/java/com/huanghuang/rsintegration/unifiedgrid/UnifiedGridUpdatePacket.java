@@ -28,7 +28,7 @@ public record UnifiedGridUpdatePacket(int containerId, UUID session, GridResourc
     public static void encode(UnifiedGridUpdatePacket packet, FriendlyByteBuf buf) {
         buf.writeVarInt(packet.containerId);
         buf.writeUUID(packet.session);
-        buf.writeByte(packet.kind.ordinal());
+        buf.writeByte(packet.kind.id());
         buf.writeVarInt(packet.epoch);
         buf.writeVarInt(packet.sequence);
         buf.writeBoolean(packet.begin);

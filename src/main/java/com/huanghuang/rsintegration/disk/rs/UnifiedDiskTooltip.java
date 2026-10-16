@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.util.DiskTooltipEffects;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.ChatFormatting;
@@ -46,6 +47,16 @@ public final class UnifiedDiskTooltip {
                         DiskTooltipEffects.Tone.MAIN, number(summary.items())));
                 tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_fluids", DiskTooltipEffects.Theme.GUIXU,
                         DiskTooltipEffects.Tone.FLUID, number(summary.fluids())));
+                for (MagicResourceKind kind : MagicResourceKind.values()) {
+                    int amount = summary.magicAmount(kind);
+                    if (amount > 0) {
+                        tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_magic",
+                                DiskTooltipEffects.Theme.GUIXU,
+                                kind == MagicResourceKind.SOUL
+                                        ? DiskTooltipEffects.Tone.MAIN : DiskTooltipEffects.Tone.FLUID,
+                                kind.displayName(), number(amount)));
+                    }
+                }
                 tooltip.add(DiskTooltipEffects.tint(PREFIX + "item_types", DiskTooltipEffects.Theme.GUIXU,
                         DiskTooltipEffects.Tone.MAIN, number(summary.itemTypes()),
                         number(summary.itemCapacity())));

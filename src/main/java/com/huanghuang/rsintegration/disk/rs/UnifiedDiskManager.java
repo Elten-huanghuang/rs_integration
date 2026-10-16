@@ -20,6 +20,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -90,6 +91,7 @@ public final class UnifiedDiskManager {
     public UUID worldId() { return worldId; }
     public boolean enabled() { return enabled; }
     public UnifiedMountCoordinator mounts() { return mounts; }
+    public Map<UUID, Entry> entries() { return Collections.unmodifiableMap(entries); }
 
     /** 只暂停文件提交，游戏中的存取继续更新内存；备份线程关闭凭据即可解除暂停。 */
     public final class BackupLease implements AutoCloseable {
@@ -306,6 +308,7 @@ public final class UnifiedDiskManager {
             completed.entry.manifest = saved.manifest();
             completed.entry.core.items.acknowledge(completed.snapshot.items());
             completed.entry.core.fluids.acknowledge(completed.snapshot.fluids());
+            completed.entry.core.acknowledgeMagic(completed.snapshot.coreMagic());
         } catch (RuntimeException e) {
             LOGGER.error("[RSI] 统一盘 {} 保存失败，保留 dirty 与旧检查点，等待重试", completed.entry.id, e);
         }

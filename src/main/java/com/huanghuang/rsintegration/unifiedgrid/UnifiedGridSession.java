@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.magic.MagicResourceEndpoint;
+import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.MagicResourceStack;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -20,6 +24,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -45,8 +50,10 @@ public final class UnifiedGridSession {
     private boolean closed;
     private boolean canCraft;
     private INetwork network;
-    private final Channel<ItemStack> items = new Channel<>(GridResourceKind.ITEM);
-    private final Channel<FluidStack> fluids = new Channel<>(GridResourceKind.FLUID);
+    private final Channel<ItemStack> items = new Channel<>(GridResourceKind.item());
+    private final Channel<FluidStack> fluids = new Channel<>(GridResourceKind.fluid());
+    /** 每种已安装的魔法资源一个通道，条目直接查询归墟盘。 */
+    private final List<MagicChannel> magic = new ArrayList<>(3);
 
     public UnifiedGridSession(GridContainerMenu menu, ServerPlayer player) {
         this(menu, player, packet -> packet.send(player));
@@ -56,6 +63,10 @@ public final class UnifiedGridSession {
         this.menu = menu;
         this.player = player;
         this.transport = transport;
+        for (MagicResourceKind kind : MagicResourceKind.values()) {
+            GridResourceKind gridKind = GridResourceKind.ofMagic(kind);
+            if (gridKind != null) magic.add(new MagicChannel(gridKind));
+        }
     }
 
     public static boolean supports(IGrid grid) {
@@ -74,37 +85,50 @@ public final class UnifiedGridSession {
             network = current;
             items.bind(current == null ? null : current.getItemStorageCache());
             fluids.bind(current == null ? null : current.getFluidStorageCache());
+            for (MagicChannel channel : magic) channel.resetRequested = true;
         }
         boolean allowed = current != null && current.getSecurityManager().hasPermission(Permission.AUTOCRAFTING, player);
         if (allowed != canCraft) {
             canCraft = allowed;
             items.resetRequested = true;
             fluids.resetRequested = true;
+            for (MagicChannel channel : magic) channel.resetRequested = true;
         }
         if (nextSerial >= Integer.MAX_VALUE - MAX_DIRTY * 2 || items.epoch == Integer.MAX_VALUE
-                || fluids.epoch == Integer.MAX_VALUE) {
+                || fluids.epoch == Integer.MAX_VALUE || anyMagicEpochExhausted()) {
             id = UUID.randomUUID();
             nextSerial = 1;
             items.resetRequested = true;
             fluids.resetRequested = true;
             items.epoch = fluids.epoch = 0;
+            for (MagicChannel channel : magic) {
+                channel.epoch = 0;
+                channel.resetRequested = true;
+            }
         }
         try {
             items.prepare();
             fluids.prepare();
-            // 两类轮流发送，避免大物品列表阻塞流体首屏。
+            for (MagicChannel channel : magic) channel.prepare();
+            // 各类轮流发送，避免大列表阻塞。
             for (int i = 0; i < PACKETS_PER_TICK; i++) {
                 items.pump();
                 fluids.pump();
+                for (MagicChannel channel : magic) channel.pump();
             }
         } catch (RuntimeException exception) {
             // 极端模板超过协议上限时回到原版，不能静默丢掉该资源的显示。
             RSIntegrationMod.LOGGER.warn("混合终端同步失败，当前菜单恢复原版路径", exception);
-            transport.accept(new UnifiedGridUpdatePacket(menu.containerId, id, GridResourceKind.ITEM, 0, 0,
+            transport.accept(new UnifiedGridUpdatePacket(menu.containerId, id, GridResourceKind.item(), 0, 0,
                     true, true, false, false, new byte[0]));
             enabled = false;
             close();
         }
+    }
+
+    private boolean anyMagicEpochExhausted() {
+        for (MagicChannel channel : magic) if (channel.epoch == Integer.MAX_VALUE) return true;
+        return false;
     }
 
     public void close() {
@@ -117,42 +141,78 @@ public final class UnifiedGridSession {
 
     public void handle(UnifiedGridActionPacket packet) {
         if (!enabled() || !id.equals(packet.session()) || player.containerMenu != menu || !menu.stillValid(player)) return;
-        Channel<?> channel = packet.kind() == GridResourceKind.ITEM ? items : fluids;
-        if (packet.action() == UnifiedGridActionPacket.Action.RESYNC) {
-            if (player.tickCount - channel.lastResync >= 20) {
-                channel.lastResync = player.tickCount;
-                channel.resetRequested = true;
+
+        // 魔法资源通道直接查询归墟盘，不走 RS 缓存，单独校验
+        if (packet.kind().isMagic()) {
+            MagicChannel channel = magicChannel(packet.kind());
+            if (channel == null) return;
+            if (packet.action() == UnifiedGridActionPacket.Action.RESYNC) {
+                if (player.tickCount - channel.lastResync >= 20) {
+                    channel.lastResync = player.tickCount;
+                    channel.resetRequested = true;
+                }
+                return;
             }
-            return;
+            if (network == null || ((INetworkAwareGrid) menu.getGrid()).getNetwork() != network
+                    || !menu.getGrid().isGridActive() || !network.canRun() || channel.epoch != packet.epoch()
+                    || channel.resetRequested || packet.flags() > 7) return;
+        } else {
+            Channel<?> channel = packet.kind() == GridResourceKind.item() ? items : fluids;
+            if (packet.action() == UnifiedGridActionPacket.Action.RESYNC) {
+                if (player.tickCount - channel.lastResync >= 20) {
+                    channel.lastResync = player.tickCount;
+                    channel.resetRequested = true;
+                }
+                return;
+            }
+            if (network == null || ((INetworkAwareGrid) menu.getGrid()).getNetwork() != network
+                    || !menu.getGrid().isGridActive() || !network.canRun() || channel.epoch != packet.epoch()
+                    || channel.resetRequested || channel.snapshot != null || packet.flags() > 7) return;
         }
-        if (network == null || ((INetworkAwareGrid) menu.getGrid()).getNetwork() != network
-                || !menu.getGrid().isGridActive() || !network.canRun() || channel.epoch != packet.epoch()
-                || channel.resetRequested || channel.snapshot != null || packet.flags() > 7) return;
         switch (packet.action()) {
             case INSERT_ITEM -> {
-                if (packet.kind() == GridResourceKind.ITEM && packet.serial() == 0 && permitted(Permission.INSERT))
+                if (packet.kind() == GridResourceKind.item() && packet.serial() == 0 && permitted(Permission.INSERT))
                     network.getItemGridHandler().onInsertHeldItem(player, (packet.flags() & 1) != 0);
             }
             case INSERT_FLUID -> {
-                if (packet.kind() == GridResourceKind.FLUID && packet.serial() == 0 && permitted(Permission.INSERT))
+                if (packet.kind() == GridResourceKind.fluid() && packet.serial() == 0 && permitted(Permission.INSERT))
                     applyFluidTransfer(UnifiedGridFluidTransfer.empty(network, menu.getCarried()), false, false);
             }
+            case INSERT_MAGIC -> {
+                if (!packet.kind().isMagic() || packet.serial() != 0 || !permitted(Permission.INSERT)) return;
+                MagicChannel channel = magicChannel(packet.kind());
+                if (channel == null) return;
+                int moved = MagicResourceInteraction.depositToNetwork(
+                        player, channel.resource, menu.getCarried());
+                if (moved > 0) channel.forceRefresh(); // 立即刷新该资源条目
+            }
             case FILL_FLUID -> {
-                if (packet.kind() != GridResourceKind.FLUID || !permitted(Permission.EXTRACT)) return;
+                if (packet.kind() != GridResourceKind.fluid() || !permitted(Permission.EXTRACT)) return;
                 ServerEntry entry = fluids.bySerial.get(packet.serial());
                 if (entry == null || entry.storedId == null) return;
                 FluidStack fluid = fluids.cache.getList().get(entry.storedId);
                 if (fluid != null) applyFluidTransfer(UnifiedGridFluidTransfer.fill(network, menu.getCarried(), fluid),
                         true, (packet.flags() & IItemGridHandler.EXTRACT_SHIFT) != 0);
             }
+            case FILL_MAGIC -> {
+                if (!packet.kind().isMagic() || !permitted(Permission.EXTRACT)) return;
+                MagicChannel channel = magicChannel(packet.kind());
+                if (channel == null || packet.serial() != channel.serial) return;
+                int moved = MagicResourceInteraction.withdrawFromNetwork(
+                        player, channel.resource, menu.getCarried(), channel.lastAmount);
+                if (moved > 0) channel.forceRefresh();
+            }
             case EXTRACT, SCROLL -> {
+                // 魔法资源不支持 EXTRACT/SCROLL，只有物品和流体
+                if (packet.kind().isMagic()) return;
+                Channel<?> channel = packet.kind() == GridResourceKind.item() ? items : fluids;
                 ServerEntry entry = channel.bySerial.get(packet.serial());
                 Permission permission = packet.action() == UnifiedGridActionPacket.Action.SCROLL && (packet.flags() & 2) != 0
                         ? Permission.INSERT : Permission.EXTRACT;
                 if (entry == null || entry.storedId == null || !permitted(permission)) return;
                 // UUID 查询使用当前缓存，不相信客户端数量，也不信任已经换代的 UUID。
                 if (channel.cache.getList().get(entry.storedId) == null) return;
-                if (packet.kind() == GridResourceKind.ITEM) {
+                if (packet.kind() == GridResourceKind.item()) {
                     if (packet.action() == UnifiedGridActionPacket.Action.SCROLL) {
                         network.getItemGridHandler().onGridScroll(player, entry.storedId,
                                 (packet.flags() & 1) != 0, (packet.flags() & 2) != 0);
@@ -164,6 +224,14 @@ public final class UnifiedGridSession {
             }
             default -> { }
         }
+    }
+
+    @Nullable
+    private MagicChannel magicChannel(GridResourceKind kind) {
+        for (MagicChannel channel : magic) {
+            if (channel.gridKind == kind) return channel;
+        }
+        return null;
     }
 
     private boolean permitted(Permission permission) {
@@ -270,7 +338,7 @@ public final class UnifiedGridSession {
         @SuppressWarnings("unchecked")
         private StorageTrackerEntry tracker(T stack) {
             if (network == null) return null;
-            return kind == GridResourceKind.ITEM ? network.getItemStorageTracker().get((ItemStack) stack)
+            return kind == GridResourceKind.item() ? network.getItemStorageTracker().get((ItemStack) stack)
                     : network.getFluidStorageTracker().get((FluidStack) stack);
         }
 
@@ -394,5 +462,87 @@ public final class UnifiedGridSession {
         private final T template;
         private final Set<UUID> ids = new LinkedHashSet<>();
         private Dirty(T template) { this.template = template; }
+    }
+
+    /**
+     * 魔法资源的轻量级通道：条目只有一个，直接查询已挂载的归墟盘，不监听 RS 缓存。
+     */
+    private final class MagicChannel {
+        /** 每秒查询一次，避免频繁扫描磁盘。 */
+        private static final int POLL_INTERVAL = 20;
+        private final GridResourceKind gridKind;
+        private final MagicResourceKind resource;
+        private int epoch;
+        private boolean resetRequested = true;
+        private int lastResync = -20;
+        private int lastPoll = -POLL_INTERVAL;
+        private ServerEntry entry;
+        private int lastAmount = -1;
+        private boolean sentInitial;
+        private int serial;
+
+        private MagicChannel(GridResourceKind gridKind) {
+            this.gridKind = gridKind;
+            this.resource = gridKind.magicKind();
+        }
+
+        private void prepare() {
+            if (!resetRequested) return;
+            resetRequested = false;
+            sentInitial = false;
+            lastAmount = -1;
+            lastPoll = player.tickCount; // 立即查询
+            epoch++;
+            if (entry == null) {
+                if (nextSerial == Integer.MAX_VALUE) throw new IllegalStateException("会话条目编号耗尽");
+                serial = nextSerial++;
+                entry = new ServerEntry(serial, new MagicResourceStack(resource, 1),
+                        GridResourceKey.of(gridKind, new MagicResourceStack(resource, 0)));
+            }
+            entry.storedId = UUID.randomUUID(); // 固定 UUID，不会变化
+            entry.craftableId = null;
+            entry.tracker = null;
+        }
+
+        /** 充放操作后立即刷新条目。 */
+        private void forceRefresh() {
+            lastPoll = player.tickCount - POLL_INTERVAL;
+        }
+
+        private void pump() {
+            if (network == null) {
+                if (!sentInitial) {
+                    send(true, true, new byte[0]);
+                    sentInitial = true;
+                }
+                return;
+            }
+            if (!resource.available()) return;
+            // 降低查询频率：每秒查询一次，而非每 tick
+            if (player.tickCount - lastPoll < POLL_INTERVAL && sentInitial) return;
+            lastPoll = player.tickCount;
+
+            int total = MagicResourceEndpoint.available(player.server, resource);
+            // 只在数量变化时发送更新
+            if (!sentInitial || total != lastAmount) {
+                lastAmount = total;
+                entry.amount = total;
+                FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer(256));
+                try {
+                    entry.update(true).write(buf, gridKind);
+                    byte[] payload = new byte[buf.readableBytes()];
+                    buf.readBytes(payload);
+                    send(!sentInitial, true, payload);
+                    sentInitial = true;
+                } finally {
+                    buf.release();
+                }
+            }
+        }
+
+        private void send(boolean begin, boolean end, byte[] payload) {
+            transport.accept(new UnifiedGridUpdatePacket(menu.containerId, id, gridKind,
+                    epoch, 0, begin, end, network != null, canCraft, payload));
+        }
     }
 }

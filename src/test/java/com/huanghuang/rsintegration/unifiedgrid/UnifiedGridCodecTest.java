@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
+import com.huanghuang.rsintegration.magic.MagicResourceStack;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.storage.tracker.StorageTrackerEntry;
 import io.netty.buffer.Unpooled;
@@ -20,8 +21,11 @@ class UnifiedGridCodecTest extends BootstrapTest {
         fluid.getOrCreateTag().putString("variant", "tagged");
         for (GridResourceKind kind : GridResourceKind.values()) {
             UUID stored = UUID.randomUUID(), craftable = UUID.randomUUID();
+            Object template = kind.isItem() ? item
+                    : kind.isFluid() ? fluid
+                    : new MagicResourceStack(kind.magicKind(), 1);
             UnifiedGridEntry original = new UnifiedGridEntry(5, Integer.MAX_VALUE, true, stored, craftable,
-                    kind == GridResourceKind.ITEM ? item : fluid, new StorageTrackerEntry(123, "player"));
+                    template, new StorageTrackerEntry(123, "player"));
             UnifiedGridEntry copy = roundTrip(kind, original);
             assertEquals(Integer.MAX_VALUE, copy.amount());
             assertEquals(stored, copy.storedId());
@@ -33,11 +37,11 @@ class UnifiedGridCodecTest extends BootstrapTest {
     }
 
     @Test void amountDeltaCarriesNoTemplateAndDeletionKeepsSerial() {
-        UnifiedGridEntry copy = roundTrip(GridResourceKind.ITEM, new UnifiedGridEntry(9, 12, false, null, null, null, null));
+        UnifiedGridEntry copy = roundTrip(GridResourceKind.item(), new UnifiedGridEntry(9, 12, false, null, null, null, null));
         assertFalse(copy.metadata());
         assertNull(copy.template());
         assertEquals(12, copy.amount());
-        copy = roundTrip(GridResourceKind.FLUID, new UnifiedGridEntry(9, 0, true, null, null, null, null));
+        copy = roundTrip(GridResourceKind.fluid(), new UnifiedGridEntry(9, 0, true, null, null, null, null));
         assertTrue(copy.removed());
         assertEquals(9, copy.serial());
     }
@@ -45,16 +49,16 @@ class UnifiedGridCodecTest extends BootstrapTest {
     @Test void keysFreezeTagsAndIgnoreOnlyOuterAmount() {
         ItemStack item = new ItemStack(Items.DIAMOND, 64);
         item.getOrCreateTag().putInt("Count", 7);
-        GridResourceKey before = GridResourceKey.of(GridResourceKind.ITEM, item);
-        assertEquals(before, GridResourceKey.of(GridResourceKind.ITEM, item.copyWithCount(1)));
+        GridResourceKey before = GridResourceKey.of(GridResourceKind.item(), item);
+        assertEquals(before, GridResourceKey.of(GridResourceKind.item(), item.copyWithCount(1)));
         item.getOrCreateTag().putInt("Count", 8);
-        assertNotEquals(before, GridResourceKey.of(GridResourceKind.ITEM, item));
+        assertNotEquals(before, GridResourceKey.of(GridResourceKind.item(), item));
     }
 
     @Test void envelopeRoundTripsAndRejectsUnknownKindsAndOversizedPayload() {
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            var packet = new UnifiedGridUpdatePacket(4, UUID.randomUUID(), GridResourceKind.FLUID, 2, 7,
+            var packet = new UnifiedGridUpdatePacket(4, UUID.randomUUID(), GridResourceKind.fluid(), 2, 7,
                     false, true, true, false, new byte[0]);
             UnifiedGridUpdatePacket.encode(packet, buf);
             var copy = UnifiedGridUpdatePacket.decode(buf);
@@ -62,9 +66,9 @@ class UnifiedGridCodecTest extends BootstrapTest {
             assertEquals(packet.kind(), copy.kind());
             assertEquals(packet.sequence(), copy.sequence());
             assertTrue(copy.end());
-            assertThrows(IllegalArgumentException.class, () -> GridResourceKind.fromId(2));
+            assertThrows(IllegalArgumentException.class, () -> GridResourceKind.fromId(99)); // 99 是未知 ID
             buf.clear();
-            packet = new UnifiedGridUpdatePacket(4, UUID.randomUUID(), GridResourceKind.ITEM, 1, 0,
+            packet = new UnifiedGridUpdatePacket(4, UUID.randomUUID(), GridResourceKind.item(), 1, 0,
                     true, true, true, false, new byte[UnifiedGridUpdatePacket.MAX_BYTES + 1]);
             UnifiedGridUpdatePacket.encode(packet, buf);
             assertThrows(RuntimeException.class, () -> UnifiedGridUpdatePacket.decode(buf));

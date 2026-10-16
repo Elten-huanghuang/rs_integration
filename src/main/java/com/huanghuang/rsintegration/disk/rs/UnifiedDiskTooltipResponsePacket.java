@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
@@ -16,6 +17,7 @@ public record UnifiedDiskTooltipResponsePacket(UUID world, UUID disk, UnifiedDis
         if (packet.summary != null) {
             UnifiedDiskSummary summary = packet.summary;
             buf.writeVarLong(summary.items()); buf.writeVarLong(summary.fluids());
+            for (int amount : summary.magicAmounts()) buf.writeVarInt(amount);
             buf.writeVarInt(summary.itemTypes()); buf.writeVarInt(summary.fluidTypes());
             buf.writeVarInt(summary.itemCapacity()); buf.writeVarInt(summary.fluidCapacity());
         }
@@ -26,8 +28,14 @@ public record UnifiedDiskTooltipResponsePacket(UUID world, UUID disk, UnifiedDis
     }
     public static UnifiedDiskTooltipResponsePacket decode(FriendlyByteBuf buf) {
         UUID world = buf.readUUID(), disk = buf.readUUID();
-        UnifiedDiskSummary summary = buf.readBoolean() ? new UnifiedDiskSummary(buf.readVarLong(), buf.readVarLong(),
-                buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt()) : null;
+        UnifiedDiskSummary summary = null;
+        if (buf.readBoolean()) {
+            long items = buf.readVarLong(), fluids = buf.readVarLong();
+            int[] magic = new int[MagicResourceKind.values().length];
+            for (int index = 0; index < magic.length; index++) magic[index] = buf.readVarInt();
+            summary = new UnifiedDiskSummary(items, fluids, magic,
+                    buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
+        }
         UnifiedDiskFailure failure = buf.readBoolean() ? new UnifiedDiskFailure(buf.readComponent(), buf.readComponent()) : null;
         return new UnifiedDiskTooltipResponsePacket(world, disk, summary, failure);
     }

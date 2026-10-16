@@ -78,7 +78,7 @@ class UnifiedDiskQuarantineTest extends BootstrapTest {
         List<PageSnapshot> replaced = new ArrayList<>(pages); replaced.set(index, changed);
         return new Snapshot(snapshot.world(), snapshot.disk(), snapshot.owner(), snapshot.limits(),
                 snapshot.itemPages(), snapshot.fluidPages(), kind == FrozenKey.Kind.ITEM ? replaced : snapshot.items(),
-                kind == FrozenKey.Kind.FLUID ? replaced : snapshot.fluids());
+                kind == FrozenKey.Kind.FLUID ? replaced : snapshot.fluids(), snapshot.coreMagic());
     }
 
     private Fixture missingDisk(FrozenKey.Kind kind, int capacity, int payloadLimit, int extraBytes) throws Exception {
@@ -255,7 +255,8 @@ class UnifiedDiskQuarantineTest extends BootstrapTest {
         UnifiedDiskCore loaded = files.load(original.worldId, original.diskId);
         assertEquals(0, loaded.items.total()); assertEquals(0, loaded.fluids.total());
         assertEquals(1, loaded.items.quarantinedSize()); assertEquals(1, loaded.fluids.quarantinedSize());
-        assertEquals(new UnifiedDiskSummary(17, 23, 1, 1, 1, 1), UnifiedDiskSummary.from(loaded));
+        assertEquals(new UnifiedDiskSummary(17, 23, new int[3], 1, 1, 1, 1),
+                UnifiedDiskSummary.from(loaded));
         assertFalse(loaded.dirty());
         assertEquals(0, files.save(Snapshot.freeze(loaded), saved.manifest()).keySegmentsWritten());
         assertArrayEquals(itemPayload, loaded.items.snapshot(true).get(0).keys()[0]);

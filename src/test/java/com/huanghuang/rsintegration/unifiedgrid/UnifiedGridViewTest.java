@@ -42,11 +42,11 @@ class UnifiedGridViewTest extends BootstrapTest {
             when(f.grid.getSortingType()).thenReturn(IGrid.SORTING_TYPE_ID);
             when(f.grid.getSortingDirection()).thenReturn(descending
                     ? IGrid.SORTING_DIRECTION_DESCENDING : IGrid.SORTING_DIRECTION_ASCENDING);
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 0, true, true,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 0, true, true,
                     new UnifiedGridEntry(1, 5, true, UUID.randomUUID(), null, new ItemStack(Items.DIAMOND), null),
                     new UnifiedGridEntry(2, 5, true, UUID.randomUUID(), null, new ItemStack(Items.STONE), null),
                     new UnifiedGridEntry(3, 5, true, UUID.randomUUID(), null, new ItemStack(Items.APPLE), null)));
-            f.view.apply(f.packet(GridResourceKind.FLUID, 1, 0, true, true,
+            f.view.apply(f.packet(GridResourceKind.fluid(), 1, 0, true, true,
                     new UnifiedGridEntry(1, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.WATER, 1), null),
                     new UnifiedGridEntry(2, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.LAVA, 1), null),
                     new UnifiedGridEntry(3, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.FLOWING_WATER, 1), null)));
@@ -74,8 +74,8 @@ class UnifiedGridViewTest extends BootstrapTest {
         try (MockedStatic<RSGridSearchCache> search = mockStatic(RSGridSearchCache.class)) {
             search.when(() -> RSGridSearchCache.beforeForceSort(any(), any())).thenReturn(true);
             Fixture f = new Fixture();
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 0, true, true, f.item(1, 5)));
-            f.view.apply(f.packet(GridResourceKind.FLUID, 1, 0, true, true,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 0, true, true, f.item(1, 5)));
+            f.view.apply(f.packet(GridResourceKind.fluid(), 1, 0, true, true,
                     new UnifiedGridEntry(2, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.WATER, 1), null)));
             f.view.forceSort();
             assertEquals(2, f.view.getStacks().size());
@@ -86,7 +86,7 @@ class UnifiedGridViewTest extends BootstrapTest {
             assertTrue(f.view.get(f.craftable).isCraftable());
             assertEquals(3, f.view.getAllStacks().size());
             List<IGridStack> ordered = f.view.getStacks();
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 1, false, false,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 1, false, false,
                     new UnifiedGridEntry(1, Integer.MAX_VALUE, false, null, null, null, null)));
             assertSame(item, f.view.get(f.stored));
             assertSame(ordered, f.view.getStacks());
@@ -108,7 +108,7 @@ class UnifiedGridViewTest extends BootstrapTest {
             UUID variantId = UUID.randomUUID();
             ItemStack variant = new ItemStack(Items.DIAMOND);
             variant.getOrCreateTag().putString("variant", "second");
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 0, true, true,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 0, true, true,
                     f.item(1, Integer.MAX_VALUE),
                     new UnifiedGridEntry(2, 10, true, variantId, null, variant, null)));
             Map<ItemStackKey, Integer> storedItems = new HashMap<>();
@@ -116,16 +116,16 @@ class UnifiedGridViewTest extends BootstrapTest {
             ItemStackKey key = new ItemStackKey(new ItemStack(Items.DIAMOND));
             assertEquals(Integer.MAX_VALUE, storedItems.get(key));
             tracker.clearInvocations();
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 1, false, false,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 1, false, false,
                     new UnifiedGridEntry(1, 20, false, null, null, null, null)));
             assertEquals(30, storedItems.get(key));
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 2, false, false,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 2, false, false,
                     new UnifiedGridEntry(1, 3, false, null, null, null, null)));
             assertEquals(13, storedItems.get(key));
             tracker.verifyNoInteractions();
             f.view.removed();
             tracker.verify(IngredientTracker::invalidate);
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 3, false, false,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 3, false, false,
                     new UnifiedGridEntry(1, 0, false, null, null, null, null)));
             assertEquals(13, storedItems.get(key), "子界面切换释放旧 tracker 的回调");
         }
@@ -135,9 +135,9 @@ class UnifiedGridViewTest extends BootstrapTest {
         try (MockedStatic<RSGridSearchCache> search = mockStatic(RSGridSearchCache.class)) {
             search.when(() -> RSGridSearchCache.beforeForceSort(any(), any())).thenReturn(true);
             Fixture f = new Fixture();
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 0, true, true, f.item(1, 5)));
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 0, true, true, f.item(1, 5)));
             f.view.removed();
-            f.view.apply(f.packet(GridResourceKind.ITEM, 1, 1, false, false,
+            f.view.apply(f.packet(GridResourceKind.item(), 1, 1, false, false,
                     new UnifiedGridEntry(1, 0, true, null, f.craftable, new ItemStack(Items.DIAMOND), null)));
             f.view.forceSort();
             assertEquals(1, f.view.getStacks().size());

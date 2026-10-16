@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.unifiedgrid;
 import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
 
 import java.util.Collection;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
@@ -12,23 +11,31 @@ import java.util.UUID;
 /** 客户端状态机不依赖屏幕：快照只有收齐后才替换对应类别。 */
 public final class UnifiedGridState {
     public enum Result { IGNORED, STAGED, RESET, DELTA, RESYNC }
-    private final EnumMap<GridResourceKind, State> states = new EnumMap<>(GridResourceKind.class);
+    private final State[] states = new State[GridResourceKind.count()];
     private UUID session;
     private final Set<UUID> retiredSessions = new HashSet<>();
 
     public UnifiedGridState() {
-        for (GridResourceKind kind : GridResourceKind.values()) states.put(kind, new State());
+        for (int id = 0; id < states.length; id++) states[id] = new State();
     }
 
     public UUID session() { return session; }
-    public int epoch(GridResourceKind kind) { return states.get(kind).epoch; }
-    public boolean needsResync(GridResourceKind kind) { return states.get(kind).broken; }
+    public int epoch(GridResourceKind kind) { return state(kind).epoch; }
+    public boolean needsResync(GridResourceKind kind) { return state(kind).broken; }
     public boolean ready(GridResourceKind kind) {
-        State state = states.get(kind);
+        State state = state(kind);
         return state.epoch > 0 && state.pending == null && !state.broken;
     }
-    public Collection<UnifiedGridEntry> entries(GridResourceKind kind) { return states.get(kind).visible.values(); }
-    public UnifiedGridEntry get(GridResourceKind kind, int serial) { return states.get(kind).visible.get(serial); }
+    public Collection<UnifiedGridEntry> entries(GridResourceKind kind) { return state(kind).visible.values(); }
+    public UnifiedGridEntry get(GridResourceKind kind, int serial) { return state(kind).visible.get(serial); }
+
+    /** 类别编号在会话期内固定；越界说明客户端与服务端的安装组合不一致。 */
+    private State state(GridResourceKind kind) {
+        int id = kind.id();
+        State state = id >= 0 && id < states.length ? states[id] : null;
+        if (state == null) throw new IllegalArgumentException("资源类别超出当前安装组合");
+        return state;
+    }
 
     public Result apply(UnifiedGridUpdatePacket packet, List<UnifiedGridEntry> updates) {
         if (!packet.enabled() || packet.epoch() <= 0 || packet.sequence() < 0) return Result.IGNORED;
@@ -36,9 +43,9 @@ public final class UnifiedGridState {
             if (retiredSessions.contains(packet.session()) || !packet.begin() || packet.sequence() != 0) return Result.IGNORED;
             if (session != null) retiredSessions.add(session);
             session = packet.session();
-            for (State state : states.values()) state.clear();
+            for (State state : states) state.clear();
         }
-        State state = states.get(packet.kind());
+        State state = state(packet.kind());
         if (packet.begin()) {
             if (packet.sequence() != 0 || packet.epoch() <= state.epoch) return Result.IGNORED;
             state.epoch = packet.epoch();
