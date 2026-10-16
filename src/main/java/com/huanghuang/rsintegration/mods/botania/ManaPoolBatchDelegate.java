@@ -140,9 +140,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void prepareGraphBatch(int executions) {
-        requestedBatch = batchingEnabled()
-                ? Math.min(graphBatchSize(executions), configuredBatchLimit())
-                : 1;
+        int mana = level != null && poolPos != null
+                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
+                ? pool.getCurrentMana() : 0;
+        requestedBatch = configuredPhysicalBatchSize(
+                executions, mana, recipe == null ? 0 : recipe.getManaToConsume());
     }
 
     @Override
@@ -407,5 +409,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return poolPos.getY() + INPUT_SPAWN_HEIGHT;
     }
     @Override public BlockPos getMachinePos() { return poolPos; }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) { resetState(); }
+    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+        resetState();
+    }
 }

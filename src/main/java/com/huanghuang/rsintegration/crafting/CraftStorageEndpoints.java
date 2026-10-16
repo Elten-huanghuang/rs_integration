@@ -33,6 +33,28 @@ public final class CraftStorageEndpoints {
                 ? legacy.network() : null;
     }
 
+    /** 判断结构化端点是否代表 Refined Storage，而不暴露其原生网络对象。 */
+    public static boolean isRefinedStorage(@Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null || endpoint.session() == null) return false;
+        try {
+            return "refinedstorage".equals(
+                    endpoint.session().reference().backendId().value());
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    /** 判断结构化端点是否代表 Beyond Dimensions。 */
+    public static boolean isBeyondDimensions(@Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null || endpoint.session() == null) return false;
+        try {
+            return "beyonddimensions".equals(
+                    endpoint.session().reference().backendId().value());
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
+    }
+
     /** Transitional insert bridge for non-delegate compatibility services. */
     @Nonnull
     public static ItemStack insertLegacy(@Nonnull INetwork network,

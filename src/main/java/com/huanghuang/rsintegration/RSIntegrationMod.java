@@ -28,6 +28,12 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.embers.EmbersMachinesRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
 import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
+import com.huanghuang.rsintegration.magic.GoetySoulBackends;
+import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
+import com.huanghuang.rsintegration.magic.MagicStorageBackendHealth;
+import com.huanghuang.rsintegration.magic.MagicStorageBackends;
+import com.huanghuang.rsintegration.magic.route.AuthorityPolicy;
+import com.huanghuang.rsintegration.magic.route.MagicResourceRouter;
 import com.huanghuang.rsintegration.mods.goety.GoetyRSModule;
 import com.huanghuang.rsintegration.mods.immortalersdelight.ImmortalersDelightRSModule;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesRSModule;
@@ -168,6 +174,7 @@ public final class RSIntegrationMod {
             "confluence", "crabbersdelight", "crockpot",
             "distant_worlds_lithum_altar", "eidolon", "eidolon_worktable",
             "farmersdelight", "farmersdelight_cooking_pot", "miners_delight_copper_pot",
+            "twilightdelight_fiery_cooking_pot",
             "farmersdelight_skillet", "farmersrespite", "farmersrespite_kettle",
             "forbidden_arcanus", "forbidden_arcanus_clibano", "goety", "goety_brazier",
             "goety_cursed_infuser", "immortalers_delight",
@@ -194,6 +201,8 @@ public final class RSIntegrationMod {
     public static final Logger LOGGER = LogManager.getLogger(MOD_NAME);
     public static final int[] RS_FLOW_COLORS = {0x3355FF, 0x7733FF, 0xCC33FF, 0x3355FF};
     public static final StorageBackendRuntime STORAGE_BACKENDS = new StorageBackendRuntime();
+    /** 魔法资源到存储后端的路由；内置后端在 onCommonSetup 里注册。 */
+    public static final MagicResourceRouter MAGIC_ROUTER = new MagicResourceRouter();
 
     // Cached to avoid a ConfigValue lookup on every diagnostic call.
     private static volatile boolean verboseLogging;
@@ -466,6 +475,15 @@ public final class RSIntegrationMod {
         if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             LOGGER.info("[RSI-Storage] Refined Storage is absent; storage operations stay disabled, but cross-mod recipe and JEI metadata remain registered.");
         }
+        // RS 与 BD 灵魂后端独立注册，各自只在 Goety 和对应存储模组同时存在时启用。
+        GoetySoulBackends.register();
+        // 魔法资源路由表：只装声明式描述符，不触碰任何库存，所以放在通用初始化里是安全的。
+        MagicStorageBackends.registerBuiltIns(MAGIC_ROUTER);
+        MAGIC_ROUTER.logRouteTable();
+        MagicStorageBackendHealth.warnOnMissingBackend(MAGIC_ROUTER);
+        // 配置里指名的权威后端只在「没有后端声明管辖」时兜底。
+        MAGIC_ROUTER.setPolicy(AuthorityPolicy.pinned(
+                RSIntegrationConfig.magicResourcePinnedBackend()));
         ExternalItemProgressBridge.initialize();
         for (ModuleEntry entry : MODULES) {
             if (!entry.configFlag().get()) continue;
@@ -869,6 +887,9 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.addListener((TickEvent.ServerTickEvent e) -> {
             if (e.phase == TickEvent.Phase.END) {
                 RecipeIndex.tickWarmUp(e.getServer().overworld());
+                if ((e.getServer().getTickCount() & 3) == 0) {
+                    MagicResourceTaskLedger.get(e.getServer()).tick(e.getServer());
+                }
                 AutoEatEngine.tick(e.getServer());
                 GenericCraftPacket
                         .tickWarmUpRequests(e.getServer());

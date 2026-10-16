@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
 
+import com.huanghuang.rsintegration.magic.BeyondDimensionsSoulInteraction;
 import com.huanghuang.rsintegration.storage.bd.BeyondDimensionsFluidInteraction;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,7 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class BDFluidContainerMixin {
     @Inject(method = "customClickHandler", at = @At("HEAD"), cancellable = true, require = 0)
     private void rsi$fluidContainers(int slot, @Coerce Object selected, int button, boolean shift, CallbackInfo ci) {
-        if (BeyondDimensionsFluidInteraction.handle((AbstractContainerMenu) (Object) this,
+        if (BeyondDimensionsSoulInteraction.handle(
+                (AbstractContainerMenu) (Object) this, button)
+                || BeyondDimensionsFluidInteraction.handle((AbstractContainerMenu) (Object) this,
                 slot, selected, button, shift)) ci.cancel();
     }
 }

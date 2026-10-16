@@ -16,6 +16,9 @@ import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
+import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import java.util.Arrays;
 import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
@@ -250,6 +253,8 @@ public final class AsyncCraftChain {
     private final CaptureLeaseRegistry captureLeases;
     private final OperationResourceCoordinator operationResources;
     private final OperationExecutionKernel operationKernel;
+    @Nullable
+    private MagicResourceTaskReservation magicResourceTaskReservation;
     private int progressTickCounter;
     private boolean waitingForVanillaBudget;
     private final CraftProgressPublisher progressPublisher;
@@ -409,6 +414,11 @@ public final class AsyncCraftChain {
             this.graphAdmissions = null;
             this.useGraphExecution = false;
         }
+        this.magicResourceTaskReservation =
+                this.storageEndpoint == null
+                        || CraftStorageEndpoints.isRefinedStorage(this.storageEndpoint)
+                ? MagicResourceTaskReservation.reserve(server, craftId, magicCostsForPlan())
+                : null;
         RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             StringBuilder sb = new StringBuilder(ctx.format("Steps: ["));
@@ -1949,6 +1959,7 @@ public final class AsyncCraftChain {
                 return GraphDispatchResult.retry("node ledger commit did not complete");
             }
             if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(nodeLedger);
+            attachMagicReservation(delegate);
 
             CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
                     prepared.step().recipeId().toString(), delegate, nodeLedger,
@@ -2088,6 +2099,7 @@ public final class AsyncCraftChain {
         runtime.markDispatched();
         nodeRuntimes.put(nodeId, runtime);
         materializePrivateLedgerGraphInputs(admission, online);
+        attachMagicReservation(delegate);
 
         boolean accepted = operationSession.tryStart(() -> delegate.startOperation(
                 OperationStartContext.delegateExtracted(online, nodeLedger)));
@@ -3450,6 +3462,7 @@ public final class AsyncCraftChain {
         }
 
         final IBatchDelegate startedDelegate = delegate;
+        attachMagicReservation(startedDelegate);
         try {
             Component outputStorageFailure = startedDelegate.validateOutputStorage(online);
             if (outputStorageFailure != null) {
@@ -4650,6 +4663,40 @@ public final class AsyncCraftChain {
 
     //  lifecycle
 
+    private List<MagicResourceCost> magicCostsForPlan() {
+        if (graph != null) {
+            List<MagicResourceCost> graphCosts = graph.magicCosts();
+            if (!graphCosts.isEmpty()) return graphCosts;
+        }
+        if (server.overworld() == null) return List.of();
+        List<MagicResourceCost> costs = new ArrayList<>();
+        RecipeManager recipes = server.overworld().getRecipeManager();
+        for (CraftingResolver.ResolutionStep step : steps) {
+            Recipe<?> recipe = recipes.byKey(step.recipeId()).orElse(null);
+            for (MagicResourceCost cost : MagicResourceCostCatalog.costsFor(recipe)) {
+                long total = cost.totalFor(step.executions());
+                if (total <= 0L) continue;
+                costs.add(new MagicResourceCost(
+                        cost.kind(), (int) Math.min(Integer.MAX_VALUE, total)));
+            }
+        }
+        return MagicResourceCost.merge(costs);
+    }
+
+    private void attachMagicReservation(IBatchDelegate delegate) {
+        if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
+            abstractDelegate.setMagicResourceTaskReservation(magicResourceTaskReservation);
+        } else if (delegate instanceof ParallelCraftGroup group) {
+            group.setMagicResourceTaskReservation(magicResourceTaskReservation);
+        }
+    }
+
+    private void closeMagicReservation() {
+        if (magicResourceTaskReservation == null) return;
+        magicResourceTaskReservation.close();
+        magicResourceTaskReservation = null;
+    }
+
     private boolean finish(ServerPlayer online) {
         if (!finalSettlementPrepared && useGraphExecution && graphMaterials != null) {
             for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
@@ -4728,6 +4775,7 @@ public final class AsyncCraftChain {
                     completedOutput, totalExecutionsForNotification()));
         }
         sendTerminalProgress(online);
+        closeMagicReservation();
         fireOnDone();
         return true;
     }
@@ -5052,6 +5100,7 @@ public final class AsyncCraftChain {
                     terminationReport.inFlightOperations(), terminationReport.settledOperations());
         }
         if (online != null) sendTerminalProgress(online);
+        closeMagicReservation();
         fireOnDone();
     }
 

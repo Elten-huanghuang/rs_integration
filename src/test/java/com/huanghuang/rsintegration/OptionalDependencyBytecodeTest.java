@@ -2,6 +2,18 @@ package com.huanghuang.rsintegration;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.magic.GoetySoulBackends;
+import com.huanghuang.rsintegration.magic.GoetySoulKeys;
+import com.huanghuang.rsintegration.magic.GoetySoulStack;
+import com.huanghuang.rsintegration.magic.MagicGridItemTransfer;
+import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
+import com.huanghuang.rsintegration.magic.MagicStackGridStack;
+import com.huanghuang.rsintegration.magic.BrazierSoulPort;
+import com.huanghuang.rsintegration.magic.DarkAltarSoulPort;
+import com.huanghuang.rsintegration.magic.GoetySoulNetworkPool;
+import com.huanghuang.rsintegration.magic.GoetySoulSourceCoordinator;
+import com.huanghuang.rsintegration.magic.GoetyVirtualSoulAccess;
+import com.huanghuang.rsintegration.magic.LiquidSoulEnergyTexture;
 import com.huanghuang.rsintegration.mixin.enigmaticaddons.ArtificialFlowerMixin;
 import com.huanghuang.rsintegration.mixin.jei.RecipeGuiLayoutsMixin;
 import com.huanghuang.rsintegration.mixin.wizardterracurios.BuffItemMixin;
@@ -20,6 +32,7 @@ import com.huanghuang.rsintegration.resonance.backpack.ResonanceSlot;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStackRules;
 import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
 import com.huanghuang.rsintegration.network.packet.ResonanceSyncPacket;
+import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridSession;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -201,6 +214,198 @@ class OptionalDependencyBytecodeTest {
         for (Class<?> type : List.of(ResonanceStackRules.class, PassiveEffectEngine.class,
                 ClientDiskData.class, ResonanceSyncPacket.class)) {
             assertNoTypeReference(type, "com/tacz/guns", "TaCZ");
+        }
+    }
+
+    @Test
+    void goetySoulBackendsRegisterIndependently() throws IOException {
+        AtomicBoolean goetyCheckSeen = new AtomicBoolean();
+        AtomicBoolean refinedStorageCheckSeen = new AtomicBoolean();
+        AtomicBoolean beyondDimensionsCheckSeen = new AtomicBoolean();
+        AtomicBoolean guardedBeyondDimensionsRegistrationSeen = new AtomicBoolean();
+        AtomicBoolean guardedRegistryAccessSeen = new AtomicBoolean();
+        AtomicBoolean commonRegistrationSeen = new AtomicBoolean();
+        AtomicBoolean gridUsesSharedResourceEndpoint = new AtomicBoolean();
+
+        new ClassReader(classBytes(GoetySoulKeys.class)).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"register".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    private String pendingModLiteral;
+                    private boolean goetyChecked;
+                    private boolean beyondDimensionsChecked;
+
+                    @Override
+                    public void visitLdcInsn(Object value) {
+                        pendingModLiteral = value instanceof String ? (String) value : null;
+                    }
+
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String methodDescriptor, boolean isInterface) {
+                        if ("net/minecraftforge/fml/ModList".equals(owner)
+                                && "isLoaded".equals(methodName)) {
+                            if ("goety".equals(pendingModLiteral)) {
+                                goetyCheckSeen.set(true);
+                                goetyChecked = true;
+                            }
+                            if ("beyonddimensions".equals(pendingModLiteral)) {
+                                beyondDimensionsCheckSeen.set(true);
+                                beyondDimensionsChecked = true;
+                            }
+                        }
+                        pendingModLiteral = null;
+
+                        if ("com/wintercogs/beyonddimensions/api/storage/key/StackKeyRegistry"
+                                .equals(owner)) {
+                            guardedRegistryAccessSeen.set(goetyChecked && beyondDimensionsChecked);
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        new ClassReader(classBytes(GoetySoulBackends.class)).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"register".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    private String pendingModLiteral;
+                    private boolean goetyChecked;
+                    private boolean beyondDimensionsChecked;
+
+                    @Override
+                    public void visitLdcInsn(Object value) {
+                        pendingModLiteral = value instanceof String ? (String) value : null;
+                    }
+
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String descriptor, boolean isInterface) {
+                        if ("net/minecraftforge/fml/ModList".equals(owner)
+                                && "isLoaded".equals(methodName)) {
+                            if ("goety".equals(pendingModLiteral)) {
+                                goetyCheckSeen.set(true);
+                                goetyChecked = true;
+                            }
+                            if ("refinedstorage".equals(pendingModLiteral)) {
+                                refinedStorageCheckSeen.set(true);
+                            }
+                            if ("beyonddimensions".equals(pendingModLiteral)) {
+                                beyondDimensionsCheckSeen.set(true);
+                                beyondDimensionsChecked = true;
+                            }
+                        }
+                        pendingModLiteral = null;
+
+                        if ("com/huanghuang/rsintegration/magic/GoetySoulBackends"
+                                .equals(owner)
+                                && "registerBeyondDimensions".equals(methodName)) {
+                            guardedBeyondDimensionsRegistrationSeen.set(
+                                    goetyChecked && beyondDimensionsChecked);
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        new ClassReader(classBytes(RSIntegrationMod.class)).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                if (!"onCommonSetup".equals(name)) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                String descriptor, boolean isInterface) {
+                        if ("com/huanghuang/rsintegration/magic/GoetySoulBackends"
+                                .equals(owner)
+                                && "register".equals(methodName)) {
+                            commonRegistrationSeen.set(true);
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+
+        Class<?> magicChannel = Stream.of(UnifiedGridSession.class.getDeclaredClasses())
+                .filter(type -> "MagicChannel".equals(type.getSimpleName()))
+                .findFirst()
+                .orElseThrow();
+        for (Class<?> type : List.of(UnifiedGridSession.class, magicChannel)) {
+            new ClassReader(classBytes(type)).accept(new ClassVisitor(Opcodes.ASM9) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                 String signature, String[] exceptions) {
+                    return new MethodVisitor(Opcodes.ASM9) {
+                        @Override
+                        public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                    String descriptor, boolean isInterface) {
+                            if ("com/huanghuang/rsintegration/magic/MagicResourceEndpoint"
+                                    .equals(owner)
+                                    && "available".equals(methodName)) {
+                                gridUsesSharedResourceEndpoint.set(true);
+                            }
+                        }
+                    };
+                }
+            }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        }
+
+        assertTrue(goetyCheckSeen.get(),
+                "Goety soul backend registration must first require Goety");
+        assertTrue(refinedStorageCheckSeen.get(),
+                "RS soul backend must register independently when Refined Storage is present");
+        assertTrue(beyondDimensionsCheckSeen.get(),
+                "BD soul backend must check Beyond Dimensions independently");
+        assertTrue(guardedBeyondDimensionsRegistrationSeen.get(),
+                "BD soul registration must be guarded by both Goety and Beyond Dimensions");
+        assertTrue(guardedRegistryAccessSeen.get(),
+                "BD StackKeyRegistry must only be reached after both mod guards");
+        assertTrue(commonRegistrationSeen.get(),
+                "onCommonSetup must invoke the independent backend registrar");
+        assertTrue(gridUsesSharedResourceEndpoint.get(),
+                "RS mixed terminal must read resources through the shared magic endpoint");
+    }
+
+    @Test
+    void sharedGoetySoulRuntimeDoesNotLinkBeyondDimensions() throws IOException {
+        for (Class<?> type : List.of(
+                MagicResourceInteraction.class,
+                GoetySoulBackends.class,
+                MagicGridItemTransfer.class,
+                BrazierSoulPort.class,
+                DarkAltarSoulPort.class,
+                GoetySoulNetworkPool.class,
+                GoetySoulSourceCoordinator.class,
+                GoetyVirtualSoulAccess.class,
+                LiquidSoulEnergyTexture.class,
+                MagicStackGridStack.class,
+                UnifiedGridSession.class)) {
+            assertNoTypeReference(type, "com/wintercogs/beyonddimensions",
+                    "Beyond Dimensions");
+        }
+    }
+
+    @Test
+    void sharedGoetySoulRuntimeDoesNotLinkGoety() throws IOException {
+        for (Class<?> type : List.of(
+                MagicResourceInteraction.class,
+                GoetySoulBackends.class,
+                MagicGridItemTransfer.class,
+                BrazierSoulPort.class,
+                DarkAltarSoulPort.class,
+                GoetySoulNetworkPool.class,
+                GoetySoulSourceCoordinator.class,
+                GoetyVirtualSoulAccess.class,
+                GoetySoulStack.class,
+                LiquidSoulEnergyTexture.class,
+                MagicStackGridStack.class,
+                UnifiedGridSession.class)) {
+            assertNoTypeReference(type, "com/Polarice3/Goety", "Goety");
         }
     }
 

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
 import java.util.stream.Collectors;
 
@@ -74,15 +75,23 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
 
     public record RecipeNode(ResourceLocation recipeId, MaterialRef output, int outputCount,
                              List<IngredientRef> inputs, String modTypeId,
-                             ResourceLocation recipeTypeId) {
+                             ResourceLocation recipeTypeId,
+                             List<MagicResourceCost> magicCosts) {
         public RecipeNode(ResourceLocation recipeId, MaterialRef output, int outputCount,
                           List<IngredientRef> inputs) {
             this(recipeId, output, outputCount, inputs, "generic",
-                    new ResourceLocation("minecraft", "crafting"));
+                    new ResourceLocation("minecraft", "crafting"), List.of());
+        }
+
+        public RecipeNode(ResourceLocation recipeId, MaterialRef output, int outputCount,
+                          List<IngredientRef> inputs, String modTypeId,
+                          ResourceLocation recipeTypeId) {
+            this(recipeId, output, outputCount, inputs, modTypeId, recipeTypeId, List.of());
         }
 
         public RecipeNode {
             inputs = List.copyOf(inputs);
+            magicCosts = MagicResourceCost.merge(magicCosts);
             modTypeId = modTypeId == null || modTypeId.isBlank() ? "generic" : modTypeId;
             recipeTypeId = recipeTypeId == null
                     ? new ResourceLocation("minecraft", "crafting") : recipeTypeId;

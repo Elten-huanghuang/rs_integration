@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.magic.GoetySoulCraftingTask;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Items;
@@ -67,6 +69,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private Object ritualRecipe;          // RitualRecipe
     private List<Object> filledPedestals;
     private int soulCost;
+    @Nullable
+    private GoetySoulCraftingTask soulTask;
     private boolean ritualEverSeenActive;
     /** True after startRitual accepted the operation; the ritual may still fail before becoming active. */
     private boolean ritualStartRequested;
@@ -139,6 +143,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.prerequisiteBlocked = false;
         this.prerequisiteFailurePermanent = false;
         this.soulPreparationFailure = null;
+        closeSoulTask();
         // Set machineDim NOW so resolveMachineLevel() resolves the machine's own
         // dimension during validation (e.g. checkStructureRequirements). The chain
         // otherwise calls setMachineDim only AFTER validateAndInit returns true, so
@@ -331,17 +336,19 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.goety.error.brazier_no_candlesticks"));
             return false;
         }
-        int totalSouls = candlesticks.stream()
-                .mapToInt(cs -> Reflect.<Integer>invoke(cs, GoetyReflection.M_GET_SOULS).orElse(0))
-                .sum();
-        if (totalSouls < brazierSoulCost) {
+        int totalSouls = GoetySoulCraftingTask.nativeAvailableBrazier(
+                player, (BlockEntity) be);
+        int diskSouls = GoetySoulCraftingTask.availableInStorage(
+                player, network, storageEndpoint());
+        int combinedSouls = saturatingAdd(totalSouls, diskSouls, 0);
+        if (combinedSouls < brazierSoulCost) {
             player.sendSystemMessage(Component.translatable("rsi.goety.error.insufficient_souls",
-                    brazierSoulCost, totalSouls));
+                    brazierSoulCost, combinedSouls));
             return false;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit brazier OK: recipe={} soulCost={} candlesticks={} totalSouls={}",
-                recipeId, brazierSoulCost, candlesticks.size(), totalSouls);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit brazier OK: recipe={} soulCost={} candlesticks={} nativeSouls={} diskSouls={}",
+                recipeId, brazierSoulCost, candlesticks.size(), totalSouls, diskSouls);
         return true;
     }
 
@@ -524,21 +531,25 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private boolean startRitualDirectly(Object ritual, ItemStack activationItemStack) {
         try {
+            if (!beginSoulTask()) return false;
             if (!ledger.commit(network, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed (no ingredients)");
                 refundActivationToPlayer();
+                closeSoulTask();
                 return false;
             }
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
                 ledger.refundCommitted(network, player);
+                closeSoulTask();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
                 ledger.refundCommitted(network, player);
+                closeSoulTask();
                 return false;
             }
             ritualStartRequested = true;
@@ -546,6 +557,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to start ritual", e);
             refundActivationToPlayer();
             ledger.refundCommitted(network, player);
+            closeSoulTask();
             return false;
         }
         return true;
@@ -580,9 +592,16 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             templates.add(stack);
         }
 
+        if (!beginSoulTask()) {
+            refundActivationToPlayer();
+            ledger.rollback(player);
+            return false;
+        }
+
         if (!ledger.commit(network, player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed before ritual start");
             refundActivationToPlayer();
+            closeSoulTask();
             return false;
         }
 
@@ -602,6 +621,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 refundActivationToPlayer();
                 ledger.refundCommitted(network, player);
                 recoverFromPedestals();
+                closeSoulTask();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
@@ -609,6 +629,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 refundActivationToPlayer();
                 ledger.refundCommitted(network, player);
                 recoverFromPedestals();
+                closeSoulTask();
                 return false;
             }
             ritualStartRequested = true;
@@ -617,6 +638,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             refundActivationToPlayer();
             ledger.refundCommitted(network, player);
             recoverFromPedestals();
+            closeSoulTask();
             return false;
         }
 
@@ -689,6 +711,15 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Start the brazier — activate() validates soul energy and begins processing
+        if (!beginBrazierSoulTask()) {
+            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
+            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
+            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+            ledger.refundCommitted(network, player);
+            return false;
+        }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
         if (!activated) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false for recipe: {}",
@@ -699,6 +730,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
             Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
             ledger.refundCommitted(network, player);
+            closeSoulTask();
             return false;
         }
 
@@ -829,17 +861,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     refundActivationToPlayer();
                     return false;
                 }
+                if (!beginSoulTask()) return false;
                 if (startAltarRitual(altar, player, activationItem, ritualRecipe)) {
                     ritualStartRequested = true;
                     return true;
                 }
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
+                closeSoulTask();
                 return false;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Failed to start ritual (no materials)", e);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
+                closeSoulTask();
                 return false;
             }
         }
@@ -875,10 +910,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 recoverFromPedestals();
                 return false;
             }
+            if (!beginSoulTask()) return false;
             if (!startAltarRitual(altar, player, activationItem, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
                 recoverFromPedestals();
+                closeSoulTask();
                 return false;
             }
             ritualStartRequested = true;
@@ -887,6 +924,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             refundActivationToPlayer();
             recoverFromPedestals();
+            closeSoulTask();
             return false;
         }
 
@@ -945,6 +983,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Start the brazier — activate() validates soul energy and begins processing
+        if (!beginBrazierSoulTask()) {
+            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
+                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
+            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
+            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
+            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+            return false;
+        }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
         if (!activated) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false in tryStartWithMaterials: {}",
@@ -955,6 +1001,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
             Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
+            closeSoulTask();
             return false;
         }
 
@@ -1009,6 +1056,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
             return doneObservation();
         }
+        if (soulTask != null) soulTask.tick(level, be);
         if (isMachineCraftFinished(level, be)) return doneObservation();
         // Give event-driven substitute result handlers a wider completion
         // window after Goety clears its current-ritual field.
@@ -1289,6 +1337,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         pendingRitualResult = ItemStack.EMPTY;
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
+        closeSoulTask();
         resetState();
         activationExtractedFromPlayer = null;
     }
@@ -1300,6 +1349,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         pendingRitualResult = ItemStack.EMPTY;
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
+        closeSoulTask();
         resetState();
         activationExtractedFromPlayer = null;
     }
@@ -1325,6 +1375,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         pendingRitualResult = ItemStack.EMPTY;
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
+        closeSoulTask();
         resetState();
         activationExtractedFromPlayer = null;
     }
@@ -1453,10 +1504,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!level.isLoaded(cp)) continue;
             BlockEntity be = level.getBlockEntity(cp);
             if (GoetyReflection.soulCandlestickBEClass.isInstance(be)) {
-                int souls = Reflect.<Integer>invoke(be, GoetyReflection.M_GET_SOULS).orElse(0);
-                if (souls > 0) {
-                    result.add(be);
-                }
+                result.add(be);
             }
         }
         return result;
@@ -1466,46 +1514,79 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private boolean validateSoulsAvailable(int cost, boolean notifyPlayer) {
         if (cost <= 0) return true;
-        try {
-            ServerLevel level = resolveMachineLevel(player);
-            BlockPos cagePos = myPos.below();
-            BlockEntity cageEntity = level.isLoaded(cagePos) ? level.getBlockEntity(cagePos) : null;
-            var cageOpt = Optional.ofNullable(cageEntity);
-            if (cageOpt.isEmpty() || cageOpt.get() == null) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] No cursedCageTile — assuming link gem/Arca, skipping soul check");
-                return true;
+        int nativeAvailable = GoetySoulCraftingTask.nativeAvailableDarkAltar(player, altar);
+        int diskAvailable = GoetySoulCraftingTask.availableInStorage(
+                player, network, storageEndpoint());
+        int combined = saturatingAdd(nativeAvailable,
+                Math.max(0, diskAvailable), 0);
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-Batch-Goety] Soul probe: altar={} required={} nativeSouls={} diskSouls={} available={}",
+                myPos, cost, nativeAvailable, diskAvailable, combined);
+        PreparationResult soulResult = soulPreparationResult(cost, combined);
+        if (soulResult.state() != PreparationState.READY) {
+            soulPreparationFailure = soulResult;
+            if (notifyPlayer) {
+                player.sendSystemMessage(soulResult.userMessage());
             }
-            Object cage = cageOpt.get();
-            if (GoetyReflection.cursedCageBEClass == null || !GoetyReflection.cursedCageBEClass.isInstance(cage)) return true;
-
-            // Automation bypasses activate(), where Goety normally refreshes this cache.
-            Reflect.setField(altar, GoetyReflection.F_CURSED_CAGE_TILE, cage);
-            int available = (int) GoetyReflection.cursedCageBEClass
-                    .getMethod(GoetyReflection.M_GET_SOULS).invoke(cage);
-            // Some Goety builds do not refresh getSouls() until the altar's
-            // native activation path runs. Read the contained totem directly
-            // as a compatibility fallback during automated preparation.
-            if (available <= 0) {
-                Object contained = Reflect.invoke(cage, "getItem").orElse(null);
-                if (contained instanceof ItemStack stack && stack.getTag() != null) {
-                    available = Math.max(available, stack.getTag().getInt("Souls"));
-                }
-            }
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Soul probe: altar={} cage={} required={} available={}",
-                    myPos, cagePos, cost, available);
-            PreparationResult soulResult = soulPreparationResult(cost, available);
-            if (soulResult.state() != PreparationState.READY) {
-                soulPreparationFailure = soulResult;
-                if (notifyPlayer) {
-                    player.sendSystemMessage(soulResult.userMessage());
-                }
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Soul validation failed, skipping", e);
-            return true;
+            return false;
         }
+        return true;
+    }
+
+    private static int saturatingAdd(int first, int second, int third) {
+        long total = (long) Math.max(0, first)
+                + Math.max(0, second) + Math.max(0, third);
+        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    }
+
+    private boolean beginSoulTask() {
+        closeSoulTask();
+        if (isBrazier || soulCost <= 0 || ritualRecipe == null) return true;
+        soulTask = GoetySoulCraftingTask.reserveDarkAltar(
+                player, network, storageEndpoint(), ritualRecipe,
+                magicResourceTaskReservation());
+        if (soulTask == null) return true;
+        if (!soulTask.prepareBeforeStart(altar)) {
+            if (soulTask.startupAvailable() < soulTask.total()) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.soul_reservation_incomplete",
+                        soulTask.total(), soulTask.startupAvailable()));
+            } else {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.soul_source_rejected"));
+            }
+            closeSoulTask();
+            return false;
+        }
+        return true;
+    }
+
+    private boolean beginBrazierSoulTask() {
+        closeSoulTask();
+        if (!isBrazier || brazierSoulCost <= 0 || brazierRecipeObj == null) return true;
+        soulTask = GoetySoulCraftingTask.reserveBrazier(
+                player, network, storageEndpoint(), brazierRecipeObj,
+                magicResourceTaskReservation());
+        if (soulTask == null) return true;
+        if (!soulTask.prepareBeforeStart(brazier)) {
+            if (soulTask.startupAvailable() < brazierSoulCost) {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.insufficient_souls",
+                        brazierSoulCost, soulTask.startupAvailable()));
+            } else {
+                player.sendSystemMessage(Component.translatable(
+                        "rsi.goety.error.soul_source_rejected"));
+            }
+            closeSoulTask();
+            return false;
+        }
+        return true;
+    }
+
+    private void closeSoulTask() {
+        if (soulTask == null) return;
+        soulTask.close();
+        soulTask = null;
     }
 
     static PreparationResult soulPreparationResult(int required, int available) {
@@ -2020,7 +2101,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
             Method m = GoetyReflection.darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, GoetyReflection.ritualRecipeClass);
             m.invoke(altar, player, activation, recipe);
-            return true;
+            boolean active = Reflect.getField(
+                    altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null;
+            if (!active) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Goety] startRitual returned without setting currentRitualRecipe");
+            }
+            return active;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] startRitual failed", e);
             return false;
@@ -2071,7 +2158,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     /** Builds the target-recipe machine list shown in the crafting plan. */
     public static List<MachineCandidateView> getPlanMachineCandidates(
-            ServerPlayer player, Recipe<?> recipe) {
+            ServerPlayer player, Recipe<?> recipe,
+            @Nullable CraftStorageEndpoint endpoint) {
         if (player == null || recipe == null || GoetyReflection.ritualRecipeClass == null
                 || !GoetyReflection.ritualRecipeClass.isInstance(recipe)) {
             return List.of();
@@ -2110,6 +2198,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     status = Component.translatable("rsi.machine_candidate.temporary");
                 } else {
                     delegate = new GoetyBatchDelegate();
+                    delegate.setStorageEndpoint(endpoint);
                     IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
                             delegate, player, recipe.getId(), machine.dim(), machine.pos());
                     if (preparation.state() == IBatchDelegate.PreparationState.READY) {
@@ -2147,8 +2236,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     public static @Nullable MachineCandidateView firstReadyPlanMachine(
-            ServerPlayer player, Recipe<?> recipe) {
-        return firstReadyMachine(getPlanMachineCandidates(player, recipe));
+            ServerPlayer player, Recipe<?> recipe,
+            @Nullable CraftStorageEndpoint endpoint) {
+        return firstReadyMachine(getPlanMachineCandidates(player, recipe, endpoint));
     }
 
     static @Nullable MachineCandidateView firstReadyMachine(

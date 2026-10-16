@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
@@ -20,6 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import java.util.ArrayDeque;
 import java.util.function.Supplier;
@@ -134,7 +137,7 @@ public final class ImmutableRecipeGraphProjector {
     @Nullable
     public static RecipeNode projectCraftingRecipe(CraftingRecipe recipe, ItemStack output,
                                                     List<IngredientSpec> specs) {
-        return projectRecipe(recipe.getId(), output, specs, "generic",
+        return projectRecipe(recipe, output, specs, "generic",
                 new ResourceLocation("minecraft", "crafting"));
     }
 
@@ -150,6 +153,29 @@ public final class ImmutableRecipeGraphProjector {
                                            List<IngredientSpec> specs, String modTypeId,
                                            ResourceLocation recipeTypeId,
                                            boolean includeOutputNbt) {
+        return projectRecipe(recipeId, output, specs, modTypeId, recipeTypeId,
+                includeOutputNbt, List.of());
+    }
+
+    public static RecipeNode projectRecipe(Recipe<?> recipe, ItemStack output,
+                                           List<IngredientSpec> specs, String modTypeId,
+                                           ResourceLocation recipeTypeId) {
+        return projectRecipe(recipe, output, specs, modTypeId, recipeTypeId, true);
+    }
+
+    public static RecipeNode projectRecipe(Recipe<?> recipe, ItemStack output,
+                                           List<IngredientSpec> specs, String modTypeId,
+                                           ResourceLocation recipeTypeId,
+                                           boolean includeOutputNbt) {
+        return projectRecipe(recipe.getId(), output, specs, modTypeId, recipeTypeId,
+                includeOutputNbt, MagicResourceCostCatalog.costsFor(recipe));
+    }
+
+    private static RecipeNode projectRecipe(ResourceLocation recipeId, ItemStack output,
+                                            List<IngredientSpec> specs, String modTypeId,
+                                            ResourceLocation recipeTypeId,
+                                            boolean includeOutputNbt,
+                                            List<MagicResourceCost> magicCosts) {
         if (output.isEmpty()) return null;
         List<IngredientRef> inputs = new ArrayList<>();
         for (IngredientSpec spec : specs) {
@@ -161,7 +187,7 @@ public final class ImmutableRecipeGraphProjector {
         MaterialRef outputRef = includeOutputNbt ? material(output, output.hasTag())
                 : new MaterialRef(BuiltInRegistries.ITEM.getKey(output.getItem()), "", true);
         return new RecipeNode(recipeId, outputRef, Math.max(1, output.getCount()),
-                inputs, modTypeId, recipeTypeId);
+                inputs, modTypeId, recipeTypeId, magicCosts);
     }
 
     /** 根据当前机器状态替换指定配方的单次输入，不修改已发布的全局配方图。 */
@@ -176,7 +202,8 @@ public final class ImmutableRecipeGraphProjector {
                 List<IngredientRef> inputs = replacements.get(recipe.recipeId());
                 if (inputs != null && !inputs.equals(recipe.inputs())) {
                     recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
-                            recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId()));
+                            recipe.outputCount(), inputs, recipe.modTypeId(),
+                            recipe.recipeTypeId(), recipe.magicCosts()));
                     changed = true;
                 } else {
                     recipes.add(recipe);
@@ -387,7 +414,8 @@ public final class ImmutableRecipeGraphProjector {
                 }
                 RecipeNode bound = inputs != null
                         ? new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
-                                inputs, recipe.modTypeId(), recipe.recipeTypeId())
+                                inputs, recipe.modTypeId(), recipe.recipeTypeId(),
+                                recipe.magicCosts())
                         : recipe;
                 if (inputs != null) {
                     if (recipes == null) recipes = new ArrayList<>(entry.getValue());
@@ -463,7 +491,8 @@ public final class ImmutableRecipeGraphProjector {
                 inputs.set(1, new IngredientRef(List.of(actualBase), base.count(),
                         NbtMatchMode.EXACT, base.role()));
                 RecipeNode specialized = new RecipeNode(recipe.recipeId(), output,
-                        recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId());
+                        recipe.outputCount(), inputs, recipe.modTypeId(),
+                        recipe.recipeTypeId(), recipe.magicCosts());
                 if (!graph.recipesByOutput().getOrDefault(output, List.of()).contains(specialized)) {
                     List<RecipeNode> variants = additions.computeIfAbsent(output, ignored -> new ArrayList<>());
                     if (!variants.contains(specialized)) variants.add(specialized);
@@ -615,7 +644,7 @@ public final class ImmutableRecipeGraphProjector {
         if (bases.isEmpty()) return null;
         inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT, base.role()));
         return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
-                recipe.modTypeId(), recipe.recipeTypeId());
+                recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts());
     }
 
     static List<RecipeNode> candidates(ImmutableRecipeGraph graph, MaterialRef wanted,

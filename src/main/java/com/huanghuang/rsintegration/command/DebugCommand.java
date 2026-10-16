@@ -14,6 +14,16 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyProgressSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
+import com.huanghuang.rsintegration.magic.GoetySoulCraftingTask;
+import com.huanghuang.rsintegration.magic.MagicResourceDiagnostics;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.MagicResourceRouteCounters;
+import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
+import com.huanghuang.rsintegration.magic.SoulPlanPreview;
+import com.huanghuang.rsintegration.magic.route.BackendResolution;
+import com.huanghuang.rsintegration.magic.route.Channel;
+import com.huanghuang.rsintegration.magic.route.MagicScope;
+import com.huanghuang.rsintegration.magic.route.MagicStorageBackendDescriptor;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -23,6 +33,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -71,6 +82,16 @@ public final class DebugCommand {
                         .executes(DebugCommand::embersClearLocks))
                 .then(Commands.literal("perf")
                         .executes(DebugCommand::perfSnapshot))
+                .then(Commands.literal("magic")
+                        .then(Commands.literal("route")
+                                .executes(DebugCommand::magicRoute)))
+                .then(Commands.literal("pending")
+                        .executes(DebugCommand::dumpPendingAudits)
+                        .then(Commands.literal("resolve")
+                                .then(Commands.argument("id", StringArgumentType.word())
+                                        .executes(DebugCommand::resolvePendingAudit)))
+                        .then(Commands.literal("clear")
+                                .executes(DebugCommand::clearPendingAudits)))
                 .then(Commands.literal("bindings")
                         .executes(DebugCommand::dumpBindings)));
     }
@@ -145,6 +166,81 @@ public final class DebugCommand {
         }
         ctx.getSource().sendSuccess(() -> Component.literal("Pending reservations: " + ledger.describePending()), false);
         return 1;
+    }
+
+    // ── magic pending ─────────────────────────────────────────────
+
+    /** 列出无法自动回收、需要人工核对的魔法资源记录。 */
+    private static int dumpPendingAudits(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        List<MagicResourceTaskLedger.Pending> pending =
+                MagicResourceTaskLedger.get(server).pendingAudits();
+        long now = server.overworld().getGameTime();
+        if (pending.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal("魔法资源待核对记录：无"), false);
+            return 0;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "魔法资源待核对记录 " + pending.size() + " 条："), false);
+        for (MagicResourceTaskLedger.Pending entry : pending) {
+            String task = entry.taskId() == null ? "-" : entry.taskId().toString();
+            String network = entry.bdNetworkId() >= 0 ? "bd=" + entry.bdNetworkId() : "bd=-";
+            long ageTicks = entry.recordedAt() <= 0 ? -1L
+                    : Math.max(0L, now - entry.recordedAt());
+            String age = ageTicks < 0L ? "时间未知" : formatAge(ageTicks);
+            String line = "  " + entry.id() + " task=" + task
+                    + " kind=" + entry.kind().id()
+                    + " amount=" + entry.amount()
+                    + " " + network
+                    + " reason=" + entry.reason()
+                    + " " + age;
+            ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "核对完成后执行 /rsi_debug pending resolve <id> 移除记录。"), false);
+        return pending.size();
+    }
+
+    /** 核对完成，移除一条待核对记录。 */
+    private static int resolvePendingAudit(CommandContext<CommandSourceStack> ctx) {
+        String raw = StringArgumentType.getString(ctx, "id");
+        UUID id;
+        try {
+            id = UUID.fromString(raw);
+        } catch (IllegalArgumentException invalid) {
+            ctx.getSource().sendFailure(Component.literal("无效的记录 ID：" + raw));
+            return 0;
+        }
+        boolean removed = MagicResourceTaskLedger.get(ctx.getSource().getServer())
+                .resolvePending(id);
+        ctx.getSource().sendSuccess(() -> Component.literal(removed
+                ? "已移除待核对记录 " + id
+                : "没有找到待核对记录 " + id), false);
+        return removed ? 1 : 0;
+    }
+
+    /** 清空所有待核对记录，用于确认过账后收尾。 */
+    private static int clearPendingAudits(CommandContext<CommandSourceStack> ctx) {
+        MagicResourceTaskLedger ledger = MagicResourceTaskLedger.get(ctx.getSource().getServer());
+        List<MagicResourceTaskLedger.Pending> pending = ledger.pendingAudits();
+        for (MagicResourceTaskLedger.Pending entry : pending) {
+            ledger.resolvePending(entry.id());
+        }
+        int cleared = pending.size();
+        ctx.getSource().sendSuccess(() ->
+                Component.literal("已清空 " + cleared + " 条待核对记录"), false);
+        return cleared;
+    }
+
+    /** 人类可读的记录时长。 */
+    private static String formatAge(long ticks) {
+        long seconds = ticks / 20L;
+        if (seconds < 60L) return seconds + "s";
+        long minutes = seconds / 60L;
+        if (minutes < 60L) return minutes + "m";
+        long hours = minutes / 60L;
+        if (hours < 24L) return hours + "h" + (minutes % 60L) + "m";
+        return (hours / 24L) + "d" + (hours % 24L) + "h";
     }
 
     // ── dump index ────────────────────────────────────────────────
@@ -413,7 +509,65 @@ public final class DebugCommand {
     private static int perfSnapshot(CommandContext<CommandSourceStack> ctx) {
         String snap = PerformanceMonitor.snapshot();
         ctx.getSource().sendSuccess(() -> Component.literal(snap), false);
+        for (String line : magicRouteCounterLines()) {
+            ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+        }
         return 1;
+    }
+
+    /** perf 的快照里没有魔法路由段，这里单独补上一段。 */
+    private static List<String> magicRouteCounterLines() {
+        List<String> lines = new ArrayList<>();
+        lines.add("  backend_route_total=" + MagicResourceRouteCounters.routeTotal()
+                + " backend_unsupported_total=" + MagicResourceRouteCounters.unsupportedTotal()
+                + " backend_unreachable_total=" + MagicResourceRouteCounters.unreachableTotal()
+                + " backend_ambiguous_total=" + MagicResourceRouteCounters.ambiguousTotal());
+        String last = MagicResourceRouteCounters.lastRoute();
+        lines.add("  last_route=" + (last.isEmpty() ? "无" : last));
+        return lines;
+    }
+
+    // ── magic route ───────────────────────────────────────────────
+
+    /**
+     * 展示魔法资源的实际路由：每个资源挂了哪些后端、当前链路落在哪个权威后端。
+     *
+     * <p>解析是纯函数且不读库存（{@code record=false}），所以这条命令可以随时执行，
+     * 不会干扰正在跑的任务。</p>
+     */
+    private static int magicRoute(CommandContext<CommandSourceStack> ctx)
+            throws CommandSyntaxException {
+        MagicScope scope = MagicScope.of(
+                ctx.getSource().getPlayerOrException(), null);
+        ctx.getSource().sendSuccess(() -> Component.literal("=== 魔法资源路由 ==="), false);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "  当前玩家=" + scope.player().getName().getString()
+                        + " 链路=" + MagicResourceDiagnostics.linkName(scope)), false);
+        boolean soulUnreachable = false;
+        for (MagicResourceKind kind : MagicResourceKind.values()) {
+            BackendResolution resolution = RSIntegrationMod.MAGIC_ROUTER
+                    .resolveCounted(kind, scope, false);
+            List<MagicStorageBackendDescriptor> candidates =
+                    RSIntegrationMod.MAGIC_ROUTER.candidates(kind);
+            StringBuilder declared = new StringBuilder();
+            for (MagicStorageBackendDescriptor descriptor : candidates) {
+                if (declared.length() > 0) declared.append(", ");
+                declared.append(descriptor.id()).append("(channel=")
+                        .append(descriptor.channel(kind)).append(')');
+            }
+            final String line = "  " + kind.id()
+                    + " 状态=" + resolution.kind()
+                    + " 权威后端=" + (resolution.backend() == null
+                            ? "无" : resolution.backend().id())
+                    + " 通道=" + resolution.channel()
+                    + " 候选=[" + declared + "]";
+            ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+            if (kind == MagicResourceKind.SOUL
+                    && resolution.kind() == BackendResolution.Kind.UNREACHABLE) {
+                soulUnreachable = true;
+            }
+        }
+        return soulUnreachable ? 1 : 0;
     }
 
     // ── dump bindings ─────────────────────────────────────────────

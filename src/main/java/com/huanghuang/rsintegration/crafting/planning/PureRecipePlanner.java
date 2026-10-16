@@ -3,6 +3,7 @@ import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
@@ -127,7 +128,8 @@ public final class PureRecipePlanner {
             }
         }
         Map<MaterialRef, Integer> resultStock = status == Status.SUCCESS ? search.stock : search.initialStock;
-        return new Result(Feasibility.from(status), resultSteps, missing, resultStock, status,
+        return new Result(Feasibility.from(status), resultSteps, missing, resultStock,
+                aggregateMagicCosts(graph, resultSteps), status,
                 search.expandedStates, search.backtracks, search.memoHits);
     }
 
@@ -155,12 +157,20 @@ public final class PureRecipePlanner {
 
     public record Result(Feasibility feasibility, List<PlannedStep> steps,
                          List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
+                         List<MagicResourceCost> magicCosts,
                          Status status, int expandedStates, int backtracks, int memoHits) {
         public Result(boolean feasible, List<PlannedStep> steps,
                       List<IngredientRef> missing, Map<MaterialRef, Integer> remaining) {
             this(feasible ? Feasibility.FEASIBLE : Feasibility.INFEASIBLE,
-                    steps, missing, remaining,
+                    steps, missing, remaining, List.of(),
                     feasible ? Status.SUCCESS : Status.UNRESOLVABLE, 0, 0, 0);
+        }
+
+        public Result(Feasibility feasibility, List<PlannedStep> steps,
+                      List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
+                      Status status, int expandedStates, int backtracks, int memoHits) {
+            this(feasibility, steps, missing, remaining, List.of(), status,
+                    expandedStates, backtracks, memoHits);
         }
 
         public boolean feasible() {
@@ -171,10 +181,28 @@ public final class PureRecipePlanner {
             steps = List.copyOf(steps);
             missing = List.copyOf(missing);
             remaining = Map.copyOf(remaining);
+            magicCosts = MagicResourceCost.merge(magicCosts);
             if (status == null || feasibility == null || feasibility != Feasibility.from(status)) {
                 throw new IllegalArgumentException("inconsistent pure-plan status");
             }
         }
+    }
+
+    private static List<MagicResourceCost> aggregateMagicCosts(
+            ImmutableRecipeGraph graph, List<PlannedStep> steps) {
+        if (steps.isEmpty()) return List.of();
+        List<MagicResourceCost> costs = new ArrayList<>();
+        for (PlannedStep step : steps) {
+            RecipeNode node = graph.recipesById().get(step.recipeId());
+            if (node == null) continue;
+            for (MagicResourceCost cost : node.magicCosts()) {
+                long total = cost.totalFor(Math.max(1, step.batches()));
+                if (total <= 0L) continue;
+                costs.add(new MagicResourceCost(
+                        cost.kind(), (int) Math.min(Integer.MAX_VALUE, total)));
+            }
+        }
+        return MagicResourceCost.merge(costs);
     }
 
     private static long scaledInputCount(IngredientRef input, long batches) {
