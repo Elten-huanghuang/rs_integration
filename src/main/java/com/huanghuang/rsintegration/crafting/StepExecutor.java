@@ -493,7 +493,7 @@ final class StepExecutor {
                                          List<InputDemand> inputs, List<OutputDeclaration> outputs) {
         return new CraftNode(nodeId, step.recipeId(), step.modType().id(), step.recipeTypeId(),
                 step.executions(), step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
-                step.syntheticInput(), step.syntheticOutput(), inputs, outputs);
+                step.syntheticInput(), step.syntheticOutput(), inputs, outputs, step.magicCosts());
     }
 
 }

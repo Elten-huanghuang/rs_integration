@@ -39,7 +39,7 @@ public final class ExecutionEquivalence {
                 node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput(),
                 node.outputs().stream().filter(output -> output.kind() == OutputKind.PRIMARY)
                         .findFirst().map(output -> new ProductionTarget(output.material(), output.quantity()))
-                        .orElse(null));
+                        .orElse(null), node.magicCosts());
     }
 
     public static Report compare(CraftPlanGraph graph,

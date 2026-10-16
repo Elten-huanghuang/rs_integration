@@ -62,6 +62,8 @@ public final class PlanWarnings {
         cost = botaniaInt(recipe, "vazkii.botania.api.recipe.TerrestrialAgglomerationRecipe", "getMana");
         if (cost >= 0) return cost;
         cost = botaniaInt(recipe, "vazkii.botania.api.recipe.BotanicalBreweryRecipe", "getManaUsage");
+        if (cost >= 0) return cost;
+        cost = botaniaInt(recipe, "mythicbotany.infuser.InfuserRecipe", "getManaUsage");
         return Math.max(0, cost);
     }
 

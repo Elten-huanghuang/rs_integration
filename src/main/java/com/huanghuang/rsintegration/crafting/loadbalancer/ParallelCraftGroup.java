@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
@@ -73,6 +74,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private final boolean[] safelyRecoverableVirtual;
     private BlockPos representativePos = BlockPos.ZERO;
     private MinecraftServer machineServer;
+    @Nullable
+    private MagicResourceTaskReservation magicResourceTaskReservation;
     private ServerPlayer player;
     private ExtractionLedger sharedLedger;
     private final ExtractionLedger delegateExtractedLedger = new ExtractionLedger();
@@ -1106,6 +1109,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
     }
 
+    public void setMagicResourceTaskReservation(
+            @Nullable MagicResourceTaskReservation reservation) {
+        this.magicResourceTaskReservation = reservation;
+        for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
+    }
+
     public void setTargetOutput(@Nullable ItemStack targetOutput) {
         this.targetOutput = targetOutput == null || targetOutput.isEmpty() ? null : targetOutput.copy();
         for (WorkerSlot worker : workers) configureDelegate(worker.delegate, worker.machine);
@@ -1173,6 +1182,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         abstractDelegate.setStorageEndpoint(storageEndpoint);
         abstractDelegate.setMachineDim(machine.dim());
         if (machineServer != null) abstractDelegate.setMachineServer(machineServer);
+        abstractDelegate.setMagicResourceTaskReservation(magicResourceTaskReservation);
         if (targetOutput != null) abstractDelegate.setTargetOutput(targetOutput);
     }
 

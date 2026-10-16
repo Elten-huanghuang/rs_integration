@@ -50,6 +50,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 
 public final class CraftingResolver {
 
@@ -675,7 +676,7 @@ public final class CraftingResolver {
                         step.syntheticOutput(), List.of(new InputDemand(inputPort, plainHeart,
                         remaining, DemandRole.TRANSFORMED, plainTemplate)),
                         List.of(new OutputDeclaration(outputPort, MaterialKey.of(tainted),
-                                remaining, OutputKind.SYNTHETIC))));
+                                remaining, OutputKind.SYNTHETIC)), step.magicCosts()));
                 alreadyHave = ctx.countMatching(ingredient);
                 remaining = count - alreadyHave;
             }
@@ -1273,7 +1274,8 @@ public final class CraftingResolver {
             int executions,
             @Nullable ItemStack syntheticInput,
             @Nullable ItemStack syntheticOutput,
-            @Nullable ProductionTarget productionTarget
+            @Nullable ProductionTarget productionTarget,
+            List<MagicResourceCost> magicCosts
     ) {
         public ResolutionStep {
             alternativeIds = List.copyOf(alternativeIds);
@@ -1281,6 +1283,17 @@ public final class CraftingResolver {
             if (executions < 1) executions = 1;
             syntheticInput = syntheticInput == null ? null : syntheticInput.copyWithCount(1);
             syntheticOutput = syntheticOutput == null ? null : syntheticOutput.copyWithCount(1);
+            magicCosts = MagicResourceCost.merge(magicCosts);
+        }
+        public ResolutionStep(ResourceLocation recipeId, ModType modType,
+                              @Nullable ResourceLocation recipeTypeId,
+                              List<ResourceLocation> alternativeIds,
+                              List<String> alternativeModTypes,
+                              boolean inferMode, int executions,
+                              @Nullable ItemStack syntheticInput, @Nullable ItemStack syntheticOutput,
+                              @Nullable ProductionTarget productionTarget) {
+            this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes,
+                    inferMode, executions, syntheticInput, syntheticOutput, productionTarget, List.of());
         }
         public ResolutionStep(ResourceLocation recipeId, ModType modType,
                               @Nullable ResourceLocation recipeTypeId,

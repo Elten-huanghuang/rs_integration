@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -19,8 +20,20 @@ public record CraftNode(
         @Nullable ItemStack syntheticInput,
         @Nullable ItemStack syntheticOutput,
         List<InputDemand> inputs,
-        List<OutputDeclaration> outputs
+        List<OutputDeclaration> outputs,
+        List<MagicResourceCost> magicCosts
 ) {
+    public CraftNode(NodeId id, ResourceLocation recipeId, String modTypeId,
+                     @Nullable ResourceLocation recipeTypeId, int executions,
+                     List<ResourceLocation> alternativeIds,
+                     List<String> alternativeModTypeIds, boolean inferMode,
+                     @Nullable ItemStack syntheticInput, @Nullable ItemStack syntheticOutput,
+                     List<InputDemand> inputs, List<OutputDeclaration> outputs) {
+        this(id, recipeId, modTypeId, recipeTypeId, executions, alternativeIds,
+                alternativeModTypeIds, inferMode, syntheticInput, syntheticOutput,
+                inputs, outputs, List.of());
+    }
+
     public CraftNode {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(recipeId, "recipeId");
@@ -32,6 +45,7 @@ public record CraftNode(
         syntheticOutput = copyUnit(syntheticOutput);
         inputs = List.copyOf(inputs);
         outputs = List.copyOf(outputs);
+        magicCosts = MagicResourceCost.merge(magicCosts);
     }
 
     private static ItemStack copyUnit(@Nullable ItemStack stack) {

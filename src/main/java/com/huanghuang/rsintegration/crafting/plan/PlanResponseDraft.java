@@ -237,7 +237,7 @@ public record PlanResponseDraft(
                 .map(item -> new PlanGraphView.UnresolvedView(item.consumerNodeId(),
                         item.consumerPortIndex(), item.display().copy(), item.quantity())).toList();
         return new PlanGraphView(source.version(), nodes, edges, roots, unresolved,
-                source.topologicalOrder());
+                source.topologicalOrder(), source.magicCosts());
     }
 
     private static ItemStack copy(ItemStack stack) {
