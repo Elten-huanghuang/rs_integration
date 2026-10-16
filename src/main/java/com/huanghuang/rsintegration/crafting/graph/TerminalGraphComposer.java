@@ -60,7 +60,7 @@ public final class TerminalGraphComposer {
                 terminalStep.modType().id(), terminalStep.recipeTypeId(), terminalStep.executions(),
                 terminalStep.alternativeIds(), terminalStep.alternativeModTypes(),
                 terminalStep.inferMode(), terminalStep.syntheticInput(), terminalStep.syntheticOutput(),
-                inputs, List.of(output));
+                inputs, List.of(output), terminalStep.magicCosts());
 
         List<CraftNode> nodes = new ArrayList<>(base.nodes());
         nodes.add(terminal);

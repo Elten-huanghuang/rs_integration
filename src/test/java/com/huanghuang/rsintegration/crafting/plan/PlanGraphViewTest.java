@@ -16,6 +16,8 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import net.minecraft.nbt.CompoundTag;
@@ -56,6 +58,8 @@ class PlanGraphViewTest extends BootstrapTest {
         assertEquals(0, view.edges().get(1).source().producerNodeId());
         assertEquals(2, view.edges().get(1).quantity());
         assertFalse(view.edges().get(0).source().initial());
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 25)),
+                view.magicCosts());
     }
 
     @Test
@@ -140,6 +144,8 @@ class PlanGraphViewTest extends BootstrapTest {
         assertEquals(3, decoded.graph().nodes().get(0).outputs().get(0).quantity());
         assertEquals(1, decoded.graph().edges().get(1).material().getCount());
         assertEquals(2, decoded.graph().edges().get(1).quantity());
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 25)),
+                decoded.graph().magicCosts());
         assertEquals(0, buf.readableBytes(), "encoded=" + encodedSize);
     }
 
@@ -199,7 +205,8 @@ class PlanGraphViewTest extends BootstrapTest {
         OutputPortId leftOutput = new OutputPortId(leftId, 0);
         OutputPortId rightOutput = new OutputPortId(rightId, 0);
         CraftNode producer = node(producerId, "producer", List.of(),
-                List.of(new OutputDeclaration(producerOutput, iron, 3, OutputKind.PRIMARY)), true);
+                List.of(new OutputDeclaration(producerOutput, iron, 3, OutputKind.PRIMARY)), true,
+                List.of(new MagicResourceCost(MagicResourceKind.MANA, 25)));
         CraftNode left = node(leftId, "left", List.of(input(leftInput, 1)),
                 List.of(new OutputDeclaration(leftOutput, diamond, 1, OutputKind.PRIMARY)));
         CraftNode right = node(rightId, "right", List.of(input(rightInput, 2)),
@@ -227,10 +234,16 @@ class PlanGraphViewTest extends BootstrapTest {
 
     private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,
                                   List<OutputDeclaration> outputs, boolean withAlternative) {
+        return node(id, path, inputs, outputs, withAlternative, List.of());
+    }
+
+    private static CraftNode node(NodeId id, String path, List<InputDemand> inputs,
+                                  List<OutputDeclaration> outputs, boolean withAlternative,
+                                  List<MagicResourceCost> magicCosts) {
         return new CraftNode(id, new ResourceLocation("test", path), ModType.GENERIC.id(),
                 new ResourceLocation("minecraft", "crafting"), 1,
                 withAlternative ? List.of(new ResourceLocation("test", "alternate")) : List.of(),
                 withAlternative ? List.of(ModType.GENERIC.id()) : List.of(),
-                false, null, null, inputs, outputs);
+                false, null, null, inputs, outputs, magicCosts);
     }
 }

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -30,14 +31,22 @@ public record PlanGraphView(
         List<EdgeView> edges,
         List<RootView> roots,
         List<UnresolvedView> unresolved,
-        List<Integer> topologicalOrder
+        List<Integer> topologicalOrder,
+        List<MagicResourceCost> magicCosts
 ) {
+    public PlanGraphView(int version, List<NodeView> nodes, List<EdgeView> edges,
+                         List<RootView> roots, List<UnresolvedView> unresolved,
+                         List<Integer> topologicalOrder) {
+        this(version, nodes, edges, roots, unresolved, topologicalOrder, List.of());
+    }
+
     public PlanGraphView {
         nodes = List.copyOf(nodes);
         edges = List.copyOf(edges);
         roots = List.copyOf(roots);
         unresolved = List.copyOf(unresolved);
         topologicalOrder = List.copyOf(topologicalOrder);
+        magicCosts = MagicResourceCost.merge(magicCosts);
     }
 
     public static PlanGraphView from(CraftPlanGraph graph) {
@@ -86,7 +95,8 @@ public record PlanGraphView(
                         missing.consumer().index(), missing.displayHint(), missing.quantity()))
                 .toList();
         return new PlanGraphView(graph.version(), nodes, edges, roots, unresolved,
-                graph.topologicalOrder().stream().map(NodeId::value).toList());
+                graph.topologicalOrder().stream().map(NodeId::value).toList(),
+                graph.magicCosts());
     }
 
     private static SourceView source(MaterialSource source) {

@@ -551,7 +551,7 @@ public final class RecipeIndex {
             boolean runtimeNbt = handler.hasRuntimeDependentPrimaryNbt(recipe);
             ImmutableRecipeGraph.RecipeNode node = typedSpecs == null ? null
                     : ImmutableRecipeGraphProjector.projectRecipe(
-                    recipe.getId(), result, typedSpecs, type.id(), typeId,
+                    recipe, result, typedSpecs, type.id(), typeId,
                     !runtimeNbt);
             if (runtimeNbt && "malum".equals(type.id())) {
                 RSIntegrationMod.LOGGER.debug(

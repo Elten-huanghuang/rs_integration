@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 
 import java.util.List;
 import java.util.Map;
@@ -54,5 +55,19 @@ public record CraftPlanGraph(
                 .map(MaterialSource.ProducerOutput.class::cast)
                 .map(source -> source.outputPort().nodeId())
                 .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /** 整个递归执行计划按实际节点次数汇总的魔法资源费用。 */
+    public List<MagicResourceCost> magicCosts() {
+        List<MagicResourceCost> costs = new java.util.ArrayList<>();
+        for (CraftNode node : nodes) {
+            for (MagicResourceCost cost : node.magicCosts()) {
+                long total = cost.totalFor(node.executions());
+                if (total <= 0L) continue;
+                costs.add(new MagicResourceCost(
+                        cost.kind(), (int) Math.min(Integer.MAX_VALUE, total)));
+            }
+        }
+        return MagicResourceCost.merge(costs);
     }
 }

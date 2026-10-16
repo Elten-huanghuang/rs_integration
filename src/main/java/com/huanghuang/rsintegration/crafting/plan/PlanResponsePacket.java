@@ -20,6 +20,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 
 import java.util.*;
@@ -480,6 +482,11 @@ public final class PlanResponsePacket {
         }
         buf.writeVarInt(graph.topologicalOrder().size());
         for (int nodeId : graph.topologicalOrder()) buf.writeVarInt(nodeId);
+        buf.writeVarInt(graph.magicCosts().size());
+        for (MagicResourceCost cost : graph.magicCosts()) {
+            buf.writeVarInt(cost.kind().ordinal());
+            buf.writeVarInt(cost.amountPerOperation());
+        }
     }
 
     static PlanGraphView readGraph(FriendlyByteBuf buf) {
@@ -550,7 +557,17 @@ public final class PlanResponsePacket {
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             topological.add(readNonNegativeVarInt(buf, "topological node id"));
         }
-        return new PlanGraphView(version, nodes, edges, roots, unresolved, topological);
+        List<MagicResourceCost> magicCosts = new ArrayList<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            int ordinal = readNonNegativeVarInt(buf, "magic resource kind");
+            if (ordinal >= MagicResourceKind.values().length) {
+                throw new DecoderException("Unknown magic resource kind ordinal: " + ordinal);
+            }
+            magicCosts.add(new MagicResourceCost(MagicResourceKind.values()[ordinal],
+                    readNonNegativeVarInt(buf, "magic resource cost")));
+        }
+        return new PlanGraphView(version, nodes, edges, roots, unresolved, topological,
+                magicCosts);
     }
 
     private static void writeSource(FriendlyByteBuf buf, PlanGraphView.SourceView source) {
