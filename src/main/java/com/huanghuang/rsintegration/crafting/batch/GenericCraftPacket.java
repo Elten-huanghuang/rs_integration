@@ -90,6 +90,11 @@ import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.summoningrituals.SummoningRitualAltarBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
+import com.huanghuang.rsintegration.magic.GoetySoulCraftingTask;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.SoulPlanPreview;
+import com.huanghuang.rsintegration.magic.SoulPlanWarnings;
+import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualHelper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
@@ -2563,7 +2568,8 @@ public final class GenericCraftPacket {
             List<AltarBindingRegistry.BoundMachine> boundMachines = new ArrayList<>(
                     AltarBindingRegistry.getBoundMachinesForRecipe(player, modType, recipeId));
             if (ModIds.GOETY.equals(modType.id())) {
-                MachineCandidateView ready = GoetyBatchDelegate.firstReadyPlanMachine(player, recipe);
+                MachineCandidateView ready = GoetyBatchDelegate.firstReadyPlanMachine(
+                        player, recipe, storageEndpoint);
                 if (ready != null) {
                     boundMachines.sort(Comparator.comparingInt(machine ->
                             machine.dim().toString().equals(ready.dimension())
@@ -5430,7 +5436,19 @@ public final class GenericCraftPacket {
             }
         }
 
-        long totalBotaniaMana = 0L;
+        Map<MagicResourceKind, Long> plannedMagicCosts = new java.util.EnumMap<>(
+                MagicResourceKind.class);
+        if (planGraph != null) {
+            for (MagicResourceCost cost : planGraph.magicCosts()) {
+                long total = plannedMagicCosts.getOrDefault(cost.kind(), 0L);
+                plannedMagicCosts.put(cost.kind(), Math.min(Long.MAX_VALUE,
+                        total + cost.amountPerOperation()));
+            }
+        }
+
+        long totalBotaniaMana = plannedMagicCosts.getOrDefault(MagicResourceKind.MANA, -1L);
+        if (totalBotaniaMana < 0L) {
+            totalBotaniaMana = 0L;
         for (PlanStep step : steps) {
             Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
                     .byKey(step.recipeId()).orElse(null);
@@ -5440,12 +5458,15 @@ public final class GenericCraftPacket {
                         totalBotaniaMana + (long) manaPerBatch * Math.max(1, step.batches()));
             }
         }
+        }
         if (totalBotaniaMana > 0) {
             modWarnings.add(Component.translatable(
                     "rsi.botania.warn.total_mana_required", totalBotaniaMana));
         }
 
-        long totalArsSource = 0L;
+        long totalArsSource = plannedMagicCosts.getOrDefault(MagicResourceKind.SOURCE, -1L);
+        if (totalArsSource < 0L) {
+            totalArsSource = 0L;
         for (PlanStep step : steps) {
             Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
                     .byKey(step.recipeId()).orElse(null);
@@ -5457,30 +5478,49 @@ public final class GenericCraftPacket {
                         : totalArsSource + stepTotal;
             }
         }
+        }
         if (totalArsSource > 0) {
             modWarnings.add(Component.translatable(
                     "rsi.ars_nouveau.warn.total_source_required",
                     String.format("%,d", totalArsSource)));
         }
 
-        long totalGoetyRitualSouls = 0L;
+        long totalGoetyRitualSouls = plannedMagicCosts.getOrDefault(MagicResourceKind.SOUL, -1L);
         long totalGoetyTotemSouls = 0L;
+        if (totalGoetyRitualSouls < 0L) {
+            totalGoetyRitualSouls = 0L;
+        }
         for (PlanStep step : steps) {
             Recipe<?> stepRecipe = player.serverLevel().getRecipeManager()
                     .byKey(step.recipeId()).orElse(null);
             if (stepRecipe == null) continue;
             long executions = Math.max(1, step.batches());
-            long ritualCost = (long) PlanWarnings.goetyRitualSoulCost(stepRecipe) * executions;
-            totalGoetyRitualSouls = ritualCost > Long.MAX_VALUE - totalGoetyRitualSouls
-                    ? Long.MAX_VALUE : totalGoetyRitualSouls + ritualCost;
+            if (plannedMagicCosts.getOrDefault(MagicResourceKind.SOUL, -1L) < 0L) {
+                long ritualCost = (long) PlanWarnings.goetyRitualSoulCost(stepRecipe) * executions;
+                totalGoetyRitualSouls = ritualCost > Long.MAX_VALUE - totalGoetyRitualSouls
+                        ? Long.MAX_VALUE : totalGoetyRitualSouls + ritualCost;
+            }
             long totemCost = (long) PlanWarnings.goetyTotemSoulCost(stepRecipe) * executions;
             totalGoetyTotemSouls = totemCost > Long.MAX_VALUE - totalGoetyTotemSouls
                     ? Long.MAX_VALUE : totalGoetyTotemSouls + totemCost;
         }
         if (totalGoetyRitualSouls > 0) {
-            modWarnings.add(Component.translatable(
-                    "rsi.goety.warn.total_ritual_souls_required",
-                    String.format("%,d", totalGoetyRitualSouls)));
+            // 预览与执行共用 SoulPlanPreview，这里只保留诊断日志和文案渲染，
+            // 不再各自算一遍可用量——那正是「预览说够、执行拿不到」的来源。
+            SoulPlanPreview.Estimate soulEstimate =
+                    SoulPlanPreview.estimate(player, planningEndpoint, (int) Math.min(
+                            Integer.MAX_VALUE, totalGoetyRitualSouls));
+            RSIntegrationMod.debug(
+                    "[RSI-Goety] soul plan recipe={} class={} batches={} total={} endpoint={} source={} available={}",
+                    recipeId, recipe.getClass().getName(),
+                    Math.max(1, repeatCount), totalGoetyRitualSouls,
+                    planningEndpoint == null ? "none"
+                            : planningEndpoint.session().reference().backendId().value(),
+                    soulEstimate.source(), soulEstimate.legacyAvailable());
+            Component soulWarning = SoulPlanWarnings.describe(
+                    player, planningEndpoint, (int) Math.min(
+                            Integer.MAX_VALUE, totalGoetyRitualSouls));
+            if (soulWarning != null) modWarnings.add(soulWarning);
         }
         if (totalGoetyTotemSouls > 0) {
             int availableTotemSouls = GoetySoulTotemCrafting.maxAvailableSouls(available);
@@ -5501,7 +5541,8 @@ public final class GenericCraftPacket {
         List<MachineCandidateView> machineCandidates = recipeModType == null
                 ? List.of()
                 : ModIds.GOETY.equals(recipeModType.id())
-                ? GoetyBatchDelegate.getPlanMachineCandidates(player, recipe)
+                ? GoetyBatchDelegate.getPlanMachineCandidates(
+                        player, recipe, planningEndpoint)
                 : ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
                 ? SummoningRitualAltarBatchDelegate.getPlanMachineCandidates(player, recipe)
                 : List.of();

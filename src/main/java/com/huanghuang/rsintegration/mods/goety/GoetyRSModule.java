@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.goety;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
@@ -21,6 +22,7 @@ public final class GoetyRSModule implements IModIntegration {
 
     public static final GoetyRSModule INSTANCE = new GoetyRSModule();
     public static final String BRAZIER_TYPE_ID = "goety_brazier";
+    public static final String ARCA_TYPE_ID = "goety_arca";
     public static final List<String> CURSED_INFUSER_BLOCK_CLASSES = List.of(
             "com.Polarice3.Goety.common.blocks.CursedInfuserBlock",
             "com.Polarice3.Goety.common.blocks.GrimInfuserBlock",
@@ -70,6 +72,9 @@ public final class GoetyRSModule implements IModIntegration {
                 new String[][]{{"goety:brazier", "goety"}},
                 new String[][]{{"com.Polarice3.Goety.common.crafting.BrazierRecipe", "goety"}},
                 "gui.rs_integration.jei.goety_brazier_craft");
+        ModType.register(ARCA_TYPE_ID,
+                new String[0], new String[]{"arca"}, new String[]{"goety_arca"},
+                GenericBatchDelegate::new);
     }
 
     @Override
@@ -91,6 +96,11 @@ public final class GoetyRSModule implements IModIntegration {
                 "goety", ModType.byId("goety"), RSIntegrationConfig.ENABLE_GOETY, List.of(
                 "com.Polarice3.Goety.common.blocks.DarkAltarBlock"
         ), "goety_altar", false));
+        // Arca 不执行配方，只作为玩家灵魂能量的溢出接收目标。
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                "goety", ModType.byId(ARCA_TYPE_ID), RSIntegrationConfig.ENABLE_GOETY,
+                List.of("com.Polarice3.Goety.common.blocks.ArcaBlock"),
+                List.of("goety:arca"), "goety_arca", false));
     }
 
     @Override

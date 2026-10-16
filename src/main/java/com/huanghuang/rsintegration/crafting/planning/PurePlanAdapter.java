@@ -33,7 +33,8 @@ public final class PurePlanAdapter {
                             graph.recipesById().get(step.recipeId());
                     return new ResolutionStep(step.recipeId(), ModType.byId(node.modTypeId()),
                             node.recipeTypeId(), List.of(), List.of(), false,
-                            step.batches(), null, demandedStack(step.demandedOutput()));
+                            step.batches(), null, demandedStack(step.demandedOutput()), null,
+                            node.magicCosts());
                 })
                 .toList();
     }

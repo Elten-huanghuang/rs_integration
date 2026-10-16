@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
+import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -55,6 +56,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected CraftStorageEndpoint storageEndpoint;
     protected boolean usingSharedLedger;
     protected CraftPhase phase = CraftPhase.WAITING_FOR_START;
+    @Nullable
+    protected MagicResourceTaskReservation magicResourceTaskReservation;
 
     /**
      * Set by the first terminal callback ({@code onBatchFailed} or
@@ -299,6 +302,17 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** Attach the chain-selected storage backend before private-ledger starts. */
     public final void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
         this.storageEndpoint = endpoint;
+    }
+
+    /** Attach the recursion-wide shared magic reservation to this physical node. */
+    public void setMagicResourceTaskReservation(
+            @Nullable MagicResourceTaskReservation reservation) {
+        this.magicResourceTaskReservation = reservation;
+    }
+
+    @Nullable
+    protected final MagicResourceTaskReservation magicResourceTaskReservation() {
+        return magicResourceTaskReservation;
     }
 
     /** Called by the chain after {@link #validateAndInit} succeeds. */

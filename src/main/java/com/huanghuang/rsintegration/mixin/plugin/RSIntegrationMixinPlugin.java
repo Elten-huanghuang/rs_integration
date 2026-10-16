@@ -119,6 +119,30 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("com.Polarice3.Goety.utils.BlockFinder")
                     && isClassPresent("net.v_black_cat.goetydelight.effect.ModEffects");
         }
+        if (mixinClassName.contains("goety.DarkAltarSoulSourceMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "checkCage");
+        }
+        if (mixinClassName.contains("goety.CursedCageSoulSourceMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "getSouls")
+                    && hasMethod(targetClassName, "decreaseSouls");
+        }
+        if (mixinClassName.contains("goety.SoulCandlestickSoulSourceMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "checkCage")
+                    && hasMethod(targetClassName, "getSouls")
+                    && hasMethod(targetClassName, "drainSouls");
+        }
+        if (mixinClassName.contains("goety.SEHelperSoulGainMixin")) {
+            return isClassPresent("com.Polarice3.Goety.utils.SEHelper")
+                    && hasMethod(targetClassName, "increaseSouls");
+        }
+        if (mixinClassName.contains("goety.SEImpSoulGainMixin")) {
+            return isClassPresent("com.Polarice3.Goety.common.capabilities.soulenergy.SEImp")
+                    && hasField(targetClassName, "soulEnergy")
+                    && hasMethod(targetClassName, "increaseSE");
+        }
         if (mixinClassName.contains("distantworlds.LithumCoreUpdateTickProcedureMixin")) {
             return isClassPresent("net.mcreator.distantworlds.procedures.LithumCoreUpdateTickProcedure");
         }

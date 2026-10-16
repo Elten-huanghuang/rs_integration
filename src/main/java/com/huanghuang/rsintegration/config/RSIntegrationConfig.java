@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.config;
 
 import net.minecraft.resources.ResourceLocation;
+import javax.annotation.Nullable;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -200,6 +201,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_IMMORTERS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSDELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_DUNGEONS_DELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_TWILIGHT_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMERSRESPITE;
     public static ForgeConfigSpec.BooleanValue ENABLE_IRON_FURNACES;
@@ -312,6 +314,10 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue MONSTER_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue MINERS_DELIGHT_COPPER_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_TWILIGHT_DELIGHT_FIERY_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue TWILIGHT_DELIGHT_FIERY_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MOKA_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue MOKA_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA_MANA_POOL_BATCH;
@@ -326,6 +332,8 @@ public final class RSIntegrationConfig {
     //  numeric params
     public static ForgeConfigSpec.IntValue MACHINE_TAB_THRESHOLD;
     public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
+    /** 魔法资源：没有空间管辖时指名的权威后端；空串表示不指名。 */
+    public static ForgeConfigSpec.ConfigValue<String> MAGIC_RESOURCE_PINNED_BACKEND;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
     public static ForgeConfigSpec.IntValue SERVER_CONFIG_SCHEMA_VERSION;
@@ -487,6 +495,10 @@ public final class RSIntegrationConfig {
                 .comment("启用地牢乐事兼容",
                         "支持怪物锅递归合成、批量预载及多台机器并发。")
                 .define("enableDungeonsDelight", true);
+        ENABLE_TWILIGHT_DELIGHT = c
+                .comment("启用暮色乐事兼容",
+                        "支持炽铁锅远程合成。炽铁锅复用农夫乐事烹饪锅配方，自带热源。")
+                .define("enableTwilightDelight", true);
         ENABLE_YOUKAISHOMECOMING = c
                 .comment("启用妖怪归家兼容",
                         "支持摩卡壶、蒸锅等机器的远程合成。")
@@ -935,6 +947,24 @@ public final class RSIntegrationConfig {
                 .comment("矿工乐事铜锅输入预载操作上限",
                         "单台机器一次预载的最大逻辑操作数。预载食材和铜杯，有材料返还的配方仍走原路径；批次和结算使用原生铜杯双倍产量，受四个输入槽及容器输出槽限制。")
                 .defineInRange("minersDelightCopperPotInputBufferLimit", 64, 1, 64);
+        ENABLE_TWILIGHT_DELIGHT_FIERY_POT_INPUT_BUFFER = s
+                .comment("启用暮色乐事炽铁锅输入预载",
+                        "预载食材和盛装容器，每周期仍只烹饪一份；有材料返还的配方仍走原路径。")
+                .define("enableTwilightDelightFieryPotInputBuffer", true);
+        TWILIGHT_DELIGHT_FIERY_POT_INPUT_BUFFER_LIMIT = s
+                .comment("暮色乐事炽铁锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数，实际批次受食材、容器与输出槽容量限制。")
+                .defineInRange("twilightDelightFieryPotInputBufferLimit", 64, 1, 64);
+        ENABLE_YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER = s
+                .comment("启用妖怪归家烹饪锅输入预载",
+                        "一次把食材与盛装容器铺满锅，锅按原生逐份烹饪、逐份产生成品；"
+                                + "批次数按配方耗时折算，避免长时间占满单台机器。")
+                .define("enableYoukaisHomecomingCookingPotInputBuffer", true);
+        YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER_LIMIT = s
+                .comment("妖怪归家烹饪锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑份数上限，实际批次还会被配方耗时、"
+                                + "原料槽容量与产物槽容量进一步压低。")
+                .defineInRange("youkaisHomecomingCookingPotInputBufferLimit", 64, 1, 64);
         ENABLE_MOKA_POT_INPUT_BUFFER = s
                 .comment("启用妖怪归家摩卡壶输入预载",
                         "预载材料和容器，每周期仍只冲泡一份；有材料返还的配方走原路径，容器与材料在同一存储事务中预留。")
@@ -1317,6 +1347,15 @@ public final class RSIntegrationConfig {
         s.comment("高级设置").push("advanced");
         s.pop();
 
+        s.comment("魔法资源").push("magicResources");
+        MAGIC_RESOURCE_PINNED_BACKEND = s
+                .comment("指名的权威后端",
+                        "留空表示不指名。填 \"命名空间:路径\"（例如 beyonddimensions:network）",
+                        "只在没有后端声明管辖当前链路时生效；不会覆盖空间管辖，",
+                        "也就是说玩家站在 RS 终端前时，这里填 BD 也不会把库存搬去 BD。")
+                .define("pinnedBackend", "");
+        s.pop();
+
         SERVER_SPEC = s.build();
 
         //  CLIENT
@@ -1539,6 +1578,13 @@ public final class RSIntegrationConfig {
     public static int migratePlanCacheTtlMs(int schema, int currentValue) {
         return schema < 5 && currentValue == 500
                 ? DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS : currentValue;
+    }
+
+    /** 指名的权威后端 id；没配置或写错格式时返回 null。 */
+    @Nullable
+    public static ResourceLocation magicResourcePinnedBackend() {
+        if (!SERVER_SPEC.isLoaded()) return null;
+        return ResourceLocation.tryParse(MAGIC_RESOURCE_PINNED_BACKEND.get());
     }
 
     public static void saveClientConfig() {

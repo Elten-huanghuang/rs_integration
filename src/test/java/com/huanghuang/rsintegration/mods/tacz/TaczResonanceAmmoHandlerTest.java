@@ -17,9 +17,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.common.capabilities.Capability;
-import net.minecraftforge.common.capabilities.CapabilityManager;
-import net.minecraftforge.common.capabilities.CapabilityToken;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
@@ -42,13 +39,8 @@ class TaczResonanceAmmoHandlerTest extends BootstrapTest {
     private ResonanceDiskWrapper disk;
 
     @BeforeAll
-    static void initializeCapabilityBoundary() throws ClassNotFoundException {
-        // 单测没有 Forge 转换器，仅替代能力令牌注册；后续盘内读取与扣弹使用真实实现。
-        try (MockedStatic<CapabilityManager> manager = mockStatic(CapabilityManager.class)) {
-            manager.when(() -> CapabilityManager.get(any(CapabilityToken.class)))
-                    .thenAnswer(call -> mock(Capability.class));
-            Class.forName(ForgeCapabilities.class.getName());
-        }
+    static void initializeCapabilityBoundary() {
+        initializeForgeCapabilities();
     }
 
     @BeforeEach

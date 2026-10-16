@@ -19,9 +19,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.capabilities.Capability;
-import net.minecraftforge.common.capabilities.CapabilityManager;
-import net.minecraftforge.common.capabilities.CapabilityToken;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -50,21 +47,12 @@ import static org.mockito.Mockito.when;
 class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
     @BeforeAll
     static void initializeModContext() throws ClassNotFoundException {
+        initializeForgeCapabilities();
         FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);
         when(context.getModEventBus()).thenReturn(mock(IEventBus.class));
         try (MockedStatic<FMLJavaModLoadingContext> loading = mockStatic(FMLJavaModLoadingContext.class)) {
             loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
             Class.forName(RSIntegrationMod.class.getName());
-        }
-    }
-
-    @BeforeAll
-    static void initializeCapabilityBoundary() throws ClassNotFoundException {
-        // 单测没有 Forge 转换器，仅替代能力令牌注册；投料仍使用真实库存实现。
-        try (MockedStatic<CapabilityManager> manager = mockStatic(CapabilityManager.class)) {
-            manager.when(() -> CapabilityManager.get(any(CapabilityToken.class)))
-                    .thenAnswer(call -> mock(Capability.class));
-            Class.forName(ForgeCapabilities.class.getName());
         }
     }
 
