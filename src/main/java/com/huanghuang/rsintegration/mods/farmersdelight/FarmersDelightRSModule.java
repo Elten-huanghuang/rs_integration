@@ -56,6 +56,22 @@ public final class FarmersDelightRSModule implements IModIntegration {
                     "gui.rs_integration.jei.md_copper_pot_craft");
         }
 
+        // Twilight Delight 炽铁锅：与农夫乐事烹饪锅同构（同槽位、同配方、同容器），
+        // 仅热源判定不同（自供热）。配方前缀故意留空，避免抢走 twilightdelight
+        // 自己的 SimpleFrozenRecipe（冰霜配方，非锅具）；分类沿用 FD 烹饪锅配方。
+        if (ModList.get().isLoaded(ModIds.TWILIGHTDELIGHT)) {
+            ModType.register(ModIds.ID_TD_FIERY_POT,
+                    new String[0],
+                    new String[]{"fiery_cooking_pot", "fiery_pot"},
+                    new String[]{ModIds.ID_TD_FIERY_POT},
+                    TwilightDelightFieryPotBatchDelegate::new)
+                    .confirmGraphExecution("炽铁锅食材与容器由共享账本预留，成品在独占机器槽内结算");
+            ModType.configureJei(ModIds.ID_TD_FIERY_POT,
+                    new String[][]{{"farmersdelight:cooking", ModIds.ID_TD_FIERY_POT}},
+                    null,
+                    "gui.rs_integration.jei.td_fiery_pot_craft");
+        }
+
         // Specific: Skillet (campfire-like recipes)
         // Registered after vanilla_machine (modules run in onCommonSetup, after
         // constructor).  With >= in classifyRecipe, this takes priority over
@@ -136,6 +152,15 @@ public final class FarmersDelightRSModule implements IModIntegration {
                     RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
                     List.of("com.sammy.minersdelight.content.block.copper_pot.CopperPotBlock"),
                     ModIds.ID_MD_COPPER_POT, true
+            ));
+        }
+
+        if (ModList.get().isLoaded(ModIds.TWILIGHTDELIGHT)) {
+            BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                    ModIds.TWILIGHTDELIGHT, ModType.byId(ModIds.ID_TD_FIERY_POT),
+                    RSIntegrationConfig.ENABLE_TWILIGHT_DELIGHT,
+                    List.of("dev.xkmc.twilightdelight.content.block.FieryCookingPotBlock"),
+                    ModIds.ID_TD_FIERY_POT, true
             ));
         }
 
