@@ -399,4 +399,5 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         entitiesBefore = Set.of();
         inputEntityIds.clear();
     }
+
 }

@@ -371,7 +371,6 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Clearing machine state");
-
         // Try to recover items if craft didn't start or failed early
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);

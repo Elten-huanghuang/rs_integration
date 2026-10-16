@@ -20,7 +20,7 @@ Thumbs.db
 # Python 绘图缓存
 __pycache__/
 *.pyc
-
+art/
 # Minecraft
 run/
 logs/

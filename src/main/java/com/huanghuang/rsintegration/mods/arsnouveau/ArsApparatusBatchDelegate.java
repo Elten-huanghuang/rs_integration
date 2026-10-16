@@ -271,7 +271,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Place reagent in central slot
+        // 保留原机行为，由附近 Source 罐等原生来源补足。
         container.setItem(0, reagent.copy());
         be.setChanged();
 
@@ -433,7 +433,6 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Clearing machine state");
-
         // Try to recover items
         if (be instanceof Container container) {
             ItemStack remaining = container.removeItem(0, 64);
