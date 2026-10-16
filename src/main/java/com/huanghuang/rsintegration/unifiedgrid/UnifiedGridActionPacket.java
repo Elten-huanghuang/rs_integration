@@ -15,12 +15,18 @@ import java.util.function.Supplier;
 /** 请求只带会话身份和动作；资源及当前库存由服务端解析。 */
 public record UnifiedGridActionPacket(int containerId, UUID session, GridResourceKind kind, int epoch,
                                       int serial, Action action, int flags) {
-    public enum Action { EXTRACT, SCROLL, INSERT_ITEM, INSERT_FLUID, RESYNC, FILL_FLUID }
+    public enum Action {
+        EXTRACT, SCROLL, INSERT_ITEM, INSERT_FLUID, RESYNC, FILL_FLUID,
+        /** 把容器里的魔法资源充入库存；serial 为 0。 */
+        INSERT_MAGIC,
+        /** 从库存吸取魔法资源填进容器；serial 必须命中对应资源条目。 */
+        FILL_MAGIC
+    }
 
     public static void encode(UnifiedGridActionPacket packet, FriendlyByteBuf buf) {
         buf.writeVarInt(packet.containerId);
         buf.writeUUID(packet.session);
-        buf.writeByte(packet.kind.ordinal());
+        buf.writeByte(packet.kind.id());
         buf.writeVarInt(packet.epoch);
         buf.writeVarInt(packet.serial);
         buf.writeEnum(packet.action);

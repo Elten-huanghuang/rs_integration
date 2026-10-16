@@ -84,7 +84,7 @@ class UnifiedDiskFailureTest extends BootstrapTest {
         PageSnapshot missingPage = new PageSnapshot(page.index(), page.keyRevision(), page.amountRevision(), keys,
                 page.generations(), page.orders(), page.amounts());
         files.save(new Snapshot(worldId, disk, owner, core.limits, snapshot.itemPages(), snapshot.fluidPages(),
-                List.of(missingPage), snapshot.fluids()), null);
+                List.of(missingPage), snapshot.fluids(), snapshot.coreMagic()), null);
         Path directory = world.resolve("data/rs_integration/unified_disks").resolve(disk.toString());
         List<Path> paths;
         try (var stream = Files.list(directory)) { paths = stream.sorted().toList(); }

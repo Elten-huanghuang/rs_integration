@@ -35,9 +35,9 @@ class UnifiedGridClickTest extends BootstrapTest {
     void itemClickKeepsNativeCursorHalfAndShiftFlags(int button, boolean shift, int flags) {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class)) {
             keys.when(Screen::hasShiftDown).thenReturn(shift);
-            Fixture f = new Fixture(GridResourceKind.ITEM);
+            Fixture f = new Fixture(GridResourceKind.item());
             assertTrue(UnifiedGridClient.click(f.screen, 10, 10, button));
-            verify(f.view).request(GridResourceKind.ITEM, 17, UnifiedGridActionPacket.Action.EXTRACT, flags);
+            verify(f.view).request(GridResourceKind.item(), 17, UnifiedGridActionPacket.Action.EXTRACT, flags);
         }
     }
 
@@ -46,31 +46,31 @@ class UnifiedGridClickTest extends BootstrapTest {
     void fluidLeftClickFillsContainerAndShiftSelectsInventory(int button, boolean shift, int flags) {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class)) {
             keys.when(Screen::hasShiftDown).thenReturn(shift);
-            Fixture f = new Fixture(GridResourceKind.FLUID);
+            Fixture f = new Fixture(GridResourceKind.fluid());
             assertTrue(UnifiedGridClient.click(f.screen, 10, 10, button));
-            verify(f.view).request(GridResourceKind.FLUID, 17, UnifiedGridActionPacket.Action.FILL_FLUID, flags);
+            verify(f.view).request(GridResourceKind.fluid(), 17, UnifiedGridActionPacket.Action.FILL_FLUID, flags);
         }
     }
 
     @Test void shiftWithHeldOrdinaryItemStillInsertsItemAndFluidTargetDoesNotNeedShift() {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class)) {
             keys.when(Screen::hasShiftDown).thenReturn(true);
-            Fixture item = new Fixture(GridResourceKind.ITEM);
+            Fixture item = new Fixture(GridResourceKind.item());
             when(item.menu.getCarried()).thenReturn(new ItemStack(Items.DIAMOND));
             UnifiedGridClient.click(item.screen, 10, 10, 0);
-            verify(item.view).request(GridResourceKind.ITEM, 0, UnifiedGridActionPacket.Action.INSERT_ITEM, 0);
+            verify(item.view).request(GridResourceKind.item(), 0, UnifiedGridActionPacket.Action.INSERT_ITEM, 0);
             keys.when(Screen::hasShiftDown).thenReturn(false);
-            Fixture fluid = new Fixture(GridResourceKind.FLUID);
+            Fixture fluid = new Fixture(GridResourceKind.fluid());
             when(fluid.menu.getCarried()).thenReturn(new ItemStack(Items.WATER_BUCKET));
             UnifiedGridClient.click(fluid.screen, 10, 10, 0);
-            verify(fluid.view).request(GridResourceKind.FLUID, 17, UnifiedGridActionPacket.Action.FILL_FLUID, 0);
+            verify(fluid.view).request(GridResourceKind.fluid(), 17, UnifiedGridActionPacket.Action.FILL_FLUID, 0);
         }
     }
 
     @Test void filledBucketRightClickOnBlankSpaceDrainsWithoutChangingItsContentsOnClient() {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class);
              MockedStatic<FluidUtil> fluids = mockStatic(FluidUtil.class, CALLS_REAL_METHODS)) {
-            Fixture f = new Fixture(GridResourceKind.ITEM);
+            Fixture f = new Fixture(GridResourceKind.item());
             ItemStack bucket = new ItemStack(Items.WATER_BUCKET);
             // 普通单测未运行 Forge capability transformer，在适配边界模拟容器读取。
             fluids.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(invocation -> {
@@ -87,7 +87,7 @@ class UnifiedGridClickTest extends BootstrapTest {
             when(f.view.getStacks()).thenReturn(List.of());
             when(f.view.row(null)).thenReturn(null);
             UnifiedGridClient.click(f.screen, 10, 10, 1);
-            verify(f.view).request(GridResourceKind.FLUID, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
+            verify(f.view).request(GridResourceKind.fluid(), 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
             assertTrue(bucket.is(Items.WATER_BUCKET));
             assertEquals(1, bucket.getCount());
         }
@@ -97,14 +97,14 @@ class UnifiedGridClickTest extends BootstrapTest {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class);
              MockedStatic<FluidUtil> fluids = FluidContainerBucketTestFixtures.capabilities()) {
             var buckets = FluidContainerBucketTestFixtures.subclassBuckets("click_poisonwater");
-            Fixture f = new Fixture(GridResourceKind.ITEM);
+            Fixture f = new Fixture(GridResourceKind.item());
             ItemStack cursor = new ItemStack(buckets.filled(), 3);
             when(f.menu.getCarried()).thenReturn(cursor);
             when(f.view.getStacks()).thenReturn(List.of());
             when(f.view.row(null)).thenReturn(null);
             assertTrue(UnifiedGridClient.click(f.screen, 10, 10, 1));
-            verify(f.view).request(GridResourceKind.FLUID, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
-            verify(f.view, never()).request(eq(GridResourceKind.ITEM), anyInt(), any(), anyInt());
+            verify(f.view).request(GridResourceKind.fluid(), 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
+            verify(f.view, never()).request(eq(GridResourceKind.item()), anyInt(), any(), anyInt());
             assertEquals(3, cursor.getCount());
             assertTrue(cursor.is(buckets.filled()));
             assertFalse(cursor.hasTag());
@@ -113,13 +113,13 @@ class UnifiedGridClickTest extends BootstrapTest {
 
     @Test void filledBucketLeftClickOnBlankSpaceStoresBucketItemAndEmptyRightClickNeverFills() {
         try (MockedStatic<Screen> keys = mockStatic(Screen.class)) {
-            Fixture f = new Fixture(GridResourceKind.ITEM);
+            Fixture f = new Fixture(GridResourceKind.item());
             when(f.menu.getCarried()).thenReturn(new ItemStack(Items.WATER_BUCKET));
             when(f.view.getStacks()).thenReturn(List.of());
             when(f.view.row(null)).thenReturn(null);
             UnifiedGridClient.click(f.screen, 10, 10, 0);
-            verify(f.view).request(GridResourceKind.ITEM, 0, UnifiedGridActionPacket.Action.INSERT_ITEM, 0);
-            Fixture fluid = new Fixture(GridResourceKind.FLUID);
+            verify(f.view).request(GridResourceKind.item(), 0, UnifiedGridActionPacket.Action.INSERT_ITEM, 0);
+            Fixture fluid = new Fixture(GridResourceKind.fluid());
             UnifiedGridClient.click(fluid.screen, 10, 10, 1);
             verify(fluid.view, never()).request(any(), anyInt(), any(), anyInt());
         }

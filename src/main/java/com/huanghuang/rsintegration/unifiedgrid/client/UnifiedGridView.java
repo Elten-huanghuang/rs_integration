@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.unifiedgrid.client;
 
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.MagicResourceStack;
+import com.huanghuang.rsintegration.magic.MagicStackGridStack;
 import com.huanghuang.rsintegration.unifiedgrid.GridResourceKind;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridActionPacket;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridEntry;
@@ -28,10 +31,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,20 +46,24 @@ import java.util.function.Predicate;
 public final class UnifiedGridView implements IGridView {
     private final GridScreen screen;
     private final UnifiedGridState state = new UnifiedGridState();
-    private final EnumMap<GridResourceKind, Int2ObjectLinkedOpenHashMap<Row>> rows = new EnumMap<>(GridResourceKind.class);
+    private final List<Int2ObjectLinkedOpenHashMap<Row>> rows = new ArrayList<>(GridResourceKind.count());
     private final Map<UUID, IGridStack> aliases = new HashMap<>();
     private final List<Consumer<IGridStack>> listeners = new ArrayList<>();
     private final List<Consumer<QuantityChange>> quantityListeners = new ArrayList<>();
+    private final int[] lastResyncTick;
     private List<IGridStack> visible = new ArrayList<>();
     private boolean canCraft;
     private boolean dirty = true;
     private int filter;
     private int lastSortTick = -5;
-    private final int[] lastResyncTick = {-20, -20};
 
     public UnifiedGridView(GridScreen screen) {
         this.screen = screen;
-        for (GridResourceKind kind : GridResourceKind.values()) rows.put(kind, new Int2ObjectLinkedOpenHashMap<>());
+        this.lastResyncTick = new int[GridResourceKind.count()];
+        Arrays.fill(this.lastResyncTick, -20);
+        for (GridResourceKind kind : GridResourceKind.values()) {
+            rows.add(kind.id(), new Int2ObjectLinkedOpenHashMap<>());
+        }
     }
 
     public void apply(UnifiedGridUpdatePacket packet) {
@@ -64,7 +71,7 @@ public final class UnifiedGridView implements IGridView {
         List<UnifiedGridEntry> updates = packet.entries();
         UnifiedGridState.Result result = state.apply(packet, updates);
         if (previous != null && !previous.equals(state.session())) {
-            rows.values().forEach(Map::clear);
+            rows.forEach(Map::clear);
             aliases.clear();
             rowIds.clear();
             visible.clear();
@@ -74,31 +81,32 @@ public final class UnifiedGridView implements IGridView {
         if (result == UnifiedGridState.Result.RESYNC) {
             request(packet.kind(), 0, UnifiedGridActionPacket.Action.RESYNC, 0);
             if (Minecraft.getInstance().player != null)
-                lastResyncTick[packet.kind().ordinal()] = Minecraft.getInstance().player.tickCount;
+                lastResyncTick[packet.kind().id()] = Minecraft.getInstance().player.tickCount;
             return;
         }
         if (result == UnifiedGridState.Result.IGNORED) return;
         canCraft = packet.canCraft();
+        Int2ObjectLinkedOpenHashMap<Row> kindRows = rows.get(packet.kind().id());
         if (result == UnifiedGridState.Result.RESET) {
-            if (packet.kind() == GridResourceKind.ITEM) invalidateIngredients();
-            for (Row row : rows.get(packet.kind()).values()) removeAliases(row);
-            rows.get(packet.kind()).clear();
+            if (packet.kind() == GridResourceKind.item()) invalidateIngredients();
+            for (Row row : kindRows.values()) removeAliases(row);
+            kindRows.clear();
             for (UnifiedGridEntry entry : state.entries(packet.kind())) put(packet.kind(), entry);
             RSGridSearchCache.onGridReset(screen, this);
             dirty = true;
         } else if (result == UnifiedGridState.Result.DELTA) {
             for (UnifiedGridEntry update : updates) {
-                Row old = rows.get(packet.kind()).get(update.serial());
+                Row old = kindRows.get(update.serial());
                 if (update.removed()) {
                     if (old != null) {
-                        if (packet.kind() == GridResourceKind.ITEM) invalidateIngredients();
+                        if (packet.kind() == GridResourceKind.item()) invalidateIngredients();
                         removeAliases(old);
-                        rows.get(packet.kind()).remove(update.serial());
+                        kindRows.remove(update.serial());
                         RSGridSearchCache.onGridDelta(screen, this, old.primary);
                         dirty = true;
                     }
                 } else if (update.metadata()) {
-                    if (packet.kind() == GridResourceKind.ITEM) invalidateIngredients();
+                    if (packet.kind() == GridResourceKind.item()) invalidateIngredients();
                     if (old != null) removeAliases(old);
                     Row row = put(packet.kind(), state.get(packet.kind(), update.serial()));
                     if (old != null && !old.primary.getId().equals(row.primary.getId()))
@@ -127,7 +135,7 @@ public final class UnifiedGridView implements IGridView {
         IGridStack primary = stack(kind, entry, entry.storedId() == null);
         IGridStack crafting = entry.craftableId() == null ? null : primary.isCraftable() ? primary : stack(kind, entry, true);
         Row row = new Row(kind, entry.serial(), primary, crafting);
-        rows.get(kind).put(entry.serial(), row);
+        rows.get(kind.id()).put(entry.serial(), row);
         aliases.put(primary.getId(), primary);
         rowIds.put(primary.getId(), row);
         if (crafting != null) aliases.put(crafting.getId(), crafting);
@@ -139,13 +147,16 @@ public final class UnifiedGridView implements IGridView {
         UUID id = crafting ? entry.craftableId() : entry.storedId();
         UUID other = crafting ? entry.storedId() : entry.craftableId();
         IGridStack stack;
-        if (kind == GridResourceKind.ITEM) {
+        if (kind == GridResourceKind.item()) {
             ItemStack template = ((ItemStack) entry.template()).copyWithCount(crafting ? 1 : Math.max(1, entry.amount()));
             stack = new ItemGridStack(id, other, template, crafting, entry.tracker());
-        } else {
+        } else if (kind == GridResourceKind.fluid()) {
             FluidStack template = ((FluidStack) entry.template()).copy();
             template.setAmount(crafting ? 1 : Math.max(1, entry.amount()));
             stack = new FluidGridStack(id, other, template, entry.tracker(), crafting);
+        } else {
+            int amount = crafting ? 1 : Math.max(1, entry.amount());
+            stack = new MagicStackGridStack(kind.magicKind(), id, other, amount, entry.tracker(), crafting);
         }
         if (!crafting && entry.amount() == 0) stack.setQuantity(0);
         return stack;
@@ -161,9 +172,9 @@ public final class UnifiedGridView implements IGridView {
     public void tick() {
         int tick = Minecraft.getInstance().player == null ? 0 : Minecraft.getInstance().player.tickCount;
         for (GridResourceKind kind : GridResourceKind.values()) {
-            if (state.needsResync(kind) && tick - lastResyncTick[kind.ordinal()] >= 20) {
+            if (state.needsResync(kind) && tick - lastResyncTick[kind.id()] >= 20) {
                 request(kind, 0, UnifiedGridActionPacket.Action.RESYNC, 0);
-                lastResyncTick[kind.ordinal()] = tick;
+                lastResyncTick[kind.id()] = tick;
             }
         }
         if (dirty && tick - lastSortTick >= 5 && screen.canSort()) {
@@ -172,15 +183,24 @@ public final class UnifiedGridView implements IGridView {
         }
     }
 
-    public void cycleFilter() { filter = (filter + 1) % 3; forceSort(); }
-    public Component filterLabel() { return Component.translatable("rs_integration.unified_grid.filter." + filter); }
+    public void cycleFilter() { filter = (filter + 1) % (GridResourceKind.count() + 1); forceSort(); }
+
+    public Component filterLabel() {
+        if (filter <= 0) return Component.translatable("rs_integration.unified_grid.filter.all");
+        GridResourceKind kind = GridResourceKind.fromId(filter - 1);
+        return kind.isMagic()
+                ? kind.magicKind().displayName()
+                : Component.translatable(kind.isItem()
+                        ? "rs_integration.unified_grid.filter.items"
+                        : "rs_integration.unified_grid.filter.fluids");
+    }
 
     public Row row(IGridStack stack) {
         return stack == null ? null : rowIds.get(stack.getId());
     }
 
     public boolean canEmptyCarried(ItemStack carried) {
-        return filter != 1 && !FluidContainerBucketSupport.getFluid(carried).isEmpty();
+        return filter != GridResourceKind.FLUID_ID + 1 && !FluidContainerBucketSupport.getFluid(carried).isEmpty();
     }
 
     private final Map<UUID, Row> rowIds = new HashMap<>();
@@ -228,11 +248,13 @@ public final class UnifiedGridView implements IGridView {
         if (tab >= 0 && tab < tabs.size()) filters = tabs.get(tab).getFilters();
         Predicate<IGridStack> search = GridFilterParser.getFilters(null, screen.getSearchFieldText(), List.of());
         List<IGridStack> next = new ArrayList<>();
-        for (GridResourceKind kind : GridResourceKind.values()) for (Row row : rows.get(kind).values()) {
-            if (filter != 0 && filter != kind.ordinal() + 1) continue;
-            IGridStack displayed = grid.getViewType() == IGrid.VIEW_TYPE_CRAFTABLES ? row.crafting : row.primary;
-            if (displayed == null || (grid.getViewType() == IGrid.VIEW_TYPE_NON_CRAFTABLES && row.crafting != null)) continue;
-            if (search.test(displayed) && UnifiedGridFilters.matches(filters, displayed)) next.add(displayed);
+        for (GridResourceKind kind : GridResourceKind.values()) {
+            for (Row row : rows.get(kind.id()).values()) {
+                if (filter != 0 && filter != kind.id() + 1) continue;
+                IGridStack displayed = grid.getViewType() == IGrid.VIEW_TYPE_CRAFTABLES ? row.crafting : row.primary;
+                if (displayed == null || (grid.getViewType() == IGrid.VIEW_TYPE_NON_CRAFTABLES && row.crafting != null)) continue;
+                if (search.test(displayed) && UnifiedGridFilters.matches(filters, displayed)) next.add(displayed);
+            }
         }
         next.sort(comparator(grid));
         visible = next;
@@ -262,10 +284,25 @@ public final class UnifiedGridView implements IGridView {
         return compare.thenComparingInt(this::kindId).thenComparing(this::registryName).thenComparing(IGridStack::getId);
     }
 
-    private int kindId(IGridStack stack) { return stack.getIngredient() instanceof ItemStack ? 0 : 1; }
+    /** 排序分组序号；未知条目排在最后。 */
+    private int kindId(IGridStack stack) {
+        Row row = rowIds.get(stack.getId());
+        return row == null ? GridResourceKind.count() : row.kind().id();
+    }
+
+    /** 稳定身份；协议只在会话内比较类别编号，跨端比较用注册名。 */
     private String registryName(IGridStack stack) {
-        return stack.getIngredient() instanceof ItemStack item ? item.getItem().builtInRegistryHolder().key().location().toString()
-                : ((FluidStack) stack.getIngredient()).getFluid().builtInRegistryHolder().key().location().toString();
+        Object ingredient = stack.getIngredient();
+        if (ingredient instanceof ItemStack item) {
+            return item.getItem().builtInRegistryHolder().key().location().toString();
+        }
+        if (ingredient instanceof FluidStack fluid) {
+            return fluid.getFluid().builtInRegistryHolder().key().location().toString();
+        }
+        if (ingredient instanceof MagicResourceStack magic) {
+            return "rs_integration:" + magic.kind().path();
+        }
+        return stack.getId().toString();
     }
 
     public record Row(GridResourceKind kind, int serial, IGridStack primary, IGridStack crafting) { }

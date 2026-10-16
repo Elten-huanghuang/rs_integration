@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid.client;
 
+import com.huanghuang.rsintegration.magic.MagicGridItemTransfer;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.unifiedgrid.GridResourceKind;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridActionPacket;
@@ -71,25 +73,46 @@ public final class UnifiedGridClient {
         UnifiedGridView.Row row = view.row(selected);
         ItemStack carried = screen.getMenu().getCarried();
         if (!carried.isEmpty()) {
-            // AE2：右键排空容器；左键流体装填；其余点击仍存放容器物品本身。
+            MagicResourceKind carriedMagic = MagicGridItemTransfer.kindOf(carried);
+            if (carriedMagic != null && !carriedMagic.available()) carriedMagic = null;
+            GridResourceKind itemKind = GridResourceKind.item();
+            GridResourceKind fluidKind = GridResourceKind.fluid();
+            // AE2：右键排空容器；左键流体装填；魔法资源容器按同样的左右键语义充放。
             if (button == 1 && view.canEmptyCarried(carried)) {
-                view.request(GridResourceKind.FLUID, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
-            } else if (button == 0 && row != null && row.kind() == GridResourceKind.FLUID) {
-                view.request(GridResourceKind.FLUID, row.serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
+                view.request(fluidKind, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
+            } else if (button == 0 && row != null && row.kind() == fluidKind) {
+                view.request(fluidKind, row.serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
                         Screen.hasShiftDown() ? IItemGridHandler.EXTRACT_SHIFT : 0);
-            } else if (row == null || row.kind() == GridResourceKind.ITEM) {
-                view.request(GridResourceKind.ITEM, 0, UnifiedGridActionPacket.Action.INSERT_ITEM, button == 1 ? 1 : 0);
+            } else if (carriedMagic != null) {
+                // 容器：右键空白处倒出，左键同类资源条目装填，其他情况存入容器物品
+                if (button == 1 && row == null) {
+                    view.request(GridResourceKind.ofMagic(carriedMagic), 0,
+                            UnifiedGridActionPacket.Action.INSERT_MAGIC, 0);
+                } else if (button == 0 && row != null && row.kind().magicKind() == carriedMagic) {
+                    view.request(row.kind(), row.serial(), UnifiedGridActionPacket.Action.FILL_MAGIC, 0);
+                } else {
+                    view.request(itemKind, 0, UnifiedGridActionPacket.Action.INSERT_ITEM,
+                            button == 1 ? 1 : 0);
+                }
+            } else if (row == null || row.kind() == itemKind) {
+                view.request(itemKind, 0, UnifiedGridActionPacket.Action.INSERT_ITEM,
+                        button == 1 ? 1 : 0);
             }
         } else if (row != null) {
             if (view.canCraft() && (selected.isCraftable() || (row.crafting() != null
                     && Screen.hasShiftDown() && Screen.hasControlDown()))) {
                 Minecraft minecraft = Minecraft.getInstance();
                 minecraft.setScreen(new CraftingSettingsScreen(screen, minecraft.player, row.crafting()));
-            } else if (row.kind() == GridResourceKind.FLUID) {
-                if (button == 0) view.request(GridResourceKind.FLUID, row.serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
+            } else if (row.kind() == GridResourceKind.fluid()) {
+                if (button == 0) view.request(GridResourceKind.fluid(), row.serial(),
+                        UnifiedGridActionPacket.Action.FILL_FLUID,
+                        Screen.hasShiftDown() ? IItemGridHandler.EXTRACT_SHIFT : 0);
+            } else if (row.kind().isMagic()) {
+                if (button == 0) view.request(row.kind(), row.serial(),
+                        UnifiedGridActionPacket.Action.FILL_MAGIC,
                         Screen.hasShiftDown() ? IItemGridHandler.EXTRACT_SHIFT : 0);
             } else {
-                int flags = (button == 1 && row.kind() == GridResourceKind.ITEM ? IItemGridHandler.EXTRACT_HALF : 0)
+                int flags = (button == 1 && row.kind() == GridResourceKind.item() ? IItemGridHandler.EXTRACT_HALF : 0)
                         | (Screen.hasShiftDown() ? IItemGridHandler.EXTRACT_SHIFT : 0);
                 view.request(row.kind(), row.serial(), UnifiedGridActionPacket.Action.EXTRACT, flags);
             }
@@ -102,7 +125,7 @@ public final class UnifiedGridClient {
         if (!(screen.getView() instanceof UnifiedGridView view) || !(Screen.hasShiftDown() || Screen.hasControlDown())
                 || !screen.isOverSlotArea(x - screen.getGuiLeft(), y - screen.getGuiTop())) return false;
         UnifiedGridView.Row row = view.row(selected(screen));
-        if (row != null && row.kind() == GridResourceKind.ITEM && !row.primary().isCraftable())
+        if (row != null && row.kind() == GridResourceKind.item() && !row.primary().isCraftable())
             view.request(row.kind(), row.serial(), UnifiedGridActionPacket.Action.SCROLL,
                     (Screen.hasShiftDown() ? 1 : 0) | (delta > 0 ? 2 : 0));
         return true;

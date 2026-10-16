@@ -6,6 +6,9 @@ import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore.Limits;
 import com.huanghuang.rsintegration.disk.core.ResourceTable.PageSnapshot;
 import com.huanghuang.rsintegration.disk.core.ResourceTable.QuarantinedResource;
+import com.huanghuang.rsintegration.magic.GoetySoulDiskStore;
+import com.huanghuang.rsintegration.magic.MagicResourceDiskStore;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -49,11 +52,19 @@ public final class DiskFileStore {
         public Manifest { items = List.copyOf(items); fluids = List.copyOf(fluids); }
     }
     public record Snapshot(UUID world, UUID disk, UUID owner, Limits limits,
-                           int itemPages, int fluidPages, List<PageSnapshot> items, List<PageSnapshot> fluids) {
+                           int itemPages, int fluidPages, List<PageSnapshot> items, List<PageSnapshot> fluids,
+                           int[] coreMagic) {
+        public Snapshot {
+            coreMagic = coreMagic.clone();
+        }
+
+        @Override public int[] coreMagic() { return coreMagic.clone(); }
+
         public static Snapshot freeze(UnifiedDiskCore core) {
             core.checkThread();
             return new Snapshot(core.worldId, core.diskId, core.owner, core.limits,
-                    core.items.pageCount(), core.fluids.pageCount(), core.items.snapshot(false), core.fluids.snapshot(false));
+                    core.items.pageCount(), core.fluids.pageCount(), core.items.snapshot(false), core.fluids.snapshot(false),
+                    core.magicSnapshot());
         }
     }
     public record Saved(Manifest manifest, int keySegmentsWritten, int amountPagesWritten) {}
@@ -142,6 +153,8 @@ public final class DiskFileStore {
         // 保留上一完整检查点；加载不自动猜测未提交的临时页。
         if (Files.exists(current)) writeAtomic(directory.resolve("manifest.previous.bin"), readChecked(current, MANIFEST_BYTES));
         writeAtomic(current, encoded);
+        writeAtomic(directory.resolve(MagicResourceDiskStore.NAME),
+                bytes(output -> MagicResourceDiskStore.write(output, snapshot.coreMagic())));
         collectPages(directory, result, previous);
         return new Saved(result, writes[0], writes[1]);
     }
@@ -220,7 +233,26 @@ public final class DiskFileStore {
         int fluidBytes = loadPages(core.fluids, FrozenKey.Kind.FLUID, manifest.fluids, directory(diskId), manifest.limits);
         if (fluidBytes > manifest.limits.payloadBytes() - itemBytes) throw new IOException("磁盘载荷总量超过容量描述");
         core.restorePayloadSize(itemBytes + fluidBytes);
+        Path magic = directory(diskId).resolve(MagicResourceDiskStore.NAME);
+        if (Files.isRegularFile(magic)) {
+            try (DataInputStream input = input(readChecked(magic, MagicResourceDiskStore.MAX_BYTES))) {
+                core.restoreMagic(MagicResourceDiskStore.read(input));
+            }
+        } else {
+            loadLegacySouls(core, diskId);
+        }
         return core;
+    }
+
+    /** 1.5.x 及更早的存档只有独立的灵魂记录文件，读入后按新的魔法资源表保存。 */
+    private void loadLegacySouls(UnifiedDiskCore core, UUID diskId) throws IOException {
+        Path souls = directory(diskId).resolve(GoetySoulDiskStore.NAME);
+        if (!Files.isRegularFile(souls)) return;
+        int[] amounts = new int[MagicResourceKind.values().length];
+        try (DataInputStream input = input(readChecked(souls, 8))) {
+            amounts[MagicResourceKind.SOUL.ordinal()] = GoetySoulDiskStore.read(input);
+        }
+        core.restoreMagic(amounts);
     }
 
     private List<PageFiles> savePages(Path directory, String kind, int pageCount, List<PageSnapshot> changed,

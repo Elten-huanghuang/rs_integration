@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
+import com.huanghuang.rsintegration.magic.MagicResourceStack;
 import com.refinedmods.refinedstorage.api.storage.tracker.StorageTrackerEntry;
 import com.refinedmods.refinedstorage.util.StackUtils;
 import net.minecraft.network.FriendlyByteBuf;
@@ -25,8 +26,9 @@ public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID st
             writeId(buf, storedId);
             writeId(buf, craftableId);
             if (!removed()) {
-                if (kind == GridResourceKind.ITEM) StackUtils.writeItemStack(buf, (ItemStack) template);
-                else ((FluidStack) template).writeToPacket(buf);
+                if (kind == GridResourceKind.item()) StackUtils.writeItemStack(buf, (ItemStack) template);
+                else if (kind == GridResourceKind.fluid()) ((FluidStack) template).writeToPacket(buf);
+                else ((MagicResourceStack) template).writeToPacket(buf);
             }
         }
         buf.writeBoolean(tracker != null);
@@ -44,7 +46,9 @@ public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID st
         UUID craftable = metadata ? readId(buf) : null;
         Object template = null;
         if (metadata && (stored != null || craftable != null)) {
-            template = kind == GridResourceKind.ITEM ? StackUtils.readItemStack(buf) : FluidStack.readFromPacket(buf);
+            if (kind == GridResourceKind.item()) template = StackUtils.readItemStack(buf);
+            else if (kind == GridResourceKind.fluid()) template = FluidStack.readFromPacket(buf);
+            else template = MagicResourceStack.readFromPacket(buf);
             if (kind.amount(template) != 1) throw new IllegalArgumentException("显示模板数量必须为 1");
         }
         StorageTrackerEntry tracker = buf.readBoolean() ? new StorageTrackerEntry(buf.readLong(), buf.readUtf(256)) : null;

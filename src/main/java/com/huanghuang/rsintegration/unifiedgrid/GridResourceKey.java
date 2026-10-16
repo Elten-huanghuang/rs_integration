@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
+import com.huanghuang.rsintegration.magic.GoetySoulStack;
+import com.huanghuang.rsintegration.storage.StorageIdentityBytes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
-import java.util.Objects;
+
 import java.util.Arrays;
-import com.huanghuang.rsintegration.storage.StorageIdentityBytes;
+import java.util.Objects;
 
 /** 会话索引冻结 NBT，避免原版缓存修改数量或模板后破坏哈希表。 */
 public final class GridResourceKey {
@@ -50,13 +52,21 @@ public final class GridResourceKey {
     }
 
     public static GridResourceKey of(GridResourceKind kind, Object stack) {
-        if (kind == GridResourceKind.ITEM) {
+        if (kind == GridResourceKind.item()) {
             ItemStack item = (ItemStack) stack;
             CompoundTag saved = item.save(new CompoundTag());
             return new GridResourceKey(kind, item.getItem(), item.getTag(),
                     saved.contains("ForgeCaps") ? saved.getCompound("ForgeCaps") : null);
         }
-        FluidStack fluid = (FluidStack) stack;
-        return new GridResourceKey(kind, fluid.getFluid(), fluid.getTag());
+        if (kind == GridResourceKind.fluid()) {
+            FluidStack fluid = (FluidStack) stack;
+            return new GridResourceKey(kind, fluid.getFluid(), fluid.getTag());
+        }
+        if (kind.isMagic()) {
+            // 魔法资源没有类型或 NBT 差异，每种资源共用同一个 Key；身份用稳定注册名，
+            // 不使用会随安装组合变化的类别编号。
+            return new GridResourceKey(kind, kind.magicKind().id(), null);
+        }
+        throw new IllegalArgumentException("未知资源类别");
     }
 }
