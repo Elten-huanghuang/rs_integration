@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.farmandcharm;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.mods.common.InventoryListItemHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.recipe.LetsDoCookingPotRecipeHandler;
@@ -71,6 +72,23 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
 
     /** 每条配方食材在计划里固定按 1 份计：一次合成每个槽位只扣 1。 */
     private static final int PER_OPERATION_INGREDIENT = 1;
+
+    @Override
+    public boolean startOperation(OperationStartContext context) {
+        if (context.repeatedOperationPlan() != null) return false;
+        if (context.buffered() && tryStartWithInputBuffer(
+                context.player(), context.inputBufferPlan(), context.ledger())) {
+            return true;
+        }
+        List<ItemStack> materials = context.legacyMaterials();
+        if (materials.isEmpty()) return false;
+        if (context.buffered()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-LetsDo] 输入缓冲启动未成功，退回预扣材料铺料 recipe={} delegate={}",
+                    recipe == null ? null : recipe.getId(), getClass().getSimpleName());
+        }
+        return tryStartWithMaterials(context.player(), materials, context.ledger());
+    }
 
     /** 主产物恒在 7 号槽；这套锅没有"碗食留在展示槽"的兜底。 */
     @Override

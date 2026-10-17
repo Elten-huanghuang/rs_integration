@@ -275,9 +275,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
-        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-CookingPot] 输入缓冲不可用 recipe={} pos={}",
+                    recipe == null ? null : recipe.getId(), myPos);
+            return false;
+        }
         List<IngredientSpec> specs = getRequiredMaterials();
-        if (plan.inputs().size() != specs.size()) return false;
+        if (specs == null || plan.inputs().size() != specs.size()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-CookingPot] 输入缓冲规格不一致 recipe={} planned={} required={}",
+                    recipe.getId(), plan.inputs().size(), specs == null ? null : specs.size());
+            return false;
+        }
         List<ItemStack> ordered = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
             InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
@@ -289,11 +299,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             if (input == null || input.slot() != expectedSlot || input.reusable()
                     || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
-                    || !spec.ingredient().test(input.stack())) return false;
+                    || !spec.ingredient().test(input.stack())) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] 输入缓冲槽位校验失败 recipe={} entry={} expectedSlot={} actualSlot={} expectedCount={} actualCount={}",
+                        recipe.getId(), i, expectedSlot, input == null ? null : input.slot(),
+                        required, input == null ? null : input.stack().getCount());
+                return false;
+            }
             ordered.add(input.stack().copy());
         }
         InputBufferPlan expected = inputBufferPlan(plan.operations());
-        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        if (!expected.enabled() || expected.operations() != plan.operations()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-CookingPot] 输入缓冲上限复校验失败 recipe={} requested={} expected={} enabled={}",
+                    recipe.getId(), plan.operations(), expected.operations(), expected.enabled());
+            return false;
+        }
         plannedOperations = plan.operations();
         return tryStartWithMaterials(player, ordered, sharedLedger);
     }
@@ -350,7 +371,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         this.craftDone = false;
 
-        if (!myLevel.hasChunkAt(myPos)) return false;
+        if (!myLevel.hasChunkAt(myPos)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 机器区块未加载 pos={}", myPos);
+            return false;
+        }
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) {
@@ -371,7 +395,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // A stale/partially completed pot must not block the scheduler. Drain
         // every slot before reserving this operation's inputs; the old contents
         // are not owned by the new shared ledger.
-        if (storageEndpoint() == null || !drainExistingContentsToNetwork(itemHandler)) return false;
+        if (storageEndpoint() == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 未选择存储端点 pos={}", myPos);
+            return false;
+        }
+        if (!drainExistingContentsToNetwork(itemHandler)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 无法清空机器原有内容 pos={}", myPos);
+            return false;
+        }
         placedInputs.clear();
         detachedRecoveredInputs.clear();
         placedContainer = ItemStack.EMPTY;
@@ -423,6 +454,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
             long requiredCount = (long) requiredContainer.getCount() * plannedOperations;
             if (requiredCount > Integer.MAX_VALUE || suppliedContainer.getCount() != (int) requiredCount) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] 容器数量不匹配 recipe={} required={} supplied={} operations={}",
+                        recipe.getId(), requiredCount, suppliedContainer.getCount(), plannedOperations);
                 return false;
             }
             containerMaterial = suppliedContainer.copy();
@@ -444,7 +478,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         List<IngredientSpec> requiredSpecs = getRequiredMaterials();
         int requiredInputCount = requiredSpecs == null ? 0
                 : requiredSpecs.size() - (requiredContainer.isEmpty() ? 0 : 1);
-        if (requiredInputCount != inputMaterials.size()) return false;
+        if (requiredInputCount != inputMaterials.size()) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-CookingPot] 食材条目数量不匹配 recipe={} required={} supplied={}",
+                    recipe.getId(), requiredInputCount, inputMaterials.size());
+            return false;
+        }
 
         // Insert one stack per recipe ingredient. The native pot consumes one
         // item from every occupied input slot after each completed cycle.
@@ -454,7 +493,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = requiredSpecs.get(slot);
             long requiredCount = (long) spec.count() * plannedOperations;
             if (requiredCount > Integer.MAX_VALUE || mat.getCount() != (int) requiredCount
-                    || !spec.ingredient().test(mat)) return false;
+                    || !spec.ingredient().test(mat)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] 食材校验失败 recipe={} slot={} required={} supplied={} ingredient={}",
+                        recipe.getId(), slot, requiredCount, mat.getCount(),
+                        CraftPacketUtils.describeIngredient(spec.ingredient()).getString());
+                forceChunkLoad(false);
+                return false;
+            }
             ItemStack placed = mat.copy();
             ItemStack remainder = itemHandler.insertItem(slot, placed, false);
             if (!remainder.isEmpty()) {
@@ -487,12 +533,18 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
             ItemStack simulated = itemHandler.insertItem(containerSlot(), containerMaterial, true);
             if (!simulated.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] 容器槽模拟插入失败 pos={} remainder={}",
+                        myPos, simulated.getCount());
                 rollbackInputs(itemHandler, slot);
                 be.setChanged();
                 return false;
             }
             ItemStack remainder = itemHandler.insertItem(containerSlot(), containerMaterial, false);
             if (!remainder.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-CookingPot] 容器槽实际插入失败 pos={} remainder={}",
+                        myPos, remainder.getCount());
                 rollbackInputs(itemHandler, slot);
                 be.setChanged();
                 return false;
