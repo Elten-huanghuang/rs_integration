@@ -3,6 +3,8 @@ import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
+import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -17,6 +19,7 @@ public abstract class GridScreenKeyboardMixin {
     @Inject(method = "m_7933_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onKeyPressed(int keyCode, int scanCode, int modifiers,
                                    CallbackInfoReturnable<Boolean> cir) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.keyPressed(keyCode);
             if (consumed) {
@@ -49,6 +52,7 @@ public abstract class GridScreenKeyboardMixin {
     @Inject(method = "m_5534_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$onCharTyped(char codePoint, int modifiers,
                                   CallbackInfoReturnable<Boolean> cir) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.charTyped(codePoint, modifiers);
             if (consumed) {

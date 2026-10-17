@@ -71,6 +71,8 @@ public final class UnifiedGridSession {
 
     public static boolean supports(IGrid grid) {
         return grid instanceof INetworkAwareGrid
+                // 样板终端复用 GridContainerMenu，但槽位和写入协议由 RS 原生处理。
+                // 混合会话接管后会屏蔽原生样板同步，因此必须排除 PATTERN。
                 && (grid.getGridType() == GridType.NORMAL || grid.getGridType() == GridType.CRAFTING);
     }
 
