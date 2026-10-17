@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.unifiedgrid.client;
 
 import com.huanghuang.rsintegration.magic.MagicGridItemTransfer;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.unifiedgrid.GridResourceKind;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridActionPacket;
@@ -84,8 +85,9 @@ public final class UnifiedGridClient {
                 view.request(fluidKind, row.serial(), UnifiedGridActionPacket.Action.FILL_FLUID,
                         Screen.hasShiftDown() ? IItemGridHandler.EXTRACT_SHIFT : 0);
             } else if (carriedMagic != null) {
-                // 容器：右键空白处倒出，左键同类资源条目装填，其他情况存入容器物品
-                if (button == 1 && row == null) {
+                // 容器：右键倒出（悬停在哪一格都算，和流体容器一致），
+                // 左键同类资源条目装填，其他情况存入容器物品
+                if (MagicResourceInteraction.depositsFromHeldItem(button)) {
                     view.request(GridResourceKind.ofMagic(carriedMagic), 0,
                             UnifiedGridActionPacket.Action.INSERT_MAGIC, 0);
                 } else if (button == 0 && row != null && row.kind().magicKind() == carriedMagic) {

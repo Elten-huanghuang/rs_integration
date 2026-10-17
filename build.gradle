@@ -55,10 +55,18 @@ copy {
     into ironFurnacesTestDirectory
     rename { "ironfurnaces-${ironFurnacesTestVersion}.jar" }
 }
+def botaniaTestSource = fileTree(dir: 'libs', include: ['*Botania-1.20.1-448-FORGE.jar']).singleFile
+def botaniaTestDirectory = layout.buildDirectory.dir('botania-test-libs').get().asFile
+copy {
+    from botaniaTestSource
+    into botaniaTestDirectory
+    rename { 'botania-1.20.1-448-FORGE.jar' }
+}
 
 repositories {
     flatDir { dirs 'libs' }
     flatDir { dirs ironFurnacesTestDirectory }
+    flatDir { dirs botaniaTestDirectory }
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com' }
     maven { url = 'https://maven.terraformersmc.com/releases/' }
@@ -145,6 +153,8 @@ dependencies {
     // 用实际怪物锅配方和库存接口验证批量适配。
     testImplementation fg.deobf('local:FarmersDelight:1.20.1-1.3.3')
     testImplementation fg.deobf('local:forge-dungeonsdelight:1.20.1-1.3.0')
+    // 验证魔力石板这类「能力挂在物品堆上」的容器识别与读写；用模块依赖确保 Minecraft 方法完成映射。
+    testImplementation fg.deobf('local:botania:1.20.1-448-FORGE')
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // 混合终端与配方预览测试需要编译、加载 JEI 接口。
     testImplementation "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
