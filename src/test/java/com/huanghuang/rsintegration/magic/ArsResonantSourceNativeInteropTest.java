@@ -162,6 +162,14 @@ class ArsResonantSourceNativeInteropTest extends BootstrapTest {
 
         assertTrue(plugin.shouldApplyMixin(SOURCE_UTIL, SOURCE_UTIL_MIXIN),
                 "本地 Ars 版本应包含三个已补丁的 SourceUtil 扫描入口");
+        assertTrue(plugin.shouldApplyMixin(
+                        "com.hollingsworth.arsnouveau.common.block.tile.RelayTile",
+                        "com.huanghuang.rsintegration.mixin.arsnouveau.RelaySourceInteropMixin"),
+                "本地 Ars 版本应支持 Relay 与共振罐的定点连接");
+        assertTrue(plugin.shouldApplyMixin(
+                        "com.hollingsworth.arsnouveau.common.block.tile.RelaySplitterTile",
+                        "com.huanghuang.rsintegration.mixin.arsnouveau.RelaySplitterSourceInteropMixin"),
+                "本地 Ars 版本应支持 RelaySplitter 与共振罐的多目标转发");
     }
 
     private static AbstractSourceMachine nativeTransferMachine() {
