@@ -47,7 +47,9 @@ import java.util.Map;
 public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
 
     private static final int INPUT_SLOT = 0;
-    private static final String INPUT_ID = "casualness_delight:deep_frying_pan:input";
+    // 默认 MaterialPlan 使用 legacy:material:<index> 作为稳定 ID，输入缓冲
+    // 必须沿用同一身份，否则预扣材料无法绑定到炸锅唯一输入槽。
+    static final String INPUT_ID = "legacy:material:0";
     private static final String OUTPUT_ID = "casualness_delight:deep_frying_pan:output";
 
     private ServerPlayer player;

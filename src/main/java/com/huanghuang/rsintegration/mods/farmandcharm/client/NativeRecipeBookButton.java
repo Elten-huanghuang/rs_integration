@@ -12,6 +12,7 @@ public final class NativeRecipeBookButton {
     private static final int BUTTON_WIDTH = 112;
     private static final int BUTTON_HEIGHT = 18;
     private static final int BUTTON_GAP = 4;
+    private static final int BUTTON_LEFT_SHIFT = 6;
 
     private NativeRecipeBookButton() {}
 
@@ -44,7 +45,7 @@ public final class NativeRecipeBookButton {
 
     static Layout layout(int screenWidth, int screenHeight, int guiTop,
                          int imageHeight, int recipeBookLeft) {
-        int preferredX = recipeBookLeft + (147 - BUTTON_WIDTH) / 2;
+        int preferredX = recipeBookLeft + (147 - BUTTON_WIDTH) / 2 - BUTTON_LEFT_SHIFT;
         int x = Math.max(2, Math.min(screenWidth - BUTTON_WIDTH - 2, preferredX));
         int y = guiTop + imageHeight + BUTTON_GAP;
         return new Layout(x, y);

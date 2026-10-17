@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -12,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LanguageParityTest {
 
@@ -24,6 +26,19 @@ class LanguageParityTest {
 
         assertEquals(Set.of(), missingInEnglish, "missing English translations");
         assertEquals(Set.of(), missingInChinese, "missing Chinese translations");
+    }
+
+    @Test
+    void letsDoMachineLabelsHaveChineseTranslations() throws Exception {
+        Set<String> chinese = loadKeys("zh_cn.json");
+        Set<String> required = Set.of(
+                "rsi.batch.mod." + ModIds.ID_FC_COOKING_POT,
+                "rsi.batch.mod." + ModIds.ID_FC_ROASTER,
+                "rsi.batch.mod." + ModIds.ID_CANDLELIGHT_COOKING_POT,
+                "rsi.batch.mod." + ModIds.ID_BAKERY_COOKING_POT);
+
+        assertTrue(chinese.containsAll(required), () -> "missing Chinese machine labels: "
+                + difference(required, chinese));
     }
 
     private static Set<String> loadKeys(String fileName) throws Exception {

@@ -53,9 +53,14 @@ public final class InventoryListItemHandler implements IItemHandler {
         if (slot < 0 || slot >= items.size()) return stack;
         ItemStack existing = items.get(slot);
         if (existing.isEmpty()) {
-            if (simulate) return stack;
-            items.set(slot, stack.copy());
-            return ItemStack.EMPTY;
+            int accepted = Math.min(Math.min(getSlotLimit(slot), stack.getMaxStackSize()),
+                    stack.getCount());
+            ItemStack remainder = accepted >= stack.getCount()
+                    ? ItemStack.EMPTY : stack.copyWithCount(stack.getCount() - accepted);
+            if (!simulate && accepted > 0) {
+                items.set(slot, stack.copyWithCount(accepted));
+            }
+            return remainder;
         }
         if (!ItemStack.isSameItemSameTags(existing, stack)) return stack;
         int limit = Math.min(getSlotLimit(slot), existing.getMaxStackSize());

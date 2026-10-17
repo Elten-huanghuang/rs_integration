@@ -11,7 +11,7 @@ class NativeRecipeBookButtonTest {
         NativeRecipeBookButton.Layout layout =
                 NativeRecipeBookButton.layout(854, 480, 157, 166, 250);
 
-        assertEquals(267, layout.x());
+        assertEquals(261, layout.x());
         assertEquals(327, layout.y());
     }
 
