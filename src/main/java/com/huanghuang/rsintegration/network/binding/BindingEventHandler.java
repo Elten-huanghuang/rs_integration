@@ -21,6 +21,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlock;
+import com.huanghuang.rsintegration.magic.ResonantMagicStorage;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
@@ -33,9 +37,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import com.refinedmods.refinedstorage.item.NetworkItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -83,6 +89,13 @@ public final class BindingEventHandler {
 
         Block block = event.getLevel().getBlockState(event.getPos()).getBlock();
         String className = block.getClass().getName();
+
+        // 共振方块复用本入口的 Shift + 右键绑定协议；处理完成后不再进入
+        // 普通机器绑定存储，避免无线终端的 useOn 抢先打开界面。
+        if (block instanceof ResonantMagicBlock) {
+            handleResonantMagicBinding(event, player);
+            return;
+        }
 
         MachineBindingTarget matched = findEnabledTarget(block);
 
@@ -252,6 +265,95 @@ public final class BindingEventHandler {
             }
         }
         event.setCanceled(true);
+    }
+
+    private static void handleResonantMagicBinding(PlayerInteractEvent.RightClickBlock event,
+                                                    ServerPlayer player) {
+        ItemStack held = player.getItemInHand(event.getHand());
+        if (!(held.getItem() instanceof NetworkItem)) return;
+
+        event.setCancellationResult(InteractionResult.CONSUME);
+        event.setCanceled(true);
+        Optional<AltarBinding> selected = RSBindingHook.INSTANCE.createBinding(held);
+        if (selected.isEmpty()) {
+            player.displayClientMessage(Component.translatable(
+                    "block.rs_integration.resonant_magic.connect_network"), true);
+            return;
+        }
+        BlockEntity raw = event.getLevel().getBlockEntity(event.getPos());
+        if (!(raw instanceof ResonantMagicStorage entity)) {
+            player.displayClientMessage(Component.translatable(
+                    "block.rs_integration.resonant_magic.unavailable"), true);
+            return;
+        }
+        INetwork network = RSIntegrationNetwork.resolveNetworkForBindingData(
+                player.server, selected.get().data());
+        if (network == null) {
+            player.displayClientMessage(Component.translatable(
+                    "block.rs_integration.resonant_magic.unreachable"), true);
+            return;
+        }
+        AltarBinding selectedBinding = selected.orElseThrow();
+        BlockPos bindingPos = event.getPos().immutable();
+        synchronized (BINDING_LOCK) {
+            if (entity.isBoundTo(selectedBinding.data())) {
+                entity.clearBinding();
+                removeResonantMachineBinding(player, event.getLevel(), held, bindingPos,
+                        selectedBinding.type());
+                player.displayClientMessage(Component.translatable(
+                        "block.rs_integration.resonant_magic.unbound"), true);
+            } else {
+                entity.setBinding(selectedBinding.data());
+                updateResonantMachineBinding(player, event.getLevel(), held,
+                        bindingPos, selectedBinding);
+                player.displayClientMessage(Component.translatable(
+                        "block.rs_integration.resonant_magic.bound"), true);
+            }
+            sendBindingRefresh(player);
+        }
+    }
+
+    /**
+     * 共振魔力池同时承担 RS 库存入口与 Botania 机器实体。这里把两种身份写进
+     * 同一份终端绑定，后续 JEI、EMI 和合成执行器只看到普通的 mana_pool 机器。
+     */
+    private static void updateResonantMachineBinding(ServerPlayer player, Level level,
+                                                      ItemStack held, BlockPos pos,
+        AltarBinding binding) {
+        removeResonantMachineBinding(player, level, held, pos, binding.type());
+        if (!isBotaniaManaPoolBinding(pos, level)) return;
+
+        Block block = level.getBlockState(pos).getBlock();
+        ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(block);
+        if (blockId == null) return;
+        String blockKey = "mana_pool||" + block.getDescriptionId();
+        ItemStack displayStack = new ItemStack(block.asItem());
+        AltarBindingRegistry.bind(player.getUUID(), level.dimension(), pos, binding);
+        BindingStorage.addBinding(held, level.dimension().location(), pos,
+                blockKey, blockId.toString(), displayStack);
+        AltarBindingRegistry.invalidateScanCache();
+        RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+    }
+
+    private static void removeResonantMachineBinding(ServerPlayer player, Level level,
+                                                      ItemStack held, BlockPos pos,
+                                                      ResourceLocation bindingType) {
+        if (!isBotaniaManaPoolBinding(pos, level) || !BindingStorage.hasBinding(
+                held, level.dimension().location(), pos)) {
+            return;
+        }
+        BindingStorage.removeBinding(held, level.dimension().location(), pos);
+        AltarBindingRegistry.unbind(player.getUUID(), level.dimension(), pos, bindingType);
+        MachineFavoritesSavedData.get(player.server).removeAt(
+                player.getUUID(), level.dimension().location(), pos);
+        AltarBindingRegistry.invalidateScanCache();
+        RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
+    }
+
+    private static boolean isBotaniaManaPoolBinding(BlockPos pos, Level level) {
+        if (!ModList.get().isLoaded(ModIds.BOTANIA)) return false;
+        return level.getBlockEntity(pos) instanceof ResonantMagicStorage entity
+                && entity.resourceKind() == MagicResourceKind.MANA;
     }
 
     /** Reuses the normal binding path for client-configurable mouse chords. */
@@ -686,12 +788,15 @@ public final class BindingEventHandler {
     public static BlockPos bindingTargetPos(Level level, BlockPos clickedPos) {
         if (level == null || clickedPos == null) return null;
         Block block = level.getBlockState(clickedPos).getBlock();
-        MachineBindingTarget target = findTarget(block);
+        MachineBindingTarget target = findEnabledTarget(block);
         if (target == null) {
             ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
             if (id == null || !RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().contains(id.getNamespace())) {
                 return null;
             }
+            // 自定义 GUI 回退只能绑定真实菜单方块。仅按模组命名空间判定会让
+            // 蟹笼模组中的装饰方块也显示绑定提示，但服务端最终会拒绝绑定。
+            if (!(level.getBlockEntity(clickedPos) instanceof MenuProvider)) return null;
         }
         return resolveRootPos(level, clickedPos, block, block.getClass().getName());
     }

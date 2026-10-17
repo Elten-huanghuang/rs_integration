@@ -35,6 +35,8 @@ class ManaPoolBindingRulesTest {
                 "mana_pool||block.improved_botania_pools.muspelheim_mana_pool"));
         assertEquals(manaPool, ModType.fromBlockKey(
                 "mana_pool||block.improved_botania_pools.nilfheim_mana_pool"));
+        assertEquals(manaPool, ModType.fromBlockKey(
+                "mana_pool||block.rs_integration.resonant_mana_pool"));
     }
 
     @Test
@@ -74,12 +76,12 @@ class ManaPoolBindingRulesTest {
     }
 
     @Test
-    void plainRecipeRejectsCatalystBindingPermanently() {
+    void plainRecipeUsesPoolAboveCatalystBinding() {
         var result = ManaPoolBindingRules.assess(
                 BINDING, false, true, false, false, false);
 
-        assertEquals(ManaPoolBindingRules.State.FATAL, result.state());
-        assertNull(result.poolPos());
+        assertEquals(ManaPoolBindingRules.State.READY, result.state());
+        assertEquals(BINDING.above(), result.poolPos());
     }
 
     @Test

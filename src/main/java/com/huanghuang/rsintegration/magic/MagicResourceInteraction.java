@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.magic;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import javax.annotation.Nullable;
 
@@ -27,11 +28,28 @@ public final class MagicResourceInteraction {
         return MagicGridItemTransfer.deposit(player, kind, stack);
     }
 
+    /** 把容器中的资源存入终端当前连接的 RS 网络。 */
+    public static int depositToNetwork(ServerPlayer player, INetwork network,
+                                       MagicResourceKind kind, @Nullable ItemStack stack) {
+        if (player == null || network == null || stack == null || stack.isEmpty()) return 0;
+        if (!kind.available() || MagicGridItemTransfer.kindOf(stack) != kind) return 0;
+        return MagicGridItemTransfer.deposit(player, network, kind, stack);
+    }
+
     /** 从当前已挂载的归墟盘吸取资源填进容器。 */
     public static int withdrawFromNetwork(ServerPlayer player, MagicResourceKind kind,
                                           @Nullable ItemStack stack, int amount) {
         if (player == null || stack == null || stack.isEmpty()) return 0;
         if (!kind.available() || MagicGridItemTransfer.kindOf(stack) != kind) return 0;
         return MagicGridItemTransfer.withdraw(player, kind, stack, amount);
+    }
+
+    /** 从终端当前连接的 RS 网络取资源填进容器。 */
+    public static int withdrawFromNetwork(ServerPlayer player, INetwork network,
+                                          MagicResourceKind kind, @Nullable ItemStack stack,
+                                          int amount) {
+        if (player == null || network == null || stack == null || stack.isEmpty()) return 0;
+        if (!kind.available() || MagicGridItemTransfer.kindOf(stack) != kind) return 0;
+        return MagicGridItemTransfer.withdraw(player, network, kind, stack, amount);
     }
 }

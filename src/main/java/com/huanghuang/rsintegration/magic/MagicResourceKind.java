@@ -11,12 +11,11 @@ import javax.annotation.Nullable;
  * 归墟盘和混合终端里可存储的魔法资源身份。
  *
  * <p>三种资源各自独立计量，默认按原生单位 1:1 转移，不引入互换比例。每种资源
- * 有自己的容量上界：原生容器都不可能装下 int 上限，所以统一盘不能把余额当成
- * 无容量上限的“银行”。</p>
+ * 有自己的单盘容量上界；网络容量按已挂载的归墟盘累加，并在原生 int 范围处饱和。</p>
  */
 public enum MagicResourceKind {
-    MANA("botania", "mana", "types.rs_integration.mana.name", 1_000_000_000),
-    SOURCE("ars_nouveau", "source", "types.rs_integration.source.name", 1_000_000_000),
+    MANA("botania", "mana", "types.rs_integration.mana.name", Integer.MAX_VALUE),
+    SOURCE("ars_nouveau", "source", "types.rs_integration.source.name", Integer.MAX_VALUE),
     SOUL("goety", "soul", "types.rs_integration.goety_soul.name", Integer.MAX_VALUE);
 
     private final String namespace;
@@ -45,6 +44,11 @@ public enum MagicResourceKind {
         return namespace + ":" + path;
     }
 
+    /** 翻译键；客户端外（如日志、网络包）只允许传键，不允许就地解析成文本。 */
+    public String translationKey() {
+        return translationKey;
+    }
+
     public Component displayName() {
         return Component.translatable(translationKey);
     }
@@ -61,7 +65,7 @@ public enum MagicResourceKind {
      * 第二套递归供能账；统一盘中的这两种资源只保留手动充放和展示。</p>
      */
     public boolean supportsRsiRecursiveCrafting() {
-        return this == SOUL;
+        return this == MANA || this == SOUL;
     }
 
     /** 该资源所属模组是否已安装。 */

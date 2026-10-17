@@ -26,15 +26,17 @@ public final class MagicStackGridStack implements IGridStack {
     private final UUID id;
     private final UUID otherId;
     private int amount;
+    private final int capacity;
     private StorageTrackerEntry trackerEntry;
     private final boolean craftable;
 
-    public MagicStackGridStack(MagicResourceKind kind, UUID id, UUID otherId, int amount,
+    public MagicStackGridStack(MagicResourceKind kind, UUID id, UUID otherId, int amount, int capacity,
                                StorageTrackerEntry trackerEntry, boolean craftable) {
         this.kind = kind;
         this.id = id;
         this.otherId = otherId;
         this.amount = amount;
+        this.capacity = capacity;
         this.trackerEntry = trackerEntry;
         this.craftable = craftable;
     }
@@ -48,7 +50,7 @@ public final class MagicStackGridStack implements IGridStack {
 
     @Override
     public String getName() {
-        return I18n.get(kind.displayName().getString());
+        return I18n.get(kind.translationKey());
     }
 
     @Override
@@ -63,9 +65,13 @@ public final class MagicStackGridStack implements IGridStack {
 
     @Override
     public List<Component> getTooltip(boolean bypassCache) {
-        return List.of(kind.displayName(),
-                Component.literal(String.format(Locale.ROOT, "%,d", amount)));
+        return List.of(kind.displayName(), Component.translatable(
+                "gui.rs_integration.unified_grid.magic_amount_capacity",
+                String.format(Locale.ROOT, "%,d", amount),
+                String.format(Locale.ROOT, "%,d", capacity)));
     }
+
+    public int getCapacity() { return capacity; }
 
     @Override
     public int getQuantity() {

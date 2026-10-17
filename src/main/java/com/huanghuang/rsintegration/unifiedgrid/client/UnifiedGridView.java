@@ -54,8 +54,21 @@ public final class UnifiedGridView implements IGridView {
     private List<IGridStack> visible = new ArrayList<>();
     private boolean canCraft;
     private boolean dirty = true;
+    /** 过滤档位下标；{@link #FILTER_LEVELS} 是它的唯一取值来源。 */
     private int filter;
     private int lastSortTick = -5;
+
+    /**
+     * 过滤档位：全部 / 物品 / 流体与能量。
+     *
+     * <p>物品、流体与全部魔法资源各自计量（个数 / mB / 点），没有统一尺度，所以这里
+     * 只做「看哪几类」，不试图把量归一到同一刻度。魔法资源之间不互相过滤：同一次
+     * 灵魂仪式只吃灵魂、Botania 机只吃魔力，按大类展示更省事。</p>
+     */
+    public static final int FILTER_ALL = 0;
+    public static final int FILTER_ITEMS = 1;
+    public static final int FILTER_FLUIDS_AND_MAGIC = 2;
+    public static final int FILTER_LEVELS = 3;
 
     public UnifiedGridView(GridScreen screen) {
         this.screen = screen;
@@ -119,7 +132,11 @@ public final class UnifiedGridView implements IGridView {
                         if (old.primary instanceof ItemGridStack item) item.setZeroed(false);
                         if (old.primary instanceof FluidGridStack fluid) fluid.setZeroed(false);
                     }
-                    if (!old.primary.isCraftable()) old.primary.setQuantity(update.amount());
+                    if (!old.primary.isCraftable()) {
+                        // 跨过 0 的增减要重排：空资源不占格，有量时才需要出现。
+                        if ((before > 0) != (update.amount() > 0)) dirty = true;
+                        old.primary.setQuantity(update.amount());
+                    }
                     old.primary.setTrackerEntry(update.tracker());
                     if (old.crafting != null) old.crafting.setTrackerEntry(update.tracker());
                     QuantityChange change = new QuantityChange(old.primary, before, update.amount());
@@ -156,7 +173,8 @@ public final class UnifiedGridView implements IGridView {
             stack = new FluidGridStack(id, other, template, entry.tracker(), crafting);
         } else {
             int amount = crafting ? 1 : Math.max(1, entry.amount());
-            stack = new MagicStackGridStack(kind.magicKind(), id, other, amount, entry.tracker(), crafting);
+            stack = new MagicStackGridStack(kind.magicKind(), id, other, amount,
+                    entry.capacity(), entry.tracker(), crafting);
         }
         if (!crafting && entry.amount() == 0) stack.setQuantity(0);
         return stack;
@@ -183,16 +201,17 @@ public final class UnifiedGridView implements IGridView {
         }
     }
 
-    public void cycleFilter() { filter = (filter + 1) % (GridResourceKind.count() + 1); forceSort(); }
+    public void cycleFilter() { filter = (filter + 1) % FILTER_LEVELS; forceSort(); }
+
+    /** 当前过滤档位，供侧按钮选图标。 */
+    public int filter() { return filter; }
 
     public Component filterLabel() {
-        if (filter <= 0) return Component.translatable("rs_integration.unified_grid.filter.all");
-        GridResourceKind kind = GridResourceKind.fromId(filter - 1);
-        return kind.isMagic()
-                ? kind.magicKind().displayName()
-                : Component.translatable(kind.isItem()
-                        ? "rs_integration.unified_grid.filter.items"
-                        : "rs_integration.unified_grid.filter.fluids");
+        return Component.translatable(switch (filter) {
+            case FILTER_ITEMS -> "rs_integration.unified_grid.filter.items";
+            case FILTER_FLUIDS_AND_MAGIC -> "rs_integration.unified_grid.filter.fluids";
+            default -> "rs_integration.unified_grid.filter.all";
+        });
     }
 
     public Row row(IGridStack stack) {
@@ -200,7 +219,7 @@ public final class UnifiedGridView implements IGridView {
     }
 
     public boolean canEmptyCarried(ItemStack carried) {
-        return filter != GridResourceKind.FLUID_ID + 1 && !FluidContainerBucketSupport.getFluid(carried).isEmpty();
+        return filter != FILTER_ITEMS && !FluidContainerBucketSupport.getFluid(carried).isEmpty();
     }
 
     private final Map<UUID, Row> rowIds = new HashMap<>();
@@ -250,7 +269,9 @@ public final class UnifiedGridView implements IGridView {
         List<IGridStack> next = new ArrayList<>();
         for (GridResourceKind kind : GridResourceKind.values()) {
             for (Row row : rows.get(kind.id()).values()) {
-                if (filter != 0 && filter != kind.id() + 1) continue;
+                if (!passesFilter(kind)) continue;
+                // 数量为 0 的魔法资源不展示：条目本身一直存在，但空资源不该占一格。
+                if (kind.isMagic() && row.primary.getQuantity() <= 0) continue;
                 IGridStack displayed = grid.getViewType() == IGrid.VIEW_TYPE_CRAFTABLES ? row.crafting : row.primary;
                 if (displayed == null || (grid.getViewType() == IGrid.VIEW_TYPE_NON_CRAFTABLES && row.crafting != null)) continue;
                 if (search.test(displayed) && UnifiedGridFilters.matches(filters, displayed)) next.add(displayed);
@@ -260,6 +281,15 @@ public final class UnifiedGridView implements IGridView {
         visible = next;
         dirty = false;
         screen.updateScrollbar();
+    }
+
+    /** 当前档位是否展示该类别。 */
+    private boolean passesFilter(GridResourceKind kind) {
+        return switch (filter) {
+            case FILTER_ITEMS -> kind.isItem();
+            case FILTER_FLUIDS_AND_MAGIC -> !kind.isItem();
+            default -> true;
+        };
     }
 
     private Comparator<IGridStack> comparator(IGrid grid) {

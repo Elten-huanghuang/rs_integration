@@ -142,7 +142,16 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
         }
         if (isPotCookingRecipe(recipe)) {
             try {
-                Method getInput = recipe.getClass().getMethod("getInput");
+                Method getInput = null;
+                for (Class<?> scan = recipe.getClass(); scan != null; scan = scan.getSuperclass()) {
+                    try {
+                        getInput = scan.getDeclaredMethod("getInput");
+                        break;
+                    } catch (NoSuchMethodException ignored) {
+                        // getInput may live on a shared base class.
+                    }
+                }
+                if (getInput == null) return null;
                 Object val = getInput.invoke(recipe);
                 if (val instanceof List<?> list) {
                     List<IngredientSpec> specs = new ArrayList<>();

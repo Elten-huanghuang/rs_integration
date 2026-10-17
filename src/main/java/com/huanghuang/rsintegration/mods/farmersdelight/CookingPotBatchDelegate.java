@@ -60,7 +60,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private Recipe<?> recipe;
+    /** 当前配方；子类（如 Let's Do 系列锅）的材料读取需要直接访问，故为 protected。 */
+    protected Recipe<?> recipe;
     private boolean craftDone;
     private boolean arcaneCookingPot;
     private int plannedOperations = 1;
@@ -631,7 +632,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return Math.max(1, Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize()));
     }
 
-    private boolean hasIngredientRemainderRisk(BlockEntity machine, IngredientSpec spec) {
+    /** 余留物风险判定；子类可覆写为恒定放行（例如余留物只写回原槽位的锅）。 */
+    protected boolean hasIngredientRemainderRisk(BlockEntity machine, IngredientSpec spec) {
         if (spec == null || spec.ingredient() == null) return true;
         Class<?> blockEntityClass = ingredientRemainderOverridesClass(machine);
         if (blockEntityClass == null) return true;

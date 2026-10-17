@@ -191,6 +191,11 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_AETHER;
     public static ForgeConfigSpec.BooleanValue ENABLE_ARS_NOUVEAU;
     public static ForgeConfigSpec.BooleanValue ENABLE_CROCKPOT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_FARM_AND_CHARM;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CANDLELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BAKERY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BOSSES_DELIGHT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CASUALNESS_DELIGHT;
     public static ForgeConfigSpec.BooleanValue ENABLE_TACZ;
     public static ForgeConfigSpec.BooleanValue ENABLE_FARMINGFORBLOCKHEADS;
     public static ForgeConfigSpec.BooleanValue ENABLE_EMBERS_ALCHEMY_CALC;
@@ -318,8 +323,16 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue TWILIGHT_DELIGHT_FIERY_POT_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue YOUKAISHOMECOMING_COOKING_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_YOUKAISHOMECOMING_STEAMER_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue YOUKAISHOMECOMING_STEAMER_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MOKA_POT_INPUT_BUFFER;
     public static ForgeConfigSpec.IntValue MOKA_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_LETSDO_COOKING_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue LETSDO_COOKING_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_BD_SOUL_COOKING_POT_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue BD_SOUL_COOKING_POT_INPUT_BUFFER_LIMIT;
+    public static ForgeConfigSpec.BooleanValue ENABLE_CD_DEEP_FRYING_PAN_INPUT_BUFFER;
+    public static ForgeConfigSpec.IntValue CD_DEEP_FRYING_PAN_INPUT_BUFFER_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA_MANA_POOL_BATCH;
     public static ForgeConfigSpec.IntValue BOTANIA_MANA_POOL_BATCH_LIMIT;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA_ELVEN_TRADE_INPUT_BUFFER;
@@ -499,6 +512,14 @@ public final class RSIntegrationConfig {
                 .comment("启用暮色乐事兼容",
                         "支持炽铁锅远程合成。炽铁锅复用农夫乐事烹饪锅配方，自带热源。")
                 .define("enableTwilightDelight", true);
+        ENABLE_BOSSES_DELIGHT = c
+                .comment("启用 BOMD 乐事兼容",
+                        "支持灵魂锅远程合成。热源是下方方块的冷源标签（冰 / 浮冰 / 蓝冰），配方类型独立。")
+                .define("enableBossesDelight", true);
+        ENABLE_CASUALNESS_DELIGHT = c
+                .comment("启用随意乐事兼容",
+                        "支持炸锅远程合成。成品以世界掉落物弹出，由插件自动回收。")
+                .define("enableCasualnessDelight", true);
         ENABLE_YOUKAISHOMECOMING = c
                 .comment("启用妖怪归家兼容",
                         "支持摩卡壶、蒸锅等机器的远程合成。")
@@ -643,6 +664,18 @@ public final class RSIntegrationConfig {
                 .comment("启用烹饪锅兼容",
                         "支持烹饪锅和便携烹饪锅。")
                 .define("enableCrockPot", true);
+        ENABLE_FARM_AND_CHARM = c
+                .comment("启用田园乐事兼容",
+                        "支持烹饪锅（整合包内叫\"宴会锅\"）与烘焙机，需要下方火炉类热源方块。")
+                .define("enableFarmAndCharm", true);
+        ENABLE_CANDLELIGHT = c
+                .comment("启用烛火晚宴兼容",
+                        "支持大汤锅（汤锅 / 铜汤锅），需要本模组的炉灶方块作热源。")
+                .define("enableCandlelight", true);
+        ENABLE_BAKERY = c
+                .comment("启用烘焙屋兼容",
+                        "支持小烹饪锅。它与田园乐事/烛火晚宴共用 pot_cooking 配方与槽位布局，需要下方火炉类热源方块。")
+                .define("enableBakery", true);
         ENABLE_TACZ = c
                 .comment("启用永恒枪械工坊兼容",
                         "支持枪械工作台递归合成。")
@@ -965,6 +998,15 @@ public final class RSIntegrationConfig {
                         "单台机器一次预载的最大逻辑份数上限，实际批次还会被配方耗时、"
                                 + "原料槽容量与产物槽容量进一步压低。")
                 .defineInRange("youkaisHomecomingCookingPotInputBufferLimit", 64, 1, 64);
+        ENABLE_YOUKAISHOMECOMING_STEAMER_INPUT_BUFFER = s
+                .comment("启用妖怪归家蒸锅输入预载",
+                        "一次把同一食材铺满蒸笼的多个格子，每个格子在原生 tick 中独立蒸熟；"
+                                + "格子数按蒸笼层数动态计算，批次数还会被单份蒸制耗时折算压低。")
+                .define("enableYoukaisHomecomingSteamerInputBuffer", true);
+        YOUKAISHOMECOMING_STEAMER_INPUT_BUFFER_LIMIT = s
+                .comment("妖怪归家蒸锅输入预载操作上限",
+                        "单台蒸锅一次预载的最大逻辑份数上限，实际批次受蒸笼格数与单份蒸制耗时限制。")
+                .defineInRange("youkaisHomecomingSteamerInputBufferLimit", 64, 1, 64);
         ENABLE_MOKA_POT_INPUT_BUFFER = s
                 .comment("启用妖怪归家摩卡壶输入预载",
                         "预载材料和容器，每周期仍只冲泡一份；有材料返还的配方走原路径，容器与材料在同一存储事务中预留。")
@@ -973,6 +1015,32 @@ public final class RSIntegrationConfig {
                 .comment("妖怪归家摩卡壶输入预载操作上限",
                         "单台机器一次预载的最大逻辑操作数。预载材料和容器，每周期仍只冲泡一份；有材料返还的配方走原路径，容器与材料在同一存储事务中预留。")
                 .defineInRange("mokaPotInputBufferLimit", 64, 1, 64);
+        ENABLE_LETSDO_COOKING_POT_INPUT_BUFFER = s
+                .comment("启用 Let's Do 锅具输入预载",
+                        "烛火晚宴的大汤锅与田园乐事的烹饪锅一次预载多份，整批一起烹饪。")
+                .define("enableLetsDoCookingPotInputBuffer", true);
+        LETSDO_COOKING_POT_INPUT_BUFFER_LIMIT = s
+                .comment("Let's Do 锅具输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。食材占 0-5 槽，盛装容器占 6 槽，每份成品在 7 槽产出；"
+                                + "每份成品各消耗一个容器，与本机原生扣容器的数量一致。")
+                .defineInRange("letsDoCookingPotInputBufferLimit", 64, 1, 64);
+        ENABLE_BD_SOUL_COOKING_POT_INPUT_BUFFER = s
+                .comment("启用 BOMD 乐事灵魂锅输入预载",
+                        "预载食材与盛装容器，整批一起烹饪；常规配方每份成品在输出槽产出，有材料返还的配方走原路径。")
+                .define("enableBossesDelightSoulCookingPotInputBuffer", true);
+        BD_SOUL_COOKING_POT_INPUT_BUFFER_LIMIT = s
+                .comment("灵魂锅输入预载操作上限",
+                        "单台机器一次预载的最大逻辑操作数。食材占 0-5 槽，盛装容器占 6 槽，每份成品在输出槽产出；"
+                                + "每份成品各消耗一个容器，与本机原生扣容器的数量一致。")
+                .defineInRange("bossesDelightSoulCookingPotInputBufferLimit", 64, 1, 64);
+        ENABLE_CD_DEEP_FRYING_PAN_INPUT_BUFFER = s
+                .comment("启用随意乐事炸锅输入预载",
+                        "炸锅只有单槽，预载即一次投入整叠原料，成品作为世界掉落物逐份弹出并被自动回收。")
+                .define("enableCasualnessDelightDeepFryingPanInputBuffer", true);
+        CD_DEEP_FRYING_PAN_INPUT_BUFFER_LIMIT = s
+                .comment("炸锅输入预载操作上限",
+                        "单台炸锅一次投入原料的最大份数上限，实际数量受该原料的堆叠上限限制。")
+                .defineInRange("casualnessDelightDeepFryingPanInputBufferLimit", 64, 1, 64);
         ENABLE_BOTANIA_MANA_POOL_BATCH = s
                 .comment("启用魔力池批量转化",
                         "一次投入多份相同物品；每份仍消耗配方原有魔力，等待整批处理完后结算。")

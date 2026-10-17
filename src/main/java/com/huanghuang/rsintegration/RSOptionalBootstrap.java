@@ -3,6 +3,9 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlockEntities;
+import com.huanghuang.rsintegration.magic.ResonantMagicBindingHintOverlay;
+import com.huanghuang.rsintegration.magic.ResonantMagicHud;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
@@ -44,8 +47,15 @@ public final class RSOptionalBootstrap {
                 RSVoidUpgradeItem::new);
     }
 
+    public static void registerBlocks(IEventBus modBus) {
+        ModBlocks.init(modBus);
+        ResonantMagicBlockEntities.init(modBus);
+        ModItems.registerOptionalMagicBlocks();
+    }
+
     public static void registerBindings() {
         AltarBindingRegistry.registerHook(AltarBinding.RS_NETWORK, RSBindingHook.INSTANCE);
+        RSIntegrationMod.LOGGER.info("[RSI-Magic] 已注册 RS NetworkItem 共振方块绑定支持");
     }
 
     public static void registerCommon() {
@@ -69,6 +79,8 @@ public final class RSOptionalBootstrap {
         MinecraftForge.EVENT_BUS.register(RSInfiniteDiskTooltip.class);
         MinecraftForge.EVENT_BUS.register(
                 RSGridSearchCache.class);
+        MinecraftForge.EVENT_BUS.register(ResonantMagicBindingHintOverlay.class);
+        MinecraftForge.EVENT_BUS.register(ResonantMagicHud.class);
     }
 
     public static void registerSidePanelCommon() {

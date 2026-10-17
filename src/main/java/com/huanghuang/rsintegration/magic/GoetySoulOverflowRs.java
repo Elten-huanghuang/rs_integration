@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -25,10 +25,10 @@ public final class GoetySoulOverflowRs {
         UnifiedDiskManager manager = UnifiedDiskManager.existing(player.server);
         if (manager == null) return 0;
 
-        int moved = 0;
-        for (UnifiedDiskCore disk : MagicDiskStore.mountedDisks(manager)) {
-            moved += disk.insertMagic(MagicResourceKind.SOUL, amount - moved, true);
-            if (moved >= amount) break;
+        int moved = MagicDiskStore.insert(MagicDiskStore.mountedDisks(manager),
+                MagicResourceKind.SOUL, amount, true);
+        if (moved < amount) {
+            RSIntegrationMod.LOGGER.warn("[RSI] Arca 灵魂溢出未全部写入归墟盘：装入 {} / {}", moved, amount);
         }
         return moved;
     }

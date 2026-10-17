@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
 import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
+import com.huanghuang.rsintegration.mods.botania.ManaPoolBindingFilters;
 import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
 import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
@@ -848,7 +849,7 @@ public class RecipeGuiLayoutsMixin {
             // Botania ManaInfusion recipes carry their catalyst in the recipe itself.
             // Use that catalyst to keep pool, alchemy catalyst, and conjuration catalyst distinct.
             if ("botania:mana_pool".equals(uid.toString())) {
-                String catalyst = rsi$botaniaManaCatalystFilter(recipe);
+                String catalyst = ManaPoolBindingFilters.filterForRecipe(recipe);
                 if (catalyst != null) return catalyst;
             }
 
@@ -1769,6 +1770,7 @@ public class RecipeGuiLayoutsMixin {
             return GoetyBindingRules.matches(
                     blockKey, entry.blockRegKey(), filter);
         }
+        if (ManaPoolBindingFilters.matches(blockKey, filter)) return true;
         if (blockKey.contains(filter)) return true;
         if ("pmmo_salvage".equals(filter)) {
             ResourceLocation configured = PmmoSalvageAccess.salvageBlockId();
@@ -1929,59 +1931,5 @@ public class RecipeGuiLayoutsMixin {
         return true;
     }
 
-
-    @Unique
-    private static String rsi$botaniaManaCatalystFilter(Object recipe) {
-        if (!rsi$implementsNamedType(recipe, "vazkii.botania.api.recipe.ManaInfusionRecipe")) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Botania mana recipe has unexpected class {}; refusing fallback binding",
-                    recipe == null ? "null" : recipe.getClass().getName());
-            return null;
-        }
-        try {
-            Object catalyst = recipe.getClass().getMethod("getRecipeCatalyst").invoke(recipe);
-            if (catalyst == null) return "mana_pool";
-            Object displayed = catalyst.getClass().getMethod("getDisplayed").invoke(catalyst);
-            if (displayed instanceof Iterable<?> states) {
-                for (Object value : states) {
-                    if (!(value instanceof BlockState state)) continue;
-                    ResourceLocation id = ForgeRegistries.BLOCKS.getKey(state.getBlock());
-                    if (id == null) continue;
-                    if ("botania".equals(id.getNamespace()) && "conjuration_catalyst".equals(id.getPath())) {
-                        return "conjuration_catalyst";
-                    }
-                    if ("botania".equals(id.getNamespace()) && "alchemy_catalyst".equals(id.getPath())) {
-                        return "alchemy_catalyst";
-                    }
-                }
-            }
-        } catch (ReflectiveOperationException exception) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] Failed to inspect Botania mana catalyst", exception);
-        }
-        RSIntegrationMod.debug(
-                "[RSI-JEI-Mixin] Botania recipe {} uses a custom mana catalyst; routing through a bound Mana Pool",
-                getRecipeIdSafe(recipe));
-        return "mana_pool";
-    }
-
-    @Unique
-    private static boolean rsi$implementsNamedType(Object value, String typeName) {
-        if (value == null) return false;
-        for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
-            if (type.getName().equals(typeName)) return true;
-            for (Class<?> contract : type.getInterfaces()) {
-                if (rsi$namedInterface(contract, typeName)) return true;
-            }
-        }
-        return false;
-    }
-
-    @Unique
-    private static boolean rsi$namedInterface(Class<?> type, String typeName) {
-        if (type.getName().equals(typeName)) return true;
-        for (Class<?> parent : type.getInterfaces()) {
-            if (rsi$namedInterface(parent, typeName)) return true;
-        }
-        return false;
-    }
 
 }

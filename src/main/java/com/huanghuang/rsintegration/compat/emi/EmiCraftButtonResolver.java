@@ -47,6 +47,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsTileAccess;
 import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
+import com.huanghuang.rsintegration.mods.botania.ManaPoolBindingFilters;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import java.util.Map;
@@ -230,6 +231,9 @@ final class EmiCraftButtonResolver {
         String yhk = classifyYhkCooking(source);
         if (yhk != null) return yhk;
 
+        String botaniaManaPool = ManaPoolBindingFilters.filterForRecipe(source);
+        if (botaniaManaPool != null) return botaniaManaPool;
+
         String categoryFilter = categoryId == null ? null : ModType.filterForJeiUid(categoryId.toString());
         if (!JeiMachineCategoryPolicy.allowClassFallback(categoryId, className, categoryFilter)) return null;
         if (categoryFilter != null) return categoryFilter;
@@ -324,6 +328,7 @@ final class EmiCraftButtonResolver {
         if (GoetyBindingRules.isGoetyMachineFilter(filter)) {
             return GoetyBindingRules.matches(blockKey, entry.blockRegKey(), filter);
         }
+        if (ManaPoolBindingFilters.matches(blockKey, filter)) return true;
         if (blockKey.contains(filter)) return true;
         if ("pmmo_salvage".equals(filter)) {
             ResourceLocation configured = PmmoSalvageAccess.salvageBlockId();

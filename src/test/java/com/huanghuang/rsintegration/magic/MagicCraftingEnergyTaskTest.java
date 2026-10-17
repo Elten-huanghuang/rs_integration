@@ -13,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -104,9 +105,9 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
     }
 
     @Test
-    void manaAndSourceCannotReserveRsiRecursiveEnergy() {
+    void manaCanReserveRsiRecursiveEnergyButSourceUsesItsNativePath() {
         MinecraftServer server = mock(MinecraftServer.class);
-        assertNull(MagicCraftingEnergyTask.reserve(server, MagicResourceKind.MANA, 100));
+        assertNotNull(MagicCraftingEnergyTask.reserve(server, MagicResourceKind.MANA, 100));
         assertNull(MagicCraftingEnergyTask.reserve(server, MagicResourceKind.SOURCE, 100));
     }
 
@@ -121,6 +122,8 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
         try (MockedStatic<MagicDiskStore> store = mockStatic(MagicDiskStore.class)) {
             store.when(() -> MagicDiskStore.mountedDisks(manager))
                     .thenReturn(List.of(disk));
+            store.when(() -> MagicDiskStore.capacity(List.of(disk), MagicResourceKind.MANA))
+                    .thenReturn(MagicResourceKind.MANA.capacity());
             MagicResourceReservations.Pool pool =
                     MagicResourceReservations.reserve(manager, MagicResourceKind.MANA, 60);
             assertEquals(40, MagicResourceReservations.extract(

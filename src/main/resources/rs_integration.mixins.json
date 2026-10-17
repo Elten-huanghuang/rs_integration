@@ -7,6 +7,7 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
   "mixins": [
+    "core.BlockEntityTypeAccessor",
     "tacz.AbstractGunItemAmmoMixin",
     "tacz.ModernKineticGunScriptAmmoMixin",
     "aetherworks.MetalFormerRecipeMixin",
@@ -120,6 +121,10 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "farmandcharm.NativeRecipeBookScreenMixin",
+    "farmandcharm.NativeRecipeBookWidgetMixin",
+    "farmandcharm.CookingPotGuiMixin",
+    "farmandcharm.RoasterGuiMixin",
     "tacz.GunHudOverlayAmmoMixin",
     "sophisticatedbackpacks.StorageGhostIngredientHandlerMixin",
     "sophisticatedbackpacks.StorageScreenFluidFilterMixin",

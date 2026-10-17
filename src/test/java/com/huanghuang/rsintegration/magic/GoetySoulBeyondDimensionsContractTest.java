@@ -49,7 +49,9 @@ class GoetySoulBeyondDimensionsContractTest {
         assertTrue(renderSource.contains("LiquidSoulEnergyTexture.render(gui, x, y)"));
         assertFalse(renderSource.contains("block/soul_absorber"));
         assertTrue(rsGridStackSource.contains("MagicResourceTexture.render(graphics, kind, x, y)"));
-        assertTrue(rsGridStackSource.contains("I18n.get(kind.displayName().getString())"));
+        // 客户端侧把翻译键交给 LanguageMap 解析；传的是键而不是已渲染文本，
+        // RS 与 BD 仍然共享同一个翻译键。
+        assertTrue(rsGridStackSource.contains("I18n.get(kind.translationKey())"));
         assertTrue(rsGridStackSource.contains("formatWithUnits(amount)"));
         assertFalse(rsGridStackSource.contains("formatInBucketFormWithOnlyTrailingDigitsIfZero(amount)"));
         assertTrue(sharedTextureSource.contains(

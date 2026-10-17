@@ -9,6 +9,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,6 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.anyList;
+import static org.mockito.Mockito.argThat;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -74,16 +78,54 @@ class OperationStartContextTest extends BootstrapTest {
     void restoresLegacySlotsWhenOrderedListContainsEmptyPlaceholders() {
         MaterialPlan materialPlan = MaterialPlan.fromLegacy(List.of(
                         IngredientSpec.EMPTY,
-                        new IngredientSpec(Ingredient.of(Items.COAL), 1)),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+                        new IngredientSpec(Ingredient.of(Items.COAL), 1),
+                        IngredientSpec.EMPTY,
+                        new IngredientSpec(Ingredient.of(Items.CHARCOAL), 1)),
+                Collections.nCopies(4, IBatchDelegate.MaterialReservationScope.PER_OPERATION));
 
         OperationStartContext context = OperationStartContext.chainReserved(
                 mock(ServerPlayer.class), new ExtractionLedger(), materialPlan,
-                List.of(ItemStack.EMPTY, new ItemStack(Items.COAL)), InputBufferPlan.none());
+                List.of(ItemStack.EMPTY, new ItemStack(Items.COAL),
+                        ItemStack.EMPTY, new ItemStack(Items.CHARCOAL)),
+                InputBufferPlan.none());
 
-        assertEquals(List.of(Items.COAL), context.legacyMaterials().stream()
-                .map(ItemStack::getItem).toList());
+        List<ItemStack> materials = context.legacyMaterials();
+        assertEquals(4, materials.size());
+        assertTrue(materials.get(0).isEmpty());
+        assertTrue(materials.get(1).is(Items.COAL));
+        assertTrue(materials.get(2).isEmpty());
+        assertTrue(materials.get(3).is(Items.CHARCOAL));
+    }
+
+    @Test
+    void legacyStartReceivesSparseShapedGridInsteadOfCompactedMaterials() {
+        MaterialPlan materialPlan = MaterialPlan.fromLegacy(List.of(
+                        IngredientSpec.EMPTY,
+                        new IngredientSpec(Ingredient.of(Items.COAL), 1),
+                        IngredientSpec.EMPTY,
+                        IngredientSpec.EMPTY,
+                        new IngredientSpec(Ingredient.of(Items.CHARCOAL), 1)),
+                Collections.nCopies(5, IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+        ServerPlayer player = mock(ServerPlayer.class);
+        ExtractionLedger ledger = new ExtractionLedger();
+        OperationStartContext context = OperationStartContext.chainReserved(
+                player, ledger, materialPlan,
+                List.of(ItemStack.EMPTY, new ItemStack(Items.COAL), ItemStack.EMPTY,
+                        ItemStack.EMPTY, new ItemStack(Items.CHARCOAL)),
+                InputBufferPlan.none());
+        IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
+        when(delegate.tryStartWithMaterials(eq(player), anyList(),
+                eq(ledger))).thenReturn(true);
+
+        assertTrue(delegate.startOperation(context));
+
+        verify(delegate).tryStartWithMaterials(eq(player), argThat(materials ->
+                materials.size() == 5
+                        && materials.get(0).isEmpty()
+                        && materials.get(1).is(Items.COAL)
+                        && materials.get(2).isEmpty()
+                        && materials.get(3).isEmpty()
+                        && materials.get(4).is(Items.CHARCOAL)), eq(ledger));
     }
 
     @Test

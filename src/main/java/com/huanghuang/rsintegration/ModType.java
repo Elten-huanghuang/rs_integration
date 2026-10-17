@@ -339,6 +339,9 @@ public final class ModType {
             return byId("smithing");
         }
 
+        ModType classRouted = classifyRecipeClass(cn);
+        if (classRouted != null) return classRouted;
+
         // Cooking pot recipes: distinguish by result's crafting remainder (the bowl/pot type)
         if (cn.startsWith("dev.xkmc.youkaishomecoming.content.pot.cooking.")) {
             return classifyCookingPotRecipe(recipe);
@@ -356,6 +359,26 @@ public final class ModType {
             }
         }
         return best;
+    }
+
+    /**
+     * 处理无法由普通前缀注册正确路由的配方类。
+     * <p>
+     * Let's Do 的三种锅复用同一个 CookingPotRecipe，必须统一回到规范类型；
+     * 随意乐事炸锅在 JEI 映射建立前就需要完成分类，否则会先退回 generic。
+     *
+     * @return 明确匹配的 ModType；没有专用路由时返回 null
+     */
+    @Nullable
+    static ModType classifyRecipeClass(String className) {
+        if (className == null) return null;
+        if (className.startsWith("net.satisfy.farm_and_charm.recipe.CookingPotRecipe")) {
+            return findById(ModIds.ID_FC_COOKING_POT);
+        }
+        if (className.startsWith("com.va11halla.casualness_delight.recipe.DeepFryingRecipe")) {
+            return findById(ModIds.ID_CD_DEEP_FRYING_PAN);
+        }
+        return null;
     }
 
     /**

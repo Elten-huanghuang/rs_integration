@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -36,6 +37,8 @@ public final class ModItems {
     public static RegistryObject<Item> DIMENSIONAL_RESONANCE_DISK;
     public static RegistryObject<Item> RS_VOID_UPGRADE;
     public static RegistryObject<Item> UNIFIED_STORAGE_DISK;
+    public static RegistryObject<Item> RESONANT_MANA_POOL;
+    public static RegistryObject<Item> RESONANT_SOURCE_TANK;
     public static final RegistryObject<Item> ALCHEMIST_INK_FLUID =
             ITEMS.register("alchemist_ink_fluid", InkFluidItem::new);
     public static final RegistryObject<Item> FLUID_REFUND =
@@ -55,6 +58,12 @@ public final class ModItems {
                         }
                         if (DIMENSIONAL_RESONANCE_DISK != null) {
                             output.accept(DIMENSIONAL_RESONANCE_DISK.get());
+                        }
+                        if (RESONANT_MANA_POOL != null) {
+                            output.accept(RESONANT_MANA_POOL.get());
+                        }
+                        if (RESONANT_SOURCE_TANK != null) {
+                            output.accept(RESONANT_SOURCE_TANK.get());
                         }
                         if (UnifiedDiskVisibility.visible()) output.accept(UNIFIED_STORAGE_DISK.get());
                         // Backpack upgrades are only registered when Sophisticated
@@ -102,5 +111,12 @@ public final class ModItems {
     public static void registerOptionalBeyondDimensions(IEventBus modBus,
                                                          Supplier<? extends Item> diskSupplier) {
         DIMENSIONAL_RESONANCE_DISK = ITEMS.register("resonance_network_generator", diskSupplier);
+    }
+
+    public static void registerOptionalMagicBlocks() {
+        RESONANT_MANA_POOL = ITEMS.register("resonant_mana_pool",
+                () -> new BlockItem(ModBlocks.RESONANT_MANA_POOL.get(), new Item.Properties()));
+        RESONANT_SOURCE_TANK = ITEMS.register("resonant_source_tank",
+                () -> new BlockItem(ModBlocks.RESONANT_SOURCE_TANK.get(), new Item.Properties()));
     }
 }

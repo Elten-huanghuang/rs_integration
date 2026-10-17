@@ -123,7 +123,15 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(targetClassName)
                     && isClassPresent("net.satisfy.farm_and_charm.client.recipebook.CookingPotRecipeBook");
         }
+        if (mixinClassName.contains("farmandcharm.NativeRecipeBookScreenMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "m_88315_");
+        }
         if (mixinClassName.contains("farmandcharm.CookingPotGuiMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "m_7856_");
+        }
+        if (mixinClassName.contains("farmandcharm.RoasterGuiMixin")) {
             return isClassPresent(targetClassName)
                     && hasMethod(targetClassName, "m_7856_");
         }

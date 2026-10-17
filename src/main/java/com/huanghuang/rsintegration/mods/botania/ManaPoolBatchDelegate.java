@@ -92,8 +92,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("Mana Pool recipe has no input: " + recipeId);
         }
 
-        boolean directlyBoundPool = resolved.getBlockEntity(bindingPos) instanceof ManaPoolBlockEntity;
-        boolean poolAboveBinding = resolved.getBlockEntity(bindingPos.above()) instanceof ManaPoolBlockEntity;
+        boolean directlyBoundPool = ManaPoolInterop.isManaPool(resolved.getBlockEntity(bindingPos));
+        boolean poolAboveBinding = ManaPoolInterop.isManaPool(resolved.getBlockEntity(bindingPos.above()));
         var catalyst = r.getRecipeCatalyst();
         boolean catalystMatches = catalyst != null && catalyst.test(resolved.getBlockState(bindingPos));
         boolean catalystMatchesBelowPool = catalyst != null && directlyBoundPool
@@ -122,7 +122,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
         // Catalyst bindings point at the catalyst block, which intentionally has no
         // block entity. The actual leased machine is the Mana Pool directly above it.
-        return level.getBlockEntity(pos.above()) instanceof ManaPoolBlockEntity;
+        return ManaPoolInterop.isManaPool(level.getBlockEntity(pos.above()));
     }
     @Override public List<IngredientSpec> getRequiredMaterials() {
         return recipe == null ? null : List.of(new IngredientSpec(recipe.getIngredients().get(0), 1));
@@ -130,9 +130,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
-        int mana = level != null && poolPos != null
-                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
-                ? pool.getCurrentMana() : 0;
+        int mana = level == null || poolPos == null ? 0
+                : ManaPoolInterop.current(level.getBlockEntity(poolPos));
         int manaCost = recipe == null ? 0 : recipe.getManaToConsume();
         requestedBatch = configuredPhysicalBatchSize(remainingOperations, mana, manaCost);
         return requestedBatch;
@@ -140,9 +139,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void prepareGraphBatch(int executions) {
-        int mana = level != null && poolPos != null
-                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
-                ? pool.getCurrentMana() : 0;
+        int mana = level == null || poolPos == null ? 0
+                : ManaPoolInterop.current(level.getBlockEntity(poolPos));
         requestedBatch = configuredPhysicalBatchSize(
                 executions, mana, recipe == null ? 0 : recipe.getManaToConsume());
     }
@@ -151,9 +149,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         if (!batchingEnabled()) return 1;
         int share = parallelWorkerBatchSize(totalOperations, workerCount);
-        int mana = level != null && poolPos != null
-                && level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
-                ? pool.getCurrentMana() : 0;
+        int mana = level == null || poolPos == null ? 0
+                : ManaPoolInterop.current(level.getBlockEntity(poolPos));
         return configuredPhysicalBatchSize(share, mana,
                 recipe == null ? 0 : recipe.getManaToConsume());
     }
@@ -236,7 +233,9 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean startEntities(ItemStack input) {
-        if (!(level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool)) return false;
+        BlockEntity poolEntity = level.getBlockEntity(poolPos);
+        var pool = ManaPoolInterop.pool(poolEntity);
+        if (pool == null) return false;
         entitiesBefore = BotaniaDelegateSupport.snapshot(level, new AABB(poolPos).inflate(1.5));
         inputEntityIds.clear();
         int remaining = input.getCount();
@@ -257,7 +256,13 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
             // dropped item from falling into the basin. The safe in-pool spawn
             // keeps it below that collision shape; process once immediately and
             // let Botania's normal entityInside callback handle later mana waits.
-            if (entity.isAlive()) pool.collideEntityItem(entity);
+            if (entity.isAlive()) {
+                if (poolEntity instanceof ManaPoolBlockEntity nativePool) {
+                    nativePool.collideEntityItem(entity);
+                } else {
+                    ManaPoolInterop.tryInfuse(level, poolPos, pool, entity);
+                }
+            }
             remaining -= count;
         }
         requestedBatch = input.getCount();
@@ -320,8 +325,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
                 remainingInputs += item.getItem().getCount();
             }
         }
-        int mana = level.getBlockEntity(poolPos) instanceof ManaPoolBlockEntity pool
-                ? pool.getCurrentMana() : -1;
+        int mana = ManaPoolInterop.current(level.getBlockEntity(poolPos));
         return "mana=" + mana + " manaPerOperation=" + (recipe == null ? -1 : recipe.getManaToConsume())
                 + " ownedInputItems=" + remainingInputs + " batch=" + requestedBatch;
     }

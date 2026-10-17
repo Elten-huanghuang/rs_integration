@@ -52,7 +52,7 @@ class MagicResourceCostPlanningTest extends BootstrapTest {
     void manaAndSourceStayOutOfRsiRecursiveCosts() {
         assertEquals(List.of(),
                 MagicResourceCostCatalog.costsFor(new InfuserRecipe(321)));
-        assertFalse(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
+        assertTrue(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
         assertFalse(MagicResourceKind.SOURCE.supportsRsiRecursiveCrafting());
         assertTrue(MagicResourceKind.SOUL.supportsRsiRecursiveCrafting());
     }

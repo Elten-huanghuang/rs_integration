@@ -5,6 +5,11 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -54,6 +59,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     protected static final int SHORT = 1;
     protected static final int LARGE = 2;
 
+    /** 原生锅的原料格数量（CookingBlockEntity 构造时以 12 个槽位创建容器）。 */
+    protected static final int MAX_INGREDIENT_SLOTS = 12;
+    /** 与农夫乐事锅一致的容器槽下标。 */
+    protected static final int CONTAINER_SLOT = 5;
+    /** 与农夫乐事锅一致的输出槽下标。 */
+    protected static final int OUTPUT_SLOT = 6;
+
     protected final int potIndex;
 
     public CookingPotBatchDelegate() { this(SMALL); }
@@ -66,6 +78,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private String machineNamespace;
     private Recipe<?> recipe;
     private boolean craftDone;
+    private int plannedOperations = 1;
+    // 已按批次放进锅里的原料，失败/超时时按指纹原样回收，避免把玩家原料留成"残余物"。
+    private final List<ItemStack> placedInputs = new ArrayList<>();
+    private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
 
     // -- reflection cache --
     private static volatile Field itemsField;          // CookingBlockEntity.items (public final)
@@ -75,6 +91,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private static volatile Method getResultMethod;    // PotCookingRecipe.getResult()
     private static volatile Method inProgressMethod;   // TimedRecipeBlockEntity.inProgress()
     private static volatile Method containerMethod;    // CookingBlockEntity.container()
+    private static volatile Method getProcessTimeMethod; // TimedRecipe.getProcessTime()
+    private static volatile Method getInventoryMethod; // CookingBlockEntity.getInventory()
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -102,6 +120,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         this.craftDone = false;
+        this.plannedOperations = 1;
+        this.placedInputs.clear();
+        this.detachedRecoveredInputs.clear();
         return true;
     }
 
@@ -132,6 +153,204 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             specs.add(new IngredientSpec(Ingredient.of(bowls), bowls.getCount()));
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    // -- 并发与批量契约 --
+    // 三台锅共用同一份实现：并发声明、批量份数、输入缓冲契约都在这里统一声明。
+    //
+    // 注意：这三台锅的 ModType 已在 GraphConcurrencyEligibility.WORLD_CAPTURE_TYPES 里，
+    // 而 AsyncCraftChain 是「资格表非空则优先」，所以下面的 concurrencyCapabilities()
+    // 对它们只是契约完整性，实际并发由资格表决定，改这里不会改变并发行为。
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        // 原料与容器全部由共享账本预留，成品始终落在机器自己的槽位/世界掉落，
+        // 失败清理可在机器离线下独立完成，因此允许与同类型机器并行。
+        return BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems();
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return Math.max(0, Math.min(1, remainingOperations));
+        plannedOperations = Math.max(1, inputBufferPlan(remainingOperations).operations());
+        return plannedOperations;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedOperations = supportsInputBuffer() ? Math.max(1, executions) : 1;
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        int operations = Math.max(1, totalOperations);
+        int capacity = Math.max(1, inputBufferPlan(operations).operations());
+        // prepared 阶段机器尚未加载区块，这里只能从契约里取一个上界；
+        // 真正的物理容量在铺料失败时按 rollback 收回，不会造成材料损失。
+        return ParallelBatchSizing.boundedEvenShare(operations, operations, capacity);
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        if (!supportsInputBuffer()) return Math.max(1, configuredLimit);
+        return Math.max(Math.max(1, configuredLimit), localOperationLimit());
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
+    }
+
+    /** 本机按配方耗时与槽位容量折算出的最大并行份数。 */
+    private int localOperationLimit() {
+        if (recipe == null) return CookingPotBatchConfig.inputBufferLimit();
+        BlockEntity be = myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)
+                ? null : myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : getInventory(be);
+        int slotCapacity = handler == null ? Integer.MAX_VALUE
+                : CookingPotBatchConfig.effectiveSlotCapacity(
+                        handler.getSlotLimit(0), maxIngredientStackSize());
+        ItemStack output = getRecipeResult(recipe);
+        int outputCapacity = handler == null ? Integer.MAX_VALUE
+                : CookingPotBatchConfig.effectiveSlotCapacity(
+                        handler.getSlotLimit(0), Math.max(1, output.getMaxStackSize()));
+        return CookingPotBatchConfig.bufferedOperationCapacity(potIndex,
+                processTime(recipe), CookingPotBatchConfig.inputBufferLimit(),
+                slotCapacity, Math.max(1, output.getCount()), outputCapacity);
+    }
+
+    @Override
+    public boolean supportsInputBuffer() {
+        // YHK 原生 finishRecipe() 会清空整个输入容器，且 CookingItemContainer
+        // 每槽上限为 1，无法安全地在同一台锅里预载多份。保留配置项以兼容旧配置，
+        // 但普通锅统一走原生 tryAddItem 的单次路径，避免材料丢失或启动失败。
+        return false;
+    }
+
+    private static boolean hasCraftingRemainder(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return true;
+        ItemStack[] candidates = spec.ingredient().getItems();
+        if (candidates.length == 0) return true;
+        for (ItemStack candidate : candidates) {
+            if (candidate == null || candidate.isEmpty() || candidate.hasCraftingRemainingItem()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public InputBufferContract inputBufferContract() {
+        if (!supportsInputBuffer()) return InputBufferContract.none();
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        IItemHandler handler = be == null ? null : be.getCapability(
+                ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
+        if (handler == null || handler.getSlots() <= 0) return InputBufferContract.none();
+
+        List<IngredientSpec> specs = getRequiredMaterials();
+        boolean potFood = isPotFoodRecipe(recipe);
+        ItemStack bowls = potFood ? computeServeBowls(recipe) : ItemStack.EMPTY;
+        int ingredientCount = specs.size() - (bowls.isEmpty() ? 0 : 1);
+
+        List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
+        for (int i = 0; i < ingredientCount; i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack prototype = ingredientPrototype(spec);
+            if (prototype.isEmpty()) return InputBufferContract.none();
+            inputs.add(new InputBufferContract.InputSlot(
+                    "yhk:material:" + i, i, prototype, Math.max(1, spec.count()), false,
+                    CookingPotBatchConfig.effectiveSlotCapacity(
+                            handler.getSlotLimit(i), prototype.getMaxStackSize())));
+        }
+        if (!bowls.isEmpty()) {
+            ItemStack prototype = bowls.copyWithCount(1);
+            inputs.add(new InputBufferContract.InputSlot(
+                    "yhk:container", CONTAINER_SLOT, prototype,
+                    Math.max(1, bowls.getCount()), false,
+                    CookingPotBatchConfig.effectiveSlotCapacity(
+                            handler.getSlotLimit(CONTAINER_SLOT), prototype.getMaxStackSize())));
+        }
+
+        ItemStack output = getRecipeResult(recipe);
+        if (output.isEmpty()) return InputBufferContract.none();
+        int operations = localOperationLimit();
+        if (operations <= 0) return InputBufferContract.none();
+        return new InputBufferContract(operations, inputs,
+                List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT,
+                        output, Math.max(1, output.getCount()),
+                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    @Override
+    public InputBufferPlan inputBufferPlan(int requestedOperations) {
+        return inputBufferContract().plan(requestedOperations);
+    }
+
+    @Override
+    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+                                           @NotNull InputBufferPlan plan,
+                                           @NotNull ExtractionLedger sharedLedger) {
+        if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || plan.inputs().size() != specs.size()) return false;
+
+        ItemStack bowls = isPotFoodRecipe(recipe) ? computeServeBowls(recipe) : ItemStack.EMPTY;
+        boolean hasContainer = !bowls.isEmpty();
+        List<ItemStack> ordered = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            String entryId = hasContainer && i == specs.size() - 1
+                    ? "yhk:container" : "yhk:material:" + i;
+            InputBufferPlan.InputSlot input = inputByEntryId(plan, entryId);
+            long required = (long) Math.max(1, spec.count()) * plan.operations();
+            if (input == null || input.reusable() || required > Integer.MAX_VALUE
+                    || input.stack().getCount() != (int) required
+                    || !spec.ingredient().test(input.stack())) {
+                return false;
+            }
+            ordered.add(input.stack().copy());
+        }
+        InputBufferPlan expected = inputBufferPlan(plan.operations());
+        if (!expected.enabled() || expected.operations() != plan.operations()) return false;
+        plannedOperations = plan.operations();
+        return tryStartWithMaterials(player, ordered, sharedLedger);
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!supportsInputBuffer()) return OutputContract.none();
+        ItemStack output = getRecipeResult(recipe);
+        if (output.isEmpty()) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT,
+                output, Math.max(1, output.getCount()),
+                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    /** 批量结算用的输出端口标识，各锅子类可覆盖以区分来源。 */
+    protected String outputPortId() {
+        return "youkaishomecoming:cooking_pot:output";
+    }
+
+    private static ItemStack ingredientPrototype(IngredientSpec spec) {
+        if (spec == null || spec.ingredient() == null) return ItemStack.EMPTY;
+        for (ItemStack candidate : spec.ingredient().getItems()) {
+            if (candidate != null && !candidate.isEmpty()) return candidate.copyWithCount(1);
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private int maxIngredientStackSize() {
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs == null || specs.isEmpty()) return 64;
+        ItemStack prototype = ingredientPrototype(specs.get(0));
+        return prototype.isEmpty() ? 64 : prototype.getMaxStackSize();
+    }
+
+    @Nullable
+    private static InputBufferPlan.InputSlot inputByEntryId(InputBufferPlan plan, String entryId) {
+        return plan.inputs().stream()
+                .filter(input -> entryId.equals(input.entryId()))
+                .findFirst().orElse(null);
     }
 
     @Override
@@ -226,30 +445,115 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             ItemStack suppliedBowls = materials.get(materials.size() - 1);
-            if (!ItemStack.isSameItemSameTags(serveBowls, suppliedBowls)
-                    || suppliedBowls.getCount() < serveBowls.getCount()) {
+            long requiredBowls = (long) serveBowls.getCount() * plannedOperations;
+            if (requiredBowls > Integer.MAX_VALUE
+                    || !ItemStack.isSameItemSameTags(serveBowls, suppliedBowls)
+                    || suppliedBowls.getCount() != (int) requiredBowls) {
+                forceChunkLoad(false);
+                return false;
+            }
+            // 批量模式下原生容器槽必须为空，铺料失败时才能干净回滚。
+            if (plannedOperations > 1 && !isContainerSlotEmpty(be)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Container slot occupied at {}", myPos);
                 forceChunkLoad(false);
                 return false;
             }
         }
 
+        // 每份原料各占一个固定槽位，槽内数量 = 单份数量 × 份数；
+        // 原生 tick 每完成一份就整槽扣掉一份，多份因此在同一槽内排队。
+        // 槽位从 startIngredientIndex() 起排：盛装容器固定占 CONTAINER_SLOT，
+        // 原料槽必须让开它，否则某份原料会被塞进容器槽导致配方不匹配。
+        List<ItemStack> placed = new ArrayList<>();
+        int slot = startIngredientIndex();
         for (int i = 0; i < materials.size(); i++) {
             ItemStack mat = materials.get(i);
             if (mat.isEmpty()) continue;
-            // Only the final, validated material is the serving container. Do not
-            // skip a same-item bowl that is an actual recipe ingredient.
+            // 只有最后一个、已校验过的材料是盛装容器。
             if (!serveBowls.isEmpty() && i == materials.size() - 1) continue;
-            ItemStack single = mat.copyWithCount(1);
-            if (!tryAddItem(be, single)) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CookPot] tryAddItem failed for {}",
-                        single.getHoverName().getString());
+            int targetSlot = batchSlot(slot);
+            if (!tryPlaceBatchInput(be, targetSlot, mat)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Failed to place {} x{} into slot {}",
+                        mat.getHoverName().getString(), mat.getCount(), targetSlot);
+                detachRecoveredInputs(be, placed);
                 forceChunkLoad(false);
                 return false;
             }
+            placed.add(mat.copy());
+            placedInputs.add(mat.copy());
+            slot++;
         }
 
         be.setChanged();
+        markCraftStarted();
         return true;
+    }
+
+    /** 原料槽在"原料优先、容器槽保留"前提下的实际下标。 */
+    private static int batchSlot(int placementIndex) {
+        return placementIndex < CONTAINER_SLOT ? placementIndex : placementIndex + 1;
+    }
+
+    /**
+     * 原料起始槽位。
+     * <p>
+     * 普通锅与幻想乡三锅都从 0 号槽开始铺；但带盛装容器的配方必须把
+     * {@link #CONTAINER_SLOT} 让给容器，因此原料从 1 号槽起排。子类可覆盖。
+     */
+    protected int startIngredientIndex() {
+        return 0;
+    }
+
+    /**
+     * 铺满批次所需的原料槽数上限（不含容器槽）。子类按自己的槽位布局覆盖。
+     */
+    protected int ingredientSlotCapacity() {
+        return MAX_INGREDIENT_SLOTS;
+    }
+
+    /**
+     * 往固定槽位铺料：先用原生 {@code tryAddItem} 校验配方匹配，再按批次数量写入。
+     * <p>
+     * {@code tryAddItem} 只接受单个物品（内部强制 copyWithCount(1)），因此
+     * 校验通过后由委托自己按整批数量覆盖槽位——原生 tick 每完成一份扣一个，
+     * 这正是"一次铺满、逐份产出"所需的行为。
+     */
+    private boolean tryPlaceBatchInput(BlockEntity be, int slot, ItemStack stack) {
+        if (stack.isEmpty()) return true;
+        // tryAddItem 会自行选择第一个合法空槽并写入一件物品；先调用它再
+        // 要求目标槽为空会把刚写入的槽误判为失败。当前锅具只启用单次路径，
+        // 因此这里直接返回原生调用结果，slot 参数仅保留给旧批量接口。
+        return tryAddItem(be, stack.copyWithCount(1));
+    }
+
+    private boolean isContainerSlotEmpty(BlockEntity be) {
+        IItemHandler handler = getInventory(be);
+        return handler == null || handler.getStackInSlot(CONTAINER_SLOT).isEmpty();
+    }
+
+    /** 铺料中途失败时，把本次已放入的原料摘到"待回收"列表，绝不留成锅里的残渣。 */
+    private void detachRecoveredInputs(BlockEntity be, List<ItemStack> placed) {
+        IItemHandler handler = getInventory(be);
+        if (handler != null) {
+            for (ItemStack expected : placed) {
+                if (expected.isEmpty()) continue;
+                for (int slot = 0; slot < handler.getSlots(); slot++) {
+                    ItemStack visible = handler.getStackInSlot(slot);
+                    if (visible.isEmpty() || !ItemStack.isSameItemSameTags(visible, expected)) continue;
+                    ItemStack removed = handler.extractItem(slot, visible.getCount(), false);
+                    if (!removed.isEmpty()) detachedRecoveredInputs.add(removed.copy());
+                    break;
+                }
+            }
+        }
+        placedInputs.clear();
+        if (be != null) be.setChanged();
+    }
+
+    private static ItemStack getInventoryStack(BlockEntity be, int slot) {
+        IItemHandler handler = getInventory(be);
+        if (handler == null || slot < 0 || slot >= handler.getSlots()) return ItemStack.EMPTY;
+        return handler.getStackInSlot(slot);
     }
 
     @Nonnull
@@ -457,7 +761,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearAndRefund();
+        this.player = player == null ? this.player : player;
+        recordFailureRecoveredInputs(clearAndRefund());
         forceChunkLoad(false);
         craftDone = false;
         network = null;
@@ -465,9 +770,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        // Don't clearAndRefund -- the pot's finishRecipe() already consumed
-        // ingredients, and collectResult() already took the result.  The
-        // bowl/pot in the container slot must stay in-world for reuse.
+        // 不做清空：原生的 finishRecipe() 已逐份消耗食材，collectResult() 也已取走成品，
+        // 锅里的盛装容器与恢复出来的空锅要留在世界里给玩家复用。
+        //
+        // 批量路径下若还有"铺了但没被吃掉"的余料，也不要在这里退：
+        // 成功收尾时共享账本已处于 committed，任何额外退款都会重复结算；
+        // 这些余料会在下一次操作开始时由 drainExistingContentsToNetwork() 归还到存储，
+        // 玩家也可以直接手动取回。
         forceChunkLoad(false);
         craftDone = false;
         network = null;
@@ -576,31 +885,26 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-CookPot] YHKReflection probe not ready");
             return;
         }
-        try {
-            // items field -- public final on CookingBlockEntity
-            itemsField = YHKReflection.cookingBEClass.getField("items");
-
-            // tryAddItem(ItemStack, boolean) -- public on CookingBlockEntity
-            tryAddItemMethod = YHKReflection.cookingBEClass.getMethod("tryAddItem", ItemStack.class, boolean.class);
-
-            // isHeated(Level, BlockPos) -- from FD's HeatableBlockEntity interface
-            isHeatedMethod = YHKReflection.cookingBEClass.getMethod("isHeated", Level.class, BlockPos.class);
-
-            // container() -- public abstract on CookingBlockEntity
-            containerMethod = YHKReflection.cookingBEClass.getMethod("container");
-
-            // inProgress() -- public on TimedRecipeBlockEntity
-            inProgressMethod = findMethodInHierarchy(YHKReflection.cookingBEClass.getSuperclass(), "inProgress");
-
-            // PotCookingRecipe.getInput() / getResult() -- public
-            getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput");
-            getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult");
-
-            // PotFoodBlock uses its public API below; it must never fall back to
-            // reflective field access or generic block-item collection.
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CookPot] Reflection probe failed", e);
-        }
+        try { itemsField = YHKReflection.cookingBEClass.getField("items"); }
+        catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CookPot] items field unavailable", e); }
+        try { tryAddItemMethod = YHKReflection.cookingBEClass.getMethod(
+                "tryAddItem", ItemStack.class, boolean.class); }
+        catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CookPot] tryAddItem unavailable", e); }
+        try { isHeatedMethod = YHKReflection.cookingBEClass.getMethod(
+                "isHeated", Level.class, BlockPos.class); }
+        catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CookPot] isHeated unavailable", e); }
+        try { containerMethod = YHKReflection.cookingBEClass.getMethod("container"); }
+        catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-CookPot] container unavailable", e); }
+        getProcessTimeMethod = findMethodInHierarchy(
+                YHKReflection.potCookingRecipeClass, "getProcessTime");
+        getInventoryMethod = findMethodInHierarchy(YHKReflection.cookingBEClass, "getInventory");
+        if (getInventoryMethod != null) getInventoryMethod.setAccessible(true);
+        inProgressMethod = findMethodInHierarchy(
+                YHKReflection.cookingBEClass.getSuperclass(), "inProgress");
+        try { getInputMethod = YHKReflection.potCookingRecipeClass.getMethod("getInput"); }
+        catch (Exception e) { getInputMethod = null; }
+        try { getResultMethod = YHKReflection.potCookingRecipeClass.getMethod("getResult"); }
+        catch (Exception e) { getResultMethod = null; }
     }
 
     private static Method findMethodInHierarchy(Class<?> clazz, String name, Class<?>... paramTypes) {
@@ -711,6 +1015,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] getRecipeInput reflection failed", e);
             }
         }
+        Field inputField = findFieldInHierarchy(recipe.getClass(), "input");
+        if (inputField != null) {
+            try {
+                inputField.setAccessible(true);
+                Object value = inputField.get(recipe);
+                if (value instanceof List<?> list) {
+                    return list.stream().filter(Ingredient.class::isInstance)
+                            .map(Ingredient.class::cast).toList();
+                }
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.warn("[RSI-CookingPot] input field reflection failed", e);
+            }
+        }
         return List.of();
     }
 
@@ -725,24 +1042,72 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
+    /** 配方耗时（tick）；读取失败时返回 0，由调用方回退到该锅的基准耗时。 */
+    private static int processTime(Recipe<?> recipe) {
+        if (getProcessTimeMethod != null) {
+            try {
+                Object value = getProcessTimeMethod.invoke(recipe);
+                if (value instanceof Integer ticks && ticks > 0) return ticks;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CookingPot] processTime reflection failed", e);
+            }
+        }
+        return 0;
+    }
+
+    /** 原生物品能力包装（固定 8 槽：7 个食材槽 + 1 个容器槽）。 */
+    @Nullable
+    private static IItemHandler getInventory(BlockEntity be) {
+        probeReflection();
+        if (getInventoryMethod != null) {
+            try {
+                Object value = getInventoryMethod.invoke(be);
+                if (value instanceof IItemHandler handler) return handler;
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-CookPot] getInventory reflection failed", e);
+            }
+        }
+        return be.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
+    }
+
     // -- cleanup --
 
-    private void clearAndRefund() {
+    /**
+     * 清空锅体并回收其中的物品。
+     * <p>
+     * 与旧实现（把整锅物品塞进 recovered 列表）不同，这里把槽内残留直接退回
+     * 存储或玩家手中：失败清理时丢在槽里的是<b>玩家自己的原料</b>，不是本次
+     * 操作的预留材料。按"退款堆叠"记录会既误判
+     * {@code physicalFailureCleanupCompleted}，又可能让调用方把同一份材料退两遍。
+     *
+     * @return 确实没能还给玩家的堆叠（离线且存储拒收），供调用方决定是否记录；
+     *         正常退还的物品不会出现在返回值里，避免与共享账本的退款重复结算。
+     */
+    private List<ItemStack> clearAndRefund() {
+        List<ItemStack> stranded = new ArrayList<>();
+        // 铺料中途摘回的原料从未进入锅体，这里同样要真正还给玩家，不能只记一笔。
+        for (ItemStack detached : new ArrayList<>(detachedRecoveredInputs)) {
+            returnOrStrand(detached, stranded);
+        }
+        detachedRecoveredInputs.clear();
+        // 正常完成路径不会调用 clearMachineState/onBatchFailed，这里清空即可：
+        // 残留快照若跨操作留存，下一次失败会重复上报上一次的材料。
+        placedInputs.clear();
+        plannedOperations = 1;
+        if (myLevel == null || myPos == null) return stranded;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !isCookingBE(be)) return;
+        if (be == null || !isCookingBE(be)) return stranded;
 
-        // Try items field first
         Container container = getItemsContainer(be);
         if (container != null) {
             for (int i = 0; i < container.getContainerSize(); i++) {
                 ItemStack s = container.getItem(i);
-                if (!s.isEmpty()) {
-                    container.setItem(i, ItemStack.EMPTY);
-                    if (!usingSharedLedger) refund(s);
-                }
+                if (s.isEmpty()) continue;
+                container.setItem(i, ItemStack.EMPTY);
+                returnOrStrand(s, stranded);
             }
             be.setChanged();
-            return;
+            return stranded;
         }
 
         // Fallback: capability
@@ -752,10 +1117,27 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (handler != null) {
             for (int i = 0; i < handler.getSlots(); i++) {
                 ItemStack s = handler.extractItem(i, 64, false);
-                if (!s.isEmpty() && !usingSharedLedger) refund(s);
+                if (s.isEmpty()) continue;
+                returnOrStrand(s, stranded);
             }
             be.setChanged();
         }
+        return stranded;
+    }
+
+    /**
+     * 把槽内残留退回来源：共享账本材料走 {@link #refund}（由账本按玩家结算），
+     * 其余先塞进存储、塞不下才转交玩家，最后仍无处安放的才并入 {@code stranded}。
+     */
+    private void returnOrStrand(ItemStack stack, List<ItemStack> stranded) {
+        if (stack.isEmpty()) return;
+        ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
+        if (leftover.isEmpty()) return;
+        if (player != null) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover.copy());
+            return;
+        }
+        stranded.add(leftover.copy());
     }
 
     /** Drain stale pot contents before a new operation owns the machine. */

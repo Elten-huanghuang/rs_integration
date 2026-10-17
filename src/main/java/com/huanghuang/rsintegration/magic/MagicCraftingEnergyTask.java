@@ -43,6 +43,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     @Nullable
     private UUID injectionId;
     private int injected;
+    private int consumed;
     private boolean prepared;
     private boolean completed;
     private boolean recovered;
@@ -97,6 +98,25 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
         return prepared;
     }
 
+    /** 从任务预留中直接消费资源，适用于 RS 绑定的逻辑池。 */
+    public boolean tryConsume() {
+        if (completed || recovered || prepared || total <= 0) return false;
+        if (reservation == null) {
+            reservation = taskReservation != null
+                    ? taskReservation.pool(kind)
+                    : MagicResourceEndpoint.reserve(server, kind, total);
+        }
+        if (reservation.remaining() < total) return false;
+        int withdrawn = reservation.withdraw(total);
+        if (withdrawn != total) {
+            if (withdrawn > 0) reservation.refund(withdrawn);
+            return false;
+        }
+        consumed = withdrawn;
+        prepared = true;
+        return true;
+    }
+
     /**
      * 幂等检查并补足机器余额。目标容量暂时不足时返回 false，调用方可以稍后重试。
      */
@@ -145,6 +165,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     public void complete() {
         if (completed || recovered) return;
         completed = true;
+        consumed = 0;
         if (taskReservation != null) taskReservation.injectedConsumed(injectionId);
         releaseReservation();
     }
@@ -153,6 +174,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     public void recover() {
         if (completed || recovered) return;
         recovered = true;
+        recoverConsumed();
         recoverInjected();
         if (taskReservation != null && injectionId != null) {
             taskReservation.injectedRecovered(injectionId, injected);
@@ -167,6 +189,13 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
         int extracted = Math.max(0, Math.min(reclaimable, target.extract(reclaimable)));
         if (extracted > 0 && reservation != null) reservation.refund(extracted);
         injected = Math.max(0, injected - extracted);
+    }
+
+    private void recoverConsumed() {
+        if (reservation != null && consumed > 0) {
+            reservation.refund(consumed);
+            consumed = 0;
+        }
     }
 
     private void releaseReservation() {

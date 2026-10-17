@@ -10,10 +10,15 @@ import net.minecraftforge.fluids.FluidStack;
 import java.util.UUID;
 
 /** template 为空表示数量增量；metadata=true 且两个 UUID 均空表示删除。 */
-public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID storedId,
+public record UnifiedGridEntry(int serial, int amount, int capacity, boolean metadata, UUID storedId,
                                UUID craftableId, Object template, StorageTrackerEntry tracker) {
     public UnifiedGridEntry {
-        if (serial <= 0 || amount < 0) throw new IllegalArgumentException("无效终端条目");
+        if (serial <= 0 || amount < 0 || capacity < 0) throw new IllegalArgumentException("无效终端条目");
+    }
+
+    public UnifiedGridEntry(int serial, int amount, boolean metadata, UUID storedId,
+                            UUID craftableId, Object template, StorageTrackerEntry tracker) {
+        this(serial, amount, 0, metadata, storedId, craftableId, template, tracker);
     }
 
     public boolean removed() { return metadata && storedId == null && craftableId == null; }
@@ -21,6 +26,7 @@ public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID st
     public void write(FriendlyByteBuf buf, GridResourceKind kind) {
         buf.writeVarInt(serial);
         buf.writeVarInt(amount);
+        if (kind.isMagic()) buf.writeVarInt(capacity);
         buf.writeBoolean(metadata);
         if (metadata) {
             writeId(buf, storedId);
@@ -41,6 +47,7 @@ public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID st
     public static UnifiedGridEntry read(FriendlyByteBuf buf, GridResourceKind kind) {
         int serial = buf.readVarInt();
         int amount = buf.readVarInt();
+        int capacity = kind.isMagic() ? buf.readVarInt() : 0;
         boolean metadata = buf.readBoolean();
         UUID stored = metadata ? readId(buf) : null;
         UUID craftable = metadata ? readId(buf) : null;
@@ -52,7 +59,7 @@ public record UnifiedGridEntry(int serial, int amount, boolean metadata, UUID st
             if (kind.amount(template) != 1) throw new IllegalArgumentException("显示模板数量必须为 1");
         }
         StorageTrackerEntry tracker = buf.readBoolean() ? new StorageTrackerEntry(buf.readLong(), buf.readUtf(256)) : null;
-        return new UnifiedGridEntry(serial, amount, metadata, stored, craftable, template, tracker);
+        return new UnifiedGridEntry(serial, amount, capacity, metadata, stored, craftable, template, tracker);
     }
 
     private static void writeId(FriendlyByteBuf buf, UUID id) {
