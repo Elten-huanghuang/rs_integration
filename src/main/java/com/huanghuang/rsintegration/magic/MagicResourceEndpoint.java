@@ -55,6 +55,12 @@ public final class MagicResourceEndpoint {
         return MagicResourceReservations.reserve(UnifiedDiskManager.existing(server), kind, requested);
     }
 
+    /** 在指定 RS 网络中预留；预留凭据只操作该网络的归墟盘。 */
+    public static MagicResourceNetworkPool reserve(@Nullable INetwork network,
+                                                   MagicResourceKind kind, int requested) {
+        return MagicResourceReservations.reserve(networkDisks(network), kind, requested);
+    }
+
     /** 充入库存，返回实际接收量。 */
     public static int insert(@Nullable MinecraftServer server, MagicResourceKind kind,
                              int requested, boolean perform) {

@@ -42,10 +42,16 @@ public final class MagicResourceReservations {
 
     /** 在当前已挂载的盘上预留，返回可继续提取的凭据。 */
     public static Pool reserve(UnifiedDiskManager manager, MagicResourceKind kind, int requested) {
+        return reserve(manager == null ? List.of() : MagicDiskStore.mountedDisks(manager),
+                kind, requested);
+    }
+
+    /** 在给定网络磁盘集合上预留，返回可继续提取的凭据。 */
+    public static Pool reserve(List<UnifiedDiskCore> disks, MagicResourceKind kind,
+                               int requested) {
         Pool pool = new Pool(kind);
-        if (manager == null || requested <= 0) return pool;
+        if (disks == null || disks.isEmpty() || requested <= 0) return pool;
         synchronized (LOCK) {
-            List<UnifiedDiskCore> disks = MagicDiskStore.mountedDisks(manager);
             int left = Math.min(requested, MagicDiskStore.capacity(disks, kind));
             for (UnifiedDiskCore disk : disks) {
                 if (left <= 0) break;
