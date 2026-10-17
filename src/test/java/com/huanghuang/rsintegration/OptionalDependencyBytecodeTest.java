@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.magic.MagicStackGridStack;
 import com.huanghuang.rsintegration.magic.BrazierSoulPort;
 import com.huanghuang.rsintegration.magic.DarkAltarSoulPort;
 import com.huanghuang.rsintegration.magic.GoetySoulNetworkPool;
+import com.huanghuang.rsintegration.magic.GoetySoulRefill;
 import com.huanghuang.rsintegration.magic.GoetySoulSourceCoordinator;
 import com.huanghuang.rsintegration.magic.GoetyVirtualSoulAccess;
 import com.huanghuang.rsintegration.magic.LiquidSoulEnergyTexture;
@@ -381,6 +382,7 @@ class OptionalDependencyBytecodeTest {
                 DarkAltarSoulPort.class,
                 GoetySoulNetworkPool.class,
                 GoetySoulSourceCoordinator.class,
+                GoetySoulRefill.class,
                 GoetyVirtualSoulAccess.class,
                 LiquidSoulEnergyTexture.class,
                 MagicStackGridStack.class,
@@ -400,6 +402,7 @@ class OptionalDependencyBytecodeTest {
                 DarkAltarSoulPort.class,
                 GoetySoulNetworkPool.class,
                 GoetySoulSourceCoordinator.class,
+                GoetySoulRefill.class,
                 GoetyVirtualSoulAccess.class,
                 GoetySoulStack.class,
                 LiquidSoulEnergyTexture.class,

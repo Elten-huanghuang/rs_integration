@@ -107,6 +107,7 @@ Open an RS crafting grid to consume food directly from the network:
 - **Embers Rekindled** can help solve Alchemy Tablet recipes and remember solutions for next time.
 - **Aetherworks** can automate hammering and material restocking at its forge, with temperature and progress shown on screen.
 - **Goety** can prepare supported rituals, but leaves the final activation to you. Long rituals account for their full soul cost.
+- The `integrations.enableGoetySoulReverseRefill` option is disabled by default. When enabled, soul consumption from the Arca refills it to capacity from the bound RS network, with at most one attempt every 20 ticks per player. When disabled, only the original Arca overflow-to-RS behavior remains.
 - Kettles, steamers, and fermentation machines from Farmer's Respite and Youkai's Homecoming can be included in crafting chains, including recipes that use fluids.
 
 ### Apotheosis Spawner Upgrades
