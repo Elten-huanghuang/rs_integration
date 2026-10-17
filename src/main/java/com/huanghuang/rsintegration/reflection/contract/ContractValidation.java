@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.api.VersionRange;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
 import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.reflection.probes.BackpackReflection;
+import com.huanghuang.rsintegration.reflection.probes.BossesDelightReflection;
+import com.huanghuang.rsintegration.reflection.probes.CasualnessDelightReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrabbersDelightReflection;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
@@ -17,6 +19,7 @@ import com.huanghuang.rsintegration.reflection.probes.FarmingForBlockheadsReflec
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
 import com.huanghuang.rsintegration.reflection.probes.JEIReflection;
+import com.huanghuang.rsintegration.reflection.probes.LetsDoReflection;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
@@ -182,6 +185,8 @@ public final class ContractValidation {
         tryLoadProbe("Aetherworks", () -> AetherworksReflection.anvilBEClass);
         tryLoadProbe("ArsNouveau", () -> ArsNouveauReflection.imbuementTileClass);
         tryLoadProbe("Backpack", () -> BackpackReflection.backpackBEClass);
+        tryLoadProbe("BossesDelight", () -> BossesDelightReflection.soulCookingPotBEClass);
+        tryLoadProbe("CasualnessDelight", () -> CasualnessDelightReflection.deepFryingPanBEClass);
         tryLoadProbe("CrabbersDelight", () -> CrabbersDelightReflection.crabTrapBEClass);
         tryLoadProbe("CrockPot", () -> CrockPotReflection.crockPotBEClass);
         tryLoadProbe("DistantWorlds", () -> DistantWorldsReflection.lithumCoreBlockClass);
@@ -194,6 +199,7 @@ public final class ContractValidation {
         tryLoadProbe("FR", () -> FRReflection.kettleBEClass);
         tryLoadProbe("Goety", () -> GoetyReflection.darkAltarBEClass);
         tryLoadProbe("ImmersalsDelight", () -> ImmersalsDelightReflection.enchantalCoolerBEClass);
+        tryLoadProbe("LetsDo", () -> LetsDoReflection.farmAndCharmCookingPotBE);
         tryLoadProbe("JEI", () -> JEIReflection.ingredientListOverlayClass);
         tryLoadProbe("Malum", () -> MalumReflection.spiritAltarBEClass);
         tryLoadProbe("TLM", () -> TLMReflection.altarBEClass);

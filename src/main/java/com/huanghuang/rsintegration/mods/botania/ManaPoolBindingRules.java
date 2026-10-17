@@ -34,10 +34,8 @@ final class ManaPoolBindingRules {
 
         BlockPos poolPos = bindingIsPool ? bindingPos.immutable() : bindingPos.above().immutable();
         if (!recipeHasCatalyst) {
-            return bindingIsPool
-                    ? new Assessment(State.READY, poolPos, "")
-                    : new Assessment(State.FATAL, null,
-                    "Plain Mana Pool recipes require a direct Mana Pool binding");
+            // 无催化剂配方只依赖池底状态；直接绑定池或绑定其下方催化剂都合法。
+            return new Assessment(State.READY, poolPos, "");
         }
         if (bindingIsPool) {
             return catalystMatchesBelowPool

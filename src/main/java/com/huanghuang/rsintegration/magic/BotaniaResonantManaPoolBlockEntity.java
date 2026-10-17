@@ -1,39 +1,58 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.mixin.core.BlockEntityTypeAccessor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.util.LazyOptional;
 import vazkii.botania.api.BotaniaForgeCapabilities;
 import vazkii.botania.api.block.Wandable;
-import vazkii.botania.api.mana.ManaPool;
 import vazkii.botania.api.mana.ManaReceiver;
-import vazkii.botania.api.mana.spark.ManaSpark;
 import vazkii.botania.api.mana.spark.SparkAttachable;
-
-import java.util.Optional;
+import vazkii.botania.common.block.block_entity.mana.ManaPoolBlockEntity;
 
 /** Botania 原生 ManaPool/Spark 适配；容量跟随绑定网络中的归墟盘总容量。 */
-public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlockEntity
-        implements ManaPool, SparkAttachable, Wandable {
+public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntity
+        implements ResonantMagicStorage {
     private static final String OUTPUTTING = "BotaniaOutputting";
+    private final ResonantMagicStorageData storage;
     private LazyOptional<ManaReceiver> manaReceiver = LazyOptional.of(() -> this);
     private LazyOptional<SparkAttachable> sparkAttachable = LazyOptional.of(() -> this);
     private LazyOptional<Wandable> wandable = LazyOptional.of(() -> this);
     private boolean outputting;
 
     public BotaniaResonantManaPoolBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-        super(type, pos, state, MagicResourceKind.MANA, MagicResourceKind.MANA.capacity());
+        super(pos, state);
+        setRegisteredType(this, type);
+        storage = new ResonantMagicStorageData(this, MagicResourceKind.MANA,
+                MagicResourceKind.MANA.capacity());
     }
+
+    private static void setRegisteredType(ManaPoolBlockEntity entity, BlockEntityType<?> type) {
+        if (entity instanceof BlockEntityTypeAccessor accessor) {
+            accessor.rsi$setType(type);
+        }
+    }
+
+    @Override public MagicResourceKind resourceKind() { return storage.kind(); }
+    @Override public int resourceCapacity() { return storage.resourceCapacity(); }
+    @Override public boolean isBound() { return storage.isBound(); }
+    @Override public CompoundTag binding() { return storage.binding(); }
+    @Override public void setBinding(CompoundTag next) { storage.setBinding(next); }
+    @Override public void clearBinding() { storage.clearBinding(); }
+    @Override public boolean isBoundTo(CompoundTag next) { return storage.isBoundTo(next); }
+    @Override public int currentAmount() { return storage.currentAmount(); }
+    @Override public boolean reachable() { return storage.reachable(); }
+    @Override public int insert(int amount) { return storage.insert(amount); }
+    @Override public int extract(int amount) { return storage.extract(amount); }
+    @Override public void serverTick() { storage.serverTick(); }
 
     @Override
     public <T> LazyOptional<T> getCapability(Capability<T> capability, Direction side) {
@@ -59,9 +78,7 @@ public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlock
         wandable = LazyOptional.of(() -> this);
     }
 
-    @Override public Level getManaReceiverLevel() { return level; }
-    @Override public BlockPos getManaReceiverPos() { return worldPosition; }
-    @Override public int getCurrentMana() { return currentAmount(); }
+    @Override public int getCurrentMana() { return storage.currentAmount(); }
     @Override public boolean isFull() { return getCurrentMana() >= resourceCapacity(); }
     @Override public void receiveMana(int mana) {
         if (mana > 0) {
@@ -72,24 +89,12 @@ public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlock
             extract(Math.min(requested, Math.max(0, getCurrentMana())));
         }
     }
-    /** 只有绑定且可达的网络才有实际库存，避免魔力束输出后发生能量丢失。 */
+
     @Override public boolean canReceiveManaFromBursts() {
         return isBound() && reachable() && !isFull();
     }
     @Override public boolean isOutputtingPower() { return outputting; }
     @Override public int getMaxMana() { return resourceCapacity(); }
-    @Override public Optional<DyeColor> getColor() { return Optional.empty(); }
-    @Override public void setColor(Optional<DyeColor> color) {}
-    @Override public boolean canAttachSpark(ItemStack stack) { return true; }
-    @Override public ManaSpark getAttachedSpark() {
-        if (level == null) return null;
-        AABB area = new AABB(worldPosition.above(), worldPosition.above().offset(1, 1, 1));
-        var sparks = level.getEntitiesOfClass(Entity.class, area).stream()
-                .filter(ManaSpark.class::isInstance)
-                .map(ManaSpark.class::cast)
-                .toList();
-        return sparks.size() == 1 ? sparks.get(0) : null;
-    }
     @Override public int getAvailableSpaceForMana() {
         return isBound() && reachable()
                 ? Math.max(0, resourceCapacity() - getCurrentMana()) : 0;
@@ -111,12 +116,24 @@ public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlock
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        storage.save(tag);
         tag.putBoolean(OUTPUTTING, outputting);
     }
 
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
+        storage.load(tag);
         outputting = tag.getBoolean(OUTPUTTING);
+    }
+
+    @Override
+    public CompoundTag getUpdateTag() {
+        return saveWithoutMetadata();
+    }
+
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
     }
 }

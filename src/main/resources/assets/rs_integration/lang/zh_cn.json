@@ -1,4 +1,8 @@
 {
+  "block.rs_integration.resonant_magic.bound": "已绑定到 RS 网络",
+  "block.rs_integration.resonant_magic.unbound": "已解除 RS 网络绑定",
+  "block.rs_integration.resonant_magic.unreachable": "RS 网络不可达",
+  "block.rs_integration.resonant_magic.unavailable": "共振方块数据尚未就绪，请稍后再试",
   "rsi.update.available": "[RS Integration] 新版本 %s 已发布。",
   "rsi.update.download": "前往 Modrinth 下载",
   "rsi.update.download_hover": "打开 Modrinth 版本页面",
@@ -43,6 +47,8 @@
   "gui.rs_integration.jei.irons_spellbooks_ink_bottling": "墨水装瓶",
   "gui.rs_integration.jei.fluid_container": "液体容器转换",
   "gui.rs_integration.jei.fluid_container_craft": "装填或排空液体容器",
+  "gui.rs_integration.native_recipe_book_craft": "RS下单",
+  "gui.rs_integration.native_recipe_book_craft.select_recipe": "请先在配方书中选择一个配方",
   "rsi.batch.mod.fluid_container": "液体容器转换",
   "rsi.batch.mod.irons_spellbooks_alchemist_cauldron": "炼金锅",
   "rsi.alchemist.recycle_hint": "卷轴回收 · 250 mB",
@@ -150,6 +156,10 @@
   "rsi.plan.mode.prepare.tooltip": "开启后只合成当前能完成的中间产物并回收到网络，不执行最终目标；再次点击可恢复严格模式",
   "rsi.plan.prepare.action": "准备材料",
   "itemGroup.rs_integration.main": "RS 集成",
+  "block.rs_integration.resonant_mana_pool": "共振魔力池",
+  "block.rs_integration.resonant_source_tank": "共振魔源罐",
+  "item.rs_integration.resonant_mana_pool": "共振魔力池",
+  "item.rs_integration.resonant_source_tank": "共振魔源罐",
   "gui.sophisticatedcore.upgrades.rs_pickup": "次元拾取",
   "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "次元拾取设置",
   "gui.sophisticatedcore.upgrades.rs_magnet": "次元磁铁",
@@ -189,6 +199,7 @@
   "gui.rs_integration.altar.binding.rs_bind_hint": "§7使用已连接的存储终端绑定此祭坛",
   "gui.rs_integration.binding_hint.bind": "可绑定  §7蹲下 + 右键",
   "gui.rs_integration.binding_hint.unbind": "已绑定  §7蹲下 + 右键解绑",
+  "gui.rs_integration.binding_hint.connect_network": "请先将 RS 终端绑定到网络",
   "gui.rs_integration.binding_hint.bind_alt": "可绑定  §7Alt + 右键",
   "gui.rs_integration.binding_hint.unbind_alt": "已绑定  §7Alt + 右键解绑",
   "gui.rs_integration.spawner_hint.open": "打开刷怪笼升级  §7蹲下 + 右键",
@@ -350,7 +361,6 @@
   "rsi.ftb_quest.info.crafting_started": "§e已开始递归合成任务材料，共 %s 个步骤",
   "gui.rs_integration.status.stacks_deposited": "已存入存储网络 %s 组物品（共 %s 个）",
   "gui.rs_integration.status.nothing_to_deposit": "没有可存入存储网络的物品",
-
   "rsi.vanilla.error.wrong_furnace_type": "§c配方与机器类型不匹配 — 请使用对应的熔炉、高炉或烟熏炉",
   "rsi.vanilla.error.furnace_occupied": "§c熔炉输入槽已有不匹配此配方的物品 — 请先取出",
   "rsi.vanilla.error.campfire_full": "§c营火已满（4个槽位均被占用）—— 请等待有物品烹饪完成后再试",
@@ -371,7 +381,6 @@
   "rsi.ironfurnaces.error.machine_type_mismatch": "§c此配方与熔炉当前安装的烧炼增强不匹配",
   "rsi.ironfurnaces.error.no_fuel": "§c存储网络中没有可用于此更多熔炉的燃料",
   "rsi.ironfurnaces.info.fuel_supplied": "§a已向更多熔炉自动补充 %s 个燃料",
-
   "rsi.generic.error.dim_not_found": "§c无法找到目标维度",
   "rsi.generic.error.recipe_not_found": "§c配方未找到: %s",
   "rsi.generic.error.recipe_stage_missing": "§c你尚未解锁该配方所需的阶段。",
@@ -409,9 +418,7 @@
   "rsi.generic.preparation.blocked": "§c无法准备中间产物：中间产物本身仍缺少材料：%s。最终目标未执行。",
   "rsi.generic.preparation.none": "§e没有可独立合成的中间产物：%s。最终目标未执行。仍缺少：%s",
   "rsi.recovery.incomplete": "§eRS Integration: %s 个物品未能自动回收，位置 %s。请手动检查机器。",
-
   "rsi.error.circuit_breaker_tripped": "§c合成已中止：连续 %s 次失败，跳过 %s 次剩余合成",
-
   "rsi.embers.pedestal_layout": "炼金台布局",
   "rsi.embers.seed_label": "种子: %s",
   "rsi.embers.mode_label": "模式:",
@@ -427,7 +434,6 @@
   "rsi.embers.infer.paused_missing_tablet": "§e推断已暂停：缺少炼金基底 %s。已完成 %s 次尝试，剩余 %s 个候选；进度已持久化保存，补足后重新发起该配方即可继续。",
   "rsi.embers.infer.paused_missing_aspect": "§e推断已暂停：缺少元素象征（Aspectus）%s。已完成 %s 次尝试，剩余 %s 个候选；进度已持久化保存，补足后重新发起该配方即可继续。",
   "rsi.embers.infer.paused_missing_input": "§e推断已暂停：缺少炼金输入 %s。已完成 %s 次尝试，剩余 %s 个候选；进度已持久化保存，补足后重新发起该配方即可继续。",
-
   "rsi.embers.error.too_many_combos": "§c可能的排列组合过多（%s）—— 超出限制（%s）。请使用计算模式。",
   "rsi.embers.error.not_tablet": "§c绑定位置没有炼金台 — 方块可能已被移除",
   "rsi.embers.error.not_alchemy_recipe": "§c配方 %s 不是炼金配方",
@@ -452,7 +458,6 @@
   "rsi.embers.code_from_cache": "§a✔ 已有推断记录",
   "rsi.embers.info.code_cached": "§a✔ 炼金编码已从之前的推断中得知 — 将使用已知的基座布局",
   "rsi.embers.info.recycled": "§a✔ 已将 %s 个阻挡物品从上一次合成中回收到存储网络",
-
   "rsi.eidolon.error.craft_failed": "§c炼药失败",
   "rsi.eidolon.error.crucible_not_found": "§c无法找到幻之坩埚 (需要装有水并加热)",
   "rsi.eidolon.warn.needs_water": "§e幻之坩埚需要先装水",
@@ -472,7 +477,6 @@
   "rsi.eidolon.error.insufficient_ritual_health": "§c仪式附近需要生物提供至少 %.1f 点生命值，当前仅有 %.1f 点",
   "rsi.eidolon.warn.pedestal_items": "§7需要 %s 个基座物品",
   "rsi.eidolon.warn.needs_focus": "§7请确保附近已安放魔力基座并放置所需物品",
-
   "rsi.malum.error.craft_failed": "§c精魂灌注失败",
   "rsi.malum.error.altar_not_found": "§c无法找到精魂祭坛方块实体",
   "rsi.malum.error.inventory_error": "§c精魂祭坛库存结构异常",
@@ -484,7 +488,6 @@
   "rsi.malum.warn.spirit_required": "§7精魂需求: %s",
   "rsi.malum.warn.spirit_slots_insufficient": "§e祭坛只有 %s 个精魂槽位，配方需要 %s 个",
   "rsi.malum.error.not_runic_workbench": "§c绑定位置没有符文工作台",
-
   "rsi.malum_crucible.error.mod_missing": "§cMalum 模组未加载，合成不可用",
   "rsi.malum_crucible.error.not_crucible": "§c绑定位置没有精魂坩埚",
   "rsi.malum_crucible.error.inventory_error": "§c精魂坩埚库存结构异常",
@@ -494,7 +497,6 @@
   "rsi.malum_crucible.error.recipe_rejected": "§c精魂坩埚未接受配方 %s，请检查催化剂、灵魂材料和多方块结构",
   "rsi.malum_crucible.warn.spirit_required": "§7精魂需求: %s",
   "rsi.malum_crucible.warn.spirit_slots_insufficient": "§e坩埚只有 %s 个精魂槽位，配方需要 %s 个",
-
   "rsi.fa.error.craft_failed": "§c仪式启动失败",
   "rsi.fa.error.ritual_not_found": "§c仪式未找到: %s",
   "rsi.fa.error.forge_not_found": "§c无法找到赫菲斯托斯锻炉",
@@ -526,7 +528,6 @@
   "rsi.fa.warn.enhancer_required": "§6⚠ 需要增强器: %s — 绑定锻炉后可检测是否已安装",
   "rsi.fa.warn.cant_check_enhancers": "§6⚠ 无法读取增强器需求 — 请绑定锻炉后重试",
   "rsi.fa.warn.essence_slot_empty": "精华槽位%s为空 (需要%s精华)",
-
   "rsi.wr.error.parse_failed": "§c无法解析配方材料",
   "rsi.wr.alchemy.error.boiler_missing": "§c炼金机正上方缺少炼金锅炉，请绑定炼金机并补齐结构",
   "rsi.wr.alchemy.error.capacity": "§c炼金配方超出容量：最多 6 种物品和 3 种液体",
@@ -574,7 +575,6 @@
   "rsi.async.earth_heart.error.timeout": "大地之心污染超时；该物品仍保留在你的物品栏中",
   "rsi.async.earth_heart.error.slot_invalid": "大地之心的污染暂存槽位已失效",
   "rsi.async.earth_heart.error.moved": "大地之心已被移动；该物品仍由玩家持有",
-
   "rsi.goety.error.altar_not_found": "§c无法找到黑暗祭坛方块实体",
   "rsi.goety.error.one_click_failed": "§c一键合成失败，请检查材料是否齐全且基座是否足够",
   "rsi.goety.warn.ritual_running": "§c祭坛正在执行另一个仪式，请等待完成",
@@ -582,7 +582,6 @@
   "rsi.goety.error.soul_insufficient": "§c灵魂能量不足 (需要 %s，当前 %s)",
   "rsi.goety.error.ritual_prerequisites": "§c仪式前置条件不满足（请检查群系、天气、时间或所需物品）",
   "rsi.goety.error.ritual_start_failed": "§c仪式启动失败，请检查祭坛状态和配方条件",
-
   "rsi.batch.error.mod_missing": "§c模组 %s 未加载，合成不可用",
   "rsi.batch.error.machine_mismatch": "§c机器未识别配方材料",
   "rsi.batch.mod.farmersrespite_kettle": "茶壶冲泡",
@@ -653,7 +652,6 @@
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ 当前P点不足（当前 %s，需要 %s）— 合成时将失败",
   "rsi.tlm.warn.insufficient_power_points": "§e⚠ P点不足（能力值+物品合计 %s，需要 %s）",
   "rsi.tlm.error.handler_not_empty": "祭坛存储槽位已被占用 — 可能另有任务正在运行",
-
   "rsi.plan.title": "合成方案: %s",
   "rsi.plan.confirm": "合成",
   "rsi.plan.cancel": "取消",
@@ -723,7 +721,6 @@
   "rsi.plan.failure.dynamic_plan_unavailable": "此配方包含动态、变换或材料锁定输入，当前无法安全生成完整计划。",
   "rsi.plan.missing_header": "无法获取:",
   "rsi.plan.missing_more": "... (+%s 更多)",
-  
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",
   "rsi.plan.repeat_count": "次数:",
@@ -736,7 +733,6 @@
   "rsi.plan.bookmark_all.tooltip": "将所有缺失的最终原材料加入收藏",
   "rsi.plan.bookmark_all.result": "收藏：新增 %s 种，已存在 %s 种，无法加入 %s 种",
   "rsi.plan.bookmark_all.unavailable": "收藏当前不可用",
-
   "rsi.async.chain_started": "§a已启动多方块合成链（%s 步）。完成后物品将送入选定存储网络。",
   "rsi.async.chain_started_player": "§a已启动多方块合成链（%s 步）。完成后最终产物将送入玩家背包。",
   "rsi.async.cancel_button": "[取消合成]",
@@ -844,7 +840,6 @@
   "rsi.progress.step.unknown": "未知中间步骤",
   "rsi.progress.step.recipe": "配方：%s",
   "rsi.progress.step.more": "另有 %s 个同阶段步骤",
-
   "rsi.goety.warn.altar_busy": "§c黑暗祭坛正在执行仪式，请稍后再试",
   "rsi.goety.error.insufficient_souls": "§c灵魂能量不足 (需要 %s，当前 %s)",
   "rsi.goety.error.unsupported_ritual_type": "§c不支持的仪式类型：%s（仅支持合成/附魔仪式）",
@@ -872,7 +867,6 @@
   "rsi.goety.error.brazier_no_candlesticks": "§c附近没有灵魂烛台 — 亡灵火炉需要烛台提供灵魂能量",
   "rsi.goety.summon_prepared": "§a基座材料已从存储网络填充完毕，§e%s§a 已放入背包。为防止误召唤，RSI不会自动启动仪式；请确认环境安全后，手持激活物品右键黑暗祭坛。",
   "rsi.goety.manual_ritual_prepared": "§a基座材料已从存储网络填充完毕，§e%s§a 已放入背包。RSI不会自动启动召唤、献祭或转化仪式；请确认目标和环境后，手持激活物品右键黑暗祭坛。",
-
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "一键存入存储网络",
   "key.rsi.toggle_mode": "切换传输模式",
@@ -888,15 +882,10 @@
   "rsi.transfer.backpack_success": "已转移 %s 个物品 (共 %s 组) 到精妙背包",
   "rsi.transfer.backpack_self": "§c不能将背包物品转移到自身 — 请先切换到存储网络模式",
   "rsi.transfer.self_network_blocked": "§c无法将网络存储介质或已绑定网络物品存入其自身存储网络",
-
   "key.rsi.side_panel": "切换 RS 侧边面板",
   "key.rsi.machine_hub": "切换机器面板",
-  
-  
-  
   "key.rsi.clear_search": "清空搜索",
   "key.rsi.mod_filter": "按模组过滤",
-  
   "key.rsi.transfer_recipe": "传输配方",
   "key.rsi.swipe_extract": "RS 网格滑动提取",
   "key.rsi.bind_nearby": "绑定附近机器",
@@ -966,23 +955,17 @@
   "rsi.error.machine_missing": "§c目标机器已不存在，绑定已移除",
   "rsi.generic.machine_gui_opened": "§a已打开机器界面",
   "rsi.generic.machine_gui_failed": "§c打开机器界面失败",
-
   "rsi.error.wireless_no_energy": "§c无线终端电量耗尽，请充电",
-
   "rsi.error.protection_denied": "§c无法操作此机器——位于受保护的领地上",
-
   "rsi.repeat.done": "§a已成功完成 %s 次合成",
   "rsi.repeat.aborted": "§e后续 %s 次合成已中止——合成环境发生改变。",
-
   "rsi.hub.title": "机器集成中心 (%s)",
   "rsi.hub.machine_count": "已绑定 %s 台机器",
   "rsi.hub.back_to_grid": "返回网格",
-
   "rsi.hub.tooltip_click": "点击展开/收起",
   "rsi.hub.filter_hint": "过滤机器...",
   "rsi.hub.no_machines": "没有匹配的机器。",
   "rsi.hub.key_toggle": "%s: 开关面板",
-
   "rsi.hub.state.has_output": "产物就绪",
   "rsi.hub.state.working": "工作中 %s%%",
   "rsi.hub.state.idle": "空闲",
@@ -991,18 +974,15 @@
   "rsi.hub.controls.quick_has_output": "空手左键:收取  空手Shift:回收RS  右键:打开",
   "rsi.hub.controls.quick_normal": "拿物品左键:放入  拿物品Shift:放燃料  空手左键:打开GUI",
   "rsi.hub.controls.gui": "左键/右键:打开GUI",
- "rsi.hub.favorite": "左键左上角星标：添加到机器快捷栏",
- "rsi.hub.unfavorite": "左键左上角星标：从机器快捷栏移除",
- "rsi.hub.unbind": "Ctrl + 左键：解除绑定",
- "rsi.hub.favorite_limit": "机器快捷栏最多收藏 %s 台机器",
-
+  "rsi.hub.favorite": "左键左上角星标：添加到机器快捷栏",
+  "rsi.hub.unfavorite": "左键左上角星标：从机器快捷栏移除",
+  "rsi.hub.unbind": "Ctrl + 左键：解除绑定",
+  "rsi.hub.favorite_limit": "机器快捷栏最多收藏 %s 台机器",
   "rsi.plan.open_machine": "打开机器",
   "rsi.jei.open_machine": "打开绑定的机器界面",
-
   "rsi.error.not_authorized": "§c你没有权限访问此机器界面。",
   "rsi.error.dim_not_loaded": "§c目标维度未加载。",
   "rsi.error.too_far": "§c绑定的机器距离太远（最大 %s 格）。",
-
   "rsi.machine.state.has_output": "产物可取",
   "rsi.machine.state.working": "工作中 %s",
   "rsi.machine.state.idle": "空闲",
@@ -1015,7 +995,6 @@
   "rsi.machine.hint.insert": "手持物品+左键: 放入输入槽 | Shift: 放入燃料槽",
   "rsi.machine.type.gui": "GUI型机器 — 需要手动操作",
   "rsi.machine.hint.open_gui": "空手左键: 打开机器界面",
-
   "rsi.machine.error.not_bound": "§c此机器不再绑定于你。",
   "rsi.machine.error.required_mod_missing": "§c缺少所需模组 %s，已保留原绑定。",
   "rsi.machine.error.binding_block_changed": "§c绑定位置的方块与保存的机器不再匹配。",
@@ -1025,7 +1004,6 @@
   "rsi.machine.error.slot_mismatch": "§c此物品与槽位中已有的物品不匹配。",
   "rsi.machine.error.slot_full": "§c目标槽位已满。",
   "rsi.machine.collected": "§a已收取 %s× %s。",
-
   "rsi.aetherworks.error.not_anvil": "§c绑定位置没有天华砧。",
   "rsi.aetherworks.error.not_tool_station": "§c绑定位置没有锻造工具站。",
   "rsi.aetherworks.error.not_metal_former": "§c绑定位置没有金属成型台。",
@@ -1070,6 +1048,9 @@
   "gui.rs_integration.jei.aether_altar_craft": "通过天境祭坛合成",
   "gui.rs_integration.jei.crockpot_cook": "通过烹饪锅远程烹饪",
   "gui.rs_integration.jei.crockpot_birdcage_feed": "通过鸟笼喂养鹦鹉",
+  "gui.rs_integration.jei.farm_and_charm_cooking_pot_craft": "通过宴会锅远程烹饪",
+  "gui.rs_integration.jei.farm_and_charm_roaster_craft": "通过烘焙机远程烘烤",
+  "gui.rs_integration.jei.candlelight_cooking_pot_craft": "通过大汤锅远程烹饪",
   "gui.rs_integration.jei.immortalers_cooler_craft": "通过魔凝机远程合成",
   "gui.rs_integration.jei.immortalers_hot_spring_craft": "通过怨泉远程浸泡",
   "rsi.batch.mod.crabbersdelight": "蟹笼诱捕",
@@ -1098,7 +1079,6 @@
   "gui.rs_integration.jei.avaritia_smithing": "通过终极锻造台制作",
   "rsi.batch.mod.tacz": "枪械工作台",
   "gui.rs_integration.jei.tacz_craft": "通过枪械工作台制作",
-
   "rsi.crabtrap.error.not_crab_trap": "§c此位置不是蟹笼",
   "rsi.crabtrap.error.bait_insert_failed": "§c无法将诱饵放入蟹笼",
   "gui.rs_integration.jei.fd_cooking_pot_craft": "通过烹饪锅远程烹饪",
@@ -1109,6 +1089,15 @@
   "gui.rs_integration.jei.td_fiery_pot_craft": "通过炽铁锅远程烹饪",
   "rsi.batch.mod.twilightdelight_fiery_cooking_pot": "炽铁锅",
   "rsi.twilightdelight.heat_warning": "§7炽铁锅自带热源，无需在下方放置热源方块。",
+  "gui.rs_integration.jei.bd_soul_cooking_pot_craft": "通过灵魂锅远程烹饪",
+  "rsi.batch.mod.bosses_delight_soul_cooking_pot": "灵魂锅",
+  "rsi.bossesdelight.no_cold_source": "§c灵魂锅下方没有检测到冰、浮冰或蓝冰冷源。",
+  "rsi.bossesdelight.cold_source_warning": "§7灵魂锅需要在下方放置冰、浮冰或蓝冰。",
+  "rsi.bossesdelight.container_stays": "§7每份产物都会消耗一个装盛容器。",
+  "gui.rs_integration.jei.cd_deep_frying_pan_craft": "通过炸锅远程油炸",
+  "rsi.batch.mod.casualness_delight_deep_frying_pan": "炸锅",
+  "rsi.casualness_delight.no_heat": "§c炸锅没有检测到原生热源。",
+  "rsi.casualness_delight.heat_warning": "§7炸锅需要在方块下方放置原生支持的热源。",
   "gui.rs_integration.jei.fd_skillet_craft": "通过煎锅远程烹饪",
   "gui.rs_integration.jei.fd_cutting_board_craft": "通过砧板远程切割",
   "rsi.farmersdelight.no_heat": "§c锅下方没有检测到热源，请在锅下方放置热源（营火、岩浆块等）",
@@ -1172,7 +1161,6 @@
   "rsi.batch.mod.youkaishomecoming_kettle": "水壶",
   "rsi.batch.mod.youkaishomecoming_cuisine": "料理台",
   "rsi.batch.mod.youkaishomecoming": "YHK设备",
-
   "item.rs_integration.resonance_storage_disk": "共振存储盘",
   "item.rs_integration.resonance_storage_disk.tooltip": "万物入盘，诸法随身。",
   "item.rs_integration.resonance_storage_disk.tooltip.subtitle": "无需攥于掌心，万千咒物，于网络之中持续回响力量。",
@@ -1211,20 +1199,16 @@
   "rsi.resonance.bd.tooltip.unbound": "状态：未绑定，右键绑定当前存储网络",
   "rsi.resonance.bd.tooltip.network": "绑定网络：#%s",
   "rsi.resonance.bd.tooltip.uuid": "空间标识：%s",
-
   "rsi.machine_center.title": "机器管理中心",
   "rsi.machine_center.machine_count": "%s 台机器已绑定",
   "rsi.machine_center.no_machines": "暂无已绑定的机器",
   "rsi.machine_center.tooltip_click": "点击打开 / Enter 切换",
-
   "rsi.resonance_backpack.title": "共振背包",
   "rsi.resonance_backpack.tooltip_click": "点击打开共振背包",
   "rsi.resonance_backpack.no_disk": "当前网络无共振盘",
-
   "rsi.resonance.duplicate_disk": "§c此 存储网络已绑定共振盘，同一网络只能使用一个共振盘。",
   "rsi.resonance.void_favor_unlocked": "§5共振盘已继承哭泣之井的虚空恩惠",
   "rsi.resonance.void_favor_no_disk": "§c当前 存储网络中没有共振盘，无法赋予转化能力",
-
   "rsi.autoeat.mode.diversity": "多样饮食",
   "rsi.autoeat.mode.stack": "堆叠暴食",
   "rsi.autoeat.mode.diet": "膳食均衡",
@@ -1487,9 +1471,12 @@
   "gui.rs_integration.tetra_sort.tooltip.primary": "先勾选的字段：主要优先级",
   "gui.rs_integration.tetra_sort.tooltip.secondary": "后勾选的字段：次要优先级",
   "gui.rs_integration.tetra_sort.tooltip.controls": "▲升序  ▼降序  ☑使用字段",
-  "rs_integration.unified_grid.filter.0": "全部资源",
-  "rs_integration.unified_grid.filter.1": "物品",
-  "rs_integration.unified_grid.filter.2": "流体",
-  "rs_integration.unified_grid.filter.3": "能量",
-  "rs_integration.unified_grid.container_hint": "点击切换类别。物品：普通提取到鼠标，Shift 提取到背包。容器：左键流体装填，右键排空；左键空白处存放容器物品。空手装填需要网络空桶。"
+  "rs_integration.unified_grid.filter.all": "全部",
+  "rs_integration.unified_grid.filter.items": "物品",
+  "rs_integration.unified_grid.filter.fluids": "流体/能量",
+  "rs_integration.unified_grid.container_hint": "点击切换类别。物品：普通提取到鼠标，Shift 提取到背包。容器：左键流体装填，右键排空；左键空白处存放容器物品。空手装填需要网络空桶。",
+  "types.rs_integration.mana.name": "魔力",
+  "types.rs_integration.source.name": "魔源",
+  "gui.rs_integration.unified_grid.magic_amount_capacity": "储量：%s / %s",
+  "item.rs_integration.unified_storage_disk.stored_magic": "已存储%s：%s"
 }

@@ -486,6 +486,11 @@ public final class AltarBindingRegistry {
             addTypeId("vanilla_blast_furnace", blockKey, modTypeIds, blockKeysByType);
         } else if ("ironfurnaces_smoker".equals(id)) {
             addTypeId("vanilla_smoker", blockKey, modTypeIds, blockKeysByType);
+        } else if (ModIds.ID_CANDLELIGHT_COOKING_POT.equals(id)
+                || ModIds.ID_BAKERY_COOKING_POT.equals(id)) {
+            // Let's Do 三种锅共用 farm_and_charm 的 CookingPotRecipe；配方分类
+            // 的规范类型是宴会锅，因此共享配方必须能发现另外两种物理锅绑定。
+            addTypeId(ModIds.ID_FC_COOKING_POT, blockKey, modTypeIds, blockKeysByType);
         }
     }
 
@@ -499,6 +504,17 @@ public final class AltarBindingRegistry {
     public static boolean isCompatibleMachineType(ModType requested, ModType bound) {
         if (requested == null || bound == null) return false;
         if (requested.id().equals(bound.id())) return true;
+        // candlelight / bakery 复用 farm_and_charm 的 CookingPotRecipe，统一
+        // 归入 farm_and_charm 规范类型，因此该请求必须接受共享锅绑定。
+        if (ModIds.ID_FC_COOKING_POT.equals(requested.id())) {
+            return ModIds.ID_CANDLELIGHT_COOKING_POT.equals(bound.id())
+                    || ModIds.ID_BAKERY_COOKING_POT.equals(bound.id());
+        }
+        // 共享配方在由具体物理锅发起执行时，也要接受规范宴会锅绑定。
+        if (ModIds.ID_CANDLELIGHT_COOKING_POT.equals(requested.id())
+                || ModIds.ID_BAKERY_COOKING_POT.equals(requested.id())) {
+            return ModIds.ID_FC_COOKING_POT.equals(bound.id());
+        }
         return switch (bound.id()) {
             case "ironfurnaces_furnace" -> "vanilla_furnace".equals(requested.id());
             case "ironfurnaces_blast_furnace" -> "vanilla_blast_furnace".equals(requested.id());
@@ -809,6 +825,27 @@ public final class AltarBindingRegistry {
     static String recipeMachineSubType(Recipe<?> recipe,
                                        ModType type) {
         if (recipe == null) return null;
+        if (type != null) {
+            String typeId = type.id();
+            // YHK 三种锅共用 PotCookingRecipe 类，必须用配方结果携带的锅具容器
+            // 分类；共享类名映射只会命中注册顺序中的第一种锅。
+            if (typeId.equals("youkaishomecoming_cooking_small")
+                    || typeId.equals("youkaishomecoming_cooking_short")
+                    || typeId.equals("youkaishomecoming_cooking_large")) {
+                ModType classified = ModType.classifyRecipe(recipe);
+                if (classified == null || classified == ModType.GENERIC) return null;
+                return classified.id().equals(typeId) ? null : classified.id();
+            }
+            // 这些锅复用同一个 Lets Do CookingPotRecipe，JEI 类映射无法区分
+            // farm_and_charm、candlelight 和 bakery 的物理机器。
+            if (typeId.equals(ModIds.ID_FC_COOKING_POT)
+                    || typeId.equals(ModIds.ID_CANDLELIGHT_COOKING_POT)
+                    || typeId.equals(ModIds.ID_BAKERY_COOKING_POT)) {
+                // pot_cooking/ 只是共享配方目录，不是机器子类型。若继续用它
+                // 过滤绑定键，汤锅和宴会锅都会被误判为“没有可用机器”。
+                return null;
+            }
+        }
         String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
         if (classHint != null && !classHint.equals(type.id())) {
             // Class mappings already contain the canonical binding filter. A

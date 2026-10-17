@@ -39,4 +39,16 @@ class CustomGuiBindingContractTest {
         assertTrue(menuGuard >= 0);
         assertTrue(nearby.indexOf("target = new MachineBindingTarget(") > menuGuard);
     }
+
+    @Test
+    void clientHintFallbackOnlyAcceptsBlocksWithMenus() throws IOException {
+        String source = Files.readString(SOURCE);
+        String hint = source.substring(source.indexOf("public static BlockPos bindingTargetPos("),
+                source.indexOf("private static MachineBindingTarget findTarget("));
+        int customList = hint.indexOf("CUSTOM_GUI_MACHINE_MODS");
+        int menuGuard = hint.indexOf(
+                "if (!(level.getBlockEntity(clickedPos) instanceof MenuProvider)) return null;");
+        assertTrue(customList >= 0 && menuGuard > customList,
+                "binding HUD must not announce decorative blocks from custom GUI mods");
+    }
 }

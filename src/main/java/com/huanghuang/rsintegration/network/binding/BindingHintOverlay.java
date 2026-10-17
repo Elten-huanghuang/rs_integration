@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
@@ -33,14 +34,15 @@ public final class BindingHintOverlay {
         if (event.getOverlay() != VanillaGuiOverlay.HOTBAR.type()) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || mc.screen != null) return;
+        if (!(mc.hitResult instanceof BlockHitResult hit)) return;
+        var blockEntity = mc.level.getBlockEntity(hit.getBlockPos());
+        if (mc.level.getBlockState(hit.getBlockPos()).getBlock() instanceof ResonantMagicBlock) return;
         ItemStack held = mc.player.getMainHandItem();
+        if (held.isEmpty() && mc.player.getOffhandItem().isEmpty()) return;
         if (AltarBindingRegistry.findHook(held).isEmpty()) {
             held = mc.player.getOffhandItem();
         }
         if (AltarBindingRegistry.findHook(held).isEmpty()) return;
-        if (!(mc.hitResult instanceof BlockHitResult hit)) return;
-
-        var blockEntity = mc.level.getBlockEntity(hit.getBlockPos());
         if (blockEntity != null
                 && "dev.shadowsoffire.apotheosis.spawn.spawner.ApothSpawnerTile"
                 .equals(blockEntity.getClass().getName())) {

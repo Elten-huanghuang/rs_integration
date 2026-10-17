@@ -51,6 +51,20 @@ public final class RSIntegrationNetwork {
 
     private RSIntegrationNetwork() {}
 
+    /** 根据 RS 网络物品绑定数据解析网络；不依赖玩家当前所在维度。 */
+    @Nullable
+    public static INetwork resolveNetworkForBindingData(MinecraftServer server, CompoundTag data) {
+        if (server == null || data == null) return null;
+        try {
+            ResourceLocation id = ResourceLocation.tryParse(data.getString("dim"));
+            if (id == null) return null;
+            ResourceKey<Level> dim = ResourceKey.create(Registries.DIMENSION, id);
+            return resolveNetwork(server, dim, new BlockPos(data.getInt("x"), data.getInt("y"), data.getInt("z")));
+        } catch (RuntimeException | LinkageError ignored) {
+            return null;
+        }
+    }
+
     /**
      * Publishes a network that was already authenticated by an RS UI/container
      * to the common player-resolution cache.  The side panel is only a UI

@@ -1,4 +1,8 @@
 {
+  "block.rs_integration.resonant_magic.bound": "Bound to the RS network",
+  "block.rs_integration.resonant_magic.unbound": "RS network binding removed",
+  "block.rs_integration.resonant_magic.unreachable": "RS network is unreachable",
+  "block.rs_integration.resonant_magic.unavailable": "Resonant block data is not ready yet; try again",
   "rsi.update.available": "[RS Integration] Version %s is available.",
   "rsi.update.download": "Download on Modrinth",
   "rsi.update.download_hover": "Open the Modrinth version page",
@@ -43,6 +47,8 @@
   "gui.rs_integration.jei.irons_spellbooks_ink_bottling": "Ink Bottling",
   "gui.rs_integration.jei.fluid_container": "Fluid Container Conversion",
   "gui.rs_integration.jei.fluid_container_craft": "Fill or empty a fluid container",
+  "gui.rs_integration.native_recipe_book_craft": "RS Craft",
+  "gui.rs_integration.native_recipe_book_craft.select_recipe": "Select a recipe in the recipe book first",
   "rsi.batch.mod.fluid_container": "Fluid Container Conversion",
   "rsi.batch.mod.irons_spellbooks_alchemist_cauldron": "Alchemist Cauldron",
   "rsi.alchemist.recycle_hint": "Scroll recycling: 250 mB",
@@ -150,6 +156,10 @@
   "rsi.plan.mode.prepare.tooltip": "Only craft complete intermediate products and return them to storage; the final target is not crafted",
   "rsi.plan.prepare.action": "Prepare",
   "itemGroup.rs_integration.main": "RS Integration",
+  "block.rs_integration.resonant_mana_pool": "RS Resonant Mana Pool",
+  "block.rs_integration.resonant_source_tank": "RS Resonant Source Tank",
+  "item.rs_integration.resonant_mana_pool": "RS Resonant Mana Pool",
+  "item.rs_integration.resonant_source_tank": "RS Resonant Source Tank",
   "gui.sophisticatedcore.upgrades.rs_pickup": "Dimensional Pickup",
   "gui.sophisticatedcore.upgrades.rs_pickup.tooltip": "Dimensional Pickup Settings",
   "gui.sophisticatedcore.upgrades.rs_magnet": "Dimensional Magnet",
@@ -189,6 +199,7 @@
   "gui.rs_integration.altar.binding.rs_bind_hint": "§7Use a linked storage terminal to bind this altar",
   "gui.rs_integration.binding_hint.bind": "Bindable  §7Sneak + Right-Click",
   "gui.rs_integration.binding_hint.unbind": "Bound  §7Sneak + Right-Click to unbind",
+  "gui.rs_integration.binding_hint.connect_network": "Bind the RS terminal to a network first",
   "gui.rs_integration.binding_hint.bind_alt": "Bindable  §7Alt + Right-Click",
   "gui.rs_integration.binding_hint.unbind_alt": "Bound  §7Alt + Right-Click to unbind",
   "gui.rs_integration.spawner_hint.open": "Open spawner upgrades  §7Sneak + Right-Click",
@@ -350,7 +361,6 @@
   "rsi.ftb_quest.info.crafting_started": "§eStarted recursive crafting for quest materials with %s step(s)",
   "gui.rs_integration.status.stacks_deposited": "Deposited %s stack(s) (%s items) to storage network",
   "gui.rs_integration.status.nothing_to_deposit": "Nothing to deposit to storage network",
-
   "rsi.vanilla.error.wrong_furnace_type": "§cWrong furnace type for this recipe — use the matching machine (Furnace, Blast Furnace, or Smoker)",
   "rsi.vanilla.error.furnace_occupied": "§cFurnace input slot has an item that doesn't match this recipe — clear it first",
   "rsi.vanilla.error.campfire_full": "§cCampfire is full (all 4 slots occupied) — wait for an item to finish cooking first",
@@ -371,7 +381,6 @@
   "rsi.ironfurnaces.error.machine_type_mismatch": "§cThis recipe does not match the furnace's smelting augment",
   "rsi.ironfurnaces.error.no_fuel": "§cNo usable fuel found in the storage network for this Iron Furnace",
   "rsi.ironfurnaces.info.fuel_supplied": "§aAuto-supplied %s fuel item(s) to the Iron Furnace",
-
   "rsi.generic.error.dim_not_found": "§cCannot find target dimension",
   "rsi.generic.error.recipe_not_found": "§cRecipe not found: %s",
   "rsi.generic.error.recipe_stage_missing": "§cYou have not unlocked the required recipe stage.",
@@ -409,9 +418,7 @@
   "rsi.generic.preparation.blocked": "§cCannot prepare intermediates because an intermediate input is missing: %s. Final target was not crafted.",
   "rsi.generic.preparation.none": "§eNo independently craftable intermediate products for %s. Final target was not crafted. Still missing: %s",
   "rsi.recovery.incomplete": "§eRS Integration: %s item(s) could not be auto-recovered at %s. Please check the machine manually.",
-
   "rsi.error.circuit_breaker_tripped": "§cCrafting aborted: %s consecutive failures. %s remaining crafts skipped.",
-
   "rsi.embers.pedestal_layout": "Alchemy Pedestal Layout",
   "rsi.embers.seed_label": "Seed: %s",
   "rsi.embers.mode_label": "Mode:",
@@ -451,7 +458,6 @@
   "rsi.embers.code_from_cache": "§a✔ Prior inference",
   "rsi.embers.info.code_cached": "§a✔ Alchemy code already known from prior inference — pedestal layout will be used",
   "rsi.embers.info.recycled": "§a✔ Recycled %s blocking item(s) from previous craft back to the storage network",
-
   "rsi.eidolon.error.craft_failed": "§cAlchemy failed",
   "rsi.eidolon.error.crucible_not_found": "§cCannot find Crucible (requires water and heat)",
   "rsi.eidolon.warn.needs_water": "§eCrucible needs water first",
@@ -471,7 +477,6 @@
   "rsi.eidolon.error.insufficient_ritual_health": "§cThe ritual needs %.1f nearby health but only %.1f is available",
   "rsi.eidolon.warn.pedestal_items": "§7Requires %s pedestal items",
   "rsi.eidolon.warn.needs_focus": "§7Ensure nearby pedestals are placed with required items",
-
   "rsi.malum.error.craft_failed": "§cSpirit infusion failed",
   "rsi.malum.error.altar_not_found": "§cCannot find Spirit Altar block entity",
   "rsi.malum.error.inventory_error": "§cSpirit Altar inventory structure error",
@@ -483,7 +488,6 @@
   "rsi.malum.warn.spirit_required": "§7Spirit requirements: %s",
   "rsi.malum.warn.spirit_slots_insufficient": "§eAltar has %s spirit slots, recipe needs %s",
   "rsi.malum.error.not_runic_workbench": "§cNo Runic Workbench at the bound position",
-
   "rsi.malum_crucible.error.mod_missing": "§cMalum mod is not loaded, crafting unavailable",
   "rsi.malum_crucible.error.not_crucible": "§cNo Spirit Crucible at the bound position",
   "rsi.malum_crucible.error.inventory_error": "§cSpirit Crucible inventory structure error",
@@ -493,7 +497,6 @@
   "rsi.malum_crucible.error.recipe_rejected": "§cThe Spirit Crucible did not accept recipe %s; check its catalyst, spirits, and multiblock structure",
   "rsi.malum_crucible.warn.spirit_required": "§7Spirit requirements: %s",
   "rsi.malum_crucible.warn.spirit_slots_insufficient": "§eCrucible has %s spirit slots, recipe needs %s",
-
   "rsi.fa.error.craft_failed": "§cRitual failed to start",
   "rsi.fa.error.ritual_not_found": "§cRitual not found: %s",
   "rsi.fa.error.forge_not_found": "§cCannot find Hephaestus Forge",
@@ -525,7 +528,6 @@
   "rsi.fa.warn.enhancer_required": "§6⚠ Enhancer required: %s — bind a forge to check if installed",
   "rsi.fa.warn.cant_check_enhancers": "§6⚠ Cannot read enhancer requirements — bind a forge and retry",
   "rsi.fa.warn.essence_slot_empty": "Essence slot %s is empty (need %s essence)",
-
   "rsi.wr.error.parse_failed": "§cCannot parse recipe ingredients",
   "rsi.wr.alchemy.error.boiler_missing": "§cAlchemy Boiler missing directly above the bound Alchemy Machine",
   "rsi.wr.alchemy.error.capacity": "§cAlchemy recipe exceeds capacity: 6 item inputs and 3 fluid inputs",
@@ -573,7 +575,6 @@
   "rsi.async.earth_heart.error.timeout": "Earth Heart tainting timed out; the heart remains in your inventory",
   "rsi.async.earth_heart.error.slot_invalid": "Earth Heart taint slot became invalid",
   "rsi.async.earth_heart.error.moved": "Earth Heart was moved; it remains with the player",
-
   "rsi.goety.error.altar_not_found": "§cCannot find Dark Altar block entity",
   "rsi.goety.error.one_click_failed": "§cOne-click craft failed, check materials and pedestals",
   "rsi.goety.warn.ritual_running": "§cAltar is performing another ritual, please wait",
@@ -581,7 +582,6 @@
   "rsi.goety.error.soul_insufficient": "§cNot enough soul energy (need %s, have %s)",
   "rsi.goety.error.ritual_prerequisites": "§cRitual prerequisites not met (check biome, weather, time, or required items)",
   "rsi.goety.error.ritual_start_failed": "§cFailed to start the ritual. Check the altar state and recipe requirements",
-
   "rsi.batch.error.mod_missing": "§cMod %s is not loaded, crafting unavailable",
   "rsi.batch.error.machine_mismatch": "§cMachine did not recognize the recipe after placing materials",
   "rsi.batch.mod.goety": "Goety Ritual",
@@ -647,7 +647,6 @@
   "rsi.tlm.warn.insufficient_power_bind": "§e⚠ P-Power insufficient (have %s, need %s) — craft will fail",
   "rsi.tlm.warn.insufficient_power_points": "§e⚠ P-Power insufficient (capability + items total %s, need %s)",
   "rsi.tlm.error.handler_not_empty": "Altar storage slots occupied — another task may be running",
-
   "rsi.plan.title": "Craft Plan: %s",
   "rsi.plan.confirm": "Craft",
   "rsi.plan.cancel": "Cancel",
@@ -717,7 +716,6 @@
   "rsi.plan.failure.dynamic_plan_unavailable": "This recipe uses dynamic, transformed, or material-locked inputs and a complete plan cannot currently be generated safely.",
   "rsi.plan.missing_header": "Unavailable:",
   "rsi.plan.missing_more": "... (+%s more)",
-  
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",
   "rsi.plan.repeat_count": "Repeat:",
@@ -730,7 +728,6 @@
   "rsi.plan.bookmark_all.tooltip": "Add all missing raw materials to recipe browser favorites",
   "rsi.plan.bookmark_all.result": "Recipe browser favorites: %s added, %s already present, %s unavailable",
   "rsi.plan.bookmark_all.unavailable": "Recipe browser favorites are unavailable",
-
   "rsi.async.chain_started": "§aMulti-step crafting chain started (%s steps). Items will be delivered to the selected storage network when complete.",
   "rsi.async.chain_started_player": "§aMulti-step crafting chain started (%s steps). The final result will be delivered to your inventory when complete.",
   "rsi.async.cancel_button": "[Cancel]",
@@ -838,7 +835,6 @@
   "rsi.progress.step.unknown": "Unknown intermediate step",
   "rsi.progress.step.recipe": "Recipe: %s",
   "rsi.progress.step.more": "%s more steps in this stage",
-
   "rsi.goety.warn.altar_busy": "§cDark Altar is already performing a ritual, please wait",
   "rsi.goety.error.insufficient_souls": "§cNot enough soul energy (need %s, have %s)",
   "rsi.goety.error.unsupported_ritual_type": "§cUnsupported ritual type: %s (only craft/enchant rituals supported)",
@@ -866,7 +862,6 @@
   "rsi.goety.error.brazier_no_candlesticks": "§cNo Soul Candlesticks nearby — brazier needs candlestick souls to operate",
   "rsi.goety.summon_prepared": "§aPedestal materials filled from the storage network. §e%s§a has been placed in your inventory. RSI did not start the ritual; confirm the area is safe, then use the activation item on the Dark Altar.",
   "rsi.goety.manual_ritual_prepared": "§aPedestal materials filled from the storage network. §e%s§a has been placed in your inventory. RSI does not automatically start summon, sacrifice, or conversion rituals; confirm the target and area, then use the activation item on the Dark Altar.",
-
   "key.categories.rsi": "RS Integration",
   "key.rsi.store_all": "Transfer to Storage Network",
   "key.rsi.toggle_mode": "Toggle Transfer Mode",
@@ -882,15 +877,10 @@
   "rsi.transfer.backpack_success": "Transferred %s item(s) across %s stack(s) to backpack",
   "rsi.transfer.backpack_self": "§cCannot transfer backpack items into itself — switch to a storage network mode first",
   "rsi.transfer.self_network_blocked": "§cCannot transfer network storage or a bound network item into its own storage network",
-
   "key.rsi.side_panel": "Toggle RS Side Panel",
   "key.rsi.machine_hub": "Toggle Machine Hub",
-  
-  
-  
   "key.rsi.clear_search": "Recipe Browser Clear Search",
   "key.rsi.mod_filter": "Recipe Browser Filter by Mod",
-  
   "key.rsi.transfer_recipe": "Recipe Browser Transfer Recipe",
   "key.rsi.swipe_extract": "RS Grid Swipe Extract",
   "key.rsi.bind_nearby": "Bind Nearby Machines",
@@ -960,23 +950,17 @@
   "rsi.error.machine_missing": "The target machine no longer exists. Binding removed.",
   "rsi.generic.machine_gui_opened": "Machine GUI opened.",
   "rsi.generic.machine_gui_failed": "Failed to open machine GUI.",
-
   "rsi.error.wireless_no_energy": "§cWireless terminal is out of energy. Please recharge it.",
-
   "rsi.error.protection_denied": "§cYou cannot interact with this machine — it is in a protected area.",
-
   "rsi.repeat.done": "§aCompleted %s crafts successfully.",
   "rsi.repeat.aborted": "§eThe remaining %s crafts have been aborted — the crafting environment has changed.",
-
   "rsi.hub.title": "Machine Hub (%s)",
   "rsi.hub.machine_count": "%s bound machines",
   "rsi.hub.back_to_grid": "Back to Grid",
-
   "rsi.hub.tooltip_click": "Click to expand/collapse",
   "rsi.hub.filter_hint": "Filter machines...",
   "rsi.hub.no_machines": "No machines match filter.",
   "rsi.hub.key_toggle": "%s: Toggle Hub",
-
   "rsi.hub.state.has_output": "Output Ready",
   "rsi.hub.state.working": "Working %s%%",
   "rsi.hub.state.idle": "Idle",
@@ -985,18 +969,15 @@
   "rsi.hub.controls.quick_has_output": "Empty L: Collect  Empty Shift: →RS  R: Open",
   "rsi.hub.controls.quick_normal": "Hold item L: Insert  Shift: Fuel  Empty L: Open",
   "rsi.hub.controls.gui": "L/R: Open GUI",
- "rsi.hub.favorite": "Left-click the top-left star: add to machine shortcuts",
- "rsi.hub.unfavorite": "Left-click the top-left star: remove from machine shortcuts",
- "rsi.hub.unbind": "Ctrl + Left-click: Unbind machine",
- "rsi.hub.favorite_limit": "Machine shortcuts can contain up to %s machines",
-
+  "rsi.hub.favorite": "Left-click the top-left star: add to machine shortcuts",
+  "rsi.hub.unfavorite": "Left-click the top-left star: remove from machine shortcuts",
+  "rsi.hub.unbind": "Ctrl + Left-click: Unbind machine",
+  "rsi.hub.favorite_limit": "Machine shortcuts can contain up to %s machines",
   "rsi.plan.open_machine": "Open Machine",
   "rsi.jei.open_machine": "Open bound machine GUI",
-
   "rsi.error.not_authorized": "§cYou are not authorized to access this machine GUI.",
   "rsi.error.dim_not_loaded": "§cTarget dimension is not loaded.",
   "rsi.error.too_far": "§cThe bound machine is too far away (max %s blocks).",
-
   "rsi.machine.state.has_output": "Output Ready",
   "rsi.machine.state.working": "Working %s",
   "rsi.machine.state.idle": "Idle",
@@ -1009,7 +990,6 @@
   "rsi.machine.hint.insert": "Hold item + L-click: Insert input | Shift: Insert fuel",
   "rsi.machine.type.gui": "GUI Machine — manual operation required",
   "rsi.machine.hint.open_gui": "Left-click: Open machine GUI",
-
   "rsi.machine.error.not_bound": "§cThis machine is no longer bound to you.",
   "rsi.machine.error.required_mod_missing": "§cRequired mod %s is not installed; the saved binding was kept.",
   "rsi.machine.error.binding_block_changed": "§cThe block at this binding no longer matches the saved machine.",
@@ -1019,7 +999,6 @@
   "rsi.machine.error.slot_mismatch": "§cThis item does not match what is already in the slot.",
   "rsi.machine.error.slot_full": "§cThe target slot is full.",
   "rsi.machine.collected": "§aCollected %s× %s.",
-
   "rsi.aetherworks.error.not_anvil": "§cNo Aetherium Anvil at the bound position.",
   "rsi.aetherworks.error.not_tool_station": "§cNo Forge Tool Station at the bound position.",
   "rsi.aetherworks.error.not_metal_former": "§cNo Metal Former at the bound position.",
@@ -1064,6 +1043,9 @@
   "gui.rs_integration.jei.aether_altar_craft": "Craft via Aether Altar",
   "gui.rs_integration.jei.crockpot_cook": "Cook via Crock Pot",
   "gui.rs_integration.jei.crockpot_birdcage_feed": "Feed Parrot via Birdcage",
+  "gui.rs_integration.jei.farm_and_charm_cooking_pot_craft": "Cook via Cooking Pot",
+  "gui.rs_integration.jei.farm_and_charm_roaster_craft": "Roast via Roaster",
+  "gui.rs_integration.jei.candlelight_cooking_pot_craft": "Cook via Large Cooking Pot",
   "gui.rs_integration.jei.immortalers_cooler_craft": "Craft via Enchantal Cooler",
   "gui.rs_integration.jei.immortalers_hot_spring_craft": "Craft via Hot Spring",
   "rsi.batch.mod.crabbersdelight": "Crab Trap",
@@ -1102,6 +1084,15 @@
   "gui.rs_integration.jei.td_fiery_pot_craft": "Cook via Fiery Cooking Pot",
   "rsi.batch.mod.twilightdelight_fiery_cooking_pot": "Fiery Cooking Pot",
   "rsi.twilightdelight.heat_warning": "§7The Fiery Cooking Pot heats itself; no heat source is required below it.",
+  "gui.rs_integration.jei.bd_soul_cooking_pot_craft": "Cook via Soul Cooking Pot",
+  "rsi.batch.mod.bosses_delight_soul_cooking_pot": "Soul Cooking Pot",
+  "rsi.bossesdelight.no_cold_source": "§cNo ice, packed ice, or blue ice cold source was detected below the Soul Cooking Pot.",
+  "rsi.bossesdelight.cold_source_warning": "§7The Soul Cooking Pot requires ice, packed ice, or blue ice below it.",
+  "rsi.bossesdelight.container_stays": "§7A serving container is consumed for each output.",
+  "gui.rs_integration.jei.cd_deep_frying_pan_craft": "Deep-fry via Deep Frying Pan",
+  "rsi.batch.mod.casualness_delight_deep_frying_pan": "Deep Frying Pan",
+  "rsi.casualness_delight.no_heat": "§cNo heat source was detected for the Deep Frying Pan.",
+  "rsi.casualness_delight.heat_warning": "§7The Deep Frying Pan requires its normal heat source below the block.",
   "gui.rs_integration.jei.fd_skillet_craft": "Cook via Skillet",
   "gui.rs_integration.jei.fd_cutting_board_craft": "Cut via Cutting Board",
   "rsi.farmersdelight.no_heat": "§cNo heat source detected under the cooking pot. Place a heat source (campfire, magma block, etc.) below the pot.",
@@ -1170,7 +1161,6 @@
   "rsi.batch.mod.youkaishomecoming_kettle": "Kettle",
   "rsi.batch.mod.youkaishomecoming_cuisine": "Cuisine Board",
   "rsi.batch.mod.youkaishomecoming": "YHK Machine",
-
   "item.rs_integration.resonance_storage_disk": "Resonance Storage Disk",
   "item.rs_integration.resonance_storage_disk.tooltip": "All things stored. Every power carried.",
   "item.rs_integration.resonance_storage_disk.tooltip.subtitle": "No need to hold them; countless relics and charms echo their power through the storage network.",
@@ -1209,20 +1199,16 @@
   "rsi.resonance.bd.tooltip.unbound": "Status: unbound; right-click a BD network to bind",
   "rsi.resonance.bd.tooltip.network": "BD network: #%s",
   "rsi.resonance.bd.tooltip.uuid": "Space ID: %s",
-
   "rsi.machine_center.title": "Machine Center",
   "rsi.machine_center.machine_count": "%s bound machine(s)",
   "rsi.machine_center.no_machines": "No bound machines",
   "rsi.machine_center.tooltip_click": "Click to open / Enter to toggle",
-
   "rsi.resonance_backpack.title": "Resonance Backpack",
   "rsi.resonance_backpack.tooltip_click": "Click to open Resonance Backpack",
   "rsi.resonance_backpack.no_disk": "No resonance disk in network",
-
   "rsi.resonance.duplicate_disk": "§cThis RS network already has a resonance disk. Only one resonance disk is allowed per network.",
   "rsi.resonance.void_favor_unlocked": "§5The Resonance Disk has inherited the Weeping Well's Favor of the Void",
   "rsi.resonance.void_favor_no_disk": "§cNo Resonance Disk was found in the current RS network",
-
   "rsi.autoeat.mode.diversity": "Diversity",
   "rsi.autoeat.mode.stack": "Stack Eat",
   "rsi.autoeat.mode.diet": "Diet Balance",
@@ -1271,8 +1257,7 @@
   "rsi.autoeat.error.solcarrot_missing": "SolCarrot is not installed",
   "rsi.autoeat.error.diet_missing": "Diet is not installed",
   "rsi.autoeat.error.diet_tracker_missing": "Diet tracker not found",
-  "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups"
-,
+  "rsi.autoeat.error.diet_no_groups": "No Diet nutrition groups",
   "rsi.villager.restock.complete": "Restocked to maximum (inventory: %s, storage network: %s)",
   "rsi.villager.trade_lock.blocked": "Trade refresh locked by a recipe browser favorite",
   "rsi.villager.restock.partial": "Partially restocked; missing items added to recipe browser favorites",
@@ -1486,9 +1471,12 @@
   "gui.rs_integration.tetra_sort.tooltip.primary": "First checked field: primary priority",
   "gui.rs_integration.tetra_sort.tooltip.secondary": "Second checked field: secondary priority",
   "gui.rs_integration.tetra_sort.tooltip.controls": "▲ Ascending  ▼ Descending  ☑ Use field",
-  "rs_integration.unified_grid.filter.0": "All resources",
-  "rs_integration.unified_grid.filter.1": "Items",
-  "rs_integration.unified_grid.filter.2": "Fluids",
-  "rs_integration.unified_grid.filter.3": "Energy",
-  "rs_integration.unified_grid.container_hint": "Click to change resource type. Items: extract to cursor, Shift-click to inventory. Containers: left-click fluid to fill, right-click to empty; left-click blank space to store the item. Empty-handed filling needs a bucket in the network."
+  "rs_integration.unified_grid.filter.all": "All",
+  "rs_integration.unified_grid.filter.items": "Items",
+  "rs_integration.unified_grid.filter.fluids": "Fluids / Energy",
+  "rs_integration.unified_grid.container_hint": "Click to change resource type. Items: extract to cursor, Shift-click to inventory. Containers: left-click fluid to fill, right-click to empty; left-click blank space to store the item. Empty-handed filling needs a bucket in the network.",
+  "types.rs_integration.mana.name": "Mana",
+  "types.rs_integration.source.name": "Source",
+  "gui.rs_integration.unified_grid.magic_amount_capacity": "Stored: %s / %s",
+  "item.rs_integration.unified_storage_disk.stored_magic": "Stored %s: %s"
 }

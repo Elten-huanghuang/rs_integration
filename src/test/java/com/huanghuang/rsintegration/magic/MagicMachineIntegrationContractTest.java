@@ -16,7 +16,7 @@ class MagicMachineIntegrationContractTest {
     @Test
     void onlySoulEntersRsiRecursiveEnergyCatalog() throws Exception {
         assertTrue(MagicResourceKind.SOUL.supportsRsiRecursiveCrafting());
-        assertFalse(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
+        assertTrue(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
         assertFalse(MagicResourceKind.SOURCE.supportsRsiRecursiveCrafting());
 
         String catalog = Files.readString(CATALOG);

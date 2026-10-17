@@ -35,6 +35,10 @@ public final class ModIds {
     public static final String LYCHEE = "lychee";
     public static final String BIOMANCY = "biomancy";
     public static final String CTHULHU_CREATURES = "cthulhu_creatures";
+    /** Let's Do 系列：烛火晚宴。 */
+    public static final String CANDLELIGHT = "candlelight";
+    /** Let's Do 系列：田园乐事（烹饪锅 / 烘焙机）。 */
+    public static final String FARM_AND_CHARM = "farm_and_charm";
 
     // Dependencies
     public static final String REFINED_STORAGE = "refinedstorage";
@@ -101,4 +105,20 @@ public final class ModIds {
     public static final String ID_YHK_FERMENT = "youkaishomecoming_ferment";
     public static final String ID_YHK_KETTLE = "youkaishomecoming_kettle";
     public static final String ID_YHK_COOKING_POT = "youkaishomecoming_cooking_pot";
+
+    // Let's Do 锅具（farm_and_charm 定义配方类型，candlelight 的大汤锅复用同一类型）
+    public static final String ID_FC_COOKING_POT = "farm_and_charm_cooking_pot";
+    public static final String ID_FC_ROASTER = "farm_and_charm_roaster";
+    public static final String ID_CANDLELIGHT_COOKING_POT = "candlelight_cooking_pot";
+    /** bakery 小烹饪锅：与 candlelight 共用 farm_and_charm 的配方类型与槽位布局。 */
+    public static final String BAKERY = "bakery";
+    public static final String ID_BAKERY_COOKING_POT = "bakery_cooking_pot";
+
+    // 其余乐事系锅具
+    /** BOMD 乐事灵魂锅：冰/浮冰/蓝冰驱动，独立配方类型。 */
+    public static final String BOSSES_DELIGHT = "bosses_delight";
+    /** 随意乐事炸锅：放置-等待-取出模式，成品以世界掉落物产出。 */
+    public static final String CASUALNESS_DELIGHT = "casualness_delight";
+    public static final String ID_BD_SOUL_COOKING_POT = "bosses_delight_soul_cooking_pot";
+    public static final String ID_CD_DEEP_FRYING_PAN = "casualness_delight_deep_frying_pan";
 }

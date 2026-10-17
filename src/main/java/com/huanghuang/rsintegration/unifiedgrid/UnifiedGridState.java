@@ -74,7 +74,8 @@ public final class UnifiedGridState {
             else if (update.metadata()) target.put(update.serial(), update);
             else {
                 UnifiedGridEntry old = target.get(update.serial());
-                target.put(update.serial(), new UnifiedGridEntry(old.serial(), update.amount(), true,
+                target.put(update.serial(), new UnifiedGridEntry(old.serial(), update.amount(),
+                        update.capacity(), true,
                         old.storedId(), old.craftableId(), old.template(), update.tracker()));
             }
         }

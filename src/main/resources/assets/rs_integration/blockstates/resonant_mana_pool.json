@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "rs_integration:block/resonant_mana_pool"
+    }
+  }
+}

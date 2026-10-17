@@ -212,6 +212,19 @@ public final class RSJeiPlugin implements IModPlugin {
                 registration.addRecipeCatalyst(salvageBlock, PmmoSalvageRecipeCategory.TYPE);
             }
         }
+        if (RSIntegrationConfig.ENABLE_BOTANIA.get()
+                && ModList.get().isLoaded(ModIds.BOTANIA)) {
+            try {
+                Class<?> helper = Class.forName(
+                        "com.huanghuang.rsintegration.compat.jei.BotaniaManaPoolJeiWorkstations");
+                helper.getMethod("register",
+                                mezz.jei.api.registration.IRecipeCatalystRegistration.class)
+                        .invoke(null, registration);
+            } catch (ReflectiveOperationException | LinkageError exception) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-JEI] 无法注册 Botania 共振魔力池催化剂", exception);
+            }
+        }
     }
 
     @Override

@@ -4,14 +4,15 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
-import java.util.stream.Collectors;
-
-import javax.annotation.Nullable;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+
+import javax.annotation.Nullable;
 
 /**
  * Structured handoff from the chain-owned reservation to a delegate start.
@@ -53,21 +54,46 @@ public record OperationStartContext(
         return inputBufferPlan != null && inputBufferPlan.enabled();
     }
 
-    /** Ordered compatibility projection used only by legacy delegate entry points. */
+    /**
+     * Ordered compatibility projection used only by legacy delegate entry points.
+     * Sparse plans retain empty placeholders so delegates that consume fixed input
+     * slots receive the same layout that {@code getRequiredMaterials()} declared.
+     */
     public List<ItemStack> legacyMaterials() {
         Map<String, ItemStack> byId = new LinkedHashMap<>();
         for (ReservedMaterial material : materials) {
             byId.put(material.entryId(), material.stack());
         }
-        return materialPlan.entries().stream()
-                .map(entry -> {
-                    ItemStack stack = byId.get(entry.id());
-                    if (stack == null || stack.isEmpty()) {
-                        throw new IllegalStateException("missing reserved material " + entry.id());
-                    }
-                    return stack.copy();
-                })
-                .toList();
+
+        boolean hasExplicitSlots = materialPlan.entries().stream()
+                .anyMatch(entry -> entry.inputSlot() != null);
+        if (!hasExplicitSlots) {
+            return materialPlan.entries().stream()
+                    .map(entry -> reservedStack(byId, entry).copy())
+                    .toList();
+        }
+
+        int slotCount = materialPlan.entries().size();
+        for (MaterialPlan.Entry entry : materialPlan.entries()) {
+            if (entry.inputSlot() != null) {
+                slotCount = Math.max(slotCount, entry.inputSlot() + 1);
+            }
+        }
+        List<ItemStack> ordered = new ArrayList<>(
+                Collections.nCopies(slotCount, ItemStack.EMPTY));
+        int nextSlot = 0;
+        for (MaterialPlan.Entry entry : materialPlan.entries()) {
+            int slot = entry.inputSlot() == null ? nextFreeSlot(ordered, nextSlot) : entry.inputSlot();
+            if (slot < 0 || slot >= ordered.size()) {
+                throw new IllegalStateException("invalid input slot for " + entry.id());
+            }
+            if (!ordered.get(slot).isEmpty()) {
+                throw new IllegalStateException("duplicate input slot for " + entry.id());
+            }
+            ordered.set(slot, reservedStack(byId, entry).copy());
+            nextSlot = slot + 1;
+        }
+        return List.copyOf(ordered);
     }
 
     /**
@@ -83,6 +109,10 @@ public record OperationStartContext(
         List<ReservedMaterial> reserved = new ArrayList<>(plan.entries().size());
         boolean compact = ordered.size() == plan.entries().size()
                 && ordered.stream().allMatch(stack -> stack != null && !stack.isEmpty());
+        for (int index = 0; compact && index < plan.entries().size(); index++) {
+            Integer inputSlot = plan.entries().get(index).inputSlot();
+            compact = inputSlot == null || inputSlot == index;
+        }
         for (int index = 0; index < plan.entries().size(); index++) {
             MaterialPlan.Entry entry = plan.entries().get(index);
             int sourceIndex = compact ? index
@@ -104,6 +134,21 @@ public record OperationStartContext(
         }
         return new OperationStartContext(player, ledger, MaterialOwnership.CHAIN_RESERVED,
                 plan, reserved, buffer, null);
+    }
+
+    private static ItemStack reservedStack(Map<String, ItemStack> byId, MaterialPlan.Entry entry) {
+        ItemStack stack = byId.get(entry.id());
+        if (stack == null || stack.isEmpty()) {
+            throw new IllegalStateException("missing reserved material " + entry.id());
+        }
+        return stack;
+    }
+
+    private static int nextFreeSlot(List<ItemStack> ordered, int start) {
+        for (int slot = Math.max(0, start); slot < ordered.size(); slot++) {
+            if (ordered.get(slot).isEmpty()) return slot;
+        }
+        return -1;
     }
 
     /** Unified outer-group handoff for an operation-major material matrix. */

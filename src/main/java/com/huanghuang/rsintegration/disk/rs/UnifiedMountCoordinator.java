@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.refinedmods.refinedstorage.api.network.node.INetworkNodeProxy;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.network.node.NetworkNode;
 import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.DiskDriveNetworkNode;
 import com.refinedmods.refinedstorage.apiimpl.network.node.diskmanipulator.DiskManipulatorNetworkNode;
 import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
+import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -19,6 +21,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Comparator;
 import java.util.function.Supplier;
 
 /** 整个服务器唯一挂载；验证物理槽位与节点实例，旧 wrapper 自动失效。 */
@@ -165,6 +168,19 @@ public final class UnifiedMountCoordinator {
     }
 
     public boolean mounted(UUID id) { return leases.containsKey(id); }
+
+    /** 返回指定 RS 网络上的归墟盘；网络之间严格隔离。 */
+    public List<UnifiedDiskCore> disksForNetwork(INetwork network) {
+        if (network == null) return List.of();
+        List<UnifiedDiskCore> result = new ArrayList<>();
+        for (Lease lease : leases.values()) {
+            if (!lease.active || lease.node.getNetwork() != network || !lease.valid()) continue;
+            UnifiedDiskManager.Entry entry = lease.root.manager().entry(lease.root.id());
+            if (entry.core != null) result.add(entry.core);
+        }
+        result.sort(Comparator.comparing(disk -> disk.diskId));
+        return result;
+    }
     public String location(UUID id) { Lease lease = leases.get(id); return lease == null ? "无" : lease.location(); }
     public void clear() { leases.values().forEach(Lease::revoke); leases.clear(); waiting.clear(); deferred.clear(); }
 

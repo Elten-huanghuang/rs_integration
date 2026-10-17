@@ -3,7 +3,10 @@ package com.huanghuang.rsintegration.magic;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import net.minecraft.server.MinecraftServer;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
 import net.minecraftforge.server.ServerLifecycleHooks;
+import net.minecraft.server.level.ServerLevel;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -27,9 +30,23 @@ public final class MagicResourceEndpoint {
         return MagicDiskStore.total(disks(server), kind);
     }
 
+    public static int total(@Nullable INetwork network, MagicResourceKind kind) {
+        return MagicDiskStore.total(networkDisks(network), kind);
+    }
+
+    /** 绑定网络中所有已挂载归墟盘对该资源提供的总容量。 */
+    public static int capacity(@Nullable INetwork network, MagicResourceKind kind) {
+        return MagicDiskStore.capacity(networkDisks(network), kind);
+    }
+
     /** 该资源的可用量（库存扣除其他任务尚未使用的预留）。 */
     public static int available(@Nullable MinecraftServer server, MagicResourceKind kind) {
         return MagicDiskStore.available(disks(server), kind);
+    }
+
+    /** 指定 RS 网络中扣除任务预留后的可用量。 */
+    public static int available(@Nullable INetwork network, MagicResourceKind kind) {
+        return MagicDiskStore.available(networkDisks(network), kind);
     }
 
     /** 在当前已挂载的盘上预留；返回的账本必须由调用方关闭。 */
@@ -44,10 +61,27 @@ public final class MagicResourceEndpoint {
         return MagicDiskStore.insert(disks(server), kind, requested, perform);
     }
 
+    public static int insert(@Nullable INetwork network, MagicResourceKind kind,
+                             int requested, boolean perform) {
+        return MagicDiskStore.insert(networkDisks(network), kind, requested, perform);
+    }
+
     /** 从库存取出，返回实际取出量；会把其他任务的预留留在盘上。 */
     public static int extract(@Nullable MinecraftServer server, MagicResourceKind kind,
                               int requested, boolean perform) {
         return MagicResourceReservations.extract(UnifiedDiskManager.existing(server), kind, requested, perform);
+    }
+
+    public static int extract(@Nullable INetwork network, MagicResourceKind kind,
+                              int requested, boolean perform) {
+        return MagicResourceReservations.extract(networkDisks(network), kind, requested, perform);
+    }
+
+    private static List<UnifiedDiskCore> networkDisks(@Nullable INetwork network) {
+        if (network == null || network.getLevel() == null) return List.of();
+        if (!(network.getLevel() instanceof ServerLevel level)) return List.of();
+        var manager = UnifiedDiskManager.existing(level.getServer());
+        return manager == null ? List.of() : manager.mounts().disksForNetwork(network);
     }
 
     /** 当前服务器；仅在服务器线程取值，拿不到时返回 null。 */

@@ -51,6 +51,16 @@ public final class MagicDiskStore {
         return (int) total;
     }
 
+    /** 已挂载归墟盘为该资源提供的总容量，按盘汇总并在 int 上限处饱和。 */
+    public static int capacity(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
+        long capacity = 0L;
+        for (UnifiedDiskCore disk : disks) {
+            capacity += Math.max(0, disk.magicCapacity(kind));
+            if (capacity >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        }
+        return (int) capacity;
+    }
+
     /** 网络内该资源的可用量（库存减去其他任务尚未使用的预留）。 */
     public static int available(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
         long available = 0L;
@@ -75,6 +85,7 @@ public final class MagicDiskStore {
             int taken = disk.extractMagic(kind, requested - moved, perform);
             moved += taken;
         }
+        if (perform && moved > 0) MagicResourceDirty.bump();
         return moved;
     }
 
@@ -88,6 +99,7 @@ public final class MagicDiskStore {
             int accepted = disk.insertMagic(kind, requested - moved, perform);
             moved += accepted;
         }
+        if (perform && moved > 0) MagicResourceDirty.bump();
         return moved;
     }
 }

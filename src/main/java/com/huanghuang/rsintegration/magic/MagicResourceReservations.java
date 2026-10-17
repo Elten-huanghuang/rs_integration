@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 
 import javax.annotation.Nullable;
 
@@ -30,10 +31,13 @@ public final class MagicResourceReservations {
     }
 
     private static void add(UUID diskId, MagicResourceKind kind, int delta) {
+        if (delta == 0) return;
         int[] amounts = BY_DISK.computeIfAbsent(diskId,
                 ignored -> new int[MagicResourceKind.values().length]);
         int next = amounts[kind.ordinal()] + delta;
         amounts[kind.ordinal()] = Math.max(0, next);
+        // 预留的增减同样改变终端显示的可用量，所以也算一次库存变动。
+        MagicResourceDirty.bump();
     }
 
     /** 在当前已挂载的盘上预留，返回可继续提取的凭据。 */
@@ -41,8 +45,9 @@ public final class MagicResourceReservations {
         Pool pool = new Pool(kind);
         if (manager == null || requested <= 0) return pool;
         synchronized (LOCK) {
-            int left = Math.min(requested, kind.capacity());
-            for (UnifiedDiskCore disk : MagicDiskStore.mountedDisks(manager)) {
+            List<UnifiedDiskCore> disks = MagicDiskStore.mountedDisks(manager);
+            int left = Math.min(requested, MagicDiskStore.capacity(disks, kind));
+            for (UnifiedDiskCore disk : disks) {
                 if (left <= 0) break;
                 int available = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
                 int take = Math.min(available, left);
@@ -73,6 +78,23 @@ public final class MagicResourceReservations {
                 }
             }
         }
+        return moved;
+    }
+
+    /** 从指定网络的归墟盘提取，不触碰其他网络的预留。 */
+    public static int extract(List<UnifiedDiskCore> disks, MagicResourceKind kind,
+                              int requested, boolean perform) {
+        if (disks == null || requested <= 0) return 0;
+        int moved = 0;
+        synchronized (LOCK) {
+            for (UnifiedDiskCore disk : disks) {
+                if (moved >= requested) break;
+                int free = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
+                int take = Math.min(requested - moved, free);
+                if (take > 0) moved += disk.extractMagic(kind, take, perform);
+            }
+        }
+        if (perform && moved > 0) MagicResourceDirty.bump();
         return moved;
     }
 

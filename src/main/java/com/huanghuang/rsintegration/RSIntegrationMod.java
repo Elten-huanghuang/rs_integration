@@ -18,6 +18,9 @@ import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRSModule;
 import com.huanghuang.rsintegration.mods.untileternity.UntilEternityRSModule;
 import com.huanghuang.rsintegration.mods.confluence.ConfluenceRSModule;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRSModule;
+import com.huanghuang.rsintegration.mods.farmandcharm.FarmAndCharmRSModule;
+import com.huanghuang.rsintegration.mods.bossesdelight.BossesDelightRSModule;
+import com.huanghuang.rsintegration.mods.casualnessdelight.CasualnessDelightRSModule;
 import com.huanghuang.rsintegration.mods.cthulhucreatures.CthulhuCreaturesRSModule;
 import com.huanghuang.rsintegration.mods.distantworlds.DistantWorldsRSModule;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonRSModule;
@@ -176,6 +179,9 @@ public final class RSIntegrationMod {
             "farmersdelight", "farmersdelight_cooking_pot", "miners_delight_copper_pot",
             "twilightdelight_fiery_cooking_pot",
             "farmersdelight_skillet", "farmersrespite", "farmersrespite_kettle",
+            "farm_and_charm_cooking_pot", "farm_and_charm_roaster", "candlelight_cooking_pot",
+            "bakery_cooking_pot",
+            "bosses_delight_soul_cooking_pot", "casualness_delight_deep_frying_pan",
             "forbidden_arcanus", "forbidden_arcanus_clibano", "goety", "goety_brazier",
             "goety_cursed_infuser", "immortalers_delight",
             "immortalers_delight_hot_spring", "ironfurnaces_blast_furnace",
@@ -265,6 +271,12 @@ public final class RSIntegrationMod {
                     () -> IssCswRSModule.INSTANCE),
             new ModuleEntry(ModIds.CROCKPOT, RSIntegrationConfig.ENABLE_CROCKPOT,
                     () -> CrockPotRSModule.INSTANCE),
+            new ModuleEntry(ModIds.FARM_AND_CHARM, RSIntegrationConfig.ENABLE_FARM_AND_CHARM,
+                    () -> FarmAndCharmRSModule.INSTANCE),
+            new ModuleEntry(ModIds.BOSSES_DELIGHT, RSIntegrationConfig.ENABLE_BOSSES_DELIGHT,
+                    () -> BossesDelightRSModule.INSTANCE),
+            new ModuleEntry(ModIds.CASUALNESS_DELIGHT, RSIntegrationConfig.ENABLE_CASUALNESS_DELIGHT,
+                    () -> CasualnessDelightRSModule.INSTANCE),
             new ModuleEntry(ModIds.TACZ, RSIntegrationConfig.ENABLE_TACZ,
                     () -> TaczRSModule.INSTANCE),
             new ModuleEntry(ModIds.SLASHBLADE, RSIntegrationConfig.ENABLE_SLASHBLADE,
@@ -336,6 +348,7 @@ public final class RSIntegrationMod {
         }
         ModItems.init(MOD_BUS);
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            RSOptionalBootstrap.registerBlocks(MOD_BUS);
             RSOptionalBootstrap.registerItems(MOD_BUS);
             RSOptionalBootstrap.registerBindings();
         }

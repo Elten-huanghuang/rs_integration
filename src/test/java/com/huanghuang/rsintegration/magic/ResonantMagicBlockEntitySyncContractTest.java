@@ -16,6 +16,10 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 class ResonantMagicBlockEntitySyncContractTest {
     @BeforeAll
@@ -57,8 +61,14 @@ class ResonantMagicBlockEntitySyncContractTest {
         assertTrue(sourceAdapter.contains("MagicResourceKind.SOURCE.capacity()"));
         assertTrue(sourceAdapter.contains("getTransferRate() { return Integer.MAX_VALUE; }"));
         assertTrue(sourceAdapter.contains("return getSource();"));
-        assertTrue(sourceAdapter.contains("ISpecialSourceProvider"));
-        assertTrue(sourceAdapter.contains("SourceManager.INSTANCE.addInterface(level, specialSourceProvider)"));
+        assertTrue(sourceAdapter.contains("implements ISourceTile"));
+        assertTrue(sourceAdapter.contains("private final ISpecialSourceProvider sourceProvider"));
+        assertTrue(sourceAdapter.contains("SourceManager.INSTANCE.addInterface(level, sourceProvider)"));
+        String mixinConfig = Files.readString(Path.of("src/main/resources/rs_integration.mixins.json"));
+        assertTrue(mixinConfig.contains("arsnouveau.SourceUtilMixin"));
+        String mixinPlugin = Files.readString(Path.of("src/main/java/com/huanghuang/"
+                + "rsintegration/mixin/plugin/RSIntegrationMixinPlugin.java"));
+        assertTrue(mixinPlugin.contains(".arsnouveau.SourceUtilMixin"));
     }
 
     @Test
@@ -70,5 +80,26 @@ class ResonantMagicBlockEntitySyncContractTest {
         entity.saveAdditional(saved);
 
         assertEquals(42, saved.getInt("Capacity"));
+    }
+
+    @Test
+    void arsSourceTileUsesMaxTransferAndSignedSourceOperations() {
+        ArsResonantSourceTankBlockEntity tank = spy(new ArsResonantSourceTankBlockEntity(
+                BlockEntityType.CHEST, BlockPos.ZERO, Blocks.CHEST.defaultBlockState()));
+        doReturn(1_000).when(tank).resourceCapacity();
+        doReturn(100).when(tank).currentAmount();
+        doReturn(0).when(tank).insert(anyInt());
+        doReturn(0).when(tank).extract(anyInt());
+
+        assertEquals(Integer.MAX_VALUE, tank.getTransferRate());
+        tank.addSource(40);
+        tank.removeSource(60);
+        tank.addSource(-20);
+        tank.removeSource(-30);
+
+        verify(tank).insert(40);
+        verify(tank).extract(60);
+        verify(tank).extract(20);
+        verify(tank).insert(30);
     }
 }

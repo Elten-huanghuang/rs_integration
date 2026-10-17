@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -65,17 +66,29 @@ public final class MagicGridItemTransfer {
      * <p>先做一次模拟插入，只有库存确实收得下才扣除容器，避免容器被清空而能量丢失。</p>
      */
     public static int deposit(ServerPlayer player, MagicResourceKind kind, @Nullable ItemStack stack) {
-        return transfer(player, kind, stack, true);
+        return transfer(player, kind, stack, true, Integer.MAX_VALUE,
+                new ResourceAccess(player, null));
+    }
+
+    /** 在指定 RS 网络内存入，供网络终端使用。 */
+    public static int deposit(ServerPlayer player, INetwork network, MagicResourceKind kind,
+                              @Nullable ItemStack stack) {
+        if (network == null) return 0;
+        return transfer(player, kind, stack, true, Integer.MAX_VALUE,
+                new ResourceAccess(player, network));
     }
 
     /** 从库存取资源填进容器，返回实际转移量。 */
     public static int withdraw(ServerPlayer player, MagicResourceKind kind, @Nullable ItemStack stack, int amount) {
-        return transfer(player, kind, stack, false, amount);
+        return transfer(player, kind, stack, false, amount, new ResourceAccess(player, null));
     }
 
-    private static int transfer(ServerPlayer player, MagicResourceKind kind,
-                               @Nullable ItemStack stack, boolean deposit) {
-        return transfer(player, kind, stack, deposit, Integer.MAX_VALUE);
+    /** 在指定 RS 网络内取出，供网络终端使用。 */
+    public static int withdraw(ServerPlayer player, INetwork network, MagicResourceKind kind,
+                               @Nullable ItemStack stack, int amount) {
+        if (network == null) return 0;
+        return transfer(player, kind, stack, false, amount,
+                new ResourceAccess(player, network));
     }
 
     /**
@@ -83,12 +96,13 @@ public final class MagicGridItemTransfer {
      * @param amount  取出上限，仅对库存→容器有意义
      */
     private static int transfer(ServerPlayer player, MagicResourceKind kind,
-                               @Nullable ItemStack stack, boolean deposit, int amount) {
+                               @Nullable ItemStack stack, boolean deposit, int amount,
+                               ResourceAccess storage) {
         if (player == null || stack == null || stack.isEmpty()) return 0;
         int balance = read(kind, stack);
         if (balance == UNKNOWN) return 0;
-        int handled = deposit ? depositToStock(player, kind, stack, balance)
-                : withdrawToContainer(player, kind, stack, amount);
+        int handled = deposit ? depositToStock(kind, stack, balance, storage)
+                : withdrawToContainer(kind, stack, amount, storage);
         if (handled > 0) {
             player.getInventory().setChanged();
             player.containerMenu.broadcastChanges();
@@ -104,9 +118,10 @@ public final class MagicGridItemTransfer {
      * 如果先写入库存、再按「写回失败」回滚，就会在已经收下能量的库存上再插一次，
      * 凭空多出一份。</p>
      */
-    private static int depositToStock(ServerPlayer player, MagicResourceKind kind, ItemStack stack, int balance) {
+    private static int depositToStock(MagicResourceKind kind, ItemStack stack, int balance,
+                                      ResourceAccess storage) {
         if (balance <= 0) return 0;
-        int accepted = MagicResourceEndpoint.insert(player.getServer(), kind, balance, false);
+        int accepted = storage.insert(kind, balance, false);
         // Botania 按单件保存余额，堆叠物品的总余额只能按堆叠数变化。
         if (kind == MagicResourceKind.MANA) {
             int stackCount = Math.max(1, stack.getCount());
@@ -149,7 +164,7 @@ public final class MagicGridItemTransfer {
             }
         }
         if (accepted <= 0) return 0;
-        MagicResourceEndpoint.insert(player.getServer(), kind, accepted, true);
+        storage.insert(kind, accepted, true);
         if (removed != accepted)
             RSIntegrationMod.debug("[RSI-Magic] 充入部分完成：{} 库存收下 {}，容器实扣 {}", kind.id(), accepted, removed);
         return accepted;
@@ -160,13 +175,13 @@ public final class MagicGridItemTransfer {
      *
      * <p>{@code write} 对 MANA 同样按差值处理，所以只要容器写进了部分就按实际写进量返回。</p>
      */
-    private static int withdrawToContainer(ServerPlayer player, MagicResourceKind kind,
-                                          ItemStack stack, int amount) {
+    private static int withdrawToContainer(MagicResourceKind kind, ItemStack stack, int amount,
+                                           ResourceAccess storage) {
         long space = space(kind, stack);
         if (space <= 0) return 0;
         int requested = (int) Math.min(Math.min(space, Math.max(0, amount)), kind.capacity());
         if (requested <= 0) return 0;
-        int extracted = MagicResourceEndpoint.extract(player.getServer(), kind, requested, true);
+        int extracted = storage.extract(kind, requested, true);
         if (extracted <= 0) return 0;
         int restored = write(kind, stack, read(kind, stack) + extracted);
         if (restored == extracted) return extracted;
@@ -174,12 +189,26 @@ public final class MagicGridItemTransfer {
         int kept = restored == UNKNOWN ? 0 : Math.max(0, restored);
         int refund = extracted - kept;
         if (refund > 0) {
-            int back = MagicResourceEndpoint.insert(player.getServer(), kind, refund, true);
+            int back = storage.insert(kind, refund, true);
             if (back != refund)
                 RSIntegrationMod.debug("[RSI-Magic] 取出回滚不全：{} 退回 {}，库存只收下 {}", kind.id(), refund, back);
         }
         RSIntegrationMod.debug("[RSI-Magic] 取出部分完成：{} 已写回容器 {}，退回库存 {}", kind.id(), kept, refund);
         return kept;
+    }
+
+    private record ResourceAccess(ServerPlayer player, @Nullable INetwork network) {
+        private int insert(MagicResourceKind kind, int amount, boolean perform) {
+            return network == null
+                    ? MagicResourceEndpoint.insert(player.getServer(), kind, amount, perform)
+                    : MagicResourceEndpoint.insert(network, kind, amount, perform);
+        }
+
+        private int extract(MagicResourceKind kind, int amount, boolean perform) {
+            return network == null
+                    ? MagicResourceEndpoint.extract(player.getServer(), kind, amount, perform)
+                    : MagicResourceEndpoint.extract(network, kind, amount, perform);
+        }
     }
 
     private static int readable(MagicResourceKind kind) {

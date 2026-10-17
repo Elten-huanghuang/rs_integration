@@ -1,0 +1,12 @@
+{
+  "values": [
+    {
+      "id": "rs_integration:resonant_mana_pool",
+      "required": false
+    },
+    {
+      "id": "rs_integration:resonant_source_tank",
+      "required": false
+    }
+  ]
+}

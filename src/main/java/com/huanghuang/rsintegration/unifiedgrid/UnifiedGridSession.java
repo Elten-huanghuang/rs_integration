@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.magic.MagicResourceDirty;
 import com.huanghuang.rsintegration.magic.MagicResourceEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
@@ -185,7 +186,7 @@ public final class UnifiedGridSession {
                 MagicChannel channel = magicChannel(packet.kind());
                 if (channel == null) return;
                 int moved = MagicResourceInteraction.depositToNetwork(
-                        player, channel.resource, menu.getCarried());
+                        player, network, channel.resource, menu.getCarried());
                 if (moved > 0) channel.forceRefresh(); // 立即刷新该资源条目
             }
             case FILL_FLUID -> {
@@ -201,7 +202,7 @@ public final class UnifiedGridSession {
                 MagicChannel channel = magicChannel(packet.kind());
                 if (channel == null || packet.serial() != channel.serial) return;
                 int moved = MagicResourceInteraction.withdrawFromNetwork(
-                        player, channel.resource, menu.getCarried(), channel.lastAmount);
+                        player, network, channel.resource, menu.getCarried(), channel.lastAmount);
                 if (moved > 0) channel.forceRefresh();
             }
             case EXTRACT, SCROLL -> {
@@ -448,6 +449,7 @@ public final class UnifiedGridSession {
         private UUID storedId;
         private UUID craftableId;
         private int amount;
+        private int capacity;
         private StorageTrackerEntry tracker;
 
         private ServerEntry(int serial, Object template, GridResourceKey key) {
@@ -456,7 +458,8 @@ public final class UnifiedGridSession {
             this.key = key;
         }
         private UnifiedGridEntry update(boolean metadata) {
-            return new UnifiedGridEntry(serial, amount, metadata, storedId, craftableId, metadata ? template : null, tracker);
+            return new UnifiedGridEntry(serial, amount, capacity, metadata, storedId, craftableId,
+                    metadata ? template : null, tracker);
         }
     }
 
@@ -467,19 +470,21 @@ public final class UnifiedGridSession {
     }
 
     /**
-     * 魔法资源的轻量级通道：条目只有一个，直接查询已挂载的归墟盘，不监听 RS 缓存。
+     * 魔法资源的轻量级通道：每种资源一个条目，直接查询已挂载的归墟盘，不监听 RS 缓存。
      */
     private final class MagicChannel {
-        /** 每秒查询一次，避免频繁扫描磁盘。 */
-        private static final int POLL_INTERVAL = 20;
+        /** 兜底轮询周期；正常情况下靠 {@link MagicResourceDirty} 的版本号即时推送。 */
+        private static final int FALLBACK_POLL_INTERVAL = 100;
         private final GridResourceKind gridKind;
         private final MagicResourceKind resource;
         private int epoch;
         private boolean resetRequested = true;
         private int lastResync = -20;
-        private int lastPoll = -POLL_INTERVAL;
+        private int lastPoll = -FALLBACK_POLL_INTERVAL;
+        private long seenVersion = -1;
         private ServerEntry entry;
         private int lastAmount = -1;
+        private int lastCapacity = -1;
         private boolean sentInitial;
         private int serial;
 
@@ -493,7 +498,9 @@ public final class UnifiedGridSession {
             resetRequested = false;
             sentInitial = false;
             lastAmount = -1;
+            lastCapacity = -1;
             lastPoll = player.tickCount; // 立即查询
+            seenVersion = -1;            // 重置后无条件重推一次
             epoch++;
             if (entry == null) {
                 if (nextSerial == Integer.MAX_VALUE) throw new IllegalStateException("会话条目编号耗尽");
@@ -508,7 +515,8 @@ public final class UnifiedGridSession {
 
         /** 充放操作后立即刷新条目。 */
         private void forceRefresh() {
-            lastPoll = player.tickCount - POLL_INTERVAL;
+            lastPoll = player.tickCount - FALLBACK_POLL_INTERVAL;
+            seenVersion = -1;
         }
 
         private void pump() {
@@ -520,15 +528,25 @@ public final class UnifiedGridSession {
                 return;
             }
             if (!resource.available()) return;
-            // 降低查询频率：每秒查询一次，而非每 tick
-            if (player.tickCount - lastPoll < POLL_INTERVAL && sentInitial) return;
+            // 其他能量曾在这里漏刷新：魔法资源不走 RS 缓存，没有变更通知，
+            // 过去只能每秒轮询，任务预留、溢出写入这类改动要等一个周期才可见。
+            // 现在所有写入路径都声明版本号，这里只在版本变化或兜底周期到时查询，
+            // 三种资源一视同仁，不再为某一种资源单独补丁。
+            long version = MagicResourceDirty.version();
+            boolean changed = version != seenVersion;
+            boolean fallback = player.tickCount - lastPoll >= FALLBACK_POLL_INTERVAL && sentInitial;
+            if (!changed && !fallback) return;
+            seenVersion = version;
             lastPoll = player.tickCount;
 
-            int total = MagicResourceEndpoint.available(player.server, resource);
-            // 只在数量变化时发送更新
-            if (!sentInitial || total != lastAmount) {
+            int total = MagicResourceEndpoint.available(network, resource);
+            int capacity = MagicResourceEndpoint.capacity(network, resource);
+            // 数量和网络容量都变化时更新终端，容量来源与绑定方块完全一致。
+            if (!sentInitial || total != lastAmount || capacity != lastCapacity) {
                 lastAmount = total;
+                lastCapacity = capacity;
                 entry.amount = total;
+                entry.capacity = capacity;
                 FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer(256));
                 try {
                     entry.update(true).write(buf, gridKind);
