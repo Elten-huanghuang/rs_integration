@@ -485,6 +485,16 @@ public final class RSIntegrationMod {
             LOGGER.info("[RSI-Storage] Optional backend {} was not registered: {}",
                     bdBackend.backendId(), bdBackend.status());
         }
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            try {
+                Class<?> type = Class.forName(
+                        "com.huanghuang.rsintegration.api.magic.BdMagicApi");
+                type.getMethod("installHandlers").invoke(null);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+                LOGGER.warn("[RSI-BD] BD Key 别名 handler 安装失败: {}",
+                        unavailable.toString());
+            }
+        }
         if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             LOGGER.info("[RSI-Storage] Refined Storage is absent; storage operations stay disabled, but cross-mod recipe and JEI metadata remain registered.");
         }
