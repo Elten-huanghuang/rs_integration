@@ -11,8 +11,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.util.LazyOptional;
+import vazkii.botania.api.BotaniaForgeCapabilities;
 import vazkii.botania.api.block.Wandable;
 import vazkii.botania.api.mana.ManaPool;
+import vazkii.botania.api.mana.ManaReceiver;
 import vazkii.botania.api.mana.spark.ManaSpark;
 import vazkii.botania.api.mana.spark.SparkAttachable;
 
@@ -22,10 +26,37 @@ import java.util.Optional;
 public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlockEntity
         implements ManaPool, SparkAttachable, Wandable {
     private static final String OUTPUTTING = "BotaniaOutputting";
+    private LazyOptional<ManaReceiver> manaReceiver = LazyOptional.of(() -> this);
+    private LazyOptional<SparkAttachable> sparkAttachable = LazyOptional.of(() -> this);
+    private LazyOptional<Wandable> wandable = LazyOptional.of(() -> this);
     private boolean outputting;
 
     public BotaniaResonantManaPoolBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state, MagicResourceKind.MANA, MagicResourceKind.MANA.capacity());
+    }
+
+    @Override
+    public <T> LazyOptional<T> getCapability(Capability<T> capability, Direction side) {
+        if (capability == BotaniaForgeCapabilities.MANA_RECEIVER) return manaReceiver.cast();
+        if (capability == BotaniaForgeCapabilities.SPARK_ATTACHABLE) return sparkAttachable.cast();
+        if (capability == BotaniaForgeCapabilities.WANDABLE) return wandable.cast();
+        return super.getCapability(capability, side);
+    }
+
+    @Override
+    public void invalidateCaps() {
+        super.invalidateCaps();
+        manaReceiver.invalidate();
+        sparkAttachable.invalidate();
+        wandable.invalidate();
+    }
+
+    @Override
+    public void reviveCaps() {
+        super.reviveCaps();
+        manaReceiver = LazyOptional.of(() -> this);
+        sparkAttachable = LazyOptional.of(() -> this);
+        wandable = LazyOptional.of(() -> this);
     }
 
     @Override public Level getManaReceiverLevel() { return level; }
@@ -41,7 +72,10 @@ public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlock
             extract(Math.min(requested, Math.max(0, getCurrentMana())));
         }
     }
-    @Override public boolean canReceiveManaFromBursts() { return isBound() && !isFull() && reachable(); }
+    /** 只有绑定且可达的网络才有实际库存，避免魔力束输出后发生能量丢失。 */
+    @Override public boolean canReceiveManaFromBursts() {
+        return isBound() && reachable() && !isFull();
+    }
     @Override public boolean isOutputtingPower() { return outputting; }
     @Override public int getMaxMana() { return resourceCapacity(); }
     @Override public Optional<DyeColor> getColor() { return Optional.empty(); }
@@ -57,7 +91,8 @@ public final class BotaniaResonantManaPoolBlockEntity extends ResonantMagicBlock
         return sparks.size() == 1 ? sparks.get(0) : null;
     }
     @Override public int getAvailableSpaceForMana() {
-        return isBound() && reachable() ? Math.max(0, resourceCapacity() - getCurrentMana()) : 0;
+        return isBound() && reachable()
+                ? Math.max(0, resourceCapacity() - getCurrentMana()) : 0;
     }
     @Override public boolean areIncomingTranfersDone() { return false; }
 
