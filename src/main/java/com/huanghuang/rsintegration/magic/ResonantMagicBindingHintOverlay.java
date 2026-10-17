@@ -32,7 +32,7 @@ public final class ResonantMagicBindingHintOverlay {
         if (mc.player == null || mc.level == null || mc.screen != null
                 || !(mc.hitResult instanceof BlockHitResult hit)) return;
         if (!(mc.level.getBlockState(hit.getBlockPos()).getBlock()
-                instanceof ResonantMagicBlock)) return;
+                instanceof ResonantMagicBlockMarker)) return;
         ResonantMagicStorage entity = mc.level.getBlockEntity(hit.getBlockPos())
                 instanceof ResonantMagicStorage magic ? magic : null;
 

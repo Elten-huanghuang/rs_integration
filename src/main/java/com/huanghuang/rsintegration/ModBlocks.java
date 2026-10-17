@@ -25,14 +25,16 @@ public final class ModBlocks {
                     .mapColor(MapColor.COLOR_LIGHT_BLUE)
                     .strength(3.0F, 6.0F)
                     .sound(SoundType.METAL)
+                    .noOcclusion()
                     .requiresCorrectToolForDrops()));
 
     public static final RegistryObject<Block> RESONANT_SOURCE_TANK = BLOCKS.register(
             "resonant_source_tank",
-            () -> new ResonantMagicBlock(BlockBehaviour.Properties.of()
+            () -> createSourceTankBlock(BlockBehaviour.Properties.of()
                     .mapColor(MapColor.COLOR_PURPLE)
                     .strength(3.0F, 6.0F)
                     .sound(SoundType.METAL)
+                    .noOcclusion()
                     .requiresCorrectToolForDrops()));
 
     private ModBlocks() {}
@@ -50,6 +52,21 @@ public final class ModBlocks {
             }
         }
         return new ResonantManaPoolBlock(properties);
+    }
+
+    private static Block createSourceTankBlock(BlockBehaviour.Properties properties) {
+        if (ModList.get().isLoaded(ModIds.ARS_NOUVEAU)) {
+            try {
+                Class<?> type = Class.forName(
+                        "com.huanghuang.rsintegration.mods.arsnouveau.ArsResonantSourceTankBlock",
+                        true, ModBlocks.class.getClassLoader());
+                return (Block) type.getConstructor(BlockBehaviour.Properties.class)
+                        .newInstance(properties);
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                // Ars 初始化失败时仍保留普通共振魔源罐方块。
+            }
+        }
+        return new ResonantMagicBlock(properties);
     }
 
     public static void init(IEventBus modBus) {

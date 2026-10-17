@@ -13,7 +13,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 
 /** 共振魔法方块的公共交互层；具体原生能量接口由可选实体实现。 */
-public class ResonantMagicBlock extends Block implements EntityBlock {
+public class ResonantMagicBlock extends Block
+        implements EntityBlock, ResonantMagicBlockMarker {
     public ResonantMagicBlock(BlockBehaviour.Properties properties) {
         super(properties);
     }

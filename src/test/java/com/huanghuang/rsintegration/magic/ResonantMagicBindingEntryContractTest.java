@@ -18,7 +18,7 @@ class ResonantMagicBindingEntryContractTest {
     @Test
     void resonantBlocksUseTheExistingSneakBindingEntry() throws IOException {
         String source = Files.readString(HANDLER);
-        int target = source.indexOf("if (block instanceof ResonantMagicBlock)");
+        int target = source.indexOf("if (block instanceof ResonantMagicBlockMarker)");
         int ordinaryMachines = source.indexOf("MachineBindingTarget matched = findEnabledTarget(block)");
         assertTrue(target >= 0 && target < ordinaryMachines,
                 "resonant blocks must be handled by the shared right-click binding entry");
@@ -31,7 +31,7 @@ class ResonantMagicBindingEntryContractTest {
     @Test
     void bindingHintDoesNotRequireClientBlockEntityToBeSynchronized() throws IOException {
         String source = Files.readString(OVERLAY);
-        assertTrue(source.contains("instanceof ResonantMagicBlock"));
+        assertTrue(source.contains("instanceof ResonantMagicBlockMarker"));
         assertTrue(source.contains("if (held.isEmpty() || !RSBindingHook.INSTANCE.matches(held)) return;"));
         assertFalse(source.contains("binding_hint.hold_terminal"));
         assertTrue(source.contains("entity != null && entity.isBound()"));
@@ -41,7 +41,7 @@ class ResonantMagicBindingEntryContractTest {
     void sharedBindingHintSkipsResonantBlocksAndEmptyHands() throws IOException {
         String source = Files.readString(Path.of("src/main/java/com/huanghuang/rsintegration/"
                 + "network/binding/BindingHintOverlay.java"));
-        assertTrue(source.contains("instanceof ResonantMagicBlock) return;"));
+        assertTrue(source.contains("instanceof ResonantMagicBlockMarker) return;"));
         assertTrue(source.contains("if (held.isEmpty() && mc.player.getOffhandItem().isEmpty()) return;"));
     }
 }

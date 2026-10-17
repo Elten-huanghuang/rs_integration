@@ -22,7 +22,7 @@ import net.minecraft.world.phys.Vec3;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlock;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
 import com.huanghuang.rsintegration.magic.ResonantMagicStorage;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 
@@ -92,7 +92,7 @@ public final class BindingEventHandler {
 
         // 共振方块复用本入口的 Shift + 右键绑定协议；处理完成后不再进入
         // 普通机器绑定存储，避免无线终端的 useOn 抢先打开界面。
-        if (block instanceof ResonantMagicBlock) {
+        if (block instanceof ResonantMagicBlockMarker) {
             handleResonantMagicBinding(event, player);
             return;
         }

@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.mixin.core.BlockEntityTypeAccessor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -81,13 +80,9 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
     @Override public int getCurrentMana() { return storage.currentAmount(); }
     @Override public boolean isFull() { return getCurrentMana() >= resourceCapacity(); }
     @Override public void receiveMana(int mana) {
-        if (mana > 0) {
-            int space = Math.max(0, resourceCapacity() - getCurrentMana());
-            insert(Math.min(mana, space));
-        } else if (mana < 0) {
-            int requested = (int) Math.min(-(long) mana, Integer.MAX_VALUE);
-            extract(Math.min(requested, Math.max(0, getCurrentMana())));
-        }
+        if (mana > 0) insert(ManaPoolManaMath.insertRequest(
+                mana, getCurrentMana(), resourceCapacity()));
+        if (mana < 0) extract(ManaPoolManaMath.extractRequest(mana, getCurrentMana()));
     }
 
     @Override public boolean canReceiveManaFromBursts() {
@@ -128,12 +123,16 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
     }
 
     @Override
-    public CompoundTag getUpdateTag() {
-        return saveWithoutMetadata();
+    public void writePacketNBT(CompoundTag tag) {
+        super.writePacketNBT(tag);
+        storage.save(tag);
+        tag.putBoolean(OUTPUTTING, outputting);
     }
 
     @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        return ClientboundBlockEntityDataPacket.create(this);
+    public void readPacketNBT(CompoundTag tag) {
+        super.readPacketNBT(tag);
+        storage.load(tag);
+        outputting = tag.getBoolean(OUTPUTTING);
     }
 }

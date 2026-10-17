@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlock;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
@@ -36,7 +36,8 @@ public final class BindingHintOverlay {
         if (mc.player == null || mc.level == null || mc.screen != null) return;
         if (!(mc.hitResult instanceof BlockHitResult hit)) return;
         var blockEntity = mc.level.getBlockEntity(hit.getBlockPos());
-        if (mc.level.getBlockState(hit.getBlockPos()).getBlock() instanceof ResonantMagicBlock) return;
+        if (mc.level.getBlockState(hit.getBlockPos()).getBlock()
+                instanceof ResonantMagicBlockMarker) return;
         ItemStack held = mc.player.getMainHandItem();
         if (held.isEmpty() && mc.player.getOffhandItem().isEmpty()) return;
         if (AltarBindingRegistry.findHook(held).isEmpty()) {
