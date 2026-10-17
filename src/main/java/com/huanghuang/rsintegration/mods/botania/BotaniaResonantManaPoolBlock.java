@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.botania;
 
 import com.huanghuang.rsintegration.magic.BotaniaResonantManaPoolBlockEntity;
 import com.huanghuang.rsintegration.magic.ResonantMagicBlockEntities;
+import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -13,7 +14,8 @@ import vazkii.botania.common.block.mana.ManaPoolBlock;
 import vazkii.botania.common.block.block_entity.mana.ManaPoolBlockEntity;
 
 /** 直接进入 Botania 原生魔力池类型链的共振池方块。 */
-public final class BotaniaResonantManaPoolBlock extends ManaPoolBlock {
+public final class BotaniaResonantManaPoolBlock extends ManaPoolBlock
+        implements ResonantMagicBlockMarker {
     public BotaniaResonantManaPoolBlock(BlockBehaviour.Properties properties) {
         super(Variant.DEFAULT, properties);
     }

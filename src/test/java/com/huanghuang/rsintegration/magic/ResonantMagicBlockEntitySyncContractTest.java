@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doReturn;
@@ -51,24 +52,24 @@ class ResonantMagicBlockEntitySyncContractTest {
     @Test
     void resonantContainersUseNetworkScaleCapacity() throws IOException {
         BlockPos pos = new BlockPos(4, 5, 6);
-        var manaPool = new BotaniaResonantManaPoolBlockEntity(BlockEntityType.CHEST, pos,
-                Blocks.CHEST.defaultBlockState());
+        var manaPool = new ResonantMagicBlockEntity(BlockEntityType.CHEST, pos,
+                Blocks.CHEST.defaultBlockState(), MagicResourceKind.MANA,
+                MagicResourceKind.MANA.capacity());
 
-        assertEquals(1_000_000_000, manaPool.resourceCapacity());
-        assertEquals(1_000_000_000, MagicResourceKind.SOURCE.capacity());
+        assertEquals(Integer.MAX_VALUE, manaPool.resourceCapacity());
+        assertEquals(Integer.MAX_VALUE, MagicResourceKind.SOURCE.capacity());
         String sourceAdapter = Files.readString(Path.of("src/main/java/com/huanghuang/"
                 + "rsintegration/magic/ArsResonantSourceTankBlockEntity.java"));
         assertTrue(sourceAdapter.contains("MagicResourceKind.SOURCE.capacity()"));
         assertTrue(sourceAdapter.contains("getTransferRate() { return Integer.MAX_VALUE; }"));
         assertTrue(sourceAdapter.contains("return getSource();"));
-        assertTrue(sourceAdapter.contains("implements ISourceTile"));
-        assertTrue(sourceAdapter.contains("private final ISpecialSourceProvider sourceProvider"));
-        assertTrue(sourceAdapter.contains("SourceManager.INSTANCE.addInterface(level, sourceProvider)"));
+        assertTrue(sourceAdapter.contains("extends SourceJarTile"));
+        assertTrue(sourceAdapter.contains("implements ResonantMagicStorage"));
         String mixinConfig = Files.readString(Path.of("src/main/resources/rs_integration.mixins.json"));
-        assertTrue(mixinConfig.contains("arsnouveau.SourceUtilMixin"));
+        assertFalse(mixinConfig.contains("arsnouveau.SourceUtilMixin"));
         String mixinPlugin = Files.readString(Path.of("src/main/java/com/huanghuang/"
                 + "rsintegration/mixin/plugin/RSIntegrationMixinPlugin.java"));
-        assertTrue(mixinPlugin.contains(".arsnouveau.SourceUtilMixin"));
+        assertFalse(mixinPlugin.contains(".arsnouveau.SourceUtilMixin"));
     }
 
     @Test

@@ -43,30 +43,6 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains(".aetherworks.")) {
             return isClassPresent(targetClassName);
         }
-        if (mixinClassName.endsWith(".arsnouveau.SourceUtilMixin")) {
-            return isClassPresent(targetClassName)
-                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.ISourceTile")
-                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.SourceProvider")
-                    && hasMethod(targetClassName, "canTakeSource")
-                    && hasMethod(targetClassName, "canGiveSource")
-                    && hasMethod(targetClassName, "hasSourceNearby");
-        }
-        if (mixinClassName.endsWith(".arsnouveau.RelaySourceInteropMixin")) {
-            return isClassPresent(targetClassName)
-                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.ISourceTile")
-                    && hasMethod(targetClassName, "setSendTo")
-                    && hasMethod(targetClassName, "setTakeFrom")
-                    && hasMethod(targetClassName, "onFinishedConnectionFirst")
-                    && hasMethod(targetClassName, "onFinishedConnectionLast")
-                    && hasMethod(targetClassName, "tick");
-        }
-        if (mixinClassName.endsWith(".arsnouveau.RelaySplitterSourceInteropMixin")) {
-            return isClassPresent(targetClassName)
-                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.ISourceTile")
-                    && hasMethod(targetClassName, "processFromList")
-                    && hasMethod(targetClassName, "processToList")
-                    && hasMethod(targetClassName, "createParticles");
-        }
         if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
                     && hasResonanceBackend();

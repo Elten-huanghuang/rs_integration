@@ -1,51 +1,34 @@
 package com.huanghuang.rsintegration.magic;
 
-import com.hollingsworth.arsnouveau.api.source.ISourceTile;
-import com.hollingsworth.arsnouveau.api.source.ISpecialSourceProvider;
-import com.hollingsworth.arsnouveau.api.source.SourceManager;
+import com.hollingsworth.arsnouveau.common.block.tile.SourceJarTile;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
 /** Ars Nouveau 原生 Source 容器适配。 */
-public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEntity
-        implements ISourceTile {
-    /**
-     * Ars 的原生 SourceManager 只接受 ISpecialSourceProvider；适配器独立于
-     * 方块实体，避免把 getSource() 的两种不同返回类型混在一个类里。
-     */
-    private final ISpecialSourceProvider sourceProvider = new ISpecialSourceProvider() {
-        @Override public ISourceTile getSource() {
-            return ArsResonantSourceTankBlockEntity.this;
-        }
-
-        @Override public BlockPos getCurrentPos() {
-            return worldPosition;
-        }
-
-        @Override public boolean isValid() {
-            return level != null && !level.isClientSide && !isRemoved()
-                    && level.hasChunkAt(worldPosition)
-                    && level.getBlockEntity(worldPosition) == ArsResonantSourceTankBlockEntity.this;
-        }
-    };
+public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
+        implements ResonantMagicStorage {
+    private final ResonantMagicStorageData storage;
 
     public ArsResonantSourceTankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-        super(type, pos, state, MagicResourceKind.SOURCE, MagicResourceKind.SOURCE.capacity());
+        super(castType(type), pos, state);
+        storage = new ResonantMagicStorageData(this, MagicResourceKind.SOURCE,
+                MagicResourceKind.SOURCE.capacity());
     }
 
-    @Override
-    public void onLoad() {
-        super.onLoad();
-        registerSourceProvider();
-    }
-
-    /** 向 Ars 的全局原生 SourceManager 注册当前维度的 provider。 */
-    void registerSourceProvider() {
-        if (level != null && !level.isClientSide) {
-            SourceManager.INSTANCE.addInterface(level, sourceProvider);
-        }
-    }
+    @Override public MagicResourceKind resourceKind() { return storage.kind(); }
+    @Override public int resourceCapacity() { return storage.resourceCapacity(); }
+    @Override public boolean isBound() { return storage.isBound(); }
+    @Override public CompoundTag binding() { return storage.binding(); }
+    @Override public void setBinding(CompoundTag next) { storage.setBinding(next); }
+    @Override public void clearBinding() { storage.clearBinding(); }
+    @Override public boolean isBoundTo(CompoundTag next) { return storage.isBoundTo(next); }
+    @Override public int currentAmount() { return storage.currentAmount(); }
+    @Override public boolean reachable() { return storage.reachable(); }
+    @Override public int insert(int amount) { return storage.insert(amount); }
+    @Override public int extract(int amount) { return storage.extract(amount); }
+    @Override public void serverTick() { storage.serverTick(); }
 
     /** Ars 的传输计算还会按来源余额和目标余量再限流，这里不人为截断。 */
     @Override public int getTransferRate() { return Integer.MAX_VALUE; }
@@ -78,5 +61,22 @@ public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEn
             addSource((int) Math.min(-(long) amount, Integer.MAX_VALUE));
         }
         return getSource();
+    }
+
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        storage.save(tag);
+    }
+
+    @Override
+    public void load(CompoundTag tag) {
+        super.load(tag);
+        storage.load(tag);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static BlockEntityType<? extends SourceJarTile> castType(BlockEntityType<?> type) {
+        return (BlockEntityType<? extends SourceJarTile>) type;
     }
 }

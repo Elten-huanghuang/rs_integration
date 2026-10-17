@@ -19,7 +19,7 @@ public final class ResonantMagicBlockEntities {
             TYPES.register("resonant_mana_pool", () -> BlockEntityType.Builder.of(
                     ResonantMagicBlockEntities::createMana, ModBlocks.RESONANT_MANA_POOL.get())
                     .build(null));
-    public static final RegistryObject<BlockEntityType<ResonantMagicBlockEntity>> SOURCE_TANK =
+    public static final RegistryObject<BlockEntityType<BlockEntity>> SOURCE_TANK =
             TYPES.register("resonant_source_tank", () -> BlockEntityType.Builder.of(
                     ResonantMagicBlockEntities::createSource, ModBlocks.RESONANT_SOURCE_TANK.get())
                     .build(null));
@@ -42,13 +42,13 @@ public final class ResonantMagicBlockEntities {
                 MagicResourceKind.MANA.capacity());
     }
 
-    private static ResonantMagicBlockEntity createSource(net.minecraft.core.BlockPos pos,
-                                                          net.minecraft.world.level.block.state.BlockState state) {
+    private static BlockEntity createSource(net.minecraft.core.BlockPos pos,
+                                            net.minecraft.world.level.block.state.BlockState state) {
         if (ModList.get().isLoaded("ars_nouveau")) {
             BlockEntity optional = createOptional(
                     "com.huanghuang.rsintegration.magic.ArsResonantSourceTankBlockEntity",
                     pos, state, SOURCE_TANK.get());
-            if (optional instanceof ResonantMagicBlockEntity nativeEntity) return nativeEntity;
+            if (optional != null) return optional;
         }
         return new ResonantMagicBlockEntity(SOURCE_TANK.get(), pos, state, MagicResourceKind.SOURCE,
                 MagicResourceKind.SOURCE.capacity());
