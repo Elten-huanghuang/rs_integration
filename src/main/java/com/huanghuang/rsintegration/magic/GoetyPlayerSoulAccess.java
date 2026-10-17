@@ -18,7 +18,11 @@ final class GoetyPlayerSoulAccess {
 
     static int consume(Player player, int requested) {
         if (player == null || requested <= 0) return 0;
-        if (!staticBoolean("decreaseSESouls", player, requested)) return 0;
+        boolean decreased;
+        try (GoetySoulRefill.Scope ignored = GoetySoulRefill.suspend()) {
+            decreased = staticBoolean("decreaseSESouls", player, requested);
+        }
+        if (!decreased) return 0;
         staticVoid("sendSEUpdatePacket", player);
         return requested;
     }

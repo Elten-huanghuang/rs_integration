@@ -117,6 +117,7 @@
 - **Embers Rekindled** 可协助解出炼金台配方，并记住已找到的结果。
 - **Aetherworks** 可以自动使用锻造砧、补充材料，并显示温度和进度。
 - **Goety** 会准备受支持的仪式，但最终启动仍由玩家确认；长仪式也会按完整持续时间计算灵魂需求。
+- 配置项 `integrations.enableGoetySoulReverseRefill` 默认关闭。开启后，灵魂方舟发生灵魂消耗时会从绑定的 RS 网络按剩余容量一次补满；同一玩家每 20 tick 最多尝试一次，关闭时只保留方舟溢出写入 RS 的原行为。
 - Farmer's Respite 和 Youkai's Homecoming 的茶壶、蒸笼及发酵机器可参与递归合成，包括涉及流体的配方。
 
 ### 神化刷怪笼升级

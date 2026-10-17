@@ -154,6 +154,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("com.Polarice3.Goety.utils.SEHelper")
                     && hasMethod(targetClassName, "increaseSouls");
         }
+        if (mixinClassName.contains("goety.SEHelperSoulLossMixin")) {
+            return isClassPresent("com.Polarice3.Goety.utils.SEHelper")
+                    && hasMethod(targetClassName, "decreaseSESouls");
+        }
         if (mixinClassName.contains("goety.SEImpSoulGainMixin")) {
             return isClassPresent("com.Polarice3.Goety.common.capabilities.soulenergy.SEImp")
                     && hasField(targetClassName, "soulEnergy")

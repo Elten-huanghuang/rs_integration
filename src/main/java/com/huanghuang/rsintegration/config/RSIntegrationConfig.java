@@ -179,6 +179,7 @@ public final class RSIntegrationConfig {
 
     //  per-mod integration
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_GOETY_SOUL_REVERSE_REFILL;
     public static ForgeConfigSpec.BooleanValue ENABLE_MALUM;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA;
     public static ForgeConfigSpec.BooleanValue ENABLE_WIZARDS_REBORN;
@@ -452,6 +453,11 @@ public final class RSIntegrationConfig {
                 .comment("启用诡厄巫法兼容",
                         "支持黑暗祭坛等机器绑定与远程合成。")
                 .define("enableGoety", true);
+        ENABLE_GOETY_SOUL_REVERSE_REFILL = c
+                .comment("允许 RS 灵魂能量反向补货灵魂方舟",
+                        "开启后，灵魂方舟发生灵魂消耗时从绑定 RS 网络按剩余容量一次补满；每 20 tick 最多尝试一次",
+                        "关闭时只保留灵魂方舟溢出写入 RS 的原行为")
+                .define("enableGoetySoulReverseRefill", false);
         ENABLE_MALUM = c
                 .comment("启用灵灾兼容",
                         "支持精魂祭坛、精魂坩埚等机器绑定与远程合成。")

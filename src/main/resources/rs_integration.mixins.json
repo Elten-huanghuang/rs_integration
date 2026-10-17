@@ -88,6 +88,7 @@
     "goety.CursedCageSoulSourceMixin",
     "goety.SoulCandlestickSoulSourceMixin",
     "goety.SEHelperSoulGainMixin",
+    "goety.SEHelperSoulLossMixin",
     "goety.SEImpSoulGainMixin",
     "distantworlds.LithumCoreUpdateTickProcedureMixin",
     "distantworlds.DistantWorldsItemHelperMixin",
