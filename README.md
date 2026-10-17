@@ -5,190 +5,142 @@
 <h1 align="center">RS Integration</h1>
 
 <p align="center">
-  <strong>English</strong> | <a href="README_zh.md">Simplified Chinese</a>
+  <strong>English</strong> | <a href="README_zh.md">简体中文</a>
 </p>
+<p align="center"><strong>Minecraft 1.20.1 · Forge 47+ </strong></p>
 
-Make items from other mods without shuttling materials between machines by hand. Pick a recipe in JEI, let RSI gather what is available, craft missing ingredients, and send the result back to storage.
+RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursive crafting, remote machine access, storage-aware interactions, and optional magic-resource integration. It is an add-on, not a replacement for either storage mod.
 
-**Current version: 1.5.1 | Minecraft 1.20.1**
+[MC百科介绍](https://www.mcmod.cn/class/29199.html)
 
-[1.5.1 release notes (Chinese)](docs/RELEASE_NOTES_1.5.1.md) | [MC Encyclopedia guide (Chinese)](https://www.mcmod.cn/class/29199.html)
+## Contents
+
+[Requirements](#requirements) · [Features](#features) · [Quick Start](#quick-start) · [Controls](#controls) · [Compatibility](#compatibility) · [Developer API](#developer-api) · [Configuration](#configuration) · [Diagnostics](#diagnostics) · [Building](#building)
 
 ## Requirements
 
 | Dependency | Requirement |
 |---|---|
-| Minecraft | 1.20.1 |
-| Forge | 47+ |
-| Refined Storage | 1.12+; Optional |
+| Minecraft / Forge | 1.20.1 / 47+ |
+| Refined Storage | 1.12+, optional; inventory-only recursive crafting remains available without it |
 | JEI | Required on the client for recipe actions and plan previews |
-| Other integrations | Optional; modules load only when their target mod is present |
+| Other integrations | Optional; each module loads only when its target mod is installed |
 
-## Main Features
+## Features
 
-### Recursive remote crafting
+### Recursive crafting
 
-**Ordinary recipes can be crafted recursively from the player's inventory even without an RS wireless terminal.**
+- Start from JEI or EMI and preview the graph, required steps, available/missing materials, alternatives, probability estimates, and repeat count before starting.
+- Uses the player inventory plus separately resolved RS and BD networks, follows recipes through crafting tables, machines, trades, and inventory-only crafting, and never adds RS and BD balances together.
+- Handles alternatives, probabilistic ingredients, multi-output recipes, byproducts, remainders, container transformations, and fluid-container recipes. Input buffering and batch conversion reduce repeated dispatch for supported machines.
+- DAG execution, reservations, machine/capture leases, input buffers, and output accounting keep materials conserved across recursion, cancellation, unloaded machines, disconnects, and failures.
+- Returns outputs, containers, and unused materials where supported. Unplaceable fluids become refund vouchers; `/rsi_fluid_refund` restores vouchers held after an inventory-full or offline event.
+- Shows progress with `P`; cancel from the progress screen or with `/rsi cancel`.
 
-- Click the RSI action in JEI to preview and start crafting.
-- Automatically follows the recipe chain through crafting tables, supported mod machines, trades, and other compatible recipes.
-- Before starting, shows the required steps, available and missing materials, and alternate recipes. You stay in control of whether to begin.
-- Uses machines you have linked and can share repeated work between compatible machines. When possible, it also crafts directly from your inventory without a wireless terminal.
-- Returns containers and unused materials where supported. Progress is shown with `P`; cancel from the progress screen or run `/rsi cancel`.
+### Machine access
 
-### Machine binding and remote access
+- Bind machines with a Network Linker, `Alt` + right-click, or `;` to scan nearby machines; broken links are cleaned up automatically.
+- Open bound machines remotely, inspect state, collect outputs, send inputs, and use the `H` Machine Center with favourites and compact tabs.
+- Multiple compatible machines can share repeated work, while per-machine operation limits and leases prevent overlapping automation.
+- Custom-GUI bindings cover machines that can be opened remotely even without recipe automation.
+- Respects FTB Chunks/Cadmus claims, never force-loads distant chunks, rate-limits remote GUI requests, and revalidates every server-side action.
 
-- Link a supported machine with a Network Linker, use `Alt` + right-click, or press `;` to find nearby machines. Broken links are cleaned up automatically.
-- Open linked machines from RSI screens, check their status, collect outputs, or send them items without walking back and forth.
-- Keep favourite machines handy. If several machines can do the same job, RSI can share the work between them.
-- Machine access follows your FTB Chunks/Cadmus claims; RSI will not load distant chunks just to run a machine.
+### JEI, EMI, and storage tools
 
-### JEI and RS interface tools
+- The optional mixed terminal shows items and fluids in one searchable list, supports filters, JEI transfer, container filling/draining, and safe rollback when a container cannot accept the result.
+- A dedicated fluid-container recipe category shows filling, draining, and remainder recipes, checks output storage before execution, and can be bookmarked or transferred.
+- RS terminal modes can switch between crafting, stonecutter, smithing, and anvil workstations; JEI transfer follows the selected mode and falls back to the native 3x3 grid when needed.
+- Supported recipes receive RSI craft buttons; linked machines may also receive a button that opens them directly.
+- JEI includes dedicated FTB Quests submission, Distant Worlds Lithum Altar, and Project MMO salvage views.
+- Bookmark missing ingredients, filter JEI by mod, send recipes to an RS grid with `Ctrl+T`, or pull a stack from storage with the middle mouse button.
+- The `Y` side panel searches storage and reaches linked machines without leaving the current screen; `U`/`R` open uses or recipes.
+- Network overlays show stored counts and missing craft amounts. Marquee selection can bookmark or hide multiple JEI entries.
+- RS search supports name, mod (`@`), tag (`$`), tooltip (`#`), and pinyin across item/fluid caches, with history, favourites, deletion, background indexing, and configurable persistent caching.
+- `F` fills an RS/BD search box from the selected JEI/EMI item. Hold `Ctrl` and drag across RS slots to take one item from each.
+- At a Tetra workbench, JEI shows fitting materials, `Ctrl`-hover previews the result, and the list can be sorted by useful stats.
+- The JEI config button opens an in-game editor for client, common, server, and storage settings, including validation, reset, restart warnings, and search.
 
-- Find and bookmark missing ingredients, filter JEI by mod, move a recipe to an RS grid with `Ctrl+T`, or pull a stack from storage with the middle mouse button.
-- Use the RSI side panel to search storage and reach linked machines while keeping your current screen open.
-- Search RS grids by name, mod (`@`), tag (`$`), or tooltip text (`#`); recent searches can be revisited, favourited, or removed later.
-- Press `F` in an RS or Beyond Dimensions terminal to fill its search box from the item currently selected in JEI or EMI.
-- Drag across RS slots while holding `Ctrl` to take one item from each slot.
+### Resonant containers
 
-### Tetra JEI integration
+- The Resonant Mana Pool extends Botania's native `ManaPoolBlockEntity`, preserving dropped-item manual infusion, sparks, receivers, output mode, and native mana rendering.
+- The Resonant Source Tank extends Ars Nouveau's native `SourceJarTile`, so relays, splitters, and source consumers use the normal Ars transfer path instead of recipe-specific patches.
 
-- At a Tetra workbench, JEI shows materials that fit the part you are working on. Hold `Ctrl` over a material to preview it, or sort the list by its useful stats.
+### Myriad Realms Guixu Disk
 
-### JEI registration and recipe entry points
+- One disk stores items, fluids, and magic resources in the native RS disk drive. Item and fluid entry limits, per-entry payload size, and total payload size are configurable.
+- `MANA`, `SOURCE`, and `SOUL` remain separate resource rows. `MANA` and `SOUL` can feed RSI recursive crafting; `SOURCE` remains on the native Ars transfer path.
+- NBT-sensitive variants retain identity. The disk participates in storage caches, automation devices, the mixed terminal, JEI/EMI lookup, and recursive item/fluid extraction.
+- Existing disks expand automatically when entry limits are raised. Save verification, crash-safe dirty handling, drop protection, void recovery, and UUID-based administrator recovery reduce data-loss risk.
+- Missing items or fluids from uninstalled mods are quarantined without blocking normal stock; their original data remains preserved and counts toward capacity.
+- Infinite RS disks can be converted when the matching recipe is available.
+- RS and Beyond Dimensions remain separate inventories. Their balances are never added together automatically.
 
-- Supported recipes get an RSI craft button; recipes for linked machines may also get a button to open that machine.
-- JEI includes extra views for FTB Quests submissions, the Distant Worlds Lithum Altar, and Project MMO salvage recipes.
+### Resonance Storage Disk
 
-### HUDs and in-world prompts
+- RS resonance disks satisfy attributes, inventory ticks, event-driven passives, and item/resource lookups as if carried by the player; supported mutations are written back instead of ticking disposable copies.
+- The passive engine combines attribute scanning, configurable tick simulation, and event hooks for items such as potion charms, Pyromancer Staff, Artificial Flower, Spectral Eye Amulet, Nine Sword Books, Terra curios, and infinite potions.
+- TaCZ loose ammunition participates in reloads with NBT and its real round count; the gun HUD includes matching disk ammunition, and Shift transfers debit only after a successful disk write.
+- Stored powder snow, source, venom, hot-spring fluid, and similar resources participate in recursive crafting; Malum Void Favor and its transmutations can be unlocked through the well interaction.
+- The disk opens a 36-slot Resonance Backpack view and cannot be dismantled by the RS `Shift` + right-click shortcut. Only one RS resonance disk is active per network.
+- The BD Resonance Network Generator provides the corresponding disk-like passive storage. Right-click to bind a BD network, keep it in the inventory, and let generators on the same network merge when space allows.
+- BD resonance access follows network permissions and stores its own Void Favor state. The generator remains a separate BD space and never enters BD `UnifiedStorage`.
 
-- **Aetherium Anvil / Forge Tool Station HUD**: looking at either machine shows its slotted item, current/required hammer hits, forge temperature, valid recipe temperature range, ember storage and per-hit cost, mistakes, and invalid-recipe warnings. Tool Stations also show target temperature and temperature rate; the footer reports configured temperature bounds, lever binding, Auto Refill, and Auto Hammer state.
-- **Distant Worlds Lithum Altar HUD**: looking at a Lithum Core shows idle/working state, the current recipe or output, energy/capacity, recovery rate, and the item/count on all eight surrounding pedestals. It can be disabled with the client option `distantWorlds.enableHud`.
-- **Craft progress HUD**: active asynchronous crafts display their target, overall percentage, completed/running node counts, current steps, and machine state in a right-side panel. It can be hidden or restored from the progress screen opened with `P`.
-- **Binding hint HUD**: while holding a compatible Network Linker and looking at a supported machine or altar, a hotbar-level prompt indicates whether the current action will bind or unbind it.
+### Other modpack integrations
 
-### Auto Eat
-
-Open an RS crafting grid to consume food directly from the network:
-
-- **Dietary Diversity** works with SolCarrot and chooses foods not yet recorded.
-- **Stack Feast** consumes one selected food until full or the per-use limit is reached.
-- Stack Feast recognizes effects such as Gnaw's Gift that legitimately allow eating at full hunger.
-- **Balanced Diet** works with Diet and chooses food for lower nutrition groups.
-- Food and status-effect blacklists prevent unwanted consumption.
-- Bowls, bottles, and other remainders return to the RS network when possible.
-- Servers can configure activation requirements, execution cost, and per-use limits.
-
-### Villager trade restock
-
-- Select a villager trade and press `Space` to fill both payment slots from your inventory and connected RS network.
-- Missing items are shown in the trade screen and can be bookmarked in JEI.
-
-### Small conveniences
-
-- Press `Space` at an enchanting table to refill lapis from storage.
-- Anvil screens can remember materials you use often and refill them later from your inventory or storage. Works with vanilla, Goety, and Iron's Spells anvil screens.
-- JEI favourites can protect villager trades from refresh mods that would otherwise reroll them.
-- Construction Wands can count matching blocks in connected storage, so you can build more without carrying every block.
-- Add an RSI Void Upgrade to a supported RS grid to discard incoming items that match your chosen rules.
-- FTB Quests' “claim all” can continue through newly unlocked rewards automatically.
-
-### Apotheosis Enchantment Library
-
-- Connect an Apotheosis library to RS to browse, search, and import enchanted books from storage.
-- Use the library's search and filters to choose which books to import; rejected books are returned safely.
-
-### Replenishment and item management
-
-- **Reforging restock**: press `Space` in Apotheosis or Ancient Reforging to refill materials from RS.
-
-### Special automation compatibility
-
-- **Embers Rekindled** can help solve Alchemy Tablet recipes and remember solutions for next time.
-- **Aetherworks** can automate hammering and material restocking at its forge, with temperature and progress shown on screen.
-- **Goety** can prepare supported rituals, but leaves the final activation to you. Long rituals account for their full soul cost.
-- The `integrations.enableGoetySoulReverseRefill` option is disabled by default. When enabled, soul consumption from the Arca refills it to capacity from the bound RS network, with at most one attempt every 20 ticks per player. When disabled, only the original Arca overflow-to-RS behavior remains.
-- Kettles, steamers, and fermentation machines from Farmer's Respite and Youkai's Homecoming can be included in crafting chains, including recipes that use fluids.
-
-### Apotheosis Spawner Upgrades
-
-- Shift-right-click an Apotheosis spawner while holding an RS network item to view and choose upgrades.
-- Check the required materials, select upgrades, and confirm; RSI can craft missing ingredients when recipes are available.
-
-### One-key container transfer
-
-- Press `F` in a chest, machine input, or other container to transfer its contents to the current target.
-- Press `G` to switch the target between a bound RS network and a Sophisticated Backpack.
-- Transfers respect filters, item blacklists, and destination capacity; rejected items remain in the source container.
-- Transfer keys are suppressed while typing in chat, search boxes, and other text fields.
-- `F` transfer is also disabled in player-inventory and crafting-accessor contexts where Minecraft needs the key for normal offhand swapping.
-
-### Resonance Disk
-
-The Resonance Disk is an RS storage disk whose contents can act as if carried by the player.
-
-- Supplies compatible attributes, inventory-tick effects, event-driven passives, and item/resource lookups.
-- TaCZ loose ammunition in the disk supplies matching guns during reloads, preserving NBT and consuming real rounds. The HUD includes matching disk ammunition and receives an updated snapshot after reload consumption. Shift transfers debit the player inventory only after a successful disk write.
-- Persists mutation for configured items instead of ticking disposable copies.
-- Includes default passive support for Apotheosis potion charms, Muyimeng fused potion charms, Reliquary's Pyromancer Staff, Enigmatic Addons' Artificial Flower, and Forbidden & Arcanus' Spectral Eye Amulet.
-- Supports Chapter of Yuusha/Moonstone Nine Sword Books, Wizard Terra Curios `BuffItem` items, and Terra Equipment stacked infinite potions.
-- Supports compatible stored resources such as powder snow buckets, source fluid, and venom during recursive crafting.
-- Supports Malum Void Favor acquisition through the well interaction while the disk is available through RS.
-- Prevents the Resonance Disk from being dismantled into a 4K storage part and housing by the RS disk `Shift` + right-click shortcut.
-- Only one Resonance Disk is active per RS network, preventing duplicated passive effects and resource queries.
-
-### Sophisticated Backpack upgrades
-
-- Connect compatible backpack upgrades to RS for magnetic pickup, item pickup, feeding, restocking, or depositing items into storage.
-- RSI also adds storage-aware upgrades, and can combine eligible Majrusz's Accessories when its compacting upgrade is installed.
-
-### Compatibility highlights
-
-The integration layer also covers Miner's Delight Copper Pots, Terra Curio's renamed workshop, History Stages recipe locks, and native EMI craft-button placement. These modules are optional and are discovered at runtime; installing one does not make it a hard dependency.
-
-### FTB Quests item tracking
-
-- Items crafted through RSI or added to storage can count toward FTB Quests item tasks.
-- Submit quest items directly from storage, scan storage for matching tasks, and bookmark anything still missing. Optional sidebar buttons can be disabled.
-- Requires FTB Quests and FTB Teams. When another mod already handles automatic item-task progress, RSI steps aside.
+- **Machine automation:** adapters use native recipe and transfer paths where possible and load only with their target mod. Embers solves and remembers Alchemy Tablet codes and runs its machines; Aetherworks automates hammering, refilling, temperature control, and Metal Former item/fluid input.
+- **Fluid supply:** water-consuming machines can refill from the selected RS network; `autoCrafting.freeWaterMachines` controls which machine types refill without consuming network fluid.
+- **Ritual and machine modules:** Goety prepares rituals without activating them, Better Summoning Rituals prepares altars without starting them, Biomancy supplies Digester/Bio-Lab/Decomposer/Bio-Forge recipes, and Cthulhu Creatures drives counted Flesh Altar batches with multi-altar support.
+- **Distant Worlds:** the Lithum Altar can be automated with configurable research bypass, Firon failure removal, nearby furnace fuel refill, search radius, per-refill limit, and fuel priority.
+- **Cooking automation:** Farmer's Delight, Farmer's Respite, Youkai's Homecoming, Dungeon's Delight, Twilight Delight, BOSSes' Delight, Casualness Delight, Farm & Charm, Candlelight, Bakery, Miners' Delight, Crock Pot, and Gensokyo Delight machines support their native heat, container, batch, fluid, and world-drop rules.
+- **HUDs and prompts:** Aetherworks shows hammering, temperature, ember, refill, and automation state; Distant Worlds shows altar/energy/pedestal state; craft progress and binding hints remain visible in-world.
+- **Auto Eat:** SolCarrot diversity, Diet balance, and stack feast support food/effect blacklists, remainder return, activation requirements, execution cost, and per-use limits.
+- **Trading and replenishment:** `Space` restocks villager payments, enchanting lapis, anvils, and Apotheosis/Ancient Reforging materials. Missing trade items are shown and bookmarked.
+- **Apotheosis:** the Enchantment Library scans and merges RS stock with server-side validation and safe returns; spawners support upgrade selection, material planning, recursive supply, and RS/BD access.
+- **Container transfer:** `F` moves container contents to RS or a Sophisticated Backpack selected with `G`, respecting filters, blacklists, capacity, text fields, and vanilla `F` contexts.
+- **Sophisticated Backpacks:** magnet, pickup, feeding, refill, deposit, and void upgrades use RS; the dimensional magnet can collect world fluids with JEI fluid filtering, ghost-slot controls, and container/upgrade safety checks.
+- **FTB Quests:** crafted/stored item progress, storage-backed submission, missing-task scans, bulk claim-all, and optional sidebar buttons. Existing authoritative task handlers take priority.
+- **Custom GUIs:** Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apotheosis, Ancient Reforging, enchanting tables, Enchanting Infuser variants, and Tetra workbenches can be bound and opened remotely.
+- **Small tools:** JEI favourites protect trades, Construction Wands count stored blocks, RSI Void Upgrades discard matching incoming items, retained-item rules protect minimum stock, and Miner's Delight, Terra Curio, History Stages, and native EMI placement remain integrated.
 
 ## Quick Start
 
-1. Build and power a Refined Storage network.
-2. Obtain an RSI Network Linker.
-3. Shift-right-click one supported machine, or press `;` to scan and bind nearby machines.
-4. Open a recipe in JEI and use the RSI craft action.
-5. Review the generated plan, choose alternatives or a repeat count, then start the chain.
-6. Watch progress with `P`; completed outputs return to RS, or to the player when no network exists.
+1. Build or connect an RS network and obtain a Network Linker.
+2. Bind a supported machine with `Alt` + right-click, or press `;` nearby.
+3. Open a recipe in JEI/EMI and use the RSI craft action.
+4. Review the plan, choose alternatives if needed, and start.
+5. Press `P` for progress. Without a storage network, outputs return to the player when possible.
 
-## Default Controls
+## Controls
 
-All key mappings can be changed in Minecraft Controls. Configurable numeric key codes use GLFW values.
+All keys can be changed in Minecraft Controls.
 
-| Control | Context | Action |
-|---|---|---|
-| `F` | Container / storage terminal | Deposit container contents, or fill the storage search box from the selected JEI/EMI item |
-| `G` | Any/container screen | Toggle RS / Sophisticated Backpack transfer target |
-| `Y` | Any screen | Toggle the RS side panel |
-| `H` | Any screen | Toggle the Machine Management Center |
-| `P` | Any screen | Open/close active crafting progress |
-| `;` | In world | Bind nearby supported machines with a Network Linker in hand, inventory, or Curios |
-| `Alt` + right-click | In world | Bind the held network terminal to the targeted machine |
-| `Alt` + left-click | JEI ingredient | Filter by mod |
-| `Alt` + middle-click | JEI ingredient list | Clear search |
-| `Ctrl+T` | JEI recipe | Transfer to RS crafting grid |
-| `Ctrl` + left-drag | RS grid | Swipe-extract one of each item |
-| Left-drag, then `A` / `H` / `Esc` | JEI list | Bookmark / hide / clear marquee selection |
-| `U` / `R` | Hovered side-panel item | Show uses / recipes in JEI |
-| `Space` | Villager / enchantment screen | Refill trade items / lapis from storage |
+| Key | Action |
+|---|---|
+| `F` | Transfer container contents, or fill RS/BD search from the selected JEI/EMI item |
+| `G` | Switch transfer target between RS and Sophisticated Backpack |
+| `Y` / `H` | Toggle the RS side panel / Machine Management Center |
+| `P` | Toggle craft progress |
+| `;` | Bind nearby supported machines |
+| `Alt` + right-click | Bind the held terminal to the targeted machine |
+| `Alt` + left-click | Filter JEI ingredients by mod |
+| `Alt` + middle-click | Clear the JEI ingredient search |
+| `Ctrl+T` | Send a JEI recipe to the RS crafting grid |
+| `Ctrl` + left-drag | Take one item from each RS slot |
+| Left-drag, then `A` / `H` / `Esc` | Bookmark / hide / clear a JEI marquee selection |
+| `U` / `R` | Show uses / recipes for the hovered side-panel item |
+| `Space` | Refill villager trades, lapis, or anvil/reforging materials |
 
-## Mod compatibility
+## Compatibility
 
-The list below is a guide to supported machine automation and add-on features. Optional mods only need to be installed when you want their integration.
+Integrations are optional and discovered at runtime. JEI/EMI use the target mod's native categories and, where supported, native workstation entries.
+
+<details>
+<summary><strong>Full compatibility table</strong></summary>
 
 | Mod | Supported recipes or machines |
 |---|---|
 | JEI / EMI | Recipe-browser craft and machine buttons, recipe transfer, missing-material bookmarks, Tetra material tools, storage pull, and dedicated FTB/Distant Worlds/PMMO categories |
+| The Long Travail | Spring Crown JEI variants use the selected flower's NBT as the recursive target |
 | Vanilla / Brick Furnace | Furnace, blast furnace, smoker, campfire, brewing stand, stonecutter, smithing, anvil, enchanting |
 | Iron Furnaces | Furnace tiers in furnace, blasting, and smoking modes, including factory/rainbow stack batches and multi-machine balancing |
 | Sophisticated Storage | Chest upgrades |
@@ -200,6 +152,9 @@ The list below is a guide to supported machine automation and add-on features. O
 | Apprentice Codex | Essence Smoker and Spellcaster Workbench |
 | ISS CSW | Spell Forge and multi-scroll spell-mixing recipes |
 | Goety / Goety Awaken | Infusers, brazier, altar, cage, candlestick, and supported rituals |
+| Better Summoning Rituals | Remote altar preparation, counted materials, catalysts, rollback, and conflict recovery; final activation and world-drop collection stay manual |
+| Biomancy | Digester, Bio-Lab, Decomposer, and Bio-Forge with nutrient/fuel handling, item/fluid input, batching, and native machine rules |
+| Cthulhu Creatures | Flesh Altar recipes with counted materials, batch insertion, multi-altar execution, remote GUI, and recursive planning |
 | Malum | Spirit Altar, Spirit Crucible, Runic Workbench, Spirit Infusion and related recipes; adjacent altars collect outputs independently and nearby Catalyzers/Runewood Obelisks retain their acceleration effects |
 | Eidolon | Worktable, Crucible, and Brazier |
 | Forbidden & Arcanus | Hephaestus Forge, Clibano, smithing/apply-modifier flow |
@@ -214,54 +169,96 @@ The list below is a guide to supported machine automation and add-on features. O
 | Dungeon's Delight | Monster Pot recipes with serving-container planning, input buffering, and concurrent pots using native monster heat sources |
 | Farmer's Respite | Kettle |
 | Youkai's Homecoming | Moka Pot, Fermentation Tank, single- or multi-layer Steamer, Kettle, cooking pots, Cuisine Board |
+| Twilight Delight | Fiery Cooking Pot with its native self-heating behavior and Farmer's Delight cooking recipes |
+| BOSSes' Delight | Soul Cooking Pot with cold-source validation, container handling, and batch cooking |
+| Casualness Delight | Deep Frying Pan with native heat validation and captured world-drop results |
+| Farm & Charm | Cooking Pot and Roaster with native heat, container, and batch rules |
+| Candlelight | Large Cooking Pot / copper cooking pot using Farm & Charm cooking recipes and Candlelight stoves |
+| Bakery | Small Cooking Pot using the shared Farm & Charm cooking recipe and heat rules |
 | Gensokyo Delight | Fermentation Tank, Steamer, Kettle, cooking pots, and Cuisine Board across renamed field layouts |
-| Immortaler's Delight | Old and new Enchantal Cooler variants; Hot Spring Bucket resources can participate through Resonance Disks |
+| Immortaler's Delight | Old and new Enchantal Cooler variants and Hot Spring infusion recipes; Hot Spring Bucket resources can participate through Resonance Disks |
 | Apotheosis | Fletching, Gem Cutting, Enchantment Library, Reforging, and Spawner upgrades |
 | TACZ and compatible gun packs | Gun Smith Table |
-| Avaritia | Compressed through Extreme six-tier crafting tables and Extreme Smithing |
+| Avaritia | Compressed through Extreme crafting tables, Extreme Smithing, Neutron Collector, Compressed Chest, and related machines |
 | Until Eternity | Recursive 5×5 End Crafting Table recipes; “I'm Full!” in a Resonance Disk activates the mod's food and thirst protection, and Vibrant Amethyst grants Amethyst Blessing through the mod's native handler |
-| SlashBlade | Crafting recipes |
+| SlashBlade | Crafting recipes with NBT-sensitive blade conditions |
 | Confluence | Workshop |
 | Distant Worlds | Lithum Altar and related interactions; crosshair HUD for recipe, energy, recovery, and all eight pedestal states |
 | Lychee | Virtual item-inside/soaking and block-interaction recipes; block interactions can run through a bound Mechanical Press |
 | Farming for Blockheads | Market exchanges that can also be used as crafting steps |
 | Project MMO | Salvage recipes |
 | Crabber's Delight | Crab Trap processing |
-| Tetra | Workbench material filtering, Ctrl-hover result preview, and configurable JEI material sorting |
+| Tetra | Remote workbench GUI, material filtering, Ctrl-hover result preview, and configurable JEI material sorting |
 | Miner's Delight | Copper Pot recipes with container-aware batching |
 | Terra Curio | Workshop recipes, binding and container-transfer protection |
 | FTB Teams / FTB Quests | Storage-backed submission, item-task progress, bulk claiming, and optional sidebar actions |
 | Beyond Dimensions | An alternative storage network for supported crafting, machine access, and JEI extraction |
 | Curios | Linker discovery in accessory slots, resonance/passive integrations, and FTB reward-item detection |
 | FTB Chunks / Cadmus | Claim-aware machine binding and remote operation checks |
-| Sophisticated Backpacks | Remote GUI/transfer support and RS-connected backpack upgrades |
+| Sophisticated Backpacks | Remote GUI/transfer, RS-connected magnet/pickup/feeding/refill/deposit/void upgrades, world-fluid collection, and Majrusz compacting |
+| Enchanting Infuser | Remote GUI binding for the normal and advanced enchanting infusers |
 | History Stages | Recipe availability respects stage locks during planning |
 | Construction Wand | Blocks in connected storage count toward wand building |
 | Easy Villagers / Trade Cycling / Trade Refresh / Retraining | Favourite JEI items can prevent a villager trade from being rerolled |
 
-Mini Boiler boiling recipes support recursive crafting through RS fluid storage. Existing batch execution fills multiple recipe inputs at once, bounded by the input tank, gas tank, and remaining operations, and reduces the batch when materials are limited. Bind the boiler itself and keep its connected machine consuming or producing Ember energy to supply waste heat. Disable output extraction pipes during crafting. Built-in conversions are 1 mB water → 5 mB steam and 1 mB dwarven oil → 1 mB dwarven gas.
+</details>
 
-Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apotheosis, and Ancient Reforging. They can be bound and opened remotely even when RSI does not automate their recipes.
+Mini Boiler boiling recipes use RS fluids and batch by input tank, gas tank, and remaining operations. Keep the connected machine supplying waste heat, bind the boiler itself, and disable output extraction pipes during crafting. Built-in conversions are 1 mB water to 5 mB steam and 1 mB dwarven oil to 1 mB dwarven gas.
+
+Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apotheosis, and Ancient Reforging, so they can be bound and opened remotely even without recipe automation.
+
+## Developer API
+
+RS and BD expose separate APIs. They do not share inventories or merge balances.
+
+RS magic resources are available through [`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java):
+
+```java
+RsiMagicApi.Session session = RsiMagicApi.network(network);
+int available = session.available(MagicResourceKind.SOUL);
+
+try (MagicResourceNetworkPool pool =
+             session.reserve(MagicResourceKind.SOUL, available)) {
+    int extracted = pool.withdraw(available);
+    // Use the extracted souls.
+}
+```
+
+BD magic resources are available through [`BdMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/BdMagicApi.java):
+
+```java
+BdMagicApi.Session session = BdMagicApi.network(player, networkId);
+long souls = session.amount(BdMagicApi.SOUL_KEY);
+```
+
+- `RsiMagicApi.Session` provides `amount`, `available`, `insert`, `extract`, and `reserve`.
+- `BdMagicApi` provides `MANA_KEY`, `SOURCE_KEY`, `SOUL_KEY`, and matching `Session` methods.
+- `BdMagicApi.registerAlias(alias, canonical)` rewrites registered alias keys in BD insert/extract handlers.
+- An alias key must already be registered in BD's `StackKeyRegistry`; RSI does not create third-party key types.
 
 ## Configuration
 
-Configuration files are documented in-place with comments and validation ranges:
+- `config/rs_integration/common.toml`: feature switches and optional integrations.
+- `config/rs_integration/storage.toml`: mixed terminal, unified-disk limits, storage save verification, transfer packet limits, and fluid-container checks.
+- `saves/<world>/serverconfig/rs_integration/server.toml`: server crafting, machine, and magic-resource behavior.
+- `config/rs_integration/client.toml`: UI, JEI, and Tetra display options.
 
-- `config/rs_integration/common.toml`: shared feature switches and optional integrations.
-- `saves/<world>/serverconfig/rs_integration/server.toml`: server crafting and machine behavior.
-- `config/rs_integration/client.toml`: side panel, display options, JEI tools, and Tetra preview settings.
+Planning limits, preferred recipes/material variants, retained-item rules, probability-attempt caps, input-buffer limits, graph/operation concurrency, and parallel delegate policies are configurable. The server-side `magicResources.pinnedBackend` only breaks ties when no active scope claims the route and never merges RS with BD.
 
-Settings files include descriptions and valid value ranges. Most settings are kept during upgrades; new list entries may need to be added manually.
+`integrations.enableGoetySoulReverseRefill` is disabled by default. When enabled, soul consumption from an Arca refills it to capacity from the bound RS network. Attempts are limited to once per player every 20 ticks.
 
-Remote crafting uses the server-side `autoCrafting.freeWaterMachines` allowlist for automatic water refills. Listed machine types refill for free; omitted types consume water from the selected RS network's fluid storage, not water bucket or bottle items. Set the list to `[]` to disable all free refills.
+`autoCrafting.freeWaterMachines` controls free water refills. Listed machines refill freely; omitted machines consume fluid from the selected RS network. `[]` disables all free refills, and the config comments list the exact default machine IDs.
 
-Defaults cover Farmer's Respite's kettle, Youkai's Homecoming's kettle/fermentation tank/moka pot/steamer, Iron's alchemist cauldron, Eidolon's crucible, and Botania's petal apothecary. The config comments list their exact machine IDs. Existing water remains usable; heat sources, ingredients, and containers are still required. Moka pots, steamers, and petal apothecaries consume 1000 mB when changing from empty to water-filled; other tanks consume only the refill deficit. Eidolon crucibles refill to at least 1000 mB to satisfy their native full-bucket check.
+Settings retain existing values during upgrades when possible. New list entries may need to be added manually.
 
 ## Diagnostics
 
-- `/rsi cancel` cancels the player's active chain.
-- `/rsi_debug` exposes chain, ledger, recipe-index, handler, binding, trace, audit, Embers cache/lock, and performance diagnostics to permission-level 2 operators.
-- `diagnosticVerboseLogging` enables detailed resolver and dispatcher logging when troubleshooting.
+- `/rsi cancel`: cancel the current craft.
+- `/rsi_fluid_refund`: claim refund vouchers retained after an inventory-full or offline event.
+- `/rsi_debug`: operator diagnostics for chains, bindings, handlers, reservations, and performance (permission level 2).
+- `/rsi_unified_disk list [page]` and `recover <uuid>`: list checkpoints and recover a lost unified-disk credential (permission level 2).
+- `/rsi_storage_test snapshot|simulate_insert|roundtrip <amount>`: explicit RS storage smoke tests for operators.
+- `diagnosticVerboseLogging`: enable detailed resolver and dispatcher logs.
 
 ## Building
 
@@ -270,7 +267,7 @@ Defaults cover Farmer's Respite's kettle, Youkai's Homecoming's kettle/fermentat
 .\gradlew.bat build --no-daemon
 ```
 
-The release JAR is written to `build/libs/` and verified by the build's `verifyReleaseJar` task.
+Release JARs are written to `build/libs/` and checked by `verifyReleaseJar`.
 
 ## License
 
