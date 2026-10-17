@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeClient;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -50,6 +51,7 @@ public abstract class GridScreenMouseMixin {
     @Unique
     private static void onMousePressedPre(ScreenEvent.MouseButtonPressed.Pre event) {
         if (!(event.getScreen() instanceof GridScreen screen)) return;
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return;
         if (event.getButton() == 1 && Screen.hasShiftDown()
                 && ModItems.RS_VOID_UPGRADE != null) {
             Slot slot = screen.getSlotUnderMouse();
@@ -72,6 +74,7 @@ public abstract class GridScreenMouseMixin {
     @Unique
     private static void onMouseDraggedPre(ScreenEvent.MouseDragged.Pre event) {
         if (!(event.getScreen() instanceof GridScreen screen)) return;
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return;
         GridScreenMouseMixin self = (GridScreenMouseMixin) (Object) screen;
         if (!self.rsi$swipeActive) return;
 
@@ -94,6 +97,8 @@ public abstract class GridScreenMouseMixin {
     @Inject(method = "m_6375_", at = @At("HEAD"), cancellable = true)
     private void rsi$onMouseClicked(double mouseX, double mouseY, int button,
                                      CallbackInfoReturnable<Boolean> cir) {
+        GridScreen currentScreen = (GridScreen) (Object) this;
+        if (currentScreen.getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.mouseClicked(mouseX, mouseY, button);
             if (consumed) {
@@ -105,7 +110,7 @@ public abstract class GridScreenMouseMixin {
         if (RSIntegrationConfig.ENABLE_RS_GRID_SWIPE_EXTRACT.get()
                 && Screen.hasControlDown() && button == 0
                 && !MachineTabHandler.isMachineCenterHovered()) {
-            GridScreen screen = (GridScreen) (Object) this;
+            GridScreen screen = currentScreen;
             double relX = mouseX - screen.getGuiLeft();
             double relY = mouseY - screen.getGuiTop();
             if (screen.isOverSlotArea(relX, relY)) {
@@ -145,6 +150,12 @@ public abstract class GridScreenMouseMixin {
     @Inject(method = "m_6348_", at = @At("HEAD"), cancellable = true)
     private void rsi$onMouseReleased(double mouseX, double mouseY, int button,
                                      CallbackInfoReturnable<Boolean> cir) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) {
+            rsi$swipeActive = false;
+            rsi$swipedIds.clear();
+            rsi$swipedItems.clear();
+            return;
+        }
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.mouseReleased(mouseX, mouseY, button);
             if (consumed) {
@@ -173,6 +184,7 @@ public abstract class GridScreenMouseMixin {
     private void rsi$onMouseDragged(double mouseX, double mouseY, int button,
                                      double dragX, double dragY,
                                      CallbackInfoReturnable<Boolean> cir) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHubInputHandler.isConsumingInput()) {
             MachineHub.updateDrag((int) mouseX, (int) mouseY);
             cir.setReturnValue(true);
@@ -182,6 +194,7 @@ public abstract class GridScreenMouseMixin {
     @Inject(method = "m_6050_", at = @At("HEAD"), cancellable = true)
     private void rsi$onMouseScrolled(double mouseX, double mouseY, double delta,
                                       CallbackInfoReturnable<Boolean> cir) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHubInputHandler.isConsumingInput()) {
             boolean consumed = MachineHubInputHandler.mouseScrolled(mouseX, mouseY, delta);
             if (consumed) {

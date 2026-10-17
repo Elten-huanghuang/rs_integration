@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -24,6 +25,7 @@ public abstract class GridScreenTooltipMixin {
 
     @Inject(method = "m_280003_", at = @At("HEAD"), cancellable = true, remap = false)
     private void rsi$suppressGridTooltip(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
+        if (((GridScreen) (Object) this).getGrid().getGridType() == GridType.PATTERN) return;
         if (MachineHub.isVisible()) {
             ci.cancel();
             return;

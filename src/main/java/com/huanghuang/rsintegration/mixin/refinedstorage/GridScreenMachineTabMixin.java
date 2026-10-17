@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -56,6 +57,10 @@ public abstract class GridScreenMachineTabMixin {
                 ? ClientSyncedConfig.ENABLE_MACHINE_GUI_TABS
                 : RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get())) return;
 
+        var screen = (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;
+        // 样板终端必须完整保留 RS 原生编辑器的输入、槽位和保存按钮。
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return;
+
         if (!rsi$bindingSyncRequested) {
             rsi$bindingSyncRequested = true;
             MachineHub.hideImmediate();
@@ -66,7 +71,6 @@ public abstract class GridScreenMachineTabMixin {
             }
         }
 
-        var screen = (com.refinedmods.refinedstorage.screen.grid.GridScreen) (Object) this;
         int topPos = screen.getGuiTop();
 
         int sideButtonBottom = 4;

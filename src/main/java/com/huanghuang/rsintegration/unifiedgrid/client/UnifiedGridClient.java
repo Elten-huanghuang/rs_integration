@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.unifiedgrid.GridResourceKind;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridActionPacket;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridUpdatePacket;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.handler.IItemGridHandler;
 import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.grid.CraftingSettingsScreen;
@@ -53,6 +54,7 @@ public final class UnifiedGridClient {
     }
 
     public static void tick(GridScreen screen) {
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return;
         if (screen.getView() instanceof UnifiedGridView view) {
             view.tick();
             addFilterButton(screen);
@@ -67,6 +69,7 @@ public final class UnifiedGridClient {
     }
 
     public static boolean click(GridScreen screen, double x, double y, int button) {
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return false;
         if (!(screen.getView() instanceof UnifiedGridView view)
                 || !screen.isOverSlotArea(x - screen.getGuiLeft(), y - screen.getGuiTop())) return false;
         if (!screen.getGrid().isGridActive() || button < 0 || button > 1) return true;
@@ -124,6 +127,7 @@ public final class UnifiedGridClient {
     }
 
     public static boolean scroll(GridScreen screen, double x, double y, double delta) {
+        if (screen.getGrid().getGridType() == GridType.PATTERN) return false;
         if (!(screen.getView() instanceof UnifiedGridView view) || !(Screen.hasShiftDown() || Screen.hasControlDown())
                 || !screen.isOverSlotArea(x - screen.getGuiLeft(), y - screen.getGuiTop())) return false;
         UnifiedGridView.Row row = view.row(selected(screen));

@@ -38,6 +38,16 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class UnifiedGridSessionTest extends BootstrapTest {
+    @ParameterizedTest
+    @ValueSource(strings = {"NORMAL", "CRAFTING", "PATTERN", "FLUID"})
+    void mixedSessionOnlySupportsNormalAndCraftingGrids(String typeName) {
+        GridType type = GridType.valueOf(typeName);
+        INetworkAwareGrid grid = mock(INetworkAwareGrid.class);
+        when(grid.getGridType()).thenReturn(type);
+        assertEquals(type == GridType.NORMAL || type == GridType.CRAFTING,
+                UnifiedGridSession.supports(grid));
+    }
+
     @Test void dualSubscriptionsMergeStoredAndCraftableAndDoNotScanOnIdleTicks() {
         Fixture f = new Fixture();
         f.session.tick();
