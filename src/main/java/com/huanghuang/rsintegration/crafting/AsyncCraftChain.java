@@ -3581,8 +3581,11 @@ public final class AsyncCraftChain {
                     }
                     RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartWithMaterials failed for {}"),
                             step.recipeId());
+                    Component failureTarget = stepFailureTarget(step, online);
+                    machineStartFailureMessage = Component.translatable(
+                            "rsi.async.abort.machine_start_failed", failureTarget);
                     online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", step.recipeId()));
+                            "rsi.generic.error.craft_failed", failureTarget));
                     try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
     RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
 }
@@ -3720,8 +3723,11 @@ public final class AsyncCraftChain {
             if (!delegate.startOperation(startContext)) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
                         "Unified operation start failed for generic step {}"), step.recipeId());
+                Component failureTarget = stepFailureTarget(step, online);
+                machineStartFailureMessage = Component.translatable(
+                        "rsi.async.abort.machine_start_failed", failureTarget);
                 online.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.craft_failed", step.recipeId()));
+                        "rsi.generic.error.craft_failed", failureTarget));
                 try { delegate.onBatchFailed(online, "unified operation start failed"); }
                 catch (Exception fe) {
                     RSIntegrationMod.LOGGER.error(ctx.format(
@@ -3740,6 +3746,26 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.debug(ctx.format("Generic step started OK: recipe={}"),
                 step.recipeId());
         return delegate;
+    }
+
+    /** 失败提示优先显示产物本地化名称，无法解析时才回退到配方 ID。 */
+    static Component stepFailureTarget(CraftingResolver.ResolutionStep step,
+                                       ServerPlayer player) {
+        ItemStack output = step.syntheticOutput();
+        if ((output == null || output.isEmpty()) && step.productionTarget() != null) {
+            output = step.productionTarget().material().toStack(1);
+        }
+        if (output == null || output.isEmpty()) {
+            Recipe<?> recipe = player.serverLevel().getRecipeManager()
+                    .byKey(step.recipeId()).orElse(null);
+            if (recipe != null) {
+                output = ModRecipeHandlers.tryGetResultItem(
+                        recipe, player.serverLevel().registryAccess());
+            }
+        }
+        return output != null && !output.isEmpty()
+                ? output.getHoverName()
+                : Component.literal(step.recipeId().toString());
     }
 
     record MachineCandidateSelection(List<BoundMachine> usable,
@@ -3983,8 +4009,11 @@ public final class AsyncCraftChain {
                 if (!group.startOperation(startContext)) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group unified start failed for {}"),
                             step.recipeId());
+                    Component failureTarget = stepFailureTarget(step, online);
+                    machineStartFailureMessage = Component.translatable(
+                            "rsi.async.abort.machine_start_failed", failureTarget);
                     online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", step.recipeId()));
+                            "rsi.generic.error.craft_failed", failureTarget));
                     try { group.onBatchFailed(online, "unified start failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
@@ -3997,8 +4026,11 @@ public final class AsyncCraftChain {
                         OperationStartContext.delegateExtracted(online, ledger))) {
                     RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartSingleCraft failed for {}"),
                             step.recipeId());
+                    Component failureTarget = stepFailureTarget(step, online);
+                    machineStartFailureMessage = Component.translatable(
+                            "rsi.async.abort.machine_start_failed", failureTarget);
                     online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", step.recipeId()));
+                            "rsi.generic.error.craft_failed", failureTarget));
                     try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
