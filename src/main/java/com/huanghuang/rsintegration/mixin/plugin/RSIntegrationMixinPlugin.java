@@ -47,9 +47,9 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(targetClassName)
                     && isClassPresent("com.hollingsworth.arsnouveau.api.source.ISourceTile")
                     && isClassPresent("com.hollingsworth.arsnouveau.api.source.SourceProvider")
-                    && hasMethod(targetClassName, "lambda$canTakeSource$1")
-                    && hasMethod(targetClassName, "lambda$canGiveSource$0")
-                    && hasMethod(targetClassName, "lambda$hasSourceNearby$2");
+                    && hasMethod(targetClassName, "canTakeSource")
+                    && hasMethod(targetClassName, "canGiveSource")
+                    && hasMethod(targetClassName, "hasSourceNearby");
         }
         if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
@@ -102,6 +102,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
             return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
                     && hasMethod(targetClassName, "getWidgets");
+        }
+        if (mixinClassName.contains("farmandcharm.NativeRecipeBookWidgetMixin")) {
+            return isClassPresent(targetClassName)
+                    && isClassPresent("net.satisfy.farm_and_charm.client.recipebook.CookingPotRecipeBook");
+        }
+        if (mixinClassName.contains("farmandcharm.CookingPotGuiMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "m_7856_");
         }
         // Every mixin under our refinedstorage namespace has RS types in its
         // annotations or method bodies.  Forge may still parse the mixin

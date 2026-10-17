@@ -25,7 +25,8 @@ public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEn
 
         @Override public boolean isValid() {
             return level != null && !level.isClientSide && !isRemoved()
-                    && level.hasChunkAt(worldPosition);
+                    && level.hasChunkAt(worldPosition)
+                    && level.getBlockEntity(worldPosition) == ArsResonantSourceTankBlockEntity.this;
         }
     };
 
@@ -48,7 +49,10 @@ public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEn
 
     /** Ars 的传输计算还会按来源余额和目标余量再限流，这里不人为截断。 */
     @Override public int getTransferRate() { return Integer.MAX_VALUE; }
-    @Override public boolean canAcceptSource() { return isBound() && reachable() && getSource() < getMaxSource(); }
+    /** 只有绑定且可达的网络才有实际库存，避免 Ars 机器输出后发生能量丢失。 */
+    @Override public boolean canAcceptSource() {
+        return isBound() && reachable() && getSource() < getMaxSource();
+    }
     @Override public int getSource() { return currentAmount(); }
     @Override public int getMaxSource() { return resourceCapacity(); }
     @Override public void setMaxSource(int ignored) {}

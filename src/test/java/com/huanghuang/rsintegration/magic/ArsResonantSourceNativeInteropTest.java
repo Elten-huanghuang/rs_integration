@@ -111,13 +111,15 @@ class ArsResonantSourceNativeInteropTest extends BootstrapTest {
         ArsResonantSourceTankBlockEntity tank = spy(new ArsResonantSourceTankBlockEntity(
                 BlockEntityType.CHEST, tankPos, Blocks.CHEST.defaultBlockState()));
         tank.setLevel(level);
+        doReturn(true).when(level).hasChunkAt(tankPos);
+        doReturn(tank).when(level).getBlockEntity(tankPos);
         doReturn(true).when(tank).canAcceptSource();
         doReturn(0).when(tank).getSource();
         doReturn(Integer.MAX_VALUE).when(tank).getMaxSource();
         doReturn(0).when(tank).addSource(anyInt());
 
-        // SourceManager 是 Ars 产出机器的公共目标发现入口；用同样的 provider
-        // 形状接入 spy，避免测试框架复制实体后 provider 捕获旧实例。
+        // Ars 产源机器使用 SourceUtil -> SourceManager 的公共目标发现入口；
+        // 这里以 provider 形状接入 spy，避免测试框架复制实体后 provider 捕获旧实例。
         ISpecialSourceProvider provider = new ISpecialSourceProvider() {
             @Override public ISourceTile getSource() { return tank; }
             @Override public boolean isValid() { return true; }
@@ -142,6 +144,16 @@ class ArsResonantSourceNativeInteropTest extends BootstrapTest {
         assertEquals(Integer.MAX_VALUE, moved);
         verify(producer).removeSource(Integer.MAX_VALUE);
         verify(tank).addSource(Integer.MAX_VALUE);
+    }
+
+    @Test
+    void unboundTankDoesNotAdvertiseAnUnavailableInventory() {
+        ArsResonantSourceTankBlockEntity tank = new ArsResonantSourceTankBlockEntity(
+                BlockEntityType.CHEST, BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
+
+        assertFalse(tank.isBound(), "测试罐体必须处于未绑定状态");
+        assertFalse(tank.canAcceptSource(),
+                "未绑定时没有可写入的 RS 库存，不能向 Ars 宣称可接收");
     }
 
     @Test
