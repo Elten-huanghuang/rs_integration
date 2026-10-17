@@ -43,6 +43,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains(".aetherworks.")) {
             return isClassPresent(targetClassName);
         }
+        if (mixinClassName.endsWith(".arsnouveau.SourceUtilMixin")) {
+            return isClassPresent(targetClassName)
+                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.ISourceTile")
+                    && isClassPresent("com.hollingsworth.arsnouveau.api.source.SourceProvider")
+                    && hasMethod(targetClassName, "lambda$canTakeSource$1")
+                    && hasMethod(targetClassName, "lambda$canGiveSource$0")
+                    && hasMethod(targetClassName, "lambda$hasSourceNearby$2");
+        }
         if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
                     && hasResonanceBackend();

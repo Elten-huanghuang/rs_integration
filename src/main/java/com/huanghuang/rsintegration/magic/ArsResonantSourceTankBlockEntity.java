@@ -10,13 +10,22 @@ import net.minecraft.world.level.block.state.BlockState;
 /** Ars Nouveau 原生 Source 容器适配。 */
 public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEntity
         implements ISourceTile {
-    private final ISpecialSourceProvider specialSourceProvider = new ISpecialSourceProvider() {
-        @Override public ISourceTile getSource() { return ArsResonantSourceTankBlockEntity.this; }
-        @Override public BlockPos getCurrentPos() { return worldPosition; }
+    /**
+     * Ars 的原生 SourceManager 只接受 ISpecialSourceProvider；适配器独立于
+     * 方块实体，避免把 getSource() 的两种不同返回类型混在一个类里。
+     */
+    private final ISpecialSourceProvider sourceProvider = new ISpecialSourceProvider() {
+        @Override public ISourceTile getSource() {
+            return ArsResonantSourceTankBlockEntity.this;
+        }
+
+        @Override public BlockPos getCurrentPos() {
+            return worldPosition;
+        }
+
         @Override public boolean isValid() {
             return level != null && !level.isClientSide && !isRemoved()
-                    && level.hasChunkAt(worldPosition)
-                    && level.getBlockEntity(worldPosition) == ArsResonantSourceTankBlockEntity.this;
+                    && level.hasChunkAt(worldPosition);
         }
     };
 
@@ -27,8 +36,13 @@ public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEn
     @Override
     public void onLoad() {
         super.onLoad();
+        registerSourceProvider();
+    }
+
+    /** 向 Ars 的全局原生 SourceManager 注册当前维度的 provider。 */
+    void registerSourceProvider() {
         if (level != null && !level.isClientSide) {
-            SourceManager.INSTANCE.addInterface(level, specialSourceProvider);
+            SourceManager.INSTANCE.addInterface(level, sourceProvider);
         }
     }
 
@@ -46,11 +60,19 @@ public final class ArsResonantSourceTankBlockEntity extends ResonantMagicBlockEn
         return getSource();
     }
     @Override public int addSource(int amount) {
-        if (amount > 0) insert(Math.min(amount, Math.max(0, getMaxSource() - getSource())));
+        if (amount > 0) {
+            insert(Math.min(amount, Math.max(0, getMaxSource() - getSource())));
+        } else if (amount < 0) {
+            removeSource((int) Math.min(-(long) amount, Integer.MAX_VALUE));
+        }
         return getSource();
     }
     @Override public int removeSource(int amount) {
-        if (amount > 0) extract(Math.min(amount, getSource()));
+        if (amount > 0) {
+            extract(Math.min(amount, getSource()));
+        } else if (amount < 0) {
+            addSource((int) Math.min(-(long) amount, Integer.MAX_VALUE));
+        }
         return getSource();
     }
 }
