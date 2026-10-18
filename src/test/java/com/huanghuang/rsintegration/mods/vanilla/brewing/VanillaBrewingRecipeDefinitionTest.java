@@ -69,6 +69,7 @@ class VanillaBrewingRecipeDefinitionTest extends BootstrapTest {
         actual.getOrCreateTag().putInt("Purity", 2);
 
         assertTrue(IngredientMatcher.matchesPotionIgnoringPurity(expected, actual));
+        assertTrue(IngredientMatcher.matchesProducedOutput(expected, actual));
 
         ItemStack wrongPotion = PotionUtils.setPotion(new ItemStack(Items.SPLASH_POTION), Potions.HEALING);
         wrongPotion.getOrCreateTag().putInt("Purity", 2);
@@ -77,5 +78,17 @@ class VanillaBrewingRecipeDefinitionTest extends BootstrapTest {
         ItemStack wrongContainer = PotionUtils.setPotion(new ItemStack(Items.LINGERING_POTION), Potions.AWKWARD);
         wrongContainer.getOrCreateTag().putInt("Purity", 2);
         assertFalse(IngredientMatcher.matchesPotionIgnoringPurity(expected, wrongContainer));
+    }
+
+    @Test
+    void exactPurityRecipeDoesNotBorrowADifferentPurityBottle() {
+        ItemStack expected = PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.WATER);
+        expected.getOrCreateTag().putInt("Purity", 1);
+        ItemStack actual = expected.copy();
+        actual.getOrCreateTag().putInt("Purity", 2);
+
+        assertFalse(IngredientMatcher.matchesWaterBottleIgnoringPurity(expected, actual));
+        assertFalse(IngredientMatcher.matchesPotionIgnoringPurity(expected, actual));
+        assertFalse(IngredientMatcher.matchesProducedOutput(expected, actual));
     }
 }

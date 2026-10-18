@@ -18,7 +18,9 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -611,11 +613,43 @@ public final class ImmutableRecipeGraphProjector {
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
             if (actual.runtimeNbt()) continue;
             if (isTaintedEarthHeart(actual, expected)) return true;
+            if (matchesPotionPuritySemantics(expected, actual)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                     ? exactNbtMatches(expected.nbt(), actual.nbt())
                     : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
         }
         return false;
+    }
+
+    private static boolean matchesPotionPuritySemantics(MaterialRef expected, MaterialRef actual) {
+        if (expected.runtimeNbt() || actual.runtimeNbt()
+                || !isVanillaPotionId(expected.itemId())
+                || !expected.itemId().equals(actual.itemId())) return false;
+        ItemStack expectedStack = materialStack(expected);
+        ItemStack actualStack = materialStack(actual);
+        return !expectedStack.isEmpty() && !actualStack.isEmpty()
+                && IngredientMatcher.matchesPotionIgnoringPurity(expectedStack, actualStack);
+    }
+
+    private static ItemStack materialStack(MaterialRef material) {
+        Item item = BuiltInRegistries.ITEM.get(material.itemId());
+        if (item == Items.AIR) return ItemStack.EMPTY;
+        ItemStack stack = new ItemStack(item);
+        if (!material.nbt().isEmpty()) {
+            try {
+                stack.setTag(TagParser.parseTag(material.nbt()));
+            } catch (Exception ignored) {
+                return ItemStack.EMPTY;
+            }
+        }
+        return stack;
+    }
+
+    private static boolean isVanillaPotionId(ResourceLocation itemId) {
+        return "minecraft".equals(itemId.getNamespace())
+                && ("potion".equals(itemId.getPath())
+                || "splash_potion".equals(itemId.getPath())
+                || "lingering_potion".equals(itemId.getPath()));
     }
 
     private static boolean isTaintedEarthHeart(MaterialRef actual, MaterialRef expected) {

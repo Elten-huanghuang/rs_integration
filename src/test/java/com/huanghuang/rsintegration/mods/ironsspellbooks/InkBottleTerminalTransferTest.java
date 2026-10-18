@@ -42,6 +42,35 @@ class InkBottleTerminalTransferTest extends BootstrapTest {
         assertEquals(250, store.amount);
     }
 
+    @Test void heldGlassBottleExtractsThirstPurityWaterWithItsNbt() {
+        FluidStack water = new FluidStack(Fluids.WATER, 250);
+        water.getOrCreateTag().putInt("Purity", 2);
+        Store store = new Store(water, 250, 0);
+
+        var result = UnifiedGridFluidTransfer.fill(
+                store.network, new ItemStack(Items.GLASS_BOTTLE), store.fluid);
+
+        assertTrue(result.cursor().is(Items.POTION));
+        assertEquals("minecraft:water", result.cursor().getTag().getString("Potion"));
+        assertEquals(2, result.cursor().getTag().getInt("Purity"));
+        assertEquals(250, result.transferred());
+        assertEquals(0, store.amount);
+    }
+
+    @Test void emptyCursorBorrowsGlassBottleForThirstPurityWater() {
+        FluidStack water = new FluidStack(Fluids.WATER, 250);
+        water.getOrCreateTag().putInt("Purity", 1);
+        Store store = new Store(water, 250, 1);
+
+        var result = UnifiedGridFluidTransfer.fill(store.network, ItemStack.EMPTY, store.fluid);
+
+        assertTrue(result.cursor().is(Items.POTION));
+        assertEquals(1, result.cursor().getTag().getInt("Purity"));
+        assertEquals(0, store.bottles);
+        verify(store.network).extractItem(argThat(stack -> stack.is(Items.GLASS_BOTTLE)),
+                eq(1), eq(Action.PERFORM));
+    }
+
     @Test void lessThan250MbDoesNotConsumeHeldOrNetworkBottle() {
         Store store = new Store("epic_ink", 249, 1);
         assertEquals(0, UnifiedGridFluidTransfer.fill(store.network, new ItemStack(Items.GLASS_BOTTLE), store.fluid).transferred());
@@ -115,7 +144,10 @@ class InkBottleTerminalTransferTest extends BootstrapTest {
         int amount, bottles, extractLimit = Integer.MAX_VALUE;
         boolean rejectRefund;
         Store(String quality, int amount, int bottles) {
-            this.fluid = InkFluidTestFixtures.ink(quality, amount);
+            this(InkFluidTestFixtures.ink(quality, amount), amount, bottles);
+        }
+        Store(FluidStack fluid, int amount, int bottles) {
+            this.fluid = fluid.copy();
             this.amount = amount;
             this.bottles = bottles;
             when(network.extractFluid(any(), anyInt(), any())).thenAnswer(call -> {

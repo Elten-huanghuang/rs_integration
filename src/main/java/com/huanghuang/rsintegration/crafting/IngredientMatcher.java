@@ -205,6 +205,7 @@ public final class IngredientMatcher {
                 || expected.getItem() != actual.getItem()) return false;
         if (!expected.hasTag()) return true;
         if (ItemStack.isSameItemSameTags(expected, actual)) return true;
+        if (matchesPotionIgnoringPurity(expected, actual)) return true;
         return expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())
                 && nbtMatches(expected.getTag(), actual.getTag(), true);
     }
@@ -275,6 +276,9 @@ public final class IngredientMatcher {
                 || !isVanillaPotionContainer(expected)
                 || PotionUtils.getPotion(expected) != Potions.WATER
                 || PotionUtils.getPotion(actual) != Potions.WATER) return false;
+        if (hasPurity(expected)
+                && (!hasPurity(actual) || !Objects.equals(expected.getTag().get("Purity"),
+                actual.getTag().get("Purity")))) return false;
         return potionTagsEqualIgnoringPurity(expected, actual);
     }
 
@@ -284,7 +288,14 @@ public final class IngredientMatcher {
                 || expected.getItem() != actual.getItem()
                 || !isVanillaPotionContainer(expected)
                 || PotionUtils.getPotion(expected) != PotionUtils.getPotion(actual)) return false;
+        if (hasPurity(expected)
+                && (!hasPurity(actual) || !Objects.equals(expected.getTag().get("Purity"),
+                actual.getTag().get("Purity")))) return false;
         return potionTagsEqualIgnoringPurity(expected, actual);
+    }
+
+    private static boolean hasPurity(ItemStack stack) {
+        return stack.getTag() != null && stack.getTag().contains("Purity", Tag.TAG_ANY_NUMERIC);
     }
 
     private static boolean potionTagsEqualIgnoringPurity(ItemStack expected, ItemStack actual) {

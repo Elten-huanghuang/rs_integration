@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjec
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -14,6 +15,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionUtils;
+import net.minecraft.world.item.alchemy.Potions;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.FluidStack;
@@ -174,6 +177,46 @@ class FluidContainerCatalogTest extends BootstrapTest {
         assertTrue(recipes.isEmpty());
     }
 
+    @Test void thirstPurityWaterDiscoversGlassBottleConversionsInBothDirections() {
+        FluidStack purity = purityWater(2);
+        purity.setAmount(1);
+        var recipes = FluidContainerCatalog.discover(
+                List.of(new ItemStack(Items.GLASS_BOTTLE), waterBottle(2)), List.of(purity),
+                InkBottleFluidHandler::create, FluidContainerCatalogTest::token);
+
+        assertEquals(2, recipes.size());
+        var fill = recipes.stream().filter(FluidContainerRecipe::filling).findFirst().orElseThrow();
+        var drain = recipes.stream().filter(recipe -> !recipe.filling()).findFirst().orElseThrow();
+        assertTrue(fill.emptyContainer().is(Items.GLASS_BOTTLE));
+        assertTrue(fill.output().is(Items.POTION));
+        assertEquals(2, fill.output().getTag().getInt("Purity"));
+        assertEquals(250, fill.fluid().getAmount());
+        assertEquals(2, fill.fluid().getTag().getInt("Purity"));
+        assertTrue(drain.filledContainer().is(Items.POTION));
+        assertEquals(2, drain.filledContainer().getTag().getInt("Purity"));
+        assertTrue(drain.secondaryOutputs().get(0).is(Items.GLASS_BOTTLE));
+    }
+
+    @Test void recursivePlanCanFillThirstPurityWaterIntoARequestedPlainWaterBottle() {
+        FluidStack purity = purityWater(2);
+        purity.setAmount(1);
+        var recipes = FluidContainerCatalog.discover(
+                List.of(new ItemStack(Items.GLASS_BOTTLE), waterBottle(2)), List.of(purity),
+                InkBottleFluidHandler::create, FluidContainerCatalogTest::token);
+        FluidContainerRecipe fill = recipes.stream()
+                .filter(FluidContainerRecipe::filling).findFirst().orElseThrow();
+        FluidStack stockFluid = purityWater(2);
+        stockFluid.setAmount(1);
+
+        var result = PureRecipePlanner.resolve(graph(recipes),
+                Map.of(material(new ItemStack(Items.GLASS_BOTTLE)), 1,
+                        material(token(stockFluid)), 250),
+                List.of(demand(waterBottle(0), 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(fill.getId(), 1)), result.steps());
+    }
+
     @Test void customCapacityAndFluidNbtAreKeptInBothDirections() {
         for (int capacity : List.of(250, 2000)) {
             ItemStack empty = new ItemStack(Items.FLINT);
@@ -319,6 +362,19 @@ class FluidContainerCatalogTest extends BootstrapTest {
     static ImmutableRecipeGraph.IngredientRef demand(ItemStack stack, int count) {
         return new ImmutableRecipeGraph.IngredientRef(List.of(material(stack)), count, ImmutableRecipeGraph.NbtMatchMode.EXACT);
     }
+
+    private static FluidStack purityWater(int purity) {
+        FluidStack fluid = new FluidStack(Fluids.WATER, 250);
+        fluid.getOrCreateTag().putInt("Purity", purity);
+        return fluid;
+    }
+
+    private static ItemStack waterBottle(int purity) {
+        ItemStack bottle = PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.WATER);
+        if (purity != 0) bottle.getOrCreateTag().putInt("Purity", purity);
+        return bottle;
+    }
+
     private static ResourceLocation id(String path) { return new ResourceLocation("test", path); }
 
     private static class NbtContainer implements IFluidHandlerItem {

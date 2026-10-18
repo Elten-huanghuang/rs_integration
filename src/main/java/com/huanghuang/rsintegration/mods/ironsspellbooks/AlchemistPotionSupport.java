@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.fluid.WaterBottleFluidSupport;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -25,10 +26,8 @@ public final class AlchemistPotionSupport {
     public static FluidStack fluid(ItemStack potion) {
         if (!(potion.is(Items.POTION) || potion.is(Items.SPLASH_POTION) || potion.is(Items.LINGERING_POTION))
                 || PotionUtils.getPotion(potion) == Potions.EMPTY) return FluidStack.EMPTY;
-        if (potion.is(Items.POTION) && PotionUtils.getPotion(potion) == Potions.WATER
-                && potion.getTag() != null && potion.getTag().getAllKeys().size() == 1) {
-            return new FluidStack(Fluids.WATER, InkFluidSupport.BOTTLE_AMOUNT);
-        }
+        FluidStack water = WaterBottleFluidSupport.fluid(potion, InkFluidSupport.BOTTLE_AMOUNT);
+        if (!water.isEmpty()) return water;
         var fluid = ForgeRegistries.FLUIDS.getValue(POTION_FLUID);
         if (fluid == null || fluid == Fluids.EMPTY) return FluidStack.EMPTY;
         CompoundTag tag = potion.getTag().copy();

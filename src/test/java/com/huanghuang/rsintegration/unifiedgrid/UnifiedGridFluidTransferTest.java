@@ -49,6 +49,22 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
         assertTrue(bucket.is(Items.WATER_BUCKET));
     }
 
+    @Test void thirstPurityWaterBottleEmptiesAsTaggedWater() {
+        FluidStack purity = water(250);
+        purity.getOrCreateTag().putInt("Purity", 3);
+        Store f = new Store(purity, 0, 1000, 0);
+        ItemStack bottle = new ItemStack(Items.POTION);
+        bottle.getOrCreateTag().putString("Potion", "minecraft:water");
+        bottle.getOrCreateTag().putInt("Purity", 3);
+
+        var result = UnifiedGridFluidTransfer.empty(f.network, bottle);
+
+        assertTrue(result.cursor().is(Items.GLASS_BOTTLE));
+        assertEquals(250, result.transferred());
+        assertEquals(250, f.amount);
+        assertEquals(3, result.resource().getTag().getInt("Purity"));
+    }
+
     @ParameterizedTest
     @CsvSource({"1,999", "1,1000", "1,2000", "3,999", "3,1000", "3,2000"})
     void bucketSubclassWithoutCapabilitiesEmptiesOnlyOneWholeBucket(int count, int capacity) {

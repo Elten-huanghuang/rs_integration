@@ -1,11 +1,9 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.fluid.WaterBottleFluidSupport;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.alchemy.PotionUtils;
-import net.minecraft.world.item.alchemy.Potions;
-import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -55,9 +53,8 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
     }
 
     private static ItemStack bottledItem(FluidStack fluid) {
-        if (fluid.getFluid() == Fluids.WATER && (!fluid.hasTag() || fluid.getTag().isEmpty())) {
-            return PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.WATER);
-        }
+        ItemStack waterBottle = WaterBottleFluidSupport.bottle(fluid);
+        if (!waterBottle.isEmpty()) return waterBottle;
         Item ink = inkItem(fluid);
         return ink != Items.AIR ? new ItemStack(ink) : AlchemistBottleSupport.bottle(fluid);
     }

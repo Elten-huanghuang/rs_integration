@@ -42,7 +42,9 @@ public final class FluidContainerTransfer {
         fluid = fluid.copy();
         boolean borrowed = cursor.isEmpty();
         ItemStack source = cursor;
-        Item emptyContainer = AlchemistBottleSupport.canBottle(fluid) ? Items.GLASS_BOTTLE : Items.BUCKET;
+        Item emptyContainer = AlchemistBottleSupport.canBottle(fluid)
+                || WaterBottleFluidSupport.isPurityWater(fluid)
+                ? Items.GLASS_BOTTLE : Items.BUCKET;
         if (borrowed) {
             // 空手从网络取匹配容器，墨水和药水使用玻璃瓶。
             if (emptyContainer == Items.BUCKET && fluid.getFluid().getBucket() == Items.AIR) return unchanged(cursor);
