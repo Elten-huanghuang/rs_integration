@@ -33,7 +33,10 @@ class UnifiedDiskInjectionTest {
         return count;
     }
     @Test void diskDriveAndManipulatorScopesHaveExactExpectedCallSites() throws Exception {
-        assertEquals(1, calls(read("apiimpl/network/node/diskdrive/DiskDriveNetworkNode"), "lambda$new$2", "util/StackUtils", "createStorages"));
+        ClassNode drive = read("apiimpl/network/node/diskdrive/DiskDriveNetworkNode");
+        assertEquals(1, calls(drive, "lambda$new$2", "util/StackUtils", "createStorages"));
+        assertTrue(drive.methods.stream().anyMatch(candidate -> candidate.name.equals("onConnectedStateChange")),
+                "磁盘仓必须保留联网状态回调，用于区块重载后的自动重挂");
         ClassNode manipulator = read("apiimpl/network/node/diskmanipulator/DiskManipulatorNetworkNode");
         assertEquals(1, calls(manipulator, "lambda$new$2", "util/StackUtils", "createStorages"));
         assertEquals(1, calls(manipulator, "lambda$new$5", "util/StackUtils", "createStorages"));

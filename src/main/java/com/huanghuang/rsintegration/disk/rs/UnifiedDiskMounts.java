@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
+import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.DiskDriveNetworkNode;
+import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.FluidDriveWrapperStorageDisk;
+import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.ItemDriveWrapperStorageDisk;
 import com.refinedmods.refinedstorage.apiimpl.network.node.NetworkNode;
 import com.refinedmods.refinedstorage.util.StackUtils;
 import net.minecraft.server.level.ServerLevel;
@@ -15,6 +18,19 @@ import java.util.function.Function;
 public final class UnifiedDiskMounts {
     private static final Logger LOGGER = LogManager.getLogger(UnifiedDiskMounts.class);
     private UnifiedDiskMounts() {}
+
+    /** 磁盘仓重新连网时，按当前节点实例重建缺失或失效的两个库存视图。 */
+    public static void rebuild(DiskDriveNetworkNode node, int slot) {
+        if (!(node.getLevel() instanceof ServerLevel level)) return;
+        ItemStack stack = node.getDisks().getStackInSlot(slot);
+        if (!(stack.getItem() instanceof UnifiedDiskItem)) return;
+        LOGGER.info("[RSI] 磁盘仓重新连网，自动重建统一盘槽位: dim={} pos={} slot={}",
+                level.dimension().location(), node.getPos(), slot);
+        UnifiedMountCoordinator.withCaller(node, () -> create(level, stack, slot,
+                node.getItemDisks(), node.getFluidDisks(),
+                disk -> new ItemDriveWrapperStorageDisk(node, disk),
+                fluid -> new FluidDriveWrapperStorageDisk(node, fluid)));
+    }
 
     public static boolean create(ServerLevel level, ItemStack stack, int slot, IStorageDisk<ItemStack>[] items,
                                  IStorageDisk<FluidStack>[] fluids,

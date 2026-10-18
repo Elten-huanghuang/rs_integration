@@ -4,11 +4,15 @@ import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
 import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskMounts;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.RS;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.storage.cache.InvalidateCause;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.apiimpl.network.node.DiskState;
+import com.refinedmods.refinedstorage.apiimpl.network.node.ConnectivityStateChangeCause;
 import com.refinedmods.refinedstorage.apiimpl.network.node.diskdrive.DiskDriveNetworkNode;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
@@ -16,12 +20,34 @@ import net.minecraftforge.fluids.FluidStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.function.Function;
 
 @Mixin(value = DiskDriveNetworkNode.class, remap = false)
 public abstract class UnifiedDiskDriveMixin {
+    @Inject(method = "onConnectedStateChange", at = @At("TAIL"), require = 1)
+    private void rsi$restoreAfterReconnect(INetwork network, boolean connected,
+                                           ConnectivityStateChangeCause cause, CallbackInfo ci) {
+        DiskDriveNetworkNode node = (DiskDriveNetworkNode) (Object) this;
+        if (!connected || !(node.getLevel() instanceof ServerLevel level)) return;
+        UnifiedDiskManager manager = UnifiedDiskManager.existing(level.getServer());
+        if (manager == null) return;
+        boolean rebuilt = false;
+        for (int slot = 0; slot < node.getDisks().getSlots(); slot++) {
+            ItemStack physical = node.getDisks().getStackInSlot(slot);
+            if (!(physical.getItem() instanceof UnifiedDiskItem)) continue;
+            if (node.getItemDisks()[slot] != null && node.getFluidDisks()[slot] != null) continue;
+            UnifiedDiskMounts.rebuild(node, slot);
+            rebuilt = true;
+        }
+        if (rebuilt && network != null) {
+            network.getItemStorageCache().invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+            network.getFluidStorageCache().invalidate(InvalidateCause.DISK_INVENTORY_CHANGED);
+        }
+    }
+
     @WrapOperation(method = "lambda$new$2", at = @At(value = "INVOKE", target =
             "Lcom/refinedmods/refinedstorage/util/StackUtils;createStorages(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/item/ItemStack;I[Lcom/refinedmods/refinedstorage/api/storage/disk/IStorageDisk;[Lcom/refinedmods/refinedstorage/api/storage/disk/IStorageDisk;Ljava/util/function/Function;Ljava/util/function/Function;)V"), require = 1)
     private void rsi$scope(ServerLevel level, ItemStack stack, int slot, IStorageDisk<ItemStack>[] items,
