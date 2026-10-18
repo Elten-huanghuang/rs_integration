@@ -39,4 +39,8 @@ final class PlanResponseRequestState {
     String expectedRecipeId() {
         return expectedRecipeId;
     }
+
+    boolean pending() {
+        return pending;
+    }
 }

@@ -331,21 +331,30 @@ public final class CraftingPlanScreen extends Screen {
         return responseRequests.activeRequestId();
     }
 
-    public void acceptResponse(long requestId, PlanResponse newPlan) {
+    @Override
+    public void onClose() {
+        if (responseRequests.pending()) {
+            PlanBackgroundClient.detach(responseRequests.activeRequestId());
+        }
+        super.onClose();
+    }
+
+    public boolean acceptResponse(long requestId, PlanResponse newPlan) {
         if (!responseRequests.accept(requestId, newPlan.recipeId())) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-PlanPkt] Dropping unrelated response: request={} recipe={} expectedRequest={} expectedRecipe={}",
                     requestId, newPlan.recipeId(), responseRequests.activeRequestId(),
                     responseRequests.expectedRecipeId());
-            return;
+            return false;
         }
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
             if (minecraft != null && minecraft.player != null && !newPlan.modWarnings().isEmpty()) {
                 minecraft.player.displayClientMessage(newPlan.modWarnings().get(0), false);
             }
-            return;
+            return true;
         }
         updatePlan(newPlan);
+        return true;
     }
 
     /** Update plan data in-place (OR-path switch, repeat-count change, etc.).

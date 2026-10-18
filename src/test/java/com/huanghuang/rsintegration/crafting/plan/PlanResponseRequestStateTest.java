@@ -100,4 +100,15 @@ class PlanResponseRequestStateTest {
         state.beginPreview(12L, POPPY);
         assertTrue(state.accept(12L, POPPY));
     }
+
+    @Test
+    void pendingTracksOnlyUnansweredPreviews() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+
+        assertFalse(state.pending());
+        state.beginPreview(11L, POPPY);
+        assertTrue(state.pending());
+        assertTrue(state.accept(11L, POPPY));
+        assertFalse(state.pending());
+    }
 }

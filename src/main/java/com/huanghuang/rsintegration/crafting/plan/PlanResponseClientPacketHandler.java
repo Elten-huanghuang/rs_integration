@@ -123,14 +123,29 @@ final class PlanResponseClientPacketHandler {
             // 页面按待处理请求校验响应；根节点切换后，响应 ID 会不同于旧方案。
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
-            existing.acceptResponse(requestId, plan);
+            if (existing.acceptResponse(requestId, plan)) return;
+            if (cacheBackgroundPlan(mc, plan, requestId)) return;
             return;
         }
+        if (cacheBackgroundPlan(mc, plan, requestId)) return;
         try {
             mc.setScreen(new CraftingPlanScreen(plan, requestId));
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] CraftingPlanScreen opened successfully");
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-PlanPkt] Failed to open CraftingPlanScreen:", e);
         }
+    }
+
+    private static boolean cacheBackgroundPlan(Minecraft mc, PlanResponse plan, long requestId) {
+        if (!PlanBackgroundClient.capture(requestId, plan)) return false;
+        Component targetName = plan.targetResult().isEmpty()
+                ? Component.literal(plan.targetName())
+                : plan.targetResult().getHoverName();
+        mc.player.displayClientMessage(
+                PlanBackgroundClient.readyMessage(targetName, requestId), false);
+        RSIntegrationMod.LOGGER.debug(
+                "[RSI-PlanPkt] cached background plan: request={} recipe={}",
+                requestId, plan.recipeId());
+        return true;
     }
 }
