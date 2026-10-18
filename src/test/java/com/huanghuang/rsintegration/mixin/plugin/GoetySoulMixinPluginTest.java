@@ -11,6 +11,8 @@ class GoetySoulMixinPluginTest {
             "com.huanghuang.rsintegration.mixin.goety.SoulCandlestickSoulSourceMixin";
     private static final String ALTAR_MIXIN =
             "com.huanghuang.rsintegration.mixin.goety.DarkAltarSoulSourceMixin";
+    private static final String VIRTUAL_CANDLE_MIXIN =
+            "com.huanghuang.rsintegration.mixin.goety.NecroBrazierVirtualCandleMixin";
 
     @Test
     void goetySoulMixinsStayUnloadedWhenGoetyIsAbsent() {
@@ -25,5 +27,8 @@ class GoetySoulMixinPluginTest {
         assertFalse(plugin.shouldApplyMixin(
                 "com.Polarice3.Goety.common.blocks.entities.DarkAltarBlockEntity",
                 ALTAR_MIXIN));
+        assertFalse(plugin.shouldApplyMixin(
+                "com.Polarice3.Goety.common.blocks.entities.NecroBrazierBlockEntity",
+                VIRTUAL_CANDLE_MIXIN));
     }
 }

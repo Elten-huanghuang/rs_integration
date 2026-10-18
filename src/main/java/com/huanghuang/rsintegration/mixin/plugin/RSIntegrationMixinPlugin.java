@@ -163,6 +163,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasField(targetClassName, "soulEnergy")
                     && hasMethod(targetClassName, "increaseSE");
         }
+        if (mixinClassName.contains("goety.NecroBrazierVirtualCandleMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "findCandlesticks");
+        }
         if (mixinClassName.contains("distantworlds.LithumCoreUpdateTickProcedureMixin")) {
             return isClassPresent("net.mcreator.distantworlds.procedures.LithumCoreUpdateTickProcedure");
         }

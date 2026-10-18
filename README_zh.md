@@ -242,6 +242,8 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 
 `integrations.enableGoetySoulReverseRefill` 默认关闭。开启后，灵魂方舟发生灵魂消耗时会从绑定的 RS 网络按剩余容量补满；同一玩家每 20 tick 最多尝试一次。
 
+`integrations.goetyBrazierVirtualCandleCount` 默认 `64`。RSI 递归合成亡灵火炉且没有实体灵魂烛台时，会使用该数量的内存烛台推进进度；每个烛台每 tick 消耗 1 点灵魂，配方总成本不变，手动点火仍遵循 Goety 原版结构要求。
+
 `autoCrafting.freeWaterMachines` 控制免费补水。列表中的机器免费补水，未列出的机器消耗所选 RS 网络中的流体；设为 `[]` 可关闭全部免费补水，配置注释中列有完整默认机器 ID。
 
 升级时通常会保留已有设置，新增列表项可能需要手动补充。

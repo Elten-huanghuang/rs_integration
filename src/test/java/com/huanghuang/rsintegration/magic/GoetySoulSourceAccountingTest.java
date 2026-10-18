@@ -81,6 +81,20 @@ class GoetySoulSourceAccountingTest {
         assertEquals(-1, GoetyVirtualSoulAccess.souls(container));
     }
 
+    @Test
+    void coordinatorNeverConsumesBeyondTheRecipeBudget() {
+        FakeNetworkPool network = new FakeNetworkPool(100);
+        FakeNativeSource nativeSource = new FakeNativeSource(1_000);
+        GoetySoulSourceCoordinator coordinator =
+                GoetySoulSourceCoordinator.create(250, network, nativeSource);
+
+        assertTrue(coordinator != null);
+        assertTrue(coordinator.consume(250));
+        assertEquals(0, coordinator.available());
+        assertFalse(coordinator.consume(1));
+        assertEquals(850, nativeSource.remaining);
+    }
+
     private static final class FakeContainer {
         private int souls;
 

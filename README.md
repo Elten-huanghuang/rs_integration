@@ -244,6 +244,8 @@ Planning limits, preferred recipes/material variants, retained-item rules, proba
 
 `integrations.enableGoetySoulReverseRefill` is disabled by default. When enabled, soul consumption from an Arca refills it to capacity from the bound RS network. Attempts are limited to once per player every 20 ticks.
 
+`integrations.goetyBrazierVirtualCandleCount` defaults to `64`. When an RSI recursive Necro Brazier craft has no physical Soul Candlesticks, this many in-memory candles advance the craft; each consumes 1 soul per tick, the recipe total remains unchanged, and manual ignition still follows Goety's original structure requirements.
+
 `autoCrafting.freeWaterMachines` controls free water refills. Listed machines refill freely; omitted machines consume fluid from the selected RS network. `[]` disables all free refills, and the config comments list the exact default machine IDs.
 
 Settings retain existing values during upgrades when possible. New list entries may need to be added manually.

@@ -180,6 +180,7 @@ public final class RSIntegrationConfig {
     //  per-mod integration
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY;
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY_SOUL_REVERSE_REFILL;
+    public static ForgeConfigSpec.IntValue GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MALUM;
     public static ForgeConfigSpec.BooleanValue ENABLE_BOTANIA;
     public static ForgeConfigSpec.BooleanValue ENABLE_WIZARDS_REBORN;
@@ -458,6 +459,11 @@ public final class RSIntegrationConfig {
                         "开启后，灵魂方舟发生灵魂消耗时从绑定 RS 网络按剩余容量一次补满；每 20 tick 最多尝试一次",
                         "关闭时只保留灵魂方舟溢出写入 RS 的原行为")
                 .define("enableGoetySoulReverseRefill", false);
+        GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT = c
+                .comment("亡灵火炉递归合成虚拟烛台数",
+                        "无实体灵魂烛台时，递归合成使用指定数量的内存烛台。每 tick 每个烛台推进 1 点进度并消耗 1 点灵魂，总成本不变。",
+                        "仅影响 RSI 递归合成；玩家手动点火仍遵循 Goety 原版烛台结构。")
+                .defineInRange("goetyBrazierVirtualCandleCount", 64, 1, 64);
         ENABLE_MALUM = c
                 .comment("启用灵灾兼容",
                         "支持精魂祭坛、精魂坩埚等机器绑定与远程合成。")

@@ -11,6 +11,7 @@ public final class GoetySoulSourceCoordinator implements AutoCloseable {
     private final GoetyNativeSoulSource nativeSource;
     private final int total;
     private final int availableAtStart;
+    private int consumed;
     private boolean closed;
 
     private GoetySoulSourceCoordinator(GoetySoulNetworkPool network,
@@ -41,7 +42,9 @@ public final class GoetySoulSourceCoordinator implements AutoCloseable {
 
     public int available() {
         if (closed) return 0;
-        return combine(network.remaining(), nativeSource.available());
+        int remainingBudget = Math.max(0, total - consumed);
+        return Math.min(remainingBudget,
+                combine(network.remaining(), nativeSource.available()));
     }
 
     public int networkRemaining() {
@@ -62,10 +65,16 @@ public final class GoetySoulSourceCoordinator implements AutoCloseable {
             return false;
         }
         int remaining = amount - withdrawn;
-        if (remaining <= 0) return true;
+        if (remaining <= 0) {
+            consumed += amount;
+            return true;
+        }
 
         int fromNative = nativeSource.consume(remaining);
-        if (fromNative == remaining) return true;
+        if (fromNative == remaining) {
+            consumed += amount;
+            return true;
+        }
 
         if (withdrawn > 0) network.refund(withdrawn);
         return false;

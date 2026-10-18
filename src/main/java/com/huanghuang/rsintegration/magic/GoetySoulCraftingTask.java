@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
@@ -20,9 +21,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -208,7 +211,8 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         SoulPlanPreview.Estimate estimate = SoulPlanPreview.estimate(player, endpoint, 0);
         if (estimate.source() == SoulPlanPreview.SourceKind.UNREACHABLE) {
             // 无端点时仍允许调用方用显式的 legacy INetwork 兜底，保持旧行为。
-            return network != null && CraftStorageEndpoints.isRefinedStorage(endpoint)
+            return network != null
+                    && (endpoint == null || CraftStorageEndpoints.isRefinedStorage(endpoint))
                     ? availableInRs(player) : -1;
         }
         return estimate.legacyAvailable();
@@ -341,11 +345,18 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
             GoetyBrazierNativeSoulSource nativeSource =
                     new GoetyBrazierNativeSoulSource(player, brazier);
             List<Object> candles = nativeSource.candles();
+            Object virtualCandle = null;
+            int virtualCandleSpeed = 1;
             if (candles.isEmpty()) {
-                RSIntegrationMod.LOGGER.warn(
-                        "[RSI-Goety] Refusing brazier soul start without soul candlesticks: {}",
-                        brazier.getBlockPos());
-                return false;
+                virtualCandle = createVirtualCandlestick(brazier);
+                if (virtualCandle == null) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Goety] Failed to create a recursive-craft virtual candlestick: {}",
+                            brazier.getBlockPos());
+                    return false;
+                }
+                virtualCandleSpeed = configuredVirtualCandleCount(total);
+                candles = List.of(virtualCandle);
             }
             startupAvailable = GoetySoulSourceCoordinator.combine(
                     reservation.remaining(), nativeSource.available());
@@ -358,13 +369,48 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
                 return false;
             }
             directAltar = altar;
-            BrazierSoulPort.attach(altar, directCoordinator, candles);
+            BrazierSoulPort.attach(altar, directCoordinator, candles,
+                    virtualCandle, virtualCandleSpeed);
             RSIntegrationMod.LOGGER.info(
-                    "[RSI-Goety] Using RS/BD network soul source directly for brazier: reserved={} available={}",
-                    reservation.remaining(), startupAvailable);
+                    "[RSI-Goety] Using RS/BD network soul source directly for brazier: reserved={} available={} virtualCandleSpeed={}",
+                    reservation.remaining(), startupAvailable, virtualCandleSpeed);
             return true;
         }
         return false;
+    }
+
+    static int virtualBrazierCandleCount(int soulCost, int configured) {
+        return Math.max(1, Math.min(Math.max(0, soulCost),
+                Math.max(1, configured)));
+    }
+
+    private static int configuredVirtualCandleCount(int soulCost) {
+        int configured = 64;
+        try {
+            configured = RSIntegrationConfig.GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT.get();
+        } catch (RuntimeException ignored) {
+            // 配置尚未加载时使用上限值。
+        }
+        return virtualBrazierCandleCount(soulCost, configured);
+    }
+
+    @Nullable
+    private Object createVirtualCandlestick(BlockEntity brazier) {
+        if (GoetyReflection.soulCandlestickBEClass == null
+                || brazier.getLevel() == null) return null;
+        try {
+            Constructor<?> constructor = GoetyReflection.soulCandlestickBEClass
+                    .getConstructor(BlockPos.class, BlockState.class);
+            Object candle = constructor.newInstance(
+                    brazier.getBlockPos(), brazier.getBlockState());
+            if (candle instanceof BlockEntity candleEntity) {
+                candleEntity.setLevel(brazier.getLevel());
+            }
+            return candle;
+        } catch (ReflectiveOperationException
+                 | RuntimeException | LinkageError ignored) {
+            return null;
+        }
     }
 
     private void supplyBrazier(ServerLevel level, BlockEntity brazier) {

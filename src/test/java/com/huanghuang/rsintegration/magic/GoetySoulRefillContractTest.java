@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GoetySoulRefillContractTest {
@@ -31,6 +32,15 @@ class GoetySoulRefillContractTest {
         assertTrue(refill.contains("NEXT_ATTEMPT"));
         assertTrue(refill.contains("class Scope"));
         assertTrue(config.contains("enableGoetySoulReverseRefill"));
+    }
+
+    @Test
+    void reverseRefillRestoresBindingFromConnectorNbt() throws IOException {
+        String refillRs = source("magic", "GoetySoulRefillRs.java");
+
+        assertTrue(refillRs.contains(
+                "RSAltarBindingResolver.resolveNetworkForAltar(player, dim, pos)"));
+        assertFalse(refillRs.contains("AltarBindingRegistry.getBinding"));
     }
 
     private static String source(String... parts) throws IOException {

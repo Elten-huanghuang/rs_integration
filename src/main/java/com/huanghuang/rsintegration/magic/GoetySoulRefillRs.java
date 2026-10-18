@@ -1,8 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.Polarice3.Goety.utils.SEHelper;
-import com.huanghuang.rsintegration.network.binding.AltarBinding;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -24,10 +22,8 @@ public final class GoetySoulRefillRs {
         BlockPos pos = SEHelper.getArcaBlock(player);
         ResourceKey<Level> dim = SEHelper.getArcaDimension(player);
         if (pos == null || dim == null) return 0;
-        AltarBinding binding = AltarBindingRegistry
-                .getBinding(player, dim, pos, AltarBinding.RS_NETWORK).orElse(null);
-        if (binding == null) return 0;
-        INetwork network = RSAltarBindingResolver.resolveNetworkForBinding(player, binding);
+        // 服务器重启后内存绑定为空，必须允许解析器从连接器 NBT 恢复绑定。
+        INetwork network = RSAltarBindingResolver.resolveNetworkForAltar(player, dim, pos);
         if (network == null) return 0;
 
         int extracted = MagicResourceEndpoint.extract(

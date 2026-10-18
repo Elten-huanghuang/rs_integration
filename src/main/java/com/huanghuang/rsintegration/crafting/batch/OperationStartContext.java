@@ -109,10 +109,6 @@ public record OperationStartContext(
         List<ReservedMaterial> reserved = new ArrayList<>(plan.entries().size());
         boolean compact = ordered.size() == plan.entries().size()
                 && ordered.stream().allMatch(stack -> stack != null && !stack.isEmpty());
-        for (int index = 0; compact && index < plan.entries().size(); index++) {
-            Integer inputSlot = plan.entries().get(index).inputSlot();
-            compact = inputSlot == null || inputSlot == index;
-        }
         for (int index = 0; index < plan.entries().size(); index++) {
             MaterialPlan.Entry entry = plan.entries().get(index);
             int sourceIndex = compact ? index

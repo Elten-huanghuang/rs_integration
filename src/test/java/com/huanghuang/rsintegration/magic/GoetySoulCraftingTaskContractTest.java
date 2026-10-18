@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,6 +25,9 @@ class GoetySoulCraftingTaskContractTest {
     private static final Path CANDLE_SOURCE = Path.of(
             "src", "main", "java", "com", "huanghuang", "rsintegration",
             "mixin", "goety", "SoulCandlestickSoulSourceMixin.java");
+    private static final Path VIRTUAL_CANDLE_SOURCE = Path.of(
+            "src", "main", "java", "com", "huanghuang", "rsintegration",
+            "mixin", "goety", "NecroBrazierVirtualCandleMixin.java");
     private static final Path PORT_SOURCE = Path.of(
             "src", "main", "java", "com", "huanghuang", "rsintegration",
             "magic", "DarkAltarSoulPort.java");
@@ -50,6 +54,7 @@ class GoetySoulCraftingTaskContractTest {
         String virtualSource = Files.readString(VIRTUAL_SOURCE);
         String cageSource = Files.readString(CAGE_SOURCE);
         String candleSource = Files.readString(CANDLE_SOURCE);
+        String virtualCandleSource = Files.readString(VIRTUAL_CANDLE_SOURCE);
         String port = Files.readString(PORT_SOURCE);
         String brazierPort = Files.readString(BRAZIER_PORT_SOURCE);
         String virtualAccess = Files.readString(VIRTUAL_ACCESS_SOURCE);
@@ -71,7 +76,8 @@ class GoetySoulCraftingTaskContractTest {
         assertTrue(task.contains("GoetySoulSourceCoordinator.create"));
         assertTrue(task.contains("GoetyDarkAltarNativeSoulSource"));
         assertTrue(task.contains("DarkAltarSoulPort.attach(altar, cage"));
-        assertTrue(task.contains("BrazierSoulPort.attach(altar, directCoordinator, candles)"));
+        assertTrue(task.contains(
+                "BrazierSoulPort.attach(altar, directCoordinator, candles,"));
         assertTrue(task.contains("directCoordinator == null"));
         assertTrue(task.contains("supplyBrazier"));
         assertTrue(task.contains("findCandlesticks"));
@@ -87,6 +93,12 @@ class GoetySoulCraftingTaskContractTest {
         assertTrue(task.contains("bdNetworkId"));
         assertTrue(delegate.contains("GoetySoulCraftingTask.reserveDarkAltar"));
         assertTrue(delegate.contains("GoetySoulCraftingTask.reserveBrazier"));
+        assertTrue(task.contains("createVirtualCandlestick"));
+        assertTrue(task.contains(
+                "virtualCandle, virtualCandleSpeed"));
+        assertTrue(task.contains("goetyBrazierVirtualCandleCount")
+                || task.contains("GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT"));
+        assertFalse(delegate.contains("brazier_no_candlesticks"));
         assertTrue(delegate.contains("soulTask.prepareBeforeStart(brazier)"));
         assertTrue(delegate.contains("storageEndpoint()"));
         assertTrue(delegate.contains("delegate.setStorageEndpoint(endpoint);"));
@@ -98,6 +110,11 @@ class GoetySoulCraftingTaskContractTest {
         assertTrue(port.contains("coordinator.consume(amount)"));
         assertTrue(port.contains("GoetyVirtualSoulAccess.attach"));
         assertTrue(brazierPort.contains("GoetyVirtualSoulAccess.attach"));
+        assertTrue(brazierPort.contains("virtualCandleSpeed"));
+        assertTrue(virtualCandleSource.contains("BrazierSoulPort.virtualCandle(this)"));
+        assertTrue(virtualCandleSource.contains("method = \"findCandlesticks\""));
+        assertTrue(virtualCandleSource.contains("rsi$accelerateRecursiveCraft"));
+        assertTrue(virtualCandleSource.contains("currentTime += extraSpeed"));
         assertTrue(coordinator.contains("network.withdraw(fromNetwork)"));
         assertTrue(coordinator.contains("nativeSource.available() < nativeNeeded"));
         assertTrue(coordinator.contains("nativeSource.consume(remaining)"));
@@ -112,5 +129,12 @@ class GoetySoulCraftingTaskContractTest {
         assertTrue(virtualAccess.contains("IdentityHashMap"));
         assertTrue(virtualAccess.contains("physicalSouls"));
         assertTrue(virtualAccess.contains("physicalDecrease"));
+    }
+
+    @Test
+    void virtualBrazierCandleCountIsCappedByConfiguredSpeedAndSoulCost() {
+        assertEquals(64, GoetySoulCraftingTask.virtualBrazierCandleCount(500, 64));
+        assertEquals(500, GoetySoulCraftingTask.virtualBrazierCandleCount(500, 1_000));
+        assertEquals(1, GoetySoulCraftingTask.virtualBrazierCandleCount(1, 64));
     }
 }

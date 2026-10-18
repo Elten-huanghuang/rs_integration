@@ -333,17 +333,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // Soul candlestick check
         List<Object> candlesticks = findNearbyCandlesticks(level, myPos);
         if (candlesticks.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("rsi.goety.error.brazier_no_candlesticks"));
-            return false;
+            // RSI 递归合成会注入仅任务期间存在的内存烛台；手动合成仍由原版逻辑拦截。
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Goety] Brazier has no physical candlestick; recursive craft will use a virtual source at {}",
+                    myPos);
         }
         int totalSouls = GoetySoulCraftingTask.nativeAvailableBrazier(
                 player, (BlockEntity) be);
         int diskSouls = GoetySoulCraftingTask.availableInStorage(
                 player, network, storageEndpoint());
         int combinedSouls = saturatingAdd(totalSouls, diskSouls, 0);
-        if (combinedSouls < brazierSoulCost) {
-            player.sendSystemMessage(Component.translatable("rsi.goety.error.insufficient_souls",
-                    brazierSoulCost, combinedSouls));
+        PreparationResult soulResult = soulPreparationResult(brazierSoulCost, combinedSouls);
+        if (soulResult.state() != PreparationState.READY) {
+            soulPreparationFailure = soulResult;
+            player.sendSystemMessage(soulResult.userMessage());
             return false;
         }
 

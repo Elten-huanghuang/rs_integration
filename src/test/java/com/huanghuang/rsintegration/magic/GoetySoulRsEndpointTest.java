@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.SessionCraftStorageEndpoint;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -41,6 +43,19 @@ class GoetySoulRsEndpointTest extends BootstrapTest {
         try (MockedStatic<RSIntegrationNetwork> current = mockStatic(RSIntegrationNetwork.class)) {
             assertNull(GoetySoulCraftingTask.resolveRsNetwork(player, legacyRs, endpoint));
             current.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void legacyRefinedStorageNetworkRemainsUsableWithoutStructuredEndpoint() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        INetwork legacyRs = mock(INetwork.class);
+
+        try (MockedStatic<UnifiedDiskManager> disks =
+                     mockStatic(UnifiedDiskManager.class)) {
+            disks.when(() -> UnifiedDiskManager.existing(null)).thenReturn(null);
+            assertEquals(0,
+                    GoetySoulCraftingTask.availableInStorage(player, legacyRs, null));
         }
     }
 

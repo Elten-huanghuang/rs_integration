@@ -98,6 +98,37 @@ class OperationStartContextTest extends BootstrapTest {
     }
 
     @Test
+    void compactReservationMapsSparseExplicitSlotsByPlanOrder() {
+        MaterialPlan materialPlan = new MaterialPlan(List.of(
+                new MaterialPlan.Entry("malum:altar:center",
+                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1),
+                        MaterialPlan.Allocation.GRAPH, false, 0),
+                new MaterialPlan.Entry("malum:altar:pedestal:0",
+                        new IngredientSpec(Ingredient.of(Items.REDSTONE), 1),
+                        MaterialPlan.Allocation.GRAPH, false, 1),
+                new MaterialPlan.Entry("malum:altar:spirit:0",
+                        new IngredientSpec(Ingredient.of(Items.BLAZE_POWDER), 1),
+                        MaterialPlan.Allocation.GRAPH, false, 16)));
+
+        OperationStartContext context = OperationStartContext.chainReserved(
+                mock(ServerPlayer.class), new ExtractionLedger(), materialPlan,
+                List.of(new ItemStack(Items.IRON_INGOT),
+                        new ItemStack(Items.REDSTONE),
+                        new ItemStack(Items.BLAZE_POWDER)),
+                InputBufferPlan.none());
+
+        assertEquals(List.of("malum:altar:center", "malum:altar:pedestal:0",
+                        "malum:altar:spirit:0"),
+                context.materials().stream()
+                        .map(OperationStartContext.ReservedMaterial::entryId).toList());
+        List<ItemStack> materials = context.legacyMaterials();
+        assertEquals(17, materials.size());
+        assertTrue(materials.get(0).is(Items.IRON_INGOT));
+        assertTrue(materials.get(1).is(Items.REDSTONE));
+        assertTrue(materials.get(16).is(Items.BLAZE_POWDER));
+    }
+
+    @Test
     void legacyStartReceivesSparseShapedGridInsteadOfCompactedMaterials() {
         MaterialPlan materialPlan = MaterialPlan.fromLegacy(List.of(
                         IngredientSpec.EMPTY,
