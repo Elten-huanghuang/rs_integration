@@ -372,7 +372,7 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         AtomicReference<UnifiedMountCoordinator.Lease> replacement = new AtomicReference<>();
         Runnable retry = () -> {
             retries.incrementAndGet();
-            var restored = manager.mounts().acquire(root, node, 0, items, fluids, current.get(), () -> {});
+            var restored = manager.mounts().acquire(root, level, node, 0, items, fluids, current.get(), () -> {});
             replacement.set(restored);
             if (restored != null) {
                 items[0] = new UnifiedBoundDisk<ItemStack>(restored, core, FrozenKey.Kind.ITEM);
@@ -385,6 +385,7 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         items[0] = oldItem; fluids[0] = oldFluid;
         assertTrue(first.valid());
         when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        when(node.getLevel()).thenReturn(null);
         for (int i = 0; i < 25; i++) manager.mounts().sweep();
         assertFalse(first.valid()); assertNull(items[0]); assertNull(fluids[0]);
         assertEquals(0, retries.get());

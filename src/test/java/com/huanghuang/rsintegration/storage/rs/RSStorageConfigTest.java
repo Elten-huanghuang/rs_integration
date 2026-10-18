@@ -18,9 +18,14 @@ class RSStorageConfigTest {
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
         assertTrue(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
+        assertTrue(RSStorageConfig.enabled(RSStorageConfig.FAST_DISK_MANIPULATOR));
         assertEquals(262144, RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES));
         assertEquals(262144, RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES));
         assertEquals(100, RSStorageConfig.transferParts());
+        assertEquals(1000, RSStorageConfig.diskManipulatorBudgetMicros());
+        assertEquals(1024, RSStorageConfig.diskManipulatorMaxOperationsPerTick());
+        assertEquals(Integer.MAX_VALUE, RSStorageConfig.diskManipulatorMaxItemsPerOperation());
+        assertEquals(20, RSStorageConfig.diskManipulatorNoProgressCooldownTicks());
 
         CommentedConfig config = CommentedConfig.inMemory();
         RSStorageConfig.SPEC.correct(config);
@@ -32,6 +37,11 @@ class RSStorageConfigTest {
         config.set("unifiedGrid.enabled", false);
         config.set("unifiedDisk.enabled", false);
         config.set("unifiedDisk.maxItemEntries", 50000);
+        config.set("storage.diskManipulator.enabled", false);
+        config.set("storage.diskManipulator.budgetMicros", 250);
+        config.set("storage.diskManipulator.maxOperationsPerTick", 32);
+        config.set("storage.diskManipulator.maxItemsPerOperation", 1024);
+        config.set("storage.diskManipulator.noProgressCooldownTicks", 5);
         config.set("storage.gridTransferParts", 32);
         try {
             RSStorageConfig.SPEC.setConfig(config);
@@ -42,8 +52,13 @@ class RSStorageConfigTest {
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.CHECK_FLUID_CONTAINER));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_GRID));
             assertFalse(RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
+            assertFalse(RSStorageConfig.enabled(RSStorageConfig.FAST_DISK_MANIPULATOR));
             assertEquals(50000, RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES));
             assertEquals(32, RSStorageConfig.transferParts());
+            assertEquals(250, RSStorageConfig.diskManipulatorBudgetMicros());
+            assertEquals(32, RSStorageConfig.diskManipulatorMaxOperationsPerTick());
+            assertEquals(1024, RSStorageConfig.diskManipulatorMaxItemsPerOperation());
+            assertEquals(5, RSStorageConfig.diskManipulatorNoProgressCooldownTicks());
         } finally {
             RSStorageConfig.SPEC.setConfig(null);
         }

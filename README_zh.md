@@ -45,21 +45,6 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 - 自定义 GUI 绑定可远程打开不参与配方自动化的机器。
 - 遵守 FTB Chunks/Cadmus 领地权限，不会强制加载远处区块，并会限制远程界面请求频率、重新校验每次服务端操作。
 
-### JEI、EMI 与存储工具
-
-- 可选的混合终端在同一列表显示物品与流体，支持搜索筛选、JEI 传送、容器装液/倒液，并在容器无法接收时安全回滚。
-- 独立流体容器配方分类显示装液、倒液和容器返还配方，执行前检查产物存储空间，并支持收藏与配方传送。
-- RS 终端可在工作台、切石机、锻造台和铁砧模式间切换；JEI 传送会跟随当前模式，不可用时回退原版 3×3 工作台。
-- 支持的配方会出现 RSI 合成按钮；已连接的机器也可能提供直接打开按钮。
-- JEI 提供 FTB Quests 物品提交、Distant Worlds Lithum 祭坛和 Project MMO 回收专用页面。
-- 可收藏缺少材料、按模组筛选 JEI、用 `Ctrl+T` 把配方传入 RS 网格，或在 JEI 物品上按中键从网络取出一组。
-- 按 `Y` 打开侧边栏（配置默认关闭），在不关闭当前界面的情况下搜索存储和访问机器；`U`/`R` 查看用途或配方。
-- JEI 覆盖层显示库存数量和合成缺料，框选可批量收藏或隐藏条目。
-- RS 搜索支持名称、模组（`@`）、标签（`$`）、提示文字（`#`）和拼音，并提供后台索引、最近搜索、收藏、删除及可配置的磁盘缓存。
-- 在 RS/BD 终端按 `F` 填入当前 JEI/EMI 物品；按住 `Ctrl` 拖过 RS 格子，每格取出一个物品。
-- Tetra 加工台会筛选适合当前部件的材料，`Ctrl` 悬停可预览结果，也能按属性排序。
-- JEI 配置按钮可打开游戏内编辑器，按客户端、通用、服务端和存储分类搜索、校验、保存、恢复默认并提示需要重启的选项。
-
 ### 共振容器
 
 - 共振魔力池继承 Botania 原生 `ManaPoolBlockEntity`，保留丢入物品手动灌注、火花、接收器、输出模式和原生魔力液面渲染。
@@ -87,16 +72,28 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 ### 其他模组组合集成
 
+- **混合终端**：在同一列表中显示物品与流体，支持搜索筛选、JEI 传送及容器装液/倒液；容器无法接收时安全回滚。
+- **流体容器配方**：独立显示装液、倒液和容器返还配方，执行前检查产物存储空间，并支持收藏与配方传送。
+- **RS 终端模式**：可在工作台、切石机、锻造台和铁砧模式间切换；JEI 传送会跟随当前模式，不可用时回退原版 3×3 工作台。
+- **配方操作**：支持的配方会显示 RSI 合成按钮；已连接机器还可能提供直接打开按钮。
+- **JEI 专用页面**：提供 FTB Quests 物品提交、Distant Worlds Lithum 祭坛和 Project MMO 回收页面。
+- **JEI 快捷操作**：可收藏缺少材料、按模组筛选、用 `Ctrl+T` 把配方传入 RS 网格，或在物品上按中键从网络取出一组。
+- **侧边栏**：按 `Y` 打开或收起（配置默认关闭），无需关闭当前界面即可搜索存储和访问机器；按 `U`/`R` 查看用途或配方。
+- **库存覆盖层**：显示网络库存数量和合成缺料；框选条目后可批量收藏或隐藏。
+- **RS 搜索**：支持名称、模组（`@`）、标签（`$`）、提示文字（`#`）和拼音，并提供后台索引、最近搜索、收藏、删除及可配置的磁盘缓存。
+- **终端快捷操作**：在 RS/BD 终端按 `F` 填入当前 JEI/EMI 物品；按住 `Ctrl` 拖过 RS 格子，每格取出一个物品。
+- **Tetra 材料筛选**：加工台会筛选适合当前部件的材料；`Ctrl` 悬停可预览结果，也能按属性排序。
+- **配置编辑器**：JEI 配置按钮可打开游戏内编辑器，按客户端、通用、服务端和存储分类搜索、校验、保存、恢复默认，并提示需要重启的选项。
 - **机器自动化**：适配优先复用目标模组原生配方和传输路径，并且只在目标模组存在时加载。Embers 可解答并记住炼金台编码、运行熔炼炉/混合离心器/压印锤/微型锅炉；Aetherworks 支持自动锤炼、补料、控温及金属成型台物品/流体输入。
 - **流体供给**：需要水的机器可从所选 RS 网络补水，`autoCrafting.freeWaterMachines` 决定哪些机器免费补水、哪些消耗网络流体。
 - **仪式与机器模块**：Goety 只准备仪式不负责启动；Better Summoning Rituals 远程准备祭坛且不自动启动或收取世界掉落；Biomancy 支持消化器、生物实验室、分解器和生物锻炉；克苏鲁生物血肉祭坛支持带数量材料、批量投料和多祭坛。
 - **Distant Worlds**：可配置研究跳过、关闭 Firon 随机失败、自动补充附近熔炉燃料，并设置搜索半径、单次补料上限和燃料优先级。
-- **烹饪自动化**：Farmer's Delight、Farmer's Respite、Youkai's Homecoming、Dungeon's Delight、Twilight Delight、BOSSes' Delight、Casualness Delight、Farm & Charm、Candlelight、Bakery、Miner's Delight、Crock Pot 和 Gensokyo Delight 均保留原生热源、容器、批量、流体及世界掉落规则。
+- **烹饪自动化**：Farmer's Delight、Farmer's Respite、Youkai's Homecoming、Dungeon's Delight、Twilight Delight、BOSSes' Delight、Casualness Delight、Farm & Charm、Candlelight、Bakery、Miner's Delight、Crock Pot 和 Gensokyo Delight 保留原生热源、容器、批量、流体及世界掉落规则。
 - **HUD**：Aetherworks 显示锤炼、温度、余烬、补货和自动状态；Distant Worlds 显示祭坛、能量、配方和基座状态，可用 `distantWorlds.enableHud` 关闭；合成进度和绑定提示继续在世界内显示。
 - **自动进食**：支持 SolCarrot 多样饮食、Diet 膳食均衡和堆叠暴食，可配置食物/状态效果黑名单、容器返还、使用条件、执行消耗和单次上限。
 - **交易与补货**：按 `Space` 补充村民付款、附魔青金石、铁砧和 Apotheosis/Ancient Reforging 材料；缺少的交易物品会显示并加入 JEI 收藏。
-- **Apotheosis**：附魔图书馆扫描并合并 RS 库存，执行服务端校验和安全退回；刷怪笼支持升级选择、材料规划、递归供料和 RS/BD 访问。
-- **容器转移**：按 `F` 把容器内容转移到当前 RS/BD 网络，或用 `G` 选择的精妙背包，遵守过滤器、黑名单、容量、文字输入和原版 `F` 使用场景。
+- **Apotheosis**：附魔图书馆扫描并合并 RS 库存，执行服务端校验和安全退回；刷怪笼支持升级选择、材料规划、递归供料及 RS/BD 访问。
+- **容器转移**：按 `F` 把容器内容转移到当前 RS/BD 网络，或用 `G` 选择的精妙背包；操作遵守过滤器、黑名单、容量、文字输入和原版 `F` 使用场景。
 - **精妙背包**：磁铁、拾取、喂食、补货、存入和虚空升级可连接 RS；次元磁铁支持世界流体采集、JEI 液体过滤、幽灵槽筛选及容器/升级安全检查。
 - **FTB Quests**：支持制作/存入进度、网络提交、缺料扫描、连续领取和可关闭的侧栏按钮；已有权威任务处理器优先。
 - **自定义 GUI**：Crabber's Delight、Metal Barrels、PGP、EMX Arms、Apotheosis、Ancient Reforging、附魔台、Enchanting Infuser 系列和 Tetra 加工台可绑定并远程打开。
@@ -203,8 +200,6 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 </details>
 
-微型锅炉支持 RS 流体递归合成，按输入罐、气体罐容量和剩余任务数量分批。绑定锅炉本体，保持连接设备消耗或产生余烬以提供余热，并在合成期间停用成品抽取管道。内置配方为 1 mB 水到 5 mB 蒸汽、1 mB 矮人油到 1 mB 矮人气体。
-
 自定义 GUI 默认包含 Crabber's Delight、Metal Barrels、PGP、EMX Arms、Apotheosis 和 Ancient Reforging，即使不自动制作配方也可绑定并远程打开。
 
 ## 开发者 API
@@ -239,7 +234,7 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 ## 配置
 
 - `config/rs_integration/common.toml`：功能开关和可选模组集成。
-- `config/rs_integration/storage.toml`：混合终端、万界归墟盘容量、存储保存校验、终端拆包上限和流体容器检查。
+- `config/rs_integration/storage.toml`：混合终端、万界归墟盘容量、磁盘操纵器分片搬运、存储保存校验、终端拆包上限和流体容器检查。
 - `saves/<世界>/serverconfig/rs_integration/server.toml`：服务端合成、机器和魔法资源行为。
 - `config/rs_integration/client.toml`：界面、JEI 和 Tetra 显示设置。
 
@@ -250,6 +245,10 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 `autoCrafting.freeWaterMachines` 控制免费补水。列表中的机器免费补水，未列出的机器消耗所选 RS 网络中的流体；设为 `[]` 可关闭全部免费补水，配置注释中列有完整默认机器 ID。
 
 升级时通常会保留已有设置，新增列表项可能需要手动补充。
+
+`storage.diskManipulator.enabled` 默认开启。开启后所有磁盘操纵器共享 `budgetMicros` 指定的单 tick 时间预算，并按 `maxOperationsPerTick` 和 `maxItemsPerOperation` 分片搬运；关闭后完全恢复 RS 原版逻辑。网络或磁盘暂时无法继续接收时会按 `noProgressCooldownTicks` 冷却，避免空转。
+
+网格搜索缓存保存在游戏目录 `rs_integration/cache/grid_search`，不会写入配置文件；旧版 `config/rs_integration/grid_search_cache` 文件会在读取时自动迁移。
 
 ## 诊断
 

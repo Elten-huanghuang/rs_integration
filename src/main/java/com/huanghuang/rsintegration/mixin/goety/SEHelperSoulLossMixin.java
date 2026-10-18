@@ -6,7 +6,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** 在 Goety 公共灵魂消耗完成后尝试从绑定 RS 网络补货。 */
@@ -15,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class SEHelperSoulLossMixin {
     @Inject(method = "decreaseSESouls", at = @At("HEAD"), require = 0)
     private static void rsi$captureSoulsBeforeLoss(
-            Player player, int souls, CallbackInfo callback) {
+            Player player, int souls, CallbackInfoReturnable<Boolean> callback) {
         GoetySoulRefill.beginLoss(player);
     }
 

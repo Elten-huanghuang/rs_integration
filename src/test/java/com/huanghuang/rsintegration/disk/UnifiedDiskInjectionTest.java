@@ -18,6 +18,11 @@ class UnifiedDiskInjectionTest {
             assertNotNull(input); ClassNode result = new ClassNode(); new ClassReader(input).accept(result, 0); return result;
         }
     }
+    private ClassNode readOwn(String name) throws Exception {
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(name + ".class")) {
+            assertNotNull(input); ClassNode result = new ClassNode(); new ClassReader(input).accept(result, 0); return result;
+        }
+    }
     private int calls(ClassNode node, String method, String owner, String called) {
         int count = 0;
         for (MethodNode candidate : node.methods) if (candidate.name.equals(method)) {
@@ -33,6 +38,26 @@ class UnifiedDiskInjectionTest {
         assertEquals(1, calls(manipulator, "lambda$new$2", "util/StackUtils", "createStorages"));
         assertEquals(1, calls(manipulator, "lambda$new$5", "util/StackUtils", "createStorages"));
         for (String method : List.of("isItemDiskDone", "isFluidDiskDone")) assertTrue(manipulator.methods.stream().anyMatch(candidate -> candidate.name.equals(method)));
+    }
+    @Test void diskManipulatorBatchTargetsStillExist() throws Exception {
+        ClassNode manipulator = read("apiimpl/network/node/diskmanipulator/DiskManipulatorNetworkNode");
+        assertEquals(1, calls(manipulator, "update", "inventory/item/UpgradeItemHandler", "getSpeed"));
+        for (String method : List.of("insertItemIntoNetwork", "extractItemFromNetwork",
+                "insertFluidIntoNetwork", "extractFluidFromNetwork", "moveDriveToOutput")) {
+            assertTrue(manipulator.methods.stream().anyMatch(candidate -> candidate.name.equals(method)),
+                    () -> "缺少 RS 磁盘操纵器方法: " + method);
+        }
+        assertTrue(manipulator.methods.stream().anyMatch(candidate ->
+                        candidate.name.equals("insertFluidIntoNetwork")
+                                && candidate.desc.equals("(L" + RS
+                                + "api/storage/disk/IStorageDisk;I)V")),
+                "insertFluidIntoNetwork 必须保留 slot 参数");
+    }
+    @Test void mixinHelpersStayOutsideTheMixinPackage() throws Exception {
+        ClassNode mixin = readOwn("com/huanghuang/rsintegration/mixin/refinedstorage/DiskManipulatorThroughputMixin");
+        assertTrue(mixin.innerClasses == null || mixin.innerClasses.stream()
+                        .noneMatch(inner -> inner.name.startsWith(mixin.name + "$")),
+                "Mixin 内部类会被 Mixin 框架禁止直接引用");
     }
     @Test void itemAndFluidNetworkHooksAndCacheIterationExistOnce() throws Exception {
         ClassNode network = read("apiimpl/network/Network");

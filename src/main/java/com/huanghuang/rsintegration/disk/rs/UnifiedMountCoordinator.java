@@ -35,19 +35,23 @@ public final class UnifiedMountCoordinator {
     }
     public static NetworkNode caller() { return CALLER.get(); }
 
-    private static LevelChunk loadedChunk(NetworkNode node) {
-        if (!(node.getLevel() instanceof ServerLevel level)) return null;
+    private static ServerLevel level(NetworkNode node) {
+        return node.getLevel() instanceof ServerLevel level ? level : null;
+    }
+
+    private static LevelChunk loadedChunk(ServerLevel level, NetworkNode node) {
+        if (level == null) return null;
         return level.getChunkSource().getChunkNow(node.getPos().getX() >> 4, node.getPos().getZ() >> 4);
     }
 
-    private static BlockEntity loadedBlockEntity(NetworkNode node) {
-        LevelChunk chunk = loadedChunk(node);
+    private static BlockEntity loadedBlockEntity(ServerLevel level, NetworkNode node) {
+        LevelChunk chunk = loadedChunk(level, node);
         // 节点 read() 可能发生在区块恢复中，不能同步请求区块或触发方块实体的 NBT 恢复。
         return chunk == null ? null : chunk.getBlockEntities().get(node.getPos());
     }
 
-    private static boolean attached(NetworkNode node) {
-        BlockEntity block = loadedBlockEntity(node);
+    private static boolean attached(ServerLevel level, NetworkNode node) {
+        BlockEntity block = loadedBlockEntity(level, node);
         return block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
     }
 
@@ -55,6 +59,7 @@ public final class UnifiedMountCoordinator {
         public final UnifiedDiskRoot root;
         public final NetworkNode node;
         public final int slot;
+        private final ServerLevel level;
         private final IStorageDisk<?>[] items, fluids;
         private final ItemStack physical;
         private final Runnable retry;
@@ -65,13 +70,18 @@ public final class UnifiedMountCoordinator {
         private boolean pendingCacheRefresh;
         Lease(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
               IStorageDisk<?>[] fluids, ItemStack physical, Runnable retry) {
+            this(root, level(node), node, slot, items, fluids, physical, retry);
+        }
+        Lease(UnifiedDiskRoot root, ServerLevel level, NetworkNode node, int slot, IStorageDisk<?>[] items,
+              IStorageDisk<?>[] fluids, ItemStack physical, Runnable retry) {
             this.root = root; this.node = node; this.slot = slot;
+            this.level = level;
             this.items = items; this.fluids = fluids; this.physical = physical; this.retry = retry;
         }
         public boolean valid() {
             if (!active || !root.manager().enabled()) return false;
             if (!hasPhysicalDisk()) return false;
-            BlockEntity block = loadedBlockEntity(node);
+            BlockEntity block = loadedBlockEntity(level, node);
             boolean same = block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
             // 节点 read() 会先恢复槽位再进入方块实体；尚未附着期间不可读写。
             if (same) observedBlockEntity = true;
@@ -80,7 +90,7 @@ public final class UnifiedMountCoordinator {
         boolean stale() {
             if (!active) return true;
             if (!hasPhysicalDisk()) return true;
-            LevelChunk chunk = loadedChunk(node);
+            LevelChunk chunk = loadedChunk(level, node);
             // 首次恢复期间区块尚未进入缓存，不代表磁盘仓已经卸载。
             if (chunk == null) return observedBlockEntity;
             BlockEntity block = chunk.getBlockEntities().get(node.getPos());
@@ -103,28 +113,30 @@ public final class UnifiedMountCoordinator {
             return root.id().equals(item.getId(current)) && root.worldId().equals(item.worldId(current));
         }
         void revoke() { active = false; items[slot] = null; fluids[slot] = null; }
-        public String location() { return node.getLevel().dimension().location() + " " + node.getPos() + " 槽=" + slot; }
+        public String location() { return level.dimension().location() + " " + node.getPos() + " 槽=" + slot; }
     }
     private static final class Candidate {
         final UnifiedDiskRoot root;
+        final ServerLevel level;
         final NetworkNode node;
         final int slot;
         final Runnable retry;
         boolean observedBlockEntity;
-        Candidate(UnifiedDiskRoot root, NetworkNode node, int slot, Runnable retry) {
-            this.root = root; this.node = node; this.slot = slot; this.retry = retry;
-            observedBlockEntity = attached(node);
+        Candidate(UnifiedDiskRoot root, ServerLevel level, NetworkNode node, int slot, Runnable retry) {
+            this.root = root; this.level = level; this.node = node; this.slot = slot; this.retry = retry;
+            observedBlockEntity = attached(level, node);
         }
     }
     private static final class Deferred {
+        final ServerLevel level;
         final NetworkNode node;
         final int slot;
         final Runnable retry;
         long nextAttempt;
         boolean observedBlockEntity;
-        Deferred(NetworkNode node, int slot, Runnable retry, long nextAttempt) {
-            this.node = node; this.slot = slot; this.retry = retry; this.nextAttempt = nextAttempt;
-            observedBlockEntity = attached(node);
+        Deferred(ServerLevel level, NetworkNode node, int slot, Runnable retry, long nextAttempt) {
+            this.level = level; this.node = node; this.slot = slot; this.retry = retry; this.nextAttempt = nextAttempt;
+            observedBlockEntity = attached(level, node);
         }
     }
     private final Map<UUID, Lease> leases = new HashMap<>();
@@ -134,13 +146,22 @@ public final class UnifiedMountCoordinator {
 
     /** RS 只调用一次 createStorages 时，延迟等待节点恢复后再触发一次。 */
     public void defer(NetworkNode node, int slot, Runnable retry) {
+        defer(level(node), node, slot, retry);
+    }
+
+    public void defer(ServerLevel level, NetworkNode node, int slot, Runnable retry) {
         if (node == null) return;
         deferred.removeIf(candidate -> candidate.node == node && candidate.slot == slot);
-        deferred.add(new Deferred(node, slot, retry, ticks + 20));
+        deferred.add(new Deferred(level, node, slot, retry, ticks + 20));
     }
 
     public Lease acquire(UnifiedDiskRoot root, NetworkNode node, int slot, IStorageDisk<?>[] items,
                          IStorageDisk<?>[] fluids, ItemStack physical, Runnable retry) {
+        return acquire(root, level(node), node, slot, items, fluids, physical, retry);
+    }
+
+    public Lease acquire(UnifiedDiskRoot root, ServerLevel level, NetworkNode node, int slot,
+                         IStorageDisk<?>[] items, IStorageDisk<?>[] fluids, ItemStack physical, Runnable retry) {
         if (node == null) return null;
         releaseSlot(node, slot);
         Lease existing = leases.get(root.id());
@@ -148,10 +169,10 @@ public final class UnifiedMountCoordinator {
         if (existing != null) {
             waiting.removeIf(candidate -> candidate.root.id().equals(root.id())
                     && candidate.node == node && candidate.slot == slot);
-            waiting.add(new Candidate(root, node, slot, retry));
+            waiting.add(new Candidate(root, level, node, slot, retry));
             return null;
         }
-        Lease lease = new Lease(root, node, slot, items, fluids, physical, retry);
+        Lease lease = new Lease(root, level, node, slot, items, fluids, physical, retry);
         lease.pendingCacheRefresh = !lease.valid();
         leases.put(root.id(), lease);
         return lease;
@@ -186,15 +207,15 @@ public final class UnifiedMountCoordinator {
 
     private void retire(Lease lease) {
         lease.revoke();
-        if (!lease.hasPhysicalDisk() || loadedChunk(lease.node) != null) return;
+        if (!lease.hasPhysicalDisk() || loadedChunk(lease.level, lease.node) != null) return;
         // RS 在区块重载后复用原节点，不会重新读取槽位；旧视图撤销后必须保留重挂载入口。
         LOGGER.info("[RSI] 统一盘 {} 所在区块卸载，等待区块恢复后重新挂载: dim={} pos={} slot={}",
-                lease.root.id(), lease.node.getLevel().dimension(), lease.node.getPos(), lease.slot);
-        defer(lease.node, lease.slot, () -> {
+                lease.root.id(), lease.level.dimension(), lease.node.getPos(), lease.slot);
+        defer(lease.level, lease.node, lease.slot, () -> {
             // 等待期间可能发生插拔；只恢复原盘，不能用捕获的旧 ItemStack 覆盖新槽位。
             if (!lease.hasPhysicalDisk()) return;
             LOGGER.info("[RSI] 统一盘 {} 所在区块已恢复，尝试自动重建物品与流体视图: dim={} pos={} slot={}",
-                    lease.root.id(), lease.node.getLevel().dimension(), lease.node.getPos(), lease.slot);
+                    lease.root.id(), lease.level.dimension(), lease.node.getPos(), lease.slot);
             lease.retry.run();
         });
     }
@@ -214,7 +235,7 @@ public final class UnifiedMountCoordinator {
             retire(lease); changed.put(lease.node, true); return true;
         });
         for (Candidate candidate : List.copyOf(waiting)) {
-            LevelChunk chunk = loadedChunk(candidate.node);
+            LevelChunk chunk = loadedChunk(candidate.level, candidate.node);
             BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
             if (block == null) {
                 if (candidate.observedBlockEntity) waiting.remove(candidate);
@@ -231,7 +252,7 @@ public final class UnifiedMountCoordinator {
             }
         }
         for (Deferred candidate : List.copyOf(deferred)) {
-            LevelChunk chunk = loadedChunk(candidate.node);
+            LevelChunk chunk = loadedChunk(candidate.level, candidate.node);
             BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
             if (block == null) {
                 if (candidate.observedBlockEntity) deferred.remove(candidate);

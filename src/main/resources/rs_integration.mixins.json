@@ -58,6 +58,7 @@
     "refinedstorage.UnifiedDiskStackUtilsMixin",
     "refinedstorage.UnifiedDiskDriveMixin",
     "refinedstorage.UnifiedDiskManipulatorMixin",
+    "refinedstorage.DiskManipulatorThroughputMixin",
     "refinedstorage.UnifiedDiskStorageCacheMixin",
     "refinedstorage.UnifiedDiskNetworkContributionMixin",
     "simplebackups.UnifiedDiskBackupMixin",

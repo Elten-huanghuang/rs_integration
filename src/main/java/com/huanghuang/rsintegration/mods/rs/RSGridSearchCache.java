@@ -1901,11 +1901,18 @@ public final class RSGridSearchCache {
         resetGlobalPrewarm();
         for (Entry entry : CACHE.values()) entry.diskLookupCounted = false;
         Path path = diskPath(desiredContext);
+        Path legacyPath = legacyDiskPath(desiredContext);
         int maxEntries = RSIntegrationConfig.GRID_SEARCH_DISK_CACHE_ENTRIES.get();
         long maxBytes = diskMaxBytes();
         try {
             DISK_EXECUTOR.execute(() -> {
                 long started = System.nanoTime();
+                try {
+                    GridSearchDiskStore.migrate(legacyPath, path);
+                } catch (IOException exception) {
+                    RSIntegrationMod.LOGGER.debug(
+                            "[RSI Grid Search] Failed to migrate the legacy disk cache", exception);
+                }
                 GridSearchDiskStore.LoadResult result = GridSearchDiskStore.load(
                         path, desiredContext, maxEntries, maxBytes);
                 DISK_LOAD_COMPLETIONS.offer(new DiskLoadCompletion(
@@ -2079,6 +2086,14 @@ public final class RSGridSearchCache {
     }
 
     private static Path diskPath(String context) {
+        return FMLPaths.GAMEDIR.get()
+                .resolve("rs_integration")
+                .resolve("cache")
+                .resolve("grid_search")
+                .resolve(sha256(context).substring(0, 24) + ".bin.gz");
+    }
+
+    private static Path legacyDiskPath(String context) {
         return FMLPaths.CONFIGDIR.get()
                 .resolve("rs_integration")
                 .resolve("grid_search_cache")

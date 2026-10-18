@@ -105,6 +105,19 @@ final class GridSearchDiskStore {
         }
     }
 
+    /** 将旧版配置目录中的缓存迁到游戏目录；目标已存在时保留目标。 */
+    static void migrate(Path legacyPath, Path targetPath) throws IOException {
+        if (Files.isRegularFile(targetPath) || !Files.isRegularFile(legacyPath)) return;
+        Path parent = targetPath.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        try {
+            Files.move(legacyPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException moveFailure) {
+            Files.copy(legacyPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            Files.deleteIfExists(legacyPath);
+        }
+    }
+
     private static String readString(DataInputStream input, long remainingBytes) throws IOException {
         int length = input.readInt();
         if (length < 0 || length > MAX_STRING_BYTES || length > remainingBytes) {

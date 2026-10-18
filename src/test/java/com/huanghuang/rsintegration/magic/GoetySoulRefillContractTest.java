@@ -25,6 +25,8 @@ class GoetySoulRefillContractTest {
         String config = source("config", "RSIntegrationConfig.java");
 
         assertTrue(mixin.contains("decreaseSESouls"));
+        assertTrue(mixin.contains(
+                "Player player, int souls, CallbackInfoReturnable<Boolean> callback"));
         assertTrue(refill.contains("RETRY_COOLDOWN_TICKS = 20L"));
         assertTrue(refill.contains("NEXT_ATTEMPT"));
         assertTrue(refill.contains("class Scope"));

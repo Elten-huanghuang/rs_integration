@@ -68,6 +68,8 @@ public final class ResourceTable {
     }
 
     public int size() { return live.size(); }
+    /** 按存活顺序访问槽位，供分片搬运在删除后继续原位置。 */
+    public int liveSlot(int position) { return live.getInt(position); }
     public int quarantinedSize() { return quarantined.size(); }
     public int occupiedSize() { return size() + quarantinedSize(); }
     public QuarantinedResource quarantined(int slot) { return quarantined.get(slot); }

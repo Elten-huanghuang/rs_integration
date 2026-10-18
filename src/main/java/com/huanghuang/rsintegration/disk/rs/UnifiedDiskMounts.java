@@ -35,7 +35,7 @@ public final class UnifiedDiskMounts {
             if (!item.initialize(stack, level, node.getOwner())) {
                 LOGGER.warn("[RSI] 统一盘槽位 {} 初始化失败，稍后由 RS 网络重试: dim={} pos={} id={}",
                         slot, level.dimension().location(), node.getPos(), item.getId(stack));
-                manager.mounts().defer(node, slot, retry);
+                manager.mounts().defer(level, node, slot, retry);
                 return true;
             }
             UnifiedDiskRoot root = manager.resolve(stack, level);
@@ -43,7 +43,7 @@ public final class UnifiedDiskMounts {
                 if (manager.worldId().equals(item.worldId(stack))) manager.notifyFailure(item.getId(stack), node.getOwner());
                 LOGGER.warn("[RSI] 统一盘槽位 {} 无法解析持久化代理，稍后重试: dim={} pos={} id={}",
                         slot, level.dimension().location(), node.getPos(), item.getId(stack));
-                manager.mounts().defer(node, slot, retry);
+                manager.mounts().defer(level, node, slot, retry);
                 return true;
             }
             UnifiedDiskManager.Entry entry = manager.entry(root.id());
@@ -51,11 +51,12 @@ public final class UnifiedDiskMounts {
                 manager.notifyFailure(root.id(), node.getOwner());
                 LOGGER.warn("[RSI] 统一盘槽位 {} 库存尚未加载，稍后重试: dim={} pos={} id={} error={}",
                         slot, level.dimension().location(), node.getPos(), root.id(), entry.error);
-                manager.mounts().defer(node, slot, retry);
+                manager.mounts().defer(level, node, slot, retry);
                 return true;
             }
             manager.notifyFailure(root.id(), node.getOwner());
-            UnifiedMountCoordinator.Lease lease = manager.mounts().acquire(root, node, slot, items, fluids, stack, retry);
+            UnifiedMountCoordinator.Lease lease = manager.mounts().acquire(
+                    root, level, node, slot, items, fluids, stack, retry);
             if (lease == null) {
                 LOGGER.debug("[RSI] 统一盘槽位等待其他挂载释放: dim={} pos={} slot={} id={}",
                         level.dimension().location(), node.getPos(), slot, root.id());
@@ -71,7 +72,7 @@ public final class UnifiedDiskMounts {
             UnifiedDiskManager failed = UnifiedDiskManager.existing(level.getServer());
             if (failed != null) {
                 failed.mounts().releaseSlot(node, slot);
-                if (node != null) failed.mounts().defer(node, slot, () -> UnifiedMountCoordinator.withCaller(node, () -> {
+                if (node != null) failed.mounts().defer(level, node, slot, () -> UnifiedMountCoordinator.withCaller(node, () -> {
                     StackUtils.createStorages(level, stack, slot, items, fluids, itemWrapper, fluidWrapper);
                     return null;
                 }));

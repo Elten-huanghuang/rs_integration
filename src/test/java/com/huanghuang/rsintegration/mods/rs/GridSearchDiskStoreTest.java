@@ -77,4 +77,18 @@ class GridSearchDiskStoreTest {
 
         assertEquals(Map.of("middle", "two", "new", "three"), result.entries());
     }
+
+    @Test
+    void migratesLegacyConfigCacheIntoTheGameDirectory() throws IOException {
+        Path legacy = temporaryDirectory.resolve("config/rs_integration/grid_search_cache/search.bin.gz");
+        Path target = temporaryDirectory.resolve("rs_integration/cache/grid_search/search.bin.gz");
+        GridSearchDiskStore.save(legacy, "context", Map.of("key", "text"), 100, 1_048_576);
+
+        GridSearchDiskStore.migrate(legacy, target);
+
+        assertFalse(Files.exists(legacy));
+        assertTrue(Files.isRegularFile(target));
+        assertEquals(Map.of("key", "text"),
+                GridSearchDiskStore.load(target, "context", 100, 1_048_576).entries());
+    }
 }

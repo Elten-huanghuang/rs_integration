@@ -1553,7 +1553,8 @@ public final class RSIntegrationConfig {
         GRID_SEARCH_DISK_CACHE_ENABLED = cl
                 .comment("启用磁盘搜索缓存",
                         "将已经完成的 RS tooltip 与拼音搜索文本保存到本地磁盘。",
-                        "再次启动客户端时可直接复用，避免每次进入世界都重新冷预热。")
+                        "再次启动客户端时可直接复用，避免每次进入世界都重新冷预热。",
+                        "缓存位于游戏目录 rs_integration/cache/grid_search，不写入配置文件。")
                 .define("diskCacheEnabled", true);
         GRID_SEARCH_DISK_CACHE_ENTRIES = cl
                 .comment("磁盘搜索缓存条目上限",

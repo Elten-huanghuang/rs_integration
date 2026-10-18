@@ -53,6 +53,24 @@ class UnifiedDiskCoreTest extends BootstrapTest {
         return FrozenKey.item(stack);
     }
 
+    @Test
+    void liveSlotCursorSeesTheEntrySwappedInAfterRemoval() {
+        var core = core(4);
+        FrozenKey first = variant(1), middle = variant(2), last = variant(3);
+        assertEquals(10, core.insert(first, 10, true));
+        assertEquals(10, core.insert(middle, 10, true));
+        assertEquals(10, core.insert(last, 10, true));
+        ResourceTable table = core.items;
+        int firstSlot = table.liveSlot(0);
+        int lastSlot = table.liveSlot(table.size() - 1);
+        assertNotEquals(firstSlot, lastSlot);
+
+        assertEquals(10, core.extract(FrozenKey.Kind.ITEM, firstSlot, 10, true));
+
+        assertEquals(2, table.size());
+        assertEquals(lastSlot, table.liveSlot(0));
+    }
+
     @Test void frozenIdentityCoversOrderZerosTypesAndDefensiveCopies() throws Exception {
         ItemStack first = new ItemStack(Items.DIAMOND, 20), second = new ItemStack(Items.DIAMOND, 2);
         // 原版 valueOf 和普通 NBT 读取都折叠负零；构造模组可能产生的非缓存实例。
