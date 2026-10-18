@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.disk.rs;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.disk.core.ResourceTable.DuplicateRepair;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore.Limits;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore.Manifest;
@@ -31,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Stream;
 
 /** 每服务器一个管理器；只有一份冻结快照在后台保存，队列不会无限增长。 */
 public final class UnifiedDiskManager {
@@ -212,6 +214,7 @@ public final class UnifiedDiskManager {
                 entry.manifest = files.save(Snapshot.freeze(loaded), entry.manifest).manifest();
             }
             entry.core = loaded;
+            logDuplicateRepairs(id, loaded);
             entry.failure = UnifiedDiskFailure.quarantined(loaded);
             if (entry.failure != null) {
                 LOGGER.warn("[RSI] 统一盘 {} 已隔离 {} 项缺失物品、{} 项缺失流体，正常库存仍可使用",
@@ -227,6 +230,17 @@ public final class UnifiedDiskManager {
             LOGGER.error("[RSI] 统一盘 {} 不可用，保留原始文件，拒绝创建空库存", id, e);
         }
         return entry;
+    }
+
+    private void logDuplicateRepairs(UUID id, UnifiedDiskCore core) {
+        List<DuplicateRepair> repairs = Stream.concat(core.items.duplicateRepairs().stream(),
+                core.fluids.duplicateRepairs().stream()).toList();
+        if (repairs.isEmpty()) return;
+        LOGGER.warn("[RSI] 统一盘 {} 已自动合并 {} 条重复资源记录，库存数量和原始文件均已保留",
+                id, repairs.size());
+        repairs.stream().limit(16).forEach(repair -> LOGGER.warn(
+                "[RSI] 重复资源已合并: kind={} resource={} keptSlot={} mergedSlot={}",
+                repair.kind(), repair.resource(), repair.keptSlot(), repair.mergedSlot()));
     }
 
     public UnifiedDiskRoot create(UUID owner) throws IOException {

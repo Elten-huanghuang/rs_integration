@@ -167,6 +167,11 @@ public final class FrozenKey {
     }
 
     public Kind kind() { return kind; }
+    public ResourceLocation resourceId() {
+        return kind == Kind.ITEM
+                ? ForgeRegistries.ITEMS.getKey((Item) type)
+                : ForgeRegistries.FLUIDS.getKey((Fluid) type);
+    }
     public Object type() { return type; }
     boolean plain() { return plain; }
     boolean stored() { return payload != null; }

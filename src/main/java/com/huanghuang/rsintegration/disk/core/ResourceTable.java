@@ -11,8 +11,10 @@ import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 /** 主线程拥有的 512 槽分块列式表；精确查询不扫描同类型 NBT 变体。 */
@@ -26,6 +28,7 @@ public final class ResourceTable {
         public QuarantinedResource { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }
     }
+    public record DuplicateRepair(int keptSlot, int mergedSlot, FrozenKey.Kind kind, ResourceLocation resource) {}
     private static final class Page {
         final FrozenKey[] keys = new FrozenKey[PAGE_SIZE];
         final int[] amounts = new int[PAGE_SIZE];
@@ -46,6 +49,9 @@ public final class ResourceTable {
     private final IntArrayList free = new IntArrayList();
     private final IntArrayList dirtyPages = new IntArrayList();
     private final Map<Integer, QuarantinedResource> quarantined = new HashMap<>();
+    private final List<DuplicateRepair> duplicateRepairs = new ArrayList<>();
+    private final Set<Integer> repairedKeyPages = new HashSet<>();
+    private final Set<Integer> repairedAmountPages = new HashSet<>();
     private final int maxEntries;
     private final long epoch;
     private int allocated;
@@ -65,6 +71,7 @@ public final class ResourceTable {
     public int quarantinedSize() { return quarantined.size(); }
     public int occupiedSize() { return size() + quarantinedSize(); }
     public QuarantinedResource quarantined(int slot) { return quarantined.get(slot); }
+    public List<DuplicateRepair> duplicateRepairs() { return List.copyOf(duplicateRepairs); }
     public List<ResourceLocation> quarantinedIds() {
         return quarantined.values().stream().map(QuarantinedResource::resource).distinct().toList();
     }
@@ -187,17 +194,33 @@ public final class ResourceTable {
         }
     }
 
-    public void restore(int slot, FrozenKey key, int generation, long order, int amount) {
+    public boolean restore(int slot, FrozenKey key, int generation, long order, int amount) {
         if (!key.stored()) throw new IllegalArgumentException("查询身份不能恢复为库存模板");
-        if (slot < 0 || slot >= maxEntries || amount <= 0 || generation <= 0 || order <= 0
-                || exact.containsKey(key)) throw new IllegalArgumentException("统一盘槽记录非法或重复");
+        if (slot < 0 || slot >= maxEntries || amount <= 0 || generation <= 0 || order <= 0) {
+            throw new IllegalArgumentException("统一盘槽记录非法");
+        }
         ensurePage(slot);
         if (key(slot) != null || quarantined.containsKey(slot)) throw new IllegalArgumentException("统一盘槽记录重复");
+        int keptSlot = exact.getInt(key);
+        if (keptSlot >= 0) {
+            int keptAmount = amount(keptSlot);
+            if (amount > Integer.MAX_VALUE - keptAmount) {
+                throw new IllegalArgumentException("统一盘重复资源数量汇总超过单条上限");
+            }
+            setAmount(keptSlot, keptAmount + amount);
+            duplicateRepairs.add(new DuplicateRepair(keptSlot, slot, key.kind(), key.resourceId()));
+            repairedKeyPages.add(slot / PAGE_SIZE);
+            repairedAmountPages.add(slot / PAGE_SIZE);
+            repairedAmountPages.add(keptSlot / PAGE_SIZE);
+            nextOrder = Math.max(nextOrder, order);
+            return false;
+        }
         allocated = Math.max(allocated, slot + 1);
         page(slot).generations[offset(slot)] = generation;
         addKey(slot, key, order);
         nextOrder = Math.max(nextOrder, order);
         setAmount(slot, amount);
+        return true;
     }
 
     public void restoreQuarantined(int slot, QuarantinedResource resource, int generation, long order, int amount) {
@@ -235,6 +258,16 @@ public final class ResourceTable {
         }
         for (Page page : pages) { page.savedKeys = page.keyRevision; page.savedAmounts = page.amountRevision; page.dirtyPosition = -1; }
         dirtyPages.clear();
+        for (int pageIndex : repairedKeyPages) {
+            Page page = pages.get(pageIndex);
+            page.keyRevision = ++revision;
+            markDirty(pageIndex, page);
+        }
+        for (int pageIndex : repairedAmountPages) {
+            Page page = pages.get(pageIndex);
+            page.amountRevision = ++revision;
+            markDirty(pageIndex, page);
+        }
     }
 
     private int allocate() {

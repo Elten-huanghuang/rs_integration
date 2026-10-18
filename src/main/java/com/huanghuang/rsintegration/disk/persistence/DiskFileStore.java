@@ -302,6 +302,7 @@ public final class DiskFileStore {
         int slots = Math.min(storedCapacity, pages.size() * ResourceTable.PAGE_SIZE);
         int[] generations = new int[slots];
         List<Record> records = new ArrayList<>();
+        Set<FrozenKey> uniqueKeys = new HashSet<>();
         int totalBytes = 0;
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
             PageFiles page = pages.get(pageIndex);
@@ -331,11 +332,13 @@ public final class DiskFileStore {
                                 || length > limits.payloadBytes() - totalBytes) throw new IOException("资源数量或载荷越界");
                         byte[] payload = input.readNBytes(length);
                         if (payload.length != length) throw new IOException("资源载荷截断");
-                        totalBytes += length;
                         try {
-                            records.add(new Record(slot, generation, order, FrozenKey.load(kind, payload), null, amount));
+                            FrozenKey key = FrozenKey.load(kind, payload);
+                            if (uniqueKeys.add(key)) totalBytes += length;
+                            records.add(new Record(slot, generation, order, key, null, amount));
                         } catch (FrozenKey.MissingResourceException missing) {
                             // 注册项缺失不等于文件损坏；保留槽位和原始载荷，重载时再尝试恢复。
+                            totalBytes += length;
                             records.add(new Record(slot, generation, order, null,
                                     new QuarantinedResource(kind, missing.resource(), payload), amount));
                         }
@@ -355,7 +358,9 @@ public final class DiskFileStore {
                 } else table.restore(record.slot, record.key, record.generation, record.order, record.amount);
             }
             table.finishRestore(slots, generations);
-        } catch (IllegalArgumentException e) { throw new IOException("磁盘资源记录非法", e); }
+        } catch (IllegalArgumentException e) {
+            throw new IOException("磁盘资源记录非法: " + e.getMessage(), e);
+        }
         return totalBytes;
     }
 

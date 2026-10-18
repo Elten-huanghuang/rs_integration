@@ -149,7 +149,7 @@ public final class UnifiedDiskCore {
         FrozenKey query = FrozenKey.queryItem(source);
         int slot = items.exactSlot(query);
         if (slot >= 0) return items.insertExisting(slot, amount, perform);
-        return items.canCreate() ? insertNew(query, query.freezeItem(source), amount, perform) : 0;
+        return insert(query.freezeItem(source), amount, perform);
     }
 
     public int insertFluid(FluidStack source, int amount, boolean perform) {
@@ -163,16 +163,7 @@ public final class UnifiedDiskCore {
         FrozenKey query = FrozenKey.queryFluid(source);
         int slot = fluids.exactSlot(query);
         if (slot >= 0) return fluids.insertExisting(slot, amount, perform);
-        return fluids.canCreate() ? insertNew(query, query.freezeFluid(source), amount, perform) : 0;
-    }
-
-    private int insertNew(FrozenKey query, FrozenKey key, int amount, boolean perform) {
-        // 模组能力若在复制/归一化时改变身份，回到完整查找；常规未命中不再重复查表。
-        if (!query.equals(key)) return insert(key, amount, perform);
-        if (key.payloadBytes() > limits.entryBytes || key.payloadBytes() > limits.payloadBytes - payloadBytes) return 0;
-        int accepted = table(key.kind()).insert(key, -1, amount, perform);
-        if (perform && accepted > 0) payloadBytes += key.payloadBytes();
-        return accepted;
+        return insert(query.freezeFluid(source), amount, perform);
     }
 
     public int extract(FrozenKey.Kind kind, int slot, int amount, boolean perform) {
