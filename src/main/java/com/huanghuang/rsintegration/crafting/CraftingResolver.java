@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraphCompactor;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.InputDemand;
@@ -547,6 +548,7 @@ public final class CraftingResolver {
                 ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
                 ctx.graphNodes.stream().map(CraftNode::id).toList());
         CraftPlanValidator.validate(graph);
+        graph = CraftPlanGraphCompactor.compact(graph);
         ctx.logGuardSummary();
         return graph;
     }

@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraphCompactor;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -1344,6 +1345,7 @@ public final class GenericCraftPacket {
                         player.sendSystemMessage(Component.translatable(key));
                     }
                 });
+        player.sendSystemMessage(backgroundPlanningNotice());
         RSIntegrationMod.debug("[RSI-exec] queued async {} planning recipe={} repeat={}",
                 planKind, recipeId, repeatCount);
     }
@@ -2052,7 +2054,7 @@ public final class GenericCraftPacket {
             throw new IllegalArgumentException(
                     "terminal graph execution mismatch: " + equivalence.mismatches());
         }
-        return completeGraph;
+        return CraftPlanGraphCompactor.compact(completeGraph);
     }
 
     static ItemStack selectTerminalGraphOutput(Recipe<?> recipe, ItemStack recipeOutput,
@@ -4125,6 +4127,7 @@ public final class GenericCraftPacket {
                                 null, null, true, fallbackReason.orElseThrow(),
                                 reuseValidatedSnapshot, sink, planStorageReference, materialLocks);
                     });
+            sink.notice(backgroundPlanningNotice());
             return;
         }
         if (directTerminalPlan) {
@@ -5403,6 +5406,10 @@ public final class GenericCraftPacket {
                                               boolean overridesProjectable, boolean hasMaterialLocks) {
         return shouldUseAsyncPurePreview(!mainThreadOnly && overridesProjectable && !hasMaterialLocks,
                 directTerminalPlan);
+    }
+
+    static Component backgroundPlanningNotice() {
+        return Component.translatable("rsi.plan.info.background_started");
     }
 
     record PreviewStep(ResolutionStep step, int batches) {}
