@@ -286,9 +286,6 @@ public final class CraftingPlanScreen extends Screen {
     private int embersModeCalcX, embersModeCalcY, embersModeCalcW, embersModeCalcH;
     private int embersModeInferX, embersModeInferY, embersModeInferW, embersModeInferH;
 
-    // 保留服务器预览刷新所需的分支选择，候选面板与树形视图共用。
-    private static final Map<String, String> LAST_FORCED = new HashMap<>();
-
     // Card-view step folding (§3.17). Keyed by recipeId string; default: root unfolded, rest folded.
     private final Map<String, Boolean> collapsedSteps = new LinkedHashMap<>();
 
@@ -898,9 +895,7 @@ public final class CraftingPlanScreen extends Screen {
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
             planRefreshTick = -1;
             ResourceLocation id = ResourceLocation.tryParse(plan.recipeId());
-            Map<String, String> forced = LAST_FORCED.isEmpty() ? Collections.emptyMap()
-                    : new HashMap<>(LAST_FORCED);
-            sendCraftPacket(id, true, forced, currentRepeat, false);
+            sendCraftPacket(id, true, exportForcedSelections(), currentRepeat, false);
         }
     }
 
@@ -2218,7 +2213,7 @@ public final class CraftingPlanScreen extends Screen {
 
     /**
      * Switch a node to an alternative recipe. Reuses the card-mode server round-trip: update the
-     * shared {@code forced} overrides ({@link #LAST_FORCED}) and send a preview
+     * current forced overrides and send a preview
      * {@link GenericCraftPacket}; the server re-resolves and the returned {@link PlanResponse}
      * flows through {@link #updatePlan}, which rebuilds the tree. Target-node switches replace the
      * root recipe; intermediate switches go into the forced map keyed by item id.
@@ -2240,8 +2235,6 @@ public final class CraftingPlanScreen extends Screen {
             if (preferenceKey != null) forced.remove(preferenceKey.toString());
         }
 
-        LAST_FORCED.clear();
-        LAST_FORCED.putAll(forced);
         sendCraftPacket(rootRid, true, forced, currentRepeat, false);
     }
 
