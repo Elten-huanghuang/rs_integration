@@ -2789,29 +2789,64 @@ public final class AsyncCraftChain {
         if (!useGraphExecution || graph == null || graphScheduler == null) {
             return buildFlatNodeProgress();
         }
-        List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(graph.topologicalOrder().size());
-        for (NodeId nodeId : graph.topologicalOrder()) {
-            CraftNode node = graphNodes.get(nodeId);
-            DagScheduler.NodeState schedulerState = graphScheduler.state(nodeId);
-            CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
-            int totalOps = runtime != null ? runtime.totalOperations()
-                    : node != null ? Math.max(1, node.executions()) : 1;
-            int completedOps = runtime != null ? runtime.completedOperations()
-                    : schedulerState == DagScheduler.NodeState.SUCCEEDED ? totalOps : 0;
-            int runningOps = runtime != null ? runtime.runningOperations() : 0;
-            String detail = runtime != null && runtime.failureReason() != null
-                    ? runtime.failureReason() : graphFailureDetails.getOrDefault(nodeId, "");
-            result.add(new CraftProgressSnapshot.NodeProgress(nodeId.value(),
-                    progressNodeState(schedulerState),
-                    node != null ? node.recipeId().toString() : "",
-                    node != null ? node.modTypeId() : "",
-                    displayOutput(node),
-                    completedOps, totalOps, runningOps,
-                    runtime != null ? runtime.machineLabel() : "",
-                    progressReasonForDetail(detail), detail,
-                    runtime != null && runtime.isDraining()));
+        int maximum = CraftProgressSnapshot.MAX_NODE_DETAILS;
+        List<NodeId> order = graph.topologicalOrder();
+        if (order.size() <= maximum) {
+            List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(order.size());
+            for (NodeId nodeId : order) result.add(buildGraphNodeProgress(nodeId));
+            return List.copyOf(result);
         }
+
+        List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(maximum);
+        Set<Integer> selected = new HashSet<>(maximum);
+        addGraphNodeProgress(result, selected, maximum, nodeId -> {
+            DagScheduler.NodeState state = graphScheduler.state(nodeId);
+            CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
+            return state == DagScheduler.NodeState.RUNNING
+                    || state == DagScheduler.NodeState.FAILED
+                    || runtime != null && runtime.isDraining()
+                    || !graphFailureDetails.getOrDefault(nodeId, "").isEmpty();
+        });
+        addGraphNodeProgress(result, selected, maximum,
+                nodeId -> graphScheduler.state(nodeId) == DagScheduler.NodeState.READY);
+        addGraphNodeProgress(result, selected, maximum,
+                nodeId -> graphScheduler.state(nodeId) == DagScheduler.NodeState.BLOCKED);
+        addGraphNodeProgress(result, selected, maximum, nodeId -> true);
         return List.copyOf(result);
+    }
+
+    private void addGraphNodeProgress(List<CraftProgressSnapshot.NodeProgress> result,
+                                      Set<Integer> selected,
+                                      int maximum,
+                                      Predicate<NodeId> predicate) {
+        if (result.size() >= maximum) return;
+        for (NodeId nodeId : graph.topologicalOrder()) {
+            if (result.size() >= maximum) return;
+            if (!predicate.test(nodeId) || !selected.add(nodeId.value())) continue;
+            result.add(buildGraphNodeProgress(nodeId));
+        }
+    }
+
+    private CraftProgressSnapshot.NodeProgress buildGraphNodeProgress(NodeId nodeId) {
+        CraftNode node = graphNodes.get(nodeId);
+        DagScheduler.NodeState schedulerState = graphScheduler.state(nodeId);
+        CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
+        int totalOps = runtime != null ? runtime.totalOperations()
+                : node != null ? Math.max(1, node.executions()) : 1;
+        int completedOps = runtime != null ? runtime.completedOperations()
+                : schedulerState == DagScheduler.NodeState.SUCCEEDED ? totalOps : 0;
+        int runningOps = runtime != null ? runtime.runningOperations() : 0;
+        String detail = runtime != null && runtime.failureReason() != null
+                ? runtime.failureReason() : graphFailureDetails.getOrDefault(nodeId, "");
+        return new CraftProgressSnapshot.NodeProgress(nodeId.value(),
+                progressNodeState(schedulerState),
+                node != null ? node.recipeId().toString() : "",
+                node != null ? node.modTypeId() : "",
+                displayOutput(node),
+                completedOps, totalOps, runningOps,
+                runtime != null ? runtime.machineLabel() : "",
+                progressReasonForDetail(detail), detail,
+                runtime != null && runtime.isDraining());
     }
 
     private List<CraftProgressSnapshot.NodeProgress> buildFlatNodeProgress() {

@@ -34,7 +34,7 @@ public final class CraftProgressPublisher {
         RSIntegrationMod.LOGGER.debug("[RSI-progress] craft={} sequence={} result={} reason={} nodes={}/{} running={}",
                 craftId, snapshot.sequence(), snapshot.result(), snapshot.reason(),
                 snapshot.completedNodes(), snapshot.totalNodes(), snapshot.runningNodes());
-        if (!terminal && lastSent != null && tickCounter % 100 != 0) {
+        if (shouldSendDelta(lastSent, snapshot, tickCounter)) {
             BatchCraftNetworkHandler.CHANNEL.sendTo(
                     new CraftProgressDeltaPacket(craftId, lastSent.sequence(), snapshot,
                             changedNodes(lastSent, snapshot)),
@@ -46,6 +46,12 @@ public final class CraftProgressPublisher {
         if (!terminal) lastSent = snapshot;
     }
 
+    static boolean shouldSendDelta(CraftProgressSnapshot previous,
+                                   CraftProgressSnapshot current,
+                                   int tickCounter) {
+        return previous != null && (current.isTerminal() || tickCounter % 100 != 0);
+    }
+
     static List<CraftProgressSnapshot.NodeProgress> changedNodes(
             CraftProgressSnapshot previous, CraftProgressSnapshot current) {
         Map<Integer, CraftProgressSnapshot.NodeProgress> old = new HashMap<>();
@@ -54,7 +60,8 @@ public final class CraftProgressPublisher {
         for (CraftProgressSnapshot.NodeProgress node : current.nodes()) {
             if (!Objects.equals(old.get(node.nodeId()), node)) changed.add(node);
         }
-        return List.copyOf(changed);
+        return CraftProgressSnapshot.selectNodeDetails(
+                changed, CraftProgressSnapshot.MAX_NODE_DETAILS);
     }
 
     static boolean samePayload(CraftProgressSnapshot previous, CraftProgressSnapshot current) {

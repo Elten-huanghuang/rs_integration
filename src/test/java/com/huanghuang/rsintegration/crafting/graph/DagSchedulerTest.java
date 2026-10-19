@@ -85,6 +85,26 @@ class DagSchedulerTest extends BootstrapTest {
     }
 
     @Test
+    void successfulCountIsMaintainedWithoutRescanningStateMap() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        NodeId left = scheduler.claimReady(1).get(0);
+
+        assertEquals(0, scheduler.countSucceeded());
+        scheduler.succeed(left);
+        assertEquals(1, scheduler.countSucceeded());
+        assertFalse(scheduler.allSucceeded());
+
+        NodeId right = scheduler.claimReady(1).get(0);
+        scheduler.succeed(right);
+        assertEquals(2, scheduler.countSucceeded());
+
+        NodeId join = scheduler.claimReady(1).get(0);
+        scheduler.succeed(join);
+        assertEquals(3, scheduler.countSucceeded());
+        assertTrue(scheduler.allSucceeded());
+    }
+
+    @Test
     void stateSnapshotTracksLifecycleAndCannotMutateScheduler() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         assertEquals(Map.of(

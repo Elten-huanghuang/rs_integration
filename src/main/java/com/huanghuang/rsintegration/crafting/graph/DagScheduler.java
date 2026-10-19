@@ -28,6 +28,7 @@ public final class DagScheduler {
     private final Map<NodeId, Set<NodeId>> dependencies = new HashMap<>();
     private final Map<NodeId, Set<NodeId>> dependents = new HashMap<>();
     private final LinkedHashSet<NodeId> ready = new LinkedHashSet<>();
+    private long succeededCount;
     private boolean stopping;
     private int epoch;
 
@@ -35,7 +36,7 @@ public final class DagScheduler {
     private NodeId failedNode;
 
     public long countSucceeded() {
-        return states.values().stream().filter(s -> s == NodeState.SUCCEEDED).count();
+        return succeededCount;
     }
 
     public DagScheduler(CraftPlanGraph graph) {
@@ -120,6 +121,7 @@ public final class DagScheduler {
         Objects.requireNonNull(readiness, "readiness");
         requireState(nodeId, NodeState.RUNNING);
         states.put(nodeId, NodeState.SUCCEEDED);
+        succeededCount++;
         if (stopping) return;
         for (NodeId dependent : dependents.getOrDefault(nodeId, Set.of())) {
             if (states.get(dependent) != NodeState.BLOCKED) continue;
@@ -192,7 +194,7 @@ public final class DagScheduler {
     }
 
     public boolean allSucceeded() {
-        return !states.isEmpty() && states.values().stream().allMatch(state -> state == NodeState.SUCCEEDED);
+        return !states.isEmpty() && succeededCount == states.size();
     }
 
     public boolean isDrained() {

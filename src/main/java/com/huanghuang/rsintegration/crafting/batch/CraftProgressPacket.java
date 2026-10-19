@@ -19,7 +19,7 @@ import java.util.function.Supplier;
 /** S2C progress update for one running or terminal craft. */
 public final class CraftProgressPacket {
 
-    static final int MAX_NODES = 4096;
+    static final int MAX_NODES = CraftProgressSnapshot.MAX_NODE_DETAILS;
     static final int MAX_TECHNICAL_DETAIL_LENGTH = CraftProgressSnapshot.MAX_TECHNICAL_DETAIL_LENGTH;
     static final int MAX_RECIPE_ID_LENGTH = 256;
     static final int MAX_MOD_TYPE_ID_LENGTH = 128;
