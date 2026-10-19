@@ -15,7 +15,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -161,8 +160,8 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -175,7 +174,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -537,7 +536,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         forceMachineChunk(myLevel, myPos, false);
         craftDone = false;
         skilletPrevTime = -1;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

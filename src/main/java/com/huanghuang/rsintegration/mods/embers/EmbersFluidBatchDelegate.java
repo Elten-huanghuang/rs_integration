@@ -84,8 +84,8 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         expected = output.copy();
         machineDim = level.dimension().location();
         machineServer = player.server;
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(
-                player, level.dimension(), target);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                player, level.dimension(), target).orElse(null));
         if (!canStoreOutput(player)) return PreparationResult.fatal("流体存储不可用",
                 Component.translatable("rsi.embers_machine.error.fluid_storage"));
         if (!inputsIdle()) return PreparationResult.retry("余烬机器输入槽非空",
@@ -135,7 +135,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
             if (material.isEmpty()) { ledger.rollback(player); return false; }
             materials.add(material.copy());
         }
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         return start(player, materials);
     }
 
@@ -231,7 +231,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(recovered);
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(recovered);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         resetState();
     }
@@ -242,7 +242,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(recovered);
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(recovered);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         resetState();
     }

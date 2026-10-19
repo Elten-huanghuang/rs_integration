@@ -148,7 +148,7 @@ final class StepExecutor {
         if (entry.modType() == ModType.byId("crockpot")
                 && CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
             List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                    entry.recipe(), ctx.network, ctx.level, null);
+                    entry.recipe(), ctx.storageEndpoint, ctx.player, ctx.level, null);
             if (categorySpecs != null && !categorySpecs.isEmpty()) specs = categorySpecs;
         }
 

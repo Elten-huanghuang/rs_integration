@@ -21,7 +21,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -350,7 +349,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -631,7 +630,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         clearMachineSlotsAndRefund();
         craftDone = false;
         plannedOperations = 1;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

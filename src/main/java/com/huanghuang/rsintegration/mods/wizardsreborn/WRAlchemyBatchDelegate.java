@@ -91,7 +91,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         if (!expectedFluid.isEmpty() && outputTank().getTankCapacity(0) < expectedFluid.getAmount()) {
             return problem("output_full");
         }
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         if ((!expectedFluid.isEmpty() || fluidCount > 0 || hasStoredFluid()) && !usesFluidStorage()) {
             return problem("fluid_storage");
         }
@@ -212,7 +212,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
             if (stack.isEmpty()) { ledger.rollback(player); return false; }
             materials.add(stack.copy());
         }
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         return place(player, materials);
     }
 
@@ -406,7 +406,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(recovered);
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(recovered);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         remaining.clear();
         placedItems.clear();
@@ -419,7 +419,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(recovered);
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(recovered);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         remaining.clear();
         placedItems.clear();

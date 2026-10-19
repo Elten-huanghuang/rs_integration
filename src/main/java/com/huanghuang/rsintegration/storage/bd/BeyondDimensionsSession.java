@@ -46,6 +46,13 @@ final class BeyondDimensionsSession implements StorageSession {
         this.reference = Objects.requireNonNull(reference, "reference");
     }
     @Override public StorageReference reference() { return reference; }
+    @Override public boolean isAvailable() {
+        try {
+            return BeyondDimensionsReflection.isCurrentNetwork(network, reference.networkId());
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
+    }
     @Override public Set<StorageCapability> capabilities() {
         return Set.of(StorageCapability.ITEM_STORAGE, StorageCapability.FLUID_STORAGE);
     }

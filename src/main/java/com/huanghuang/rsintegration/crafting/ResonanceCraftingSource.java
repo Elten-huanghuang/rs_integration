@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
-import com.huanghuang.rsintegration.resonance.bridge.RSResonanceDiskAccess;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;
@@ -18,7 +17,7 @@ public final class ResonanceCraftingSource {
             @Nullable CraftStorageEndpoint endpoint, ServerPlayer player) {
         if (endpoint == null || player == null) return List.of();
         if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
-            ResonanceStorageView view = RSResonanceDiskAccess.find(legacy.network());
+            ResonanceStorageView view = legacy.resonanceView();
             return view == null ? List.of() : List.of(view);
         }
         String backendId;

@@ -79,8 +79,8 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         expected = output.copy();
         machineDim = level.dimension().location();
         machineServer = player.server;
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(
-                player, level.dimension(), target);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                player, level.dimension(), target).orElse(null));
         if (!MachineWaterSupply.supportsFluidStorage(storageEndpoint())) {
             return PreparationResult.fatal("金属成型流体材料需要 RS 或 BD 流体存储",
                     Component.translatable("rsi.embers_machine.error.fluid_storage"));
@@ -145,7 +145,7 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
             if (material.isEmpty()) { ledger.rollback(player); return false; }
             materials.add(material.copy());
         }
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         return start(player, materials);
     }
 
@@ -284,7 +284,7 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         recordFailureRecoveredInputs(recovered);
         if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(recovered);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         remaining.clear();
         placedItem = ItemStack.EMPTY;

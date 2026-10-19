@@ -21,6 +21,16 @@ import java.util.Set;
 public interface StorageSession {
     StorageReference reference();
 
+    /** 当前会话是否仍指向可用网络。 */
+    default boolean isAvailable() {
+        return true;
+    }
+
+    /** 网络稳定坐标；无法安全确定位置时返回空。 */
+    default Optional<StorageNetworkLocation> location() {
+        return Optional.empty();
+    }
+
     default Set<StorageCapability> capabilities() {
         return Set.of(StorageCapability.ITEM_STORAGE);
     }

@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
+
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -106,7 +108,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (storageEndpoint() == null) {
-            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
         }
         this.materialsPlaced = false;
         this.recordedInputItem = null;

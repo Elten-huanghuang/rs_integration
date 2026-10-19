@@ -81,9 +81,9 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
         if (!validateExecutionContext(player)) return false;
         ExtractionLedger ownLedger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }
-        if (network == null && !hasStorageAccess()) return false;
+        if (storageEndpoint() == null && !hasStorageAccess()) return false;
         ownLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {
@@ -101,7 +101,7 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
         }
         CraftedOutputs outputs = craft(recipe, materials, player.serverLevel().registryAccess(), 1);
         if (outputs == null || !validateExecutionContext(player)
-                || !ownLedger.commit(network, player)) {
+                || !ownLedger.commitToEndpoint(storageEndpoint(), player)) {
             ownLedger.rollback(player);
             return false;
         }

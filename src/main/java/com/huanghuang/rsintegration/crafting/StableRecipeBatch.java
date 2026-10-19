@@ -103,11 +103,9 @@ final class StableRecipeBatch {
             if (remaining <= 0) continue;
 
             int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
-            ItemStack reserved = ledger.storageEndpoint() != null
-                    ? ledger.reserveExactAcrossNetworkAndInventory(
-                    requirement.template(), amount, ledger.storageEndpoint(), player)
-                    : ledger.reserveExactAcrossNetworkAndInventory(
-                    requirement.template(), amount, ledger.legacyNetwork(), player);
+            var endpoint = ledger.storageEndpoint();
+            ItemStack reserved = ledger.reserveExactAcrossNetworkAndInventory(
+                    requirement.template(), amount, endpoint, player);
             if (reserved.isEmpty() || reserved.getCount() != amount) {
                 return false;
             }

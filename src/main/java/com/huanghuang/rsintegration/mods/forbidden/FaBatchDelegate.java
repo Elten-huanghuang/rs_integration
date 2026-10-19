@@ -16,7 +16,6 @@ import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -257,9 +256,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-        } else {
-            this.network = null;
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
 
@@ -268,7 +265,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -353,7 +350,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Phase 2: commit ledger — extract items from RS BEFORE physical placement
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] Ledger commit failed (no items placed yet)");
             return false;
         }
@@ -381,7 +378,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: placement failed:", e);
             rollbackPhysical();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
 
@@ -409,16 +406,16 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Phase 4: require a RitualStarterItem
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
-        final ItemStack starterStack = findRitualStarterItem(player, network);
+        final ItemStack starterStack = findRitualStarterItem(player);
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
             rollbackPhysical();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Found starter '{}' from {}",
-                starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
+                starterStack.getHoverName().getString(), starterFromEndpoint != null ? "storage" : "inventory");
 
         // Phase 5: start the ritual
         try {
@@ -440,7 +437,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             if (callback.wasCalled && !callback.accepted) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: ritual rejected by forge");
                 rollbackPhysical();
-                ledger.refundCommitted(network, player);
+                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 returnStarterToSource(starterStack);
                 return false;
             }
@@ -448,13 +445,13 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             Throwable root = e.getCause() != null ? e.getCause() : e;
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartRitual failed — forge rejected", root);
             rollbackPhysical();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             returnStarterToSource(starterStack);
             return false;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: start ritual failed:", e);
             rollbackPhysical();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             returnStarterToSource(starterStack);
             return false;
         }
@@ -496,9 +493,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             setStorageEndpoint(sharedLedger.storageEndpoint());
         }
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
         this.usingSharedLedger = true;
 
@@ -507,7 +504,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -636,7 +633,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
         // Require a RitualStarterItem
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Searching for RitualStarterItem...");
-        final ItemStack starterStack = findRitualStarterItem(player, network);
+        final ItemStack starterStack = findRitualStarterItem(player);
         if (starterStack.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartWithMaterials: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
@@ -644,7 +641,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Found starter '{}' from {}",
-                starterStack.getHoverName().getString(), starterFromRS != null ? "RS" : "inventory");
+                starterStack.getHoverName().getString(), starterFromEndpoint != null ? "storage" : "inventory");
 
         // Start the ritual
         try {
@@ -795,21 +792,19 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        if (starterFromRS != null || starterFromStorage != null) {
-            ItemStack source = starterFromRS != null ? starterFromRS : starterFromStorage;
+        if (starterFromEndpoint != null) {
+            ItemStack source = starterFromEndpoint;
             ItemStack leftover = storageEndpoint() != null
                     ? insertIntoStorage(player, source, false)
                     : ItemStack.EMPTY;
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
-            starterFromRS = null;
-            starterFromStorage = null;
+            starterFromEndpoint = null;
         }
         rollbackAll();
         resetState();
-        starterFromRS = null;
-        starterFromStorage = null;
+        starterFromEndpoint = null;
         ritualEverSeenActive = false;
     }
 
@@ -821,8 +816,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
         } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
         resetState();
-        starterFromRS = null;
-        starterFromStorage = null;
+        starterFromEndpoint = null;
         ritualEverSeenActive = false;
     }
 
@@ -849,7 +843,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             int mainSlot = FaRitualHelper.getMainSlot();
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
-                if (storageEndpoint() != null || network != null) {
+                if (storageEndpoint() != null || storageEndpoint() != null) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -868,7 +862,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
-                    if (storageEndpoint() != null || network != null) {
+                    if (storageEndpoint() != null || storageEndpoint() != null) {
                         ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -902,28 +896,20 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
     // ── RitualStarterItem helpers ─────────────────────────────────
 
-    @Nullable
-    private transient ItemStack starterFromRS;
-    private transient ItemStack starterFromStorage;
+    private transient ItemStack starterFromEndpoint;
 
     private void returnStarterToSource(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (starterFromStorage != null && storageEndpoint() != null) {
+        if (starterFromEndpoint != null && storageEndpoint() != null) {
             FaRitualHelper.returnStarterToSource(stack, player, storageEndpoint());
-        } else {
-            INetwork srcNetwork = starterFromRS != null ? network : null;
-            FaRitualHelper.returnStarterToSource(stack, player, srcNetwork);
         }
-        starterFromRS = null;
-        starterFromStorage = null;
+        starterFromEndpoint = null;
     }
 
-    private ItemStack findRitualStarterItem(ServerPlayer player, INetwork network) {
-        FaRitualHelper.StarterResult result = network == null && storageEndpoint() != null
-                ? FaRitualHelper.findRitualStarterItem(player, storageEndpoint())
-                : FaRitualHelper.findRitualStarterItem(player, network);
-        starterFromRS = result.sourceNetwork() != null ? result.stack() : null;
-        starterFromStorage = result.sourceEndpoint() != null ? result.stack() : null;
+    private ItemStack findRitualStarterItem(ServerPlayer player) {
+        FaRitualHelper.StarterResult result =
+                FaRitualHelper.findRitualStarterItem(player, storageEndpoint());
+        starterFromEndpoint = result.sourceEndpoint() != null ? result.stack() : null;
         return result.stack();
     }
 
@@ -932,14 +918,10 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        if (starterFromStorage != null && storageEndpoint() != null) {
+        if (starterFromEndpoint != null && storageEndpoint() != null) {
             FaRitualHelper.consumeRitualStarterUse(starterStack, player, storageEndpoint());
-        } else {
-            INetwork srcNetwork = starterFromRS != null ? network : null;
-            FaRitualHelper.consumeRitualStarterUse(starterStack, player, srcNetwork);
         }
-        starterFromRS = null;
-        starterFromStorage = null;
+        starterFromEndpoint = null;
     }
 
     // ── Essence validation (instance wrappers) ───────────────────

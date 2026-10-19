@@ -115,8 +115,8 @@ public final class FtbQuestSubmissionService {
             return;
         }
 
-        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
-                endpoint, plan.graph());
+        AsyncCraftChain chain = new AsyncCraftChain(
+                player.getUUID(), player.getServer(), endpoint, plan.graph());
         chain.onDone(() -> {
             ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
             if (current == null) return;

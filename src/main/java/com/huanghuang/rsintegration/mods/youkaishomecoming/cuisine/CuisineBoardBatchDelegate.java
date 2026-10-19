@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -126,8 +125,8 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -140,7 +139,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             if (!tryStartWithMaterials(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
@@ -330,7 +329,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         craftDone = false;
         resultItem = ItemStack.EMPTY;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -343,7 +342,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         }
         craftDone = false;
         resultItem = ItemStack.EMPTY;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -43,7 +42,6 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     private ServerLevel level;
     private BlockPos pos;
     private ElvenTradeRecipe recipe;
-    private INetwork rsNetwork;
     private List<ItemStack> expected = List.of();
     private boolean started;
     private int requestedBatch = 1;
@@ -68,9 +66,10 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
         recipe = elvenRecipe;
         expected = consolidateOutputs(elvenRecipe.getOutputs(), 1);
         if (storageEndpoint() == null) {
-            rsNetwork = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), pos).orElse(null));
         }
-        return (rsNetwork != null || hasStorageAccess()) && !expected.isEmpty();
+        return hasStorageAccess() && !expected.isEmpty();
     }
 
     @Override
@@ -118,14 +117,13 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        List<ItemStack> materials = storageEndpoint() != null
-                ? BotaniaDelegateSupport.extractAtomically(storageEndpoint(), player, getRequiredMaterials())
-                : BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
+        if (storageEndpoint() == null) return false;
+        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
+                storageEndpoint(), player, getRequiredMaterials());
         if (materials.isEmpty()) return false;
         requestedBatch = 1;
         if (start(materials)) return true;
-        if (storageEndpoint() != null) BotaniaDelegateSupport.refund(storageEndpoint(), player, materials);
-        else if (rsNetwork != null) BotaniaDelegateSupport.refund(rsNetwork, materials);
+        BotaniaDelegateSupport.refund(storageEndpoint(), player, materials);
         return false;
     }
 
@@ -350,10 +348,9 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        if (storageEndpoint() == null) this.network = rsNetwork;
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
-        if (player != null) PlayerUtils.safeGiveToPlayer(player, leftover, rsNetwork);
+        if (player != null) PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());
         else if (level != null && pos != null) level.addFreshEntity(new ItemEntity(level,
                 pos.getX() + 0.5D, pos.getY() + 1.5D, pos.getZ() + 0.5D, leftover));
     }
@@ -401,7 +398,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
         level = null;
         pos = null;
         recipe = null;
-        rsNetwork = null;
+        setStorageEndpoint(null);
         expected = List.of();
         started = false;
         requestedBatch = 1;

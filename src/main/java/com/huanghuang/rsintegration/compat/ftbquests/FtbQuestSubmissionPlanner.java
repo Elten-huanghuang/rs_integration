@@ -56,7 +56,7 @@ public final class FtbQuestSubmissionPlanner {
                 MaterialSources.listAllAvailable(player, endpoint);
         List<String> missing = new ArrayList<>(overflow);
         var graph = CraftingResolver.resolveGraphForSpecsWithTypes(specs, available,
-                player.serverLevel(), player, network, missing, null, false,
+                player.serverLevel(), player, endpoint, missing, null, false,
                 RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get());
 
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();

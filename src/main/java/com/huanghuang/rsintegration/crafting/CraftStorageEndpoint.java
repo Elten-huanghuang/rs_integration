@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,6 +16,7 @@ import net.minecraft.world.item.Item;
 
 import javax.annotation.Nonnull;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Storage boundary used by recursive crafting.
@@ -25,6 +27,16 @@ import java.util.Objects;
  */
 public interface CraftStorageEndpoint {
     StorageSession session();
+
+    default boolean isAvailable() {
+        StorageSession current = session();
+        return current != null && current.isAvailable();
+    }
+
+    default Optional<StorageNetworkLocation> location() {
+        StorageSession current = session();
+        return current == null ? Optional.empty() : current.location();
+    }
 
     default StorageOperationResult insert(@Nonnull ItemStack stack, boolean simulate) {
         return StorageOperationResult.failedInsert(

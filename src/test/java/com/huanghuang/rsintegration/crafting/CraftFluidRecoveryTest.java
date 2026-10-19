@@ -52,11 +52,11 @@ class CraftFluidRecoveryTest extends BootstrapTest {
              MockedStatic<PlayerUtils> delivery = mockStatic(PlayerUtils.class)) {
             items.when(() -> FluidRefundItem.create(any(CompoundTag.class), isNull()))
                     .thenReturn(voucher);
-            CraftFluidRecovery.retain(player, token, null);
+            CraftFluidRecovery.retainToEndpoint(player, token, null);
             ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
             items.verify(() -> FluidRefundItem.create(captured.capture(), isNull()));
             assertEquals(1000, captured.getValue().getInt("Amount"));
-            delivery.verify(() -> PlayerUtils.safeGiveToPlayer(player, voucher, null));
+            delivery.verify(() -> PlayerUtils.safeGiveToStorage(player, voucher, null));
         }
     }
 
@@ -71,7 +71,7 @@ class CraftFluidRecoveryTest extends BootstrapTest {
         when(recovery.retainRaw(eq(owner), any(CompoundTag.class), isNull())).thenReturn(true);
         try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
             savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
-            CraftFluidRecovery.retain(player, token(1000), null);
+            CraftFluidRecovery.retainToEndpoint(player, token(1000), null);
         }
         ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
         verify(recovery).retainRaw(eq(owner), captured.capture(), isNull());

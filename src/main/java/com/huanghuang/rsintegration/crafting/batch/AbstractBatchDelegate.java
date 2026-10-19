@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -50,8 +49,6 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     protected ExtractionLedger ledger;
     protected ExtractionLedger sharedLedger;
-    protected INetwork network;
-    /** Backend-neutral view of {@link #network}; populated lazily for legacy delegates. */
     @Nullable
     protected CraftStorageEndpoint storageEndpoint;
     protected boolean usingSharedLedger;
@@ -298,7 +295,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     public final void useSharedLedger(@Nonnull ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         CraftStorageEndpoint selected = sharedLedger.storageEndpoint();
-        if (selected != null) this.storageEndpoint = selected;
+        if (selected != null) setStorageEndpoint(selected);
         this.usingSharedLedger = true;
     }
 
@@ -422,16 +419,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         return terminalCleanupDone;
     }
 
-    /**
-     * Returns the storage boundary for this delegate. The lazy bridge keeps
-     * existing machine initialization code source-compatible while allowing
-     * refund/output paths to stop calling the RS API directly.
-     */
+    /** Returns the storage boundary for this delegate. */
     @Nullable
     protected final CraftStorageEndpoint storageEndpoint() {
-        if (storageEndpoint == null && network != null) {
-            storageEndpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
-        }
         return storageEndpoint;
     }
 
@@ -540,7 +530,6 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         }
         ledger = null;
         sharedLedger = null;
-        network = null;
         storageEndpoint = null;
         usingSharedLedger = false;
         machineDim = null;

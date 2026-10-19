@@ -90,9 +90,9 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
         if (storageEndpoint() == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
-        if (network == null && !hasStorageAccess()) return false;
+        if (storageEndpoint() == null && !hasStorageAccess()) return false;
 
         List<ItemStack> inputs = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
@@ -104,7 +104,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
                 if (reserved.isEmpty()) return false;
                 inputs.add(reserved.copy());
             }
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
             if (!ensureNutrients(player)) {
                 for (ItemStack input : inputs) insertIntoStorage(player, input, false);
                 return false;
@@ -126,7 +126,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
             rememberUnplacedInputs(materials);
         }
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         if (!ensureNutrients(player)) return false;
         if (isBioForge()) return startBioForge(player, materials);
         return placeInputs(player, materials);
@@ -451,8 +451,11 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
                 try (ExtractionLedger fuelLedger = new ExtractionLedger()) {
                     fuelLedger.setStorageEndpoint(storageEndpoint());
                     ItemStack paste = CraftPacketUtils.ensureMaterialAvailable(player, dimension, pos,
-                            nutrientPasteIngredient(), 1, fuelLedger, network);
-                    if (!paste.isEmpty() && fuelLedger.commit(network, player)) fuel = paste.copy();
+                            nutrientPasteIngredient(), 1, fuelLedger, storageEndpoint());
+                    if (!paste.isEmpty() && fuelLedger.commitToEndpoint(
+                            storageEndpoint(), player)) {
+                        fuel = paste.copy();
+                    }
                 }
             }
             if (fuel.isEmpty()) fuel = reserveFallbackFuel(player, deficit);
@@ -524,8 +527,9 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         for (int count = requested; count > 0; count /= 2) {
             try (ExtractionLedger fuelLedger = new ExtractionLedger()) {
                 fuelLedger.setStorageEndpoint(storageEndpoint());
-                ItemStack fuel = fuelLedger.reserve(ingredient, count, network, player, dimension, pos);
-                if (!fuel.isEmpty() && fuelLedger.commit(network, player)) return fuel.copy();
+                ItemStack fuel = fuelLedger.reserve(
+                        ingredient, count, storageEndpoint(), player, dimension, pos);
+                if (!fuel.isEmpty() && fuelLedger.commitToEndpoint(storageEndpoint(), player)) return fuel.copy();
             }
         }
         return ItemStack.EMPTY;
@@ -549,7 +553,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
 
     private void refundFuel(@Nullable ServerPlayer player, ItemStack fuel) {
         ItemStack remainder = insertIntoStorage(player, fuel, false);
-        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player != null ? player : this.player, remainder, network);
+        if (!remainder.isEmpty()) PlayerUtils.safeGiveToStorage(player != null ? player : this.player, remainder, storageEndpoint());
     }
 
     private static String fuelId(ItemStack fuel) {

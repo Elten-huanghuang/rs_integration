@@ -17,7 +17,6 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -297,8 +296,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -311,7 +310,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -553,7 +552,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         clearRackSlots();
         craftDone = false;
         plannedOperations = 1;
-        network = null;
+        setStorageEndpoint(null);
         potBasePos = null;
         placedInputs.clear();
     }

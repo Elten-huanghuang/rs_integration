@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -19,6 +21,17 @@ import javax.annotation.Nullable;
  */
 public final class RSGridMatrixNormalizer {
     private RSGridMatrixNormalizer() {}
+
+    /** 仅在当前请求属于 Refined Storage 时归还工作台矩阵。 */
+    public static boolean returnToSelectedNetwork(
+            ServerPlayer player, @Nullable StorageReference selectedReference) {
+        if (selectedReference != null
+                && !"refinedstorage".equals(selectedReference.backendId().value())) {
+            return true;
+        }
+        return returnToNetwork(player,
+                RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player));
+    }
 
     /**
      * @return true when the matrix is empty or was returned in full

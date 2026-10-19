@@ -238,8 +238,8 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -252,7 +252,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -621,7 +621,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         pendingNativeSolidMats.clear();
         nativeInputRefund = ItemStack.EMPTY;
         nativeOutputContainerRefund = ItemStack.EMPTY;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

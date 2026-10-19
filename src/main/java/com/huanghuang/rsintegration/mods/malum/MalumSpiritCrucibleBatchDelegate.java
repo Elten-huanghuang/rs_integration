@@ -29,7 +29,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -96,7 +95,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Nullable
     private CraftStorageEndpoint catalystReturnEndpoint;
     @Nullable
-    private INetwork catalystReturnNetwork;
 
     // ── IBatchDelegate ────────────────────────────────────────────
 
@@ -183,15 +181,14 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         // endpoint must remain authoritative and must never be replaced by an
         // RS lookup during preparation.
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils
-                    .resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), pos).orElse(null));
         }
         // onBatchFinished resets AbstractBatchDelegate before the surrounding
         // parallel group releases its worker-reusable catalyst. Preserve the
         // exact backend route until releaseReusableMaterials runs, otherwise a
         // later order can leave the catalyst outside its originating storage.
         this.catalystReturnEndpoint = storageEndpoint();
-        this.catalystReturnNetwork = this.network;
 
         // Check crucible is idle (no active recipe)
         Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
@@ -259,8 +256,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
-        if (storageEndpoint() == null && network == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, myLevel.dimension(), myPos);
+        if (storageEndpoint() == null && storageEndpoint() == null) {
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myLevel.dimension(), myPos).orElse(null));
         }
         return tryStartWithExtraction(player, false, null);
     }
@@ -670,7 +667,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
         // ── Commit ──
         if (!usingSharedLedger) {
-            if (!localLedger.commit(this.network, player)) {
+            if (!localLedger.commitToEndpoint(storageEndpoint(), player)) {
                 clearUncommittedPlacements();
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Ledger commit failed"));
@@ -1098,7 +1095,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
         if (allReturned) {
             catalystReturnEndpoint = null;
-            catalystReturnNetwork = null;
+            catalystReturnEndpoint = null;
         }
     }
 
@@ -1238,27 +1235,19 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (stack.isEmpty()) return true;
         CraftStorageEndpoint endpoint = storageEndpoint();
         if (endpoint == null) endpoint = catalystReturnEndpoint;
-        INetwork returnNetwork = network != null ? network : catalystReturnNetwork;
-        if (endpoint == null && returnNetwork == null && returnPlayer != null) {
-            returnNetwork = CraftPacketUtils
-                    .resolveNetworkForCraft(returnPlayer, myLevel.dimension(), myPos);
+        if (endpoint == null && returnPlayer != null) {
+            endpoint = CraftPacketUtils.resolveEndpointForCraft(
+                    returnPlayer, myLevel.dimension(), myPos).orElse(null);
         }
         if (endpoint != null && returnPlayer != null) {
             ItemStack leftover = endpoint.insert(returnPlayer, stack.copy(), false)
                     .remainder().orElseGet(stack::copy);
             if (!leftover.isEmpty()) {
-                PlayerUtils.safeGiveToPlayer(returnPlayer, leftover, returnNetwork);
-            }
-            return true;
-        } else if (returnNetwork != null && returnPlayer != null) {
-            ItemStack leftover = CraftStorageEndpoints.insertLegacy(
-                    returnNetwork, returnPlayer, stack.copy(), false);
-            if (!leftover.isEmpty()) {
-                PlayerUtils.safeGiveToPlayer(returnPlayer, leftover, returnNetwork);
+                PlayerUtils.safeGiveToStorage(returnPlayer, leftover, endpoint);
             }
             return true;
         } else if (returnPlayer != null) {
-            PlayerUtils.safeGiveToPlayer(returnPlayer, stack.copy(), null);
+            PlayerUtils.safeGiveToStorage(returnPlayer, stack.copy(), null);
             return true;
         }
         return false;
@@ -1266,16 +1255,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     private ItemStack extractFromRS(ServerPlayer player, Ingredient ingredient,
                                     int count, ExtractionLedger ledger, boolean useShared) {
-        if (storageEndpoint() != null) {
-            return ledger.reserveFromEndpoint(ingredient, count, storageEndpoint(), player);
+        CraftStorageEndpoint endpoint = storageEndpoint();
+        if (endpoint == null) {
+            endpoint = CraftPacketUtils.resolveEndpointForCraft(
+                    player, myLevel.dimension(), myPos).orElse(null);
         }
-        if (this.network == null) {
-            this.network = CraftPacketUtils
-                    .resolveNetworkForCraft(player, myLevel.dimension(), myPos);
-        }
-        if (this.network == null) return ItemStack.EMPTY;
-
-        return ledger.reserveFromNetwork(ingredient, count, this.network);
+        return endpoint == null ? ItemStack.EMPTY
+                : ledger.reserveFromEndpoint(ingredient, count, endpoint, player);
     }
 
     // ── plan warnings ─────────────────────────────────────────────

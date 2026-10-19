@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
-import com.refinedmods.refinedstorage.api.network.INetwork;
+
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -42,7 +42,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     private ServerLevel level;
     private BlockPos pos;
     private PureDaisyRecipe recipe;
-    private INetwork network;
+
     private ItemStack input = ItemStack.EMPTY;
     private ItemStack expected = ItemStack.EMPTY;
     private final List<BlockPos> targets = new ArrayList<>();
@@ -66,14 +66,13 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         if (!(found instanceof PureDaisyRecipe pureDaisyRecipe)) return false;
         recipe = pureDaisyRecipe;
         expected = new ItemStack(recipe.getOutputState().getBlock());
-        // The chain may already have selected a non-RS backend.  Only resolve
-        // the legacy RS network when no endpoint was supplied.
+        // The chain may already have selected a non-RS backend.
         if (storageEndpoint() == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }
         targets.clear();
         Arrays.stream(OFFSETS).map(pos::offset).filter(level::isEmptyBlock).forEach(targets::add);
-        return (network != null || hasStorageAccess()) && !targets.isEmpty() && !expected.isEmpty();
+        return hasStorageAccess() && !targets.isEmpty() && !expected.isEmpty();
     }
 
     @Override
@@ -113,9 +112,9 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
 
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        List<ItemStack> materials = storageEndpoint() != null
-                ? BotaniaDelegateSupport.extractAtomically(storageEndpoint(), player, getRequiredMaterials())
-                : BotaniaDelegateSupport.extractAtomically(network, getRequiredMaterials());
+        if (storageEndpoint() == null) return false;
+        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
+                storageEndpoint(), player, getRequiredMaterials());
         return !materials.isEmpty() && start(materials.get(0));
     }
 

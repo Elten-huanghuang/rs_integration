@@ -84,7 +84,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>(3);
@@ -97,9 +97,9 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
             }
             materials.add(stack.copy());
         }
-        if (!privateLedger.commit(network, player)) return false;
+        if (!privateLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (start(player, materials)) return true;
-        privateLedger.refundCommitted(network, player);
+        privateLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 

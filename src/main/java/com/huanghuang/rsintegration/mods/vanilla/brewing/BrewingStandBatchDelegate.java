@@ -70,16 +70,18 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         if (recipe == null || stand == null) return false;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }
-        if (network == null && !hasStorageAccess()) return false;
+        if (storageEndpoint() == null && !hasStorageAccess()) return false;
         ledger.setStorageEndpoint(storageEndpoint());
-        ItemStack input = ledger.reserve(recipe.getIngredients().get(0), 3, network, player,
+        ItemStack input = ledger.reserve(
+                recipe.getIngredients().get(0), 3, storageEndpoint(), player,
                 level.dimension(), pos);
-        ItemStack reagent = ledger.reserveExact(recipe.reagent(), 1, network, player, level.dimension(), pos);
-        ItemStack fuel = ledger.reserveExact(new ItemStack(Items.BLAZE_POWDER),
-                1, network, player, level.dimension(), pos);
-        if (input.isEmpty() || reagent.isEmpty() || fuel.isEmpty() || !ledger.commit(network, player)) return false;
+        ItemStack reagent = ledger.reserveExactToEndpoint(
+                recipe.reagent(), 1, storageEndpoint(), player, level.dimension(), pos);
+        ItemStack fuel = ledger.reserveExactToEndpoint(new ItemStack(Items.BLAZE_POWDER),
+                1, storageEndpoint(), player, level.dimension(), pos);
+        if (input.isEmpty() || reagent.isEmpty() || fuel.isEmpty() || !ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         return place(List.of(input, reagent, fuel));
     }
 

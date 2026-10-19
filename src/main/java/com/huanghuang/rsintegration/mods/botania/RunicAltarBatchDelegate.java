@@ -67,7 +67,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
                 ResourceKey.create(Registries.DIMENSION, dim));
         this.recipe = null;
         this.expected = ItemStack.EMPTY;
-        this.network = null;
+        setStorageEndpoint(null);
 
         if (level == null) return PreparationResult.retry("Runic Altar dimension is unavailable");
         if (!(level.getBlockEntity(pos) instanceof RunicAltarBlockEntity altar)) {
@@ -88,7 +88,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
         this.recipe = runicRecipe;
         this.expected = output.copy();
         if (!hasStorageAccess()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }
         return !hasStorageAccess()
                 ? PreparationResult.retry("Runic Altar is not connected to a storage backend")
@@ -111,11 +111,9 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
-        List<ItemStack> extracted = storageEndpoint() != null
-                ? BotaniaDelegateSupport.extractAtomically(
-                        storageEndpoint(), player, getRequiredMaterials())
-                : BotaniaDelegateSupport.extractAtomically(
-                        network, getRequiredMaterials());
+        if (storageEndpoint() == null) return false;
+        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(
+                storageEndpoint(), player, getRequiredMaterials());
         if (extracted.isEmpty()) return false;
         if (start(player, extracted)) return true;
         for (ItemStack stack : extracted) refundStandalone(player, stack);
@@ -312,7 +310,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {
-            PlayerUtils.safeGiveToPlayer(player, leftover, network);
+            PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());
         } else if (level != null && pos != null) {
             ItemEntity drop = new ItemEntity(level,
                     pos.getX() + 0.5D, pos.getY() + 1.1D, pos.getZ() + 0.5D,

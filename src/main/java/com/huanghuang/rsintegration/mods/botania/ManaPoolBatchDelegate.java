@@ -2,13 +2,12 @@ package com.huanghuang.rsintegration.mods.botania;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -43,7 +42,6 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     private BlockPos bindingPos;
     private BlockPos poolPos;
     private ManaInfusionRecipe recipe;
-    private INetwork rsNetwork;
     private ItemStack expected = ItemStack.EMPTY;
     private boolean started;
     private int requestedBatch = 1;
@@ -74,7 +72,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         this.expected = ItemStack.EMPTY;
         this.requestedBatch = 1;
         this.inputEntityIds.clear();
-        this.rsNetwork = null;
+        setStorageEndpoint(null);
 
         ServerLevel resolved = dim == null ? player.serverLevel() : player.getServer().getLevel(
                 ResourceKey.create(Registries.DIMENSION, dim));
@@ -113,7 +111,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         this.recipe = r;
         this.expected = result.copy();
         if (storageEndpoint() == null) {
-            this.rsNetwork = resolveNetwork(player);
+            setStorageEndpoint(resolveEndpoint(player));
         }
         return PreparationResult.ready();
     }
@@ -193,8 +191,8 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null) return false;
         if (storageEndpoint() == null) {
-            if (rsNetwork == null) rsNetwork = resolveNetwork(player);
-            if (rsNetwork == null) return false;
+            setStorageEndpoint(resolveEndpoint(player));
+            if (storageEndpoint() == null) return false;
         }
         ItemStack input = extractInput(player);
         if (input.isEmpty()) return false;
@@ -217,19 +215,16 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     /** Extract the infusion input through the selected backend. */
     private ItemStack extractInput(ServerPlayer player) {
-        if (storageEndpoint() != null) {
-            var result = storageEndpoint().extractMatching(player,
-                    recipe.getIngredients().get(0), 1, false);
-            ItemStack combined = ItemStack.EMPTY;
-            for (ItemStack stack : result.extractedStacks()) {
-                if (stack == null || stack.isEmpty()) continue;
-                if (combined.isEmpty()) combined = stack.copy();
-                else if (ItemStack.isSameItemSameTags(combined, stack)) combined.grow(stack.getCount());
-            }
-            return combined;
+        if (storageEndpoint() == null) return ItemStack.EMPTY;
+        var result = storageEndpoint().extractMatching(player,
+                recipe.getIngredients().get(0), 1, false);
+        ItemStack combined = ItemStack.EMPTY;
+        for (ItemStack stack : result.extractedStacks()) {
+            if (stack == null || stack.isEmpty()) continue;
+            if (combined.isEmpty()) combined = stack.copy();
+            else if (ItemStack.isSameItemSameTags(combined, stack)) combined.grow(stack.getCount());
         }
-        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(rsNetwork, getRequiredMaterials());
-        return extracted.isEmpty() ? ItemStack.EMPTY : extracted.get(0);
+        return combined;
     }
 
     private boolean startEntities(ItemStack input) {
@@ -269,12 +264,14 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         started = true; startTick = level.getGameTime(); markCraftStarted(); return true;
     }
 
-    private INetwork resolveNetwork(ServerPlayer player) {
+    @Nullable
+    private CraftStorageEndpoint resolveEndpoint(ServerPlayer player) {
         if (level == null || bindingPos == null) return null;
-        INetwork resolved = CraftPacketUtils.resolveNetworkForCraft(
-                player, level.dimension(), bindingPos);
+        CraftStorageEndpoint resolved = CraftPacketUtils.resolveEndpointForCraft(
+                player, level.dimension(), bindingPos).orElse(null);
         if (resolved == null && poolPos != null && !poolPos.equals(bindingPos)) {
-            resolved = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), poolPos);
+            resolved = CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), poolPos).orElse(null);
         }
         return resolved;
     }
@@ -370,11 +367,10 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        if (storageEndpoint() == null) this.network = rsNetwork;
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {
-            PlayerUtils.safeGiveToPlayer(player, leftover, rsNetwork);
+            PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());
             return;
         }
         if (level != null && poolPos != null) {

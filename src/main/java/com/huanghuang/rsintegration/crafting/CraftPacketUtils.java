@@ -3,7 +3,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Array;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import java.util.function.Function;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -19,18 +18,16 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
@@ -227,15 +224,6 @@ public final class CraftPacketUtils {
      */
     public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
                                                @Nonnull List<CraftingResolver.ResolutionStep> steps,
-                                               @Nullable INetwork network) {
-        CraftStorageEndpoint endpoint = network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
-        return executeCraftingSteps(player, steps, network, endpoint);
-    }
-
-    /** Endpoint-aware execution entry point. Native RS remains an optional compatibility argument. */
-    public static boolean executeCraftingSteps(@Nonnull ServerPlayer player,
-                                               @Nonnull List<CraftingResolver.ResolutionStep> steps,
-                                               @Nullable INetwork network,
                                                @Nullable CraftStorageEndpoint endpoint) {
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
@@ -248,11 +236,8 @@ public final class CraftPacketUtils {
                 @Override
                 public ItemStack reserve(ExtractionLedger target, Ingredient ingredient,
                                          int amount, ServerPlayer online) {
-                    ItemStack reserved = endpoint != null
-                            ? target.reserveFromEndpoint(ingredient, amount, endpoint, online)
-                            : network != null
-                            ? target.reserveFromNetwork(ingredient, amount, network, online)
-                            : ItemStack.EMPTY;
+                    ItemStack reserved = endpoint == null ? ItemStack.EMPTY
+                            : target.reserveFromEndpoint(ingredient, amount, endpoint, online);
                     return reserved.isEmpty()
                             ? target.reserveFromInventory(ingredient, amount, online)
                             : reserved;
@@ -282,7 +267,7 @@ public final class CraftPacketUtils {
                             player.serverLevel(), ctx, steps, null, host, Map.of()));
             if (!crafted) return false;
 
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error(ctx.format("executeCraftingSteps: commit failed for {} steps"), steps.size());
                 return false;
             }
@@ -295,14 +280,11 @@ public final class CraftPacketUtils {
                     if (endpoint != null) {
                         ItemStack remainder = endpoint.insert(player, vi, false)
                                 .remainder().orElse(ItemStack.EMPTY);
-                        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
-                    } else if (network == null) {
-                        PlayerUtils.safeGiveToPlayer(player, vi.copy(), null);
-                    } else {
-                        ItemStack remainder = TrackedNetworkInsertion.insert(network, player, vi);
                         if (!remainder.isEmpty()) {
-                            PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                            PlayerUtils.safeGiveToStorage(player, remainder, endpoint);
                         }
+                    } else {
+                        PlayerUtils.safeGiveToStorage(player, vi.copy(), null);
                     }
                 }
             }
@@ -1313,27 +1295,17 @@ public final class CraftPacketUtils {
      * @return true if every resolved step completed inline and the items are
      *         available now
      */
-    private static boolean tryResolveAndRunChain(ServerPlayer player, INetwork network,
-                                                  Ingredient ingredient, int count) {
-        return tryResolveAndRunChain(player, network, null, ingredient, count);
-    }
-
-    private static boolean tryResolveAndRunChain(ServerPlayer player, @Nullable INetwork network,
+    private static boolean tryResolveAndRunChain(ServerPlayer player,
                                                   @Nullable CraftStorageEndpoint endpoint,
                                                   Ingredient ingredient, int count) {
-        Map<StackKey, Integer> available = endpoint != null
-                ? MaterialSources.listAllAvailable(player, endpoint)
-                : network != null
-                        ? MaterialSources.listAllAvailable(player,
-                                CraftStorageEndpoints.fromLegacyNetwork(network))
-                        : MaterialSources.listAllAvailable(player, (INetwork) null);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
         List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
 
         // 1. Try typed resolver (includes multi-block candidates)
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             List<String> missing = new ArrayList<>();
             List<ResolutionStep> steps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                    specs, available, player.serverLevel(), player, network, missing, null, false);
+                    specs, available, player.serverLevel(), player, endpoint, missing, null, false);
             if (!missing.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI] tryResolveAndRunChain: typed resolver could not resolve: {}",
                         missing);
@@ -1349,7 +1321,7 @@ public final class CraftPacketUtils {
                 // All vanilla — execute inline
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.info.auto_crafting", steps.size()));
-                return executeCraftingSteps(player, steps, network, endpoint);
+                return executeCraftingSteps(player, steps, endpoint);
             }
         }
 
@@ -1369,7 +1341,7 @@ public final class CraftPacketUtils {
                 wrapped.add(new ResolutionStep(id, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
             }
-            return executeCraftingSteps(player, wrapped, network, endpoint);
+            return executeCraftingSteps(player, wrapped, endpoint);
         }
 
         RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {} x{}",
@@ -1408,50 +1380,69 @@ public final class CraftPacketUtils {
     }
 
     /**
-     * Ledger-aware material lookup with an already resolved storage network.
-     * Execution must reuse the network selected while building the recursive
+     * Ledger-aware material lookup with an already resolved storage endpoint.
+     * Execution must reuse the endpoint selected while building the recursive
      * plan; resolving again from the player's current terminal/inventory can
      * lose wireless or otherwise non-held NetworkItem context.
      */
     public static ItemStack ensureMaterialAvailable(ServerPlayer player, ResourceKey<Level> altarDim,
                                                      BlockPos altarPos, Ingredient ingredient, int count,
                                                      @Nullable ExtractionLedger ledger,
-                                                     @Nullable INetwork preferredNetwork) {
+                                                     @Nullable CraftStorageEndpoint preferredEndpoint) {
         if (ledger != null) {
-            CraftStorageEndpoint endpoint = ledger.storageEndpoint();
-            INetwork network = preferredNetwork != null
-                    ? preferredNetwork
-                    : ledger != null && ledger.legacyNetwork() != null
-                            ? ledger.legacyNetwork()
-                            : endpoint == null
-                                    ? RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player)
-                                    : null;
-            if (endpoint == null && network == null && altarDim != null && altarPos != null) {
-                network = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
+            CraftStorageEndpoint endpoint = preferredEndpoint != null
+                    ? preferredEndpoint : ledger.storageEndpoint();
+            List<CraftStorageEndpoint> candidates = endpoint == null
+                    ? resolveEndpointCandidatesForCraft(player, altarDim, altarPos)
+                    : List.of(endpoint);
+            ItemStack reserved = ItemStack.EMPTY;
+            if (candidates.isEmpty()) {
+                reserved = ledger.reserve(
+                        ingredient, count, (CraftStorageEndpoint) null,
+                        player, altarDim, altarPos);
+            } else {
+                for (CraftStorageEndpoint candidate : candidates) {
+                    reserved = ledger.reserve(
+                            ingredient, count, candidate, player, altarDim, altarPos);
+                    if (!reserved.isEmpty()) {
+                        endpoint = candidate;
+                        break;
+                    }
+                }
             }
-            ItemStack reserved = ledger.reserve(ingredient, count, network, player, altarDim, altarPos);
             if (!reserved.isEmpty()) return reserved;
 
             // Auto-craft fallback (inline vanilla or async multi-block)
             if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get() && !ingredient.isEmpty()
-                    && (endpoint != null || network != null)) {
-                if (tryResolveAndRunChain(player, network, endpoint, ingredient, count)) {
+                    && !candidates.isEmpty()) {
+                for (CraftStorageEndpoint candidate : candidates) {
+                    if (!tryResolveAndRunChain(player, candidate, ingredient, count)) continue;
                     // The first reserve cached the network before this inline
                     // craft inserted the requested intermediate stack.
                     ledger.invalidateNetworkSnapshot();
-                    reserved = ledger.reserve(ingredient, count, network,
+                    reserved = ledger.reserve(ingredient, count, candidate,
                             player, altarDim, altarPos);
-                    if (!reserved.isEmpty()) return reserved;
+                    if (!reserved.isEmpty()) {
+                        endpoint = candidate;
+                        return reserved;
+                    }
                 }
             }
             return ItemStack.EMPTY;
         }
 
-        // Original immediate-extraction path (ledger == null)
-        // Phase 1: direct extraction
-        ItemStack result = AltarBindingRegistry.tryExtractFromBindings(player, altarDim, altarPos, ingredient, count);
-        if (!result.isEmpty()) return result;
-        result = RSIntegrationNetwork.tryExtractFromPlayerRS(player, ingredient, count);
+        List<CraftStorageEndpoint> candidates = resolveEndpointCandidatesForCraft(
+                player, altarDim, altarPos);
+        CraftStorageEndpoint endpoint = null;
+        ItemStack result = ItemStack.EMPTY;
+        for (CraftStorageEndpoint candidate : candidates) {
+            result = candidate.extractMatching(player, ingredient, count, false)
+                    .extractedStacks().stream().findFirst().orElse(ItemStack.EMPTY);
+            if (!result.isEmpty()) {
+                endpoint = candidate;
+                break;
+            }
+        }
         if (!result.isEmpty()) return result;
         result = extractFromPlayerInventoryAggregated(player, ingredient, count);
         if (!result.isEmpty()) return result;
@@ -1459,49 +1450,56 @@ public final class CraftPacketUtils {
         // Phase 2: auto-craft intermediates (inline vanilla or async multi-block)
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return ItemStack.EMPTY;
         if (ingredient.isEmpty()) return ItemStack.EMPTY;
-
-        INetwork network = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
-        if (network == null) {
-            network = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
+        boolean crafted = false;
+        for (CraftStorageEndpoint candidate : candidates) {
+            if (!tryResolveAndRunChain(player, candidate, ingredient, count)) continue;
+            endpoint = candidate;
+            crafted = true;
+            break;
         }
-        if (network == null) return ItemStack.EMPTY;
-
-        if (!tryResolveAndRunChain(player, network, ingredient, count)) {
+        if (!crafted) {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
             return ItemStack.EMPTY;
         }
 
-        // Retry ALL extraction paths after auto-crafting
-        result = AltarBindingRegistry.tryExtractFromBindings(player, altarDim, altarPos, ingredient, count);
-        if (!result.isEmpty()) return result;
-        result = RSIntegrationNetwork.tryExtractFromPlayerRS(player, ingredient, count);
+        // Retry the selected endpoint after auto-crafting refreshed its inventory.
+        for (CraftStorageEndpoint candidate : candidates) {
+            MaterialSources.invalidateFor(player, candidate);
+            result = candidate.extractMatching(player, ingredient, count, false)
+                    .extractedStacks().stream().findFirst().orElse(ItemStack.EMPTY);
+            if (!result.isEmpty()) break;
+        }
         if (!result.isEmpty()) return result;
         result = extractFromPlayerInventoryAggregated(player, ingredient, count);
         if (!result.isEmpty()) return result;
         return ItemStack.EMPTY;
     }
 
-    /**
-     * Resolve RS network with binding fallback. When the player has no RS terminal
-     * open and no NetworkItem in inventory, try to find the network through the
-     * altar's registered bindings. Callers that have {@code altarDim}/{@code altarPos}
-     * available should use this instead of {@link RSIntegration#resolveNetworkFromPlayer}.
-     */
-    @Nullable
-    public static INetwork resolveNetworkForCraft(ServerPlayer player,
-                                                   @Nullable ResourceKey<Level> altarDim,
-                                                   @Nullable BlockPos altarPos) {
-        // Try altar-specific binding first — if this altar is bound to a
-        // specific RS network, that network takes priority over any random
-        // NetworkItem the player happens to carry.
-        if (altarDim != null && altarPos != null) {
-            INetwork net = RSAltarBindingResolver.resolveNetworkForAltar(player, altarDim, altarPos);
-            if (net != null) return net;
-        }
-        // Fall back only to a credential that is present now. A persisted
-        // resolver cache or nearby controller is not sufficient to select RS;
-        // otherwise an old RS coordinate can win over an active BD backend.
-        return RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
+    /** Resolves the machine binding first, then the player's current/default endpoint. */
+    public static Optional<CraftStorageEndpoint> resolveEndpointForCraft(
+            ServerPlayer player, @Nullable ResourceKey<Level> altarDim,
+            @Nullable BlockPos altarPos) {
+        List<CraftStorageEndpoint> candidates = resolveEndpointCandidatesForCraft(
+                player, altarDim, altarPos);
+        return candidates.isEmpty() ? Optional.empty() : Optional.of(candidates.get(0));
+    }
+
+    /** 机器绑定优先，当前终端/默认存储作为后备。 */
+    public static List<CraftStorageEndpoint> resolveEndpointCandidatesForCraft(
+            ServerPlayer player, @Nullable ResourceKey<Level> altarDim,
+            @Nullable BlockPos altarPos) {
+        List<CraftStorageEndpoint> endpoints = new ArrayList<>(2);
+        CraftStorageEndpoints.resolveBinding(player, altarDim, altarPos)
+                .ifPresent(endpoints::add);
+        StorageRestockSupport.resolve(player).ifPresent(candidate -> {
+            String candidateId = candidate.session().reference().networkId();
+            String candidateBackend = candidate.session().reference().backendId().value();
+            boolean duplicate = endpoints.stream().anyMatch(existing ->
+                    candidateBackend.equals(existing.session().reference().backendId().value())
+                            && candidateId.equals(existing.session().reference().networkId()));
+            if (!duplicate) endpoints.add(candidate);
+        });
+        return List.copyOf(endpoints);
     }
 
     // ── keyed-counts helpers ──────────────────────────────────────
@@ -1536,8 +1534,8 @@ public final class CraftPacketUtils {
      */
     @Nullable
     public static List<ResolutionStep> resolveIntermediateSteps(
-            ServerPlayer player, INetwork network, CraftingRecipe recipe) {
-        return resolveIntermediateSteps(player, network, recipe, 1);
+            ServerPlayer player, CraftStorageEndpoint endpoint, CraftingRecipe recipe) {
+        return resolveIntermediateSteps(player, endpoint, recipe, 1);
     }
 
     /**
@@ -1546,9 +1544,10 @@ public final class CraftPacketUtils {
      * returned intermediate executions again.
      */
     public static List<ResolutionStep> resolveIntermediateSteps(
-            ServerPlayer player, INetwork network, CraftingRecipe recipe, int repeatCount) {
+            ServerPlayer player, CraftStorageEndpoint endpoint,
+            CraftingRecipe recipe, int repeatCount) {
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
-                player, CraftStorageEndpoints.fromLegacyNetwork(network));
+                player, endpoint);
         int repeats = Math.max(1, repeatCount);
 
         List<IngredientSpec> specs = extractIngredientSpecs(recipe);
@@ -1564,7 +1563,8 @@ public final class CraftPacketUtils {
 
         List<String> missingCheck = new ArrayList<>();
         List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                specs, available, player.serverLevel(), player, network, missingCheck, null, false);
+                specs, available, player.serverLevel(), player,
+                endpoint, missingCheck, null, false);
 
         if (!missingCheck.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RSI] resolveIntermediateSteps: typed resolver could not resolve: {}",
@@ -1613,13 +1613,15 @@ public final class CraftPacketUtils {
         }
         if (needed.isEmpty()) return false;
 
-        INetwork network = resolveNetworkForCraft(player, altarDim, altarPos);
-        if (network == null) return false;
+        CraftStorageEndpoint endpoint = resolveEndpointForCraft(
+                player, altarDim, altarPos).orElse(null);
+        if (endpoint == null) return false;
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
-                player, CraftStorageEndpoints.fromLegacyNetwork(network));
+                player, endpoint);
         List<String> missing = new ArrayList<>();
         List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                needed, available, player.serverLevel(), player, network, missing, null, false);
+                needed, available, player.serverLevel(), player,
+                endpoint, missing, null, false);
 
         // Only report as craftable when every intermediate is vanilla;
         // multi-block steps require async chain execution, not a preview.

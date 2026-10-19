@@ -11,18 +11,15 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
-import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.Comparator;
@@ -50,10 +47,9 @@ public final class PlanningStateValidator {
                 || !requests.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
             return false;
         }
-        INetwork currentNetwork = selectedReference == null
-                && ModList.get().isLoaded(
-                ModIds.REFINED_STORAGE)
-                ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
+        CraftStorageEndpoint currentEndpoint = selectedReference == null
+                ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos)
+                .orElse(null)
                 : null;
         Map<StackKey, Integer> currentAvailable;
         if (selectedReference != null) {
@@ -63,10 +59,10 @@ public final class PlanningStateValidator {
                     ? MaterialSources.listAllAvailable(player, endpoint.orElseThrow())
                     : Map.of();
         } else {
-            currentAvailable = MaterialSources.listAllAvailable(player, currentNetwork);
+            currentAvailable = MaterialSources.listAllAvailable(player, currentEndpoint);
         }
         String fingerprint = selectedReference == null
-                ? networkFingerprint(currentNetwork, currentAvailable)
+                ? networkFingerprint(reference(currentEndpoint), currentAvailable)
                 : networkFingerprint(selectedReference, currentAvailable);
         return snapshot.networkFingerprint().equals(fingerprint)
                 && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
@@ -116,21 +112,17 @@ public final class PlanningStateValidator {
                                                    @Nullable PlanGraphView graph,
                                                    ResourceKey<Level> dimension, BlockPos lookupPos,
                                                    @Nullable StorageReference selectedReference) {
-        INetwork currentNetwork = selectedReference == null
-                && ModList.get().isLoaded(
-                ModIds.REFINED_STORAGE)
-                ? CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos)
+        CraftStorageEndpoint endpoint = selectedReference == null
+                ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos)
+                .orElse(null)
                 : null;
-        CraftStorageEndpoint endpoint = null;
         if (selectedReference != null) {
             var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
             if (resolved.isEmpty()) return false;
             endpoint = resolved.orElseThrow();
-        } else if (currentNetwork != null) {
-            endpoint = CraftStorageEndpoints.fromLegacyNetwork(currentNetwork);
         }
         String fingerprint = selectedReference == null
-                ? networkFingerprint(currentNetwork, Map.of())
+                ? networkFingerprint(reference(endpoint), Map.of())
                 : networkFingerprint(selectedReference, Map.of());
         if (!networkIdentity(snapshot.networkFingerprint()).equals(networkIdentity(fingerprint))) {
             return false;
@@ -179,10 +171,9 @@ public final class PlanningStateValidator {
             var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
             if (resolved.isEmpty()) return false;
             endpoint = resolved.orElseThrow();
-        } else if (ModList.get().isLoaded(
-                ModIds.REFINED_STORAGE)) {
-            INetwork network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, lookupPos);
-            if (network != null) endpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
+        } else {
+            endpoint = CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos)
+                    .orElse(null);
         }
         Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
                 player, endpoint, dependencyTypes);
@@ -317,18 +308,6 @@ public final class PlanningStateValidator {
         return separator < 0 ? String.valueOf(fingerprint) : fingerprint.substring(0, separator);
     }
 
-    public static String networkFingerprint(@Nullable INetwork network,
-                                            Map<StackKey, Integer> available) {
-        int inventoryHash = 1;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey(Comparator.comparing(StackKey::toString))).toList()) {
-            inventoryHash = 31 * inventoryHash + entry.getKey().hashCode();
-            inventoryHash = 31 * inventoryHash + entry.getValue();
-        }
-        return (network == null ? "none" : Integer.toHexString(System.identityHashCode(network)))
-                + ':' + Integer.toHexString(inventoryHash);
-    }
-
     /** Stable fingerprint for a backend-neutral selected network. */
     public static String networkFingerprint(@Nullable StorageReference reference,
                                              Map<StackKey, Integer> available) {
@@ -340,6 +319,16 @@ public final class PlanningStateValidator {
         }
         return (reference == null ? "none" : reference.backendId().value() + "@" + reference.networkId())
                 + ':' + Integer.toHexString(inventoryHash);
+    }
+
+    @Nullable
+    private static StorageReference reference(@Nullable CraftStorageEndpoint endpoint) {
+        if (endpoint == null) return null;
+        try {
+            return endpoint.session().reference();
+        } catch (RuntimeException | LinkageError ignored) {
+            return null;
+        }
     }
 
     public static String bindingFingerprint(ServerPlayer player, ResourceKey<Level> dimension,

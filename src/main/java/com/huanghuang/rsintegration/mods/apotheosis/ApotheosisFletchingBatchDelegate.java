@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import dev.shadowsoffire.apotheosis.village.fletching.FletchingContainer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -117,7 +116,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>(INPUT_COUNT);
@@ -130,10 +129,10 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
             }
             materials.add(reserved.copy());
         }
-        if (!privateLedger.commit(network, player)) return false;
+        if (!privateLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (startCraft(player, materials)) return true;
 
-        privateLedger.refundCommitted(network, player);
+        privateLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 

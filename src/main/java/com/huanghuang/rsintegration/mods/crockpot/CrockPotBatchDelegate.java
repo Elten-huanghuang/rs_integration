@@ -19,7 +19,6 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -97,7 +96,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         this.myPos = pos;
         this.player = player;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
 
         Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
@@ -156,9 +155,8 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (hasCatConstraints) {
-            return storageEndpoint() != null
-                    ? buildCategoryPlanIngredients(recipe, storageEndpoint(), player, myLevel, myPos)
-                    : buildCategoryPlanIngredients(recipe, network, myLevel, myPos);
+            return buildCategoryPlanIngredients(
+                    recipe, storageEndpoint(), player, myLevel, myPos);
         }
 
         var handler = ModRecipeHandlers.handlerFor(recipe);
@@ -171,7 +169,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         if (!hasStorageAccess()) return false;
 
@@ -185,9 +183,8 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 // uses, so both agree on which OR branch to satisfy and which items
                 // to place. Reserving fixed ingredients through ensureMaterialAvailable
                 // keeps auto-craft/inventory fallback; filler is always network-sourced.
-                CategoryPlan plan = storageEndpoint() != null
-                        ? resolveCategoryPlan(recipe, storageEndpoint(), player, myLevel, potLevel)
-                        : resolveCategoryPlan(recipe, network, myLevel, potLevel);
+                CategoryPlan plan = resolveCategoryPlan(
+                        recipe, storageEndpoint(), player, myLevel, potLevel);
                 if (plan == null) {
                     player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
                     String blocked = buildBlockedCategoriesMessage();
@@ -204,10 +201,10 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                     materials.add(reserved.copy());
                 }
                 for (ItemStack want : plan.filler()) {
-                    ItemStack reserved = storageEndpoint() != null
-                            ? ledger.reserveFromEndpoint(Ingredient.of(want.getItem()), 1,
-                            storageEndpoint(), player)
-                            : ledger.reserveFromNetwork(Ingredient.of(want.getItem()), 1, network);
+                    var endpoint = storageEndpoint();
+                    ItemStack reserved = endpoint == null ? ItemStack.EMPTY
+                            : ledger.reserveFromEndpoint(
+                                    Ingredient.of(want.getItem()), 1, endpoint, player);
                     if (reserved.isEmpty()) return false; // network changed, auto-rollback
                     materials.add(reserved.copy());
                 }
@@ -226,7 +223,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             }
 
             // All reservations done — commit (performs actual extraction)
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterialsImpl(player, materials, ledger, false)) {
@@ -441,38 +438,6 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return "§7Blocked (max=0): " + sb;
     }
 
-    /**
-     * Plan-build helper for pure-category Crock Pot recipes, which carry no fixed ingredient list —
-     * a match is decided by the summed food values of the pot's contents. Runs the same food-value
-     * selection the batch delegate uses at craft time so the plan preview shows exactly the items the
-     * craft will place. Returns null if the network cannot satisfy the recipe's category constraints.
-     */
-    @Nullable
-    public static List<IngredientSpec> buildCategoryPlanIngredients(Recipe<?> recipe,
-                                                                    @Nullable INetwork network, Level level,
-                                                                    @Nullable BlockPos pos) {
-        int blockPotLevel = getBlockPotLevel(level, pos);
-        if (blockPotLevel <= 0) blockPotLevel = CrockPotRecipeHandler.INPUT_SLOT_COUNT;
-
-        CategoryPlan plan = resolveCategoryPlan(recipe, network, level, blockPotLevel);
-        if (plan == null) return null;
-
-        List<IngredientSpec> result = new ArrayList<>(plan.fixed());
-        LinkedHashMap<MaterialKey, ItemStack> grouped = new LinkedHashMap<>();
-        for (ItemStack stack : plan.filler()) {
-            MaterialKey key = MaterialKey.of(stack);
-            grouped.compute(key, (ignored, existing) -> {
-                if (existing == null) return stack.copyWithCount(1);
-                existing.grow(1);
-                return existing;
-            });
-        }
-        for (ItemStack stack : grouped.values()) {
-            result.add(new IngredientSpec(concreteIngredient(stack), stack.getCount()));
-        }
-        return result.isEmpty() ? null : result;
-    }
-
     /** Endpoint-aware category planning used when BD is the selected backend. */
     @Nullable
     public static List<IngredientSpec> buildCategoryPlanIngredients(Recipe<?> recipe,
@@ -499,24 +464,6 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
      * first satisfiable one, so plan preview and craft execution — both calling this — always pick
      * the identical term and place identical items. Returns null when no term can be satisfied.
      */
-    @Nullable
-    public static CategoryPlan resolveCategoryPlan(Recipe<?> recipe, @Nullable INetwork network,
-                                                   Level level, int blockPotLevel) {
-        if (network == null || !CrockPotFoodValues.isReady()) return null;
-
-        // One network snapshot shared by every term trial and by both callers.
-        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
-        Map<MaterialKey, Integer> baseAvail = new HashMap<>();
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (stack.isEmpty() || stack.getCount() <= 0) continue;
-            candidates.add(new CrockPotFoodValues.Candidate(stack, stack.getCount()));
-            baseAvail.merge(MaterialKey.of(stack), stack.getCount(), Integer::sum);
-        }
-
-        return resolveCategoryPlan(candidates, baseAvail, recipe, level, blockPotLevel);
-    }
-
     /** Resolve category requirements from a backend-neutral item snapshot. */
     @Nullable
     public static CategoryPlan resolveCategoryPlan(Recipe<?> recipe,

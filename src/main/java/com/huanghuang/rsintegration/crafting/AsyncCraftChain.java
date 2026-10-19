@@ -79,7 +79,6 @@ import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -138,8 +137,7 @@ public final class AsyncCraftChain {
     private final UUID craftId;
     private final UUID playerId;
     private final MinecraftServer server;
-    private final INetwork network;
-    /** Backend-neutral storage endpoint; RS is retained only as a compatibility handle. */
+    /** 当前合成链固定使用的存储端点。 */
     @Nullable
     private final CraftStorageEndpoint storageEndpoint;
     private final List<CraftingResolver.ResolutionStep> steps;
@@ -262,43 +260,39 @@ public final class AsyncCraftChain {
     @Nullable
     private TerminationCoordinator.Report terminationReport;
 
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
-                           List<CraftingResolver.ResolutionStep> steps) {
-        this(UUID.randomUUID(), playerId, server, network, steps, null, null);
-    }
-
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+    public AsyncCraftChain(UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint storageEndpoint,
                            List<CraftingResolver.ResolutionStep> steps) {
-        this(UUID.randomUUID(), playerId, server, network, steps, null, storageEndpoint);
+        this(UUID.randomUUID(), playerId, server, storageEndpoint, steps, null);
     }
 
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
-                           CraftPlanGraph graph) {
-        this(UUID.randomUUID(), playerId, server, network,
-                ExecutionEquivalence.projectFlatSteps(graph), graph, null);
-    }
-
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+    public AsyncCraftChain(UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint storageEndpoint,
                            CraftPlanGraph graph) {
-        this(UUID.randomUUID(), playerId, server, network,
-                ExecutionEquivalence.projectFlatSteps(graph), graph, storageEndpoint);
+        this(UUID.randomUUID(), playerId, server, storageEndpoint,
+                ExecutionEquivalence.projectFlatSteps(graph), graph);
     }
 
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, INetwork network,
-                           CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
-                           int repeatCount) {
-        this(playerId, server, network, null, graph, terminalStep, repeatCount);
+    /**
+     * 兼容旧构造器的参数位置；第三参数不再接受原生网络，链状态只保留端点。
+     */
+    @Deprecated
+    public AsyncCraftChain(UUID playerId, MinecraftServer server,
+                           @Nullable CraftStorageEndpoint ignoredEndpoint,
+                           @Nullable CraftStorageEndpoint storageEndpoint,
+                           CraftPlanGraph graph) {
+        this(playerId, server,
+                storageEndpoint != null ? storageEndpoint : ignoredEndpoint,
+                graph);
     }
 
-    public AsyncCraftChain(UUID playerId, MinecraftServer server, @Nullable INetwork network,
+    public AsyncCraftChain(UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint storageEndpoint,
                            CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
                            int repeatCount) {
-        this(UUID.randomUUID(), playerId, server, network,
+        this(UUID.randomUUID(), playerId, server, storageEndpoint,
                 compatibilitySteps(ExecutionEquivalence.projectFlatSteps(graph),
-                        terminalStep, repeatCount), graph, storageEndpoint);
+                        terminalStep, repeatCount), graph);
         // The resolver graph describes the materials needed by terminalStep; it
         // does not contain terminalStep itself. Running that graph scheduler would
         // therefore finish after the intermediates and silently skip the requested
@@ -315,23 +309,21 @@ public final class AsyncCraftChain {
                 executionDecision.reason(), executionDecision.detail(), terminalStep.recipeId());
     }
 
-    AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
+    AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server,
+                    @Nullable CraftStorageEndpoint storageEndpoint,
                     List<CraftingResolver.ResolutionStep> steps) {
-        this(craftId, playerId, server, network, steps, null, null);
+        this(craftId, playerId, server, storageEndpoint, steps, null);
     }
 
-    private AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server, INetwork network,
+    private AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server,
+                            @Nullable CraftStorageEndpoint storageEndpoint,
                             List<CraftingResolver.ResolutionStep> steps,
-                            @Nullable CraftPlanGraph graph,
-                            @Nullable CraftStorageEndpoint storageEndpoint) {
+                            @Nullable CraftPlanGraph graph) {
         this.craftId = Objects.requireNonNull(craftId, "craftId");
         this.progressPublisher = new CraftProgressPublisher(craftId);
         this.playerId = playerId;
         this.server = server;
-        this.network = network;
-        this.storageEndpoint = storageEndpoint != null
-                ? storageEndpoint
-                : network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+        this.storageEndpoint = storageEndpoint;
         this.steps = new ArrayList<>(steps);
         if (graph != null) {
             CraftPlanValidator.validate(graph);
@@ -624,8 +616,8 @@ public final class AsyncCraftChain {
                 abortSilently("Player disconnected");
                 return true;
             }
-            if (network != null && !network.canRun()) {
-                abortSilently("RS controller removed or network invalidated");
+            if (storageEndpoint != null && !storageEndpoint.isAvailable()) {
+                abortSilently("Storage endpoint removed or network invalidated");
                 return true;
             }
             return tickGraph(online, vanillaAllowance);
@@ -645,8 +637,8 @@ public final class AsyncCraftChain {
         }
 
         // Re-validate network each tick -RS controller may have been removed
-        if (network != null && !network.canRun()) {
-            abortSilently("RS controller removed or network invalidated");
+        if (storageEndpoint != null && !storageEndpoint.isAvailable()) {
+            abortSilently("Storage endpoint removed or network invalidated");
             return true;
         }
 
@@ -1265,7 +1257,7 @@ public final class AsyncCraftChain {
         CraftPlanGraph supplemental;
         try {
             supplemental = CraftingResolver.resolveSupplementalGraph(inputs, usable,
-                    player.serverLevel(), player, network, missing, excluded,
+                    player.serverLevel(), player, storageEndpoint, missing, excluded,
                     supplementalForcedRecipes, supplementalMaterialLocks,
                     new CraftingResolver.ActiveRootRecipe(step.recipeId(), progress.target().material().toStack(1)));
         } catch (CraftingPlanningTimeoutException timeout) {
@@ -1757,16 +1749,6 @@ public final class AsyncCraftChain {
      */
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
                                       List<IBatchDelegate.MaterialReservationScope> scopes,
-                                      ServerPlayer online, @Nullable INetwork network) {
-        if (specs == null || specs.isEmpty() || online == null) return 1;
-        Map<CraftingResolver.StackKey, Integer> available = network == null
-                ? MaterialSources.listAllAvailable(online, (INetwork) null)
-                : MaterialSources.listAllAvailable(online, network);
-        return reusableWorkerCapacity(specs, scopes, available);
-    }
-
-    static int reusableWorkerCapacity(List<IngredientSpec> specs,
-                                      List<IBatchDelegate.MaterialReservationScope> scopes,
                                       ServerPlayer online, @Nullable CraftStorageEndpoint endpoint) {
         if (specs == null || specs.isEmpty() || online == null) return 1;
         return reusableWorkerCapacity(specs, scopes,
@@ -2084,7 +2066,7 @@ public final class AsyncCraftChain {
         if (operationSession == null) {
             return GraphDispatchResult.retry("operation budget or machine is temporarily unavailable");
         }
-        if (!operationSession.commit(() -> nodeLedger.commit(network, online))) {
+        if (!operationSession.commit(() -> nodeLedger.commitToEndpoint(storageEndpoint, online))) {
             operationSession.close();
             return GraphDispatchResult.retry("node ledger commit did not complete");
         }
@@ -2129,7 +2111,7 @@ public final class AsyncCraftChain {
                         admission.nodeId(), exception);
             }
             if (!leftover.isEmpty()) {
-                PlayerUtils.safeGiveToPlayer(online, leftover, network);
+                PlayerUtils.safeGiveToStorage(online, leftover, storageEndpoint);
             }
         }
         // Private-ledger delegates resolve their inputs from MaterialSources.
@@ -2369,9 +2351,8 @@ public final class AsyncCraftChain {
                         }
                         material = planned.get(0);
                     } else {
-                        material = storageEndpoint != null
-                                ? ledger.reserve(spec.ingredient(), spec.count(), storageEndpoint, online, null, null)
-                                : ledger.reserve(spec.ingredient(), spec.count(), network, online, null, null);
+                        material = ledger.reserve(spec.ingredient(), spec.count(),
+                                storageEndpoint, online, null, null);
                         if (material.isEmpty() || material.getCount() != spec.count()) {
                             ledger.cancelReservationsSince(reservationMark);
                             return null;
@@ -4300,9 +4281,8 @@ public final class AsyncCraftChain {
                 materials.add(ItemStack.EMPTY);
                 continue;
             }
-            ItemStack reserved = storageEndpoint != null
-                    ? targetLedger.reserve(spec.ingredient(), spec.count(), storageEndpoint, online, null, null)
-                    : targetLedger.reserve(spec.ingredient(), spec.count(), network, online, null, null);
+            ItemStack reserved = targetLedger.reserve(spec.ingredient(), spec.count(),
+                    storageEndpoint, online, null, null);
             if (reserved.isEmpty() || reserved.getCount() != spec.count()) {
                 while (targetLedger.reservationMark() > mark) {
                     targetLedger.cancelLastReservation();
@@ -4688,7 +4668,8 @@ public final class AsyncCraftChain {
             stack = stillLeft;
         }
         if (InkFluidSupport.isToken(stack)) {
-            CraftFluidRecovery.retain(server, playerId, resolvePlayer(), stack, storageEndpoint, network);
+            CraftFluidRecovery.retainToEndpoint(
+                    server, playerId, resolvePlayer(), stack, storageEndpoint);
             return true;
         }
         if (dropThrottleTripped) {
@@ -4881,19 +4862,18 @@ public final class AsyncCraftChain {
     }
 
     /**
-     * Backend-neutral storage helpers. The legacy INetwork field remains only
-     * for native RS compatibility; all migrated execution paths use the
-     * resolved endpoint and its session operations.
+     * Backend-neutral storage helpers. All execution paths use the resolved
+     * endpoint and its session operations.
      */
     private boolean commitLedger(ExtractionLedger target, @Nullable ServerPlayer player) {
         if (player == null) return false;
         if (storageEndpoint != null) target.setStorageEndpoint(storageEndpoint);
-        return target.commit(network, player);
+        return target.commitToEndpoint(storageEndpoint, player);
     }
 
     private void refundCommitted(ExtractionLedger target, @Nullable ServerPlayer player) {
         if (storageEndpoint != null) target.setStorageEndpoint(storageEndpoint);
-        target.refundCommitted(network, player);
+        target.refundCommittedToEndpoint(storageEndpoint, player);
     }
 
     private ItemStack reserveIngredient(ExtractionLedger target, Ingredient ingredient,
@@ -4901,9 +4881,6 @@ public final class AsyncCraftChain {
         if (amount <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (storageEndpoint != null) {
             ItemStack stored = target.reserveFromEndpoint(ingredient, amount, storageEndpoint, player);
-            if (!stored.isEmpty()) return stored;
-        } else if (network != null) {
-            ItemStack stored = target.reserveFromNetwork(ingredient, amount, network, player);
             if (!stored.isEmpty()) return stored;
         }
         return target.reserveFromInventory(ingredient, amount, player);
@@ -4914,7 +4891,8 @@ public final class AsyncCraftChain {
         if (storageEndpoint != null) {
             return target.reserveExactAcrossNetworkAndInventory(template, amount, storageEndpoint, player);
         }
-        return target.reserveExactAcrossNetworkAndInventory(template, amount, network, player);
+        return target.reserveExactAcrossNetworkAndInventory(
+                template, amount, storageEndpoint, player);
     }
 
     private ItemStack insertIntoStorage(@Nullable ServerPlayer player, ItemStack stack) {
@@ -5427,7 +5405,7 @@ public final class AsyncCraftChain {
     //  safe item give
 
     private void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
-        PlayerUtils.safeGiveToPlayer(player, stack, network);
+        PlayerUtils.safeGiveToStorage(player, stack, storageEndpoint);
     }
 
     //  debug helpers

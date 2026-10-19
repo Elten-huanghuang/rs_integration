@@ -1,13 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.util.StackListEntry;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -92,26 +88,6 @@ public final class MaterialSources {
     }
 
     /**
-     * Add all items from an RS network into the NBT-aware counts map.
-     */
-    public static void addNetworkItems(Map<StackKey, Integer> counts, @Nullable INetwork network) {
-        if (network == null) return;
-        IStorageCache<ItemStack> cache = network.getItemStorageCache();
-        if (cache == null) return;
-
-        List<StackListEntry<ItemStack>> entries = new ArrayList<>(cache.getList().getStacks());
-        for (StackListEntry<ItemStack> entry : entries) {
-            ItemStack stack = entry.getStack();
-            if (!stack.isEmpty()) {
-                mergeAvailable(counts, StackKey.of(stack, true), stack.getCount(), "refined_storage");
-            }
-        }
-        for (ItemStack token : InkFluidSupport.snapshot(network, null)) {
-            mergeAvailable(counts, StackKey.of(token, true), token.getCount(), "refined_storage_ink");
-        }
-    }
-
-    /**
      * Unified enumeration: aggregates RS network + player inventory into a
      * single NBT-aware counts map. Result is cached per-player per-tick to
      * avoid redundant RS storage scans (can be called 2-3 times within a
@@ -120,25 +96,9 @@ public final class MaterialSources {
      * <p>Cache lookup is lock-free; tick advancement uses double-checked
      * locking. Expensive network scans are performed outside any lock.</p>
      */
-    public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player, @Nullable INetwork network) {
-        if (network != null) {
-            return listAllAvailable(player, CraftStorageEndpoints.fromLegacyNetwork(network));
-        }
-        int currentTick = currentTick(player);
-        String cacheKey = cacheKey(player, null);
-        rotateCache(currentTick);
-        Map<StackKey, Integer> cached = cache.get(cacheKey);
-        if (cached != null) return cached;
-
-        Map<StackKey, Integer> available = countInventory(player);
-        Map<StackKey, Integer> snapshot = Map.copyOf(available);
-        cache.putIfAbsent(cacheKey, snapshot);
-        return snapshot;
-    }
-
     /** Backend-neutral availability view used by migrated planning callers. */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
-                                                           CraftStorageEndpoint endpoint) {
+                                                           @Nullable CraftStorageEndpoint endpoint) {
         int currentTick = currentTick(player);
         String cacheKey = cacheKey(player, endpoint);
         rotateCache(currentTick);
@@ -146,6 +106,11 @@ public final class MaterialSources {
         if (cached != null) return cached;
 
         Map<StackKey, Integer> available = countInventory(player);
+        if (endpoint == null) {
+            Map<StackKey, Integer> snapshot = Map.copyOf(available);
+            cache.putIfAbsent(cacheKey, snapshot);
+            return snapshot;
+        }
         // Keep the RS compatibility bridge on its native cache representation.
         // StorageItemKey intentionally normalizes display stacks to count=1 and
         // can lose backend-specific payload details; the old planner consumed
@@ -155,7 +120,12 @@ public final class MaterialSources {
             Map<StackKey, Integer> networkItems = networkCache.get(networkKey);
             if (networkItems == null) {
                 Map<StackKey, Integer> scanned = new HashMap<>();
-                addNetworkItems(scanned, legacy.network());
+                for (ItemStack stack : legacy.cachedStackVariants()) {
+                    if (!stack.isEmpty()) {
+                        mergeAvailable(scanned, StackKey.of(stack, true), stack.getCount(),
+                                "refined_storage");
+                    }
+                }
                 networkItems = Map.copyOf(scanned);
                 Map<StackKey, Integer> existing = networkCache.putIfAbsent(networkKey, networkItems);
                 if (existing != null) networkItems = existing;
@@ -279,11 +249,7 @@ public final class MaterialSources {
     }
 
     private static String networkCacheKey(LegacyRsCraftStorageEndpoint endpoint) {
-        try {
-            return endpoint.session().reference().toString();
-        } catch (RuntimeException ignored) {
-            return "legacy@" + System.identityHashCode(endpoint.network());
-        }
+        return endpoint.cacheKey();
     }
 
     private static void rotateCache(int currentTick) {

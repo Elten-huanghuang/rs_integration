@@ -312,9 +312,11 @@ public final class DebugCommand {
 
         // Candidate decision tree — use actual inventory when available
         var network = noInventory ? null : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+        CraftStorageEndpoint endpoint = network == null
+                ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
         Map<CraftingResolver.StackKey, Integer> available = noInventory
                 ? Map.of()
-                : MaterialSources.listAllAvailable(player, network);
+                : MaterialSources.listAllAvailable(player, endpoint);
         List<CraftingResolver.TraceEntry> diag = CraftingResolver.traceCandidates(
                 ingredient, player.serverLevel(), player, available);
 
@@ -379,7 +381,8 @@ public final class DebugCommand {
         // Resolution — reuses network & available from candidate trace above
         List<String> missingOut = new ArrayList<>();
         List<CraftingResolver.ResolutionStep> steps = CraftingResolver.resolveStepsForIngredientsWithTypes(
-                List.of(ingredient), available, player.serverLevel(), player, network, missingOut,
+                List.of(ingredient), available, player.serverLevel(), player,
+                endpoint, missingOut,
                 null, true);
 
         String netStatus = noInventory ? "disabled" : (network != null ? "found" : "not found");

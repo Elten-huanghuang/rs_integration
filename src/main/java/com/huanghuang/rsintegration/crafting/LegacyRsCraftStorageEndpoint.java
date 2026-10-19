@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.resonance.bridge.RSResonanceDiskAccess;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
@@ -17,6 +19,7 @@ import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StoragePermissionResult;
+import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
@@ -26,12 +29,14 @@ import com.huanghuang.rsintegration.util.LogSampler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.Optional;
 import net.minecraft.world.item.Item;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.Objects;
 
 /**
@@ -49,6 +54,32 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     }
 
     INetwork network() { return network; }
+
+    /** 保留 RS 原生缓存顺序与 NBT 变体，供规划器构造材料视图。 */
+    List<ItemStack> cachedStackVariants() {
+        var cache = network.getItemStorageCache();
+        if (cache == null || cache.getList() == null) return List.of();
+        List<ItemStack> stacks = new ArrayList<>();
+        for (var entry : cache.getList().getStacks()) {
+            ItemStack stack = entry.getStack();
+            if (!stack.isEmpty()) stacks.add(stack);
+        }
+        stacks.addAll(InkFluidSupport.snapshot(network, null));
+        return stacks;
+    }
+
+    String cacheKey() {
+        try {
+            return session().reference().toString();
+        } catch (RuntimeException ignored) {
+            return "legacy@" + System.identityHashCode(network);
+        }
+    }
+
+    @Nullable
+    ResonanceStorageView resonanceView() {
+        return RSResonanceDiskAccess.find(network);
+    }
 
     @Override public StorageSession session() { return session; }
 
@@ -128,6 +159,28 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
                     new StorageBackendId("refinedstorage"),
                     "v1|" + level.dimension().location() + "@"
                             + position.getX() + "," + position.getY() + "," + position.getZ());
+        }
+
+        @Override public boolean isAvailable() {
+            try {
+                return network.canRun() && network.getLevel() != null
+                        && network.getItemStorageCache() != null
+                        && network.getItemStorageCache().getList() != null;
+            } catch (RuntimeException | LinkageError ignored) {
+                return false;
+            }
+        }
+
+        @Override public Optional<StorageNetworkLocation> location() {
+            try {
+                var level = network.getLevel();
+                var position = network.getPosition();
+                return level == null || position == null ? Optional.empty()
+                        : Optional.of(new StorageNetworkLocation(
+                                level.dimension(), position.immutable()));
+            } catch (RuntimeException | LinkageError ignored) {
+                return Optional.empty();
+            }
         }
 
         @Override public StorageSnapshotResult snapshotItems(ServerPlayer player) {

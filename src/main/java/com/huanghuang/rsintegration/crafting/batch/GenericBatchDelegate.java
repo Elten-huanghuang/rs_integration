@@ -25,7 +25,6 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
@@ -110,16 +109,13 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = new ExtractionLedger();
-        // The chain may have already selected a BD endpoint.  Only resolve the
-        // legacy RS handle when no backend-neutral endpoint was injected.
+        // The chain may have already selected an endpoint. Only resolve the
+        // current/default endpoint when none was injected.
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network != null) {
-                this.ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(this.network));
-            }
-        } else {
-            this.ledger.setStorageEndpoint(storageEndpoint());
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, myDim, myPos).orElse(null));
         }
+        this.ledger.setStorageEndpoint(storageEndpoint());
         this.craftDone = false;
         this.pendingSecondary.clear();
 
@@ -191,7 +187,8 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             }
 
             // Do not physically consume inputs until all output preparation succeeds.
-            if (!validateExecutionContext(player) || !ledger.commit(network, player)) {
+            if (!validateExecutionContext(player)
+                    || !ledger.commitToEndpoint(storageEndpoint(), player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
                 clearSingleCraftState(player);
                 return false;
@@ -214,7 +211,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             try {
                 ExtractionLedger.State state = ledger.state();
                 if (state == ExtractionLedger.State.COMMITTED) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 } else if (state != ExtractionLedger.State.IDLE
                         && state != ExtractionLedger.State.ROLLED_BACK) {
                     ledger.rollback(player);
@@ -283,10 +280,10 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = sharedLedger;
-        // Shared-ledger graph dispatch owns the selected storage session. Do
-        // not replace a BD endpoint with a fresh RS lookup here.
+        // Shared-ledger graph dispatch owns the selected storage session.
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, myDim, myPos).orElse(null));
         }
         this.craftDone = false;
         this.pendingSecondary.clear();
@@ -601,7 +598,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         pendingSecondary.clear();
         craftDone = false;
         ledger = null;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -616,10 +613,10 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             // Materials were already extracted and committed.  If we computed
             // the result (Phase 1 succeeds before Phase 3), insert the result
             // into RS so the materials are not simply lost.
-            if (craftDone && !pendingResult.isEmpty() && network != null) {
+            if (craftDone && !pendingResult.isEmpty() && storageEndpoint() != null) {
                 var leftover = ledgerStorageInsert(pendingResult.copy());
                 if (!leftover.isEmpty() && player != null && !player.hasDisconnected() && !player.isRemoved()) {
-                    PlayerUtils.safeGiveToPlayer(player, leftover, null);
+                    PlayerUtils.safeGiveToStorage(player, leftover, null);
                 }
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] Recovery: inserted result {}x{} after commit failure",
                         pendingResult.getCount(), ItemStackUtils.registryId(pendingResult));

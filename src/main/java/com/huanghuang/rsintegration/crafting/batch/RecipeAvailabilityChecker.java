@@ -30,7 +30,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -69,10 +68,10 @@ public final class RecipeAvailabilityChecker {
             return MaterialAvailability.UNKNOWN;
         }
         CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
-        if (ModList.get().isLoaded("refinedstorage")
-                && (endpoint == null || !"beyonddimensions".equals(endpoint.session().reference().backendId().value()))) {
-            var network = GenericCraftPacket.resolveNetworkForRecipe(player, key.dimension(), key.machinePos(), type);
-            if (network != null) endpoint = CraftStorageEndpoints.fromLegacyNetwork(network);
+        if (endpoint == null || CraftStorageEndpoints.isRefinedStorage(endpoint)) {
+            CraftStorageEndpoint resolved = GenericCraftPacket.resolveStorageEndpointForRecipe(
+                    player, key.dimension(), key.machinePos(), type);
+            if (resolved != null) endpoint = resolved;
         }
         Map<StackKey, Integer> available = new HashMap<>(MaterialSources.countInventory(player));
         if (endpoint != null) {

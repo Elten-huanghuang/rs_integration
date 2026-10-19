@@ -7,8 +7,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
@@ -48,7 +46,6 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     private Recipe<?> recipe;
     private List<IngredientSpec> requiredMaterials;
     private ItemStack expected = ItemStack.EMPTY;
-    private INetwork rsNetwork;
     private boolean started;
     private long startTick;
     private Set<UUID> entitiesBefore = Set.of();
@@ -106,8 +103,8 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         this.requiredMaterials = List.copyOf(specs);
         this.expected = output.copy();
         if (storageEndpoint() == null) {
-            this.rsNetwork = CraftPacketUtils.resolveNetworkForCraft(
-                    player, resolved.dimension(), infuserPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, resolved.dimension(), infuserPos).orElse(null));
         }
         return PreparationResult.ready();
     }
@@ -170,10 +167,11 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null || infuserPos == null || requiredMaterials == null) return false;
-        if (storageEndpoint() == null && rsNetwork == null) {
-            rsNetwork = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), infuserPos);
+        if (storageEndpoint() == null) {
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), infuserPos).orElse(null));
         }
-        if (storageEndpoint() == null && rsNetwork == null) return false;
+        if (storageEndpoint() == null) return false;
 
         this.ledger = new ExtractionLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
@@ -188,9 +186,9 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
             }
             materials.add(reserved);
         }
-        if (!ledger.commit(rsNetwork, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (!startEntities(materials)) {
-            ledger.refundCommitted(rsNetwork, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
         ledger.reset();
@@ -337,11 +335,10 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (storageEndpoint() == null) this.network = rsNetwork;
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (leftover.isEmpty()) return;
         if (player != null) {
-            PlayerUtils.safeGiveToPlayer(player, leftover, rsNetwork);
+            PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());
         } else if (level != null && infuserPos != null) {
             level.addFreshEntity(new ItemEntity(level,
                     infuserPos.getX() + 0.5, infuserPos.getY() + 1.1,
@@ -393,7 +390,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         recipe = null;
         requiredMaterials = null;
         expected = ItemStack.EMPTY;
-        rsNetwork = null;
+        setStorageEndpoint(null);
         started = false;
         startTick = 0L;
         entitiesBefore = Set.of();

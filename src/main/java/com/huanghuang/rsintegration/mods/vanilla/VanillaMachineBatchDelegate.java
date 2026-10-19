@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla;
+
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -303,9 +305,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) {
-                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null) {
+                setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
             }
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
@@ -328,9 +330,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) {
-                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null) {
+                setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
             }
         }
         this.craftDone = false;
@@ -464,8 +466,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null) setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
         }
         this.craftDone = false;
         boolean started = tryStartFurnaceWithMaterials(List.of(input.stack()));
@@ -556,9 +558,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null) {
-                this.network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null) {
+                setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
             }
         }
         this.craftDone = false;
@@ -614,7 +616,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (!acquireFurnaceInventory()) return false;
 
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Extraction commit failed"));
                 return false;
@@ -904,7 +906,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         // Commit private ledger
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
                 return false;
             }
         }
@@ -956,7 +958,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         // Commit BEFORE placing — commit failure leaves campfire untouched
         if (!usingSharedLedger && ledger != null && !ledger.isCommitted()) {
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.craft_failed", "Extraction commit failed"));
                 return false;

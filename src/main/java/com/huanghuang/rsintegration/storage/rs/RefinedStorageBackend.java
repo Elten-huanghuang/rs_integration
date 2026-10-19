@@ -14,6 +14,7 @@ import net.minecraftforge.fml.ModList;
 import com.huanghuang.rsintegration.storage.StorageSession;
 
 import java.util.Objects;
+import javax.annotation.Nullable;
 
 /** Refined Storage adapter. This class must only be loaded when RS is present. */
 public final class RefinedStorageBackend implements StorageBackend {
@@ -74,6 +75,26 @@ public final class RefinedStorageBackend implements StorageBackend {
                     : createSession(network);
         } catch (RuntimeException | LinkageError e) {
             return StorageResolutionResult.failure(StorageResolutionStatus.FAILED);
+        }
+    }
+
+    /** 由已授权引用恢复原生句柄，仅供仍需旧 RS API 的机器兼容层使用。 */
+    @Nullable
+    public static INetwork resolveNativeNetwork(StorageReference reference,
+                                                ServerPlayer player) {
+        Objects.requireNonNull(reference, "reference");
+        Objects.requireNonNull(player, "player");
+        StorageThreadGuard.requireServerThread(player);
+        try {
+            var parsed = RefinedStorageReference.parse(reference);
+            if (parsed.isEmpty()) return null;
+            var location = parsed.orElseThrow();
+            var level = player.server.getLevel(location.dimension());
+            if (level == null || !level.isLoaded(location.position())) return null;
+            return RSIntegrationNetwork.resolveNetworkStrict(
+                    player.server, location.dimension(), location.position());
+        } catch (RuntimeException | LinkageError ignored) {
+            return null;
         }
     }
 

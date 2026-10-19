@@ -13,7 +13,6 @@ import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -125,8 +124,8 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -139,7 +138,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -386,16 +385,11 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                         && tankFluid.getFluid() == recipeResult.getFluid()) {
                     ItemStack result = collectResult(player);
                     if (!result.isEmpty()) {
-                        if (network == null && storageEndpoint() == null)
-                            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, be.getBlockPos());
-                        if (storageEndpoint() != null) {
-                            ItemStack remainder = insertIntoStorage(player, result, false);
-                            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, null);
-                        } else if (network != null) {
-                            ItemStack remainder = TrackedNetworkInsertion.insert(network, player, result);
-                            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
-                        } else {
-                            PlayerUtils.safeGiveToPlayer(player, result, null);
+                        if (storageEndpoint() == null)
+                            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, be.getBlockPos()).orElse(null));
+                        ItemStack remainder = insertIntoStorage(player, result, false);
+                        if (!remainder.isEmpty()) {
+                            PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
                         }
                     }
                 }
@@ -404,7 +398,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         clearAndRefund();
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -412,7 +406,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         clearAndRefund();
         craftDone = false;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

@@ -23,7 +23,6 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -231,17 +230,13 @@ public final class FaCraftPacket {
         }
 
         // Count available materials
-        CraftStorageEndpoint endpoint = StorageRestockSupport
-                .resolve(player).orElse(null);
-        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
-        if (endpoint == null) network = CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos);
+        CraftStorageEndpoint endpoint = CraftPacketUtils.resolveEndpointForCraft(
+                player, altarDim, pos).orElse(null);
 
         // Pre-check essences per-type before material extraction
         if (!FaRitualHelper.checkEssences(player, ritual, be, ritualManager)) return;
 
-        Map<StackKey, Integer> available = endpoint != null
-                ? MaterialSources.listAllAvailable(player, endpoint)
-                : MaterialSources.listAllAvailable(player, network);
+        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
 
         // Try auto-crafting if items are missing
         if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
@@ -262,14 +257,14 @@ public final class FaCraftPacket {
                 return;
             }
 
-            if (!autoSteps.isEmpty() && (network != null || endpoint != null)) {
+            if (!autoSteps.isEmpty() && endpoint != null) {
                 player.displayClientMessage(Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()), true);
                 List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
                 for (ResourceLocation id : autoSteps) {
                     wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
                             new ResourceLocation("minecraft:crafting")));
                 }
-                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network, endpoint)) {
+                if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, endpoint)) {
                     player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
                     return;
                 }
@@ -311,9 +306,7 @@ public final class FaCraftPacket {
         }
 
         // Phase 1: reserve all items via ledger
-        if (endpoint == null && network == null) {
-            network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-        }
+        if (endpoint == null) endpoint = StorageRestockSupport.resolve(player).orElse(null);
 
         List<Object> filledPedestals = new ArrayList<>();
         ItemStack mainTemplate = ItemStack.EMPTY;
@@ -365,7 +358,7 @@ public final class FaCraftPacket {
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Placement failed for ritual {}:", ritualId, e);
-                rollbackAll(player, be, filledPedestals, network, endpoint);
+                rollbackAll(player, be, filledPedestals, endpoint);
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.prepare_failed"));
                 return;
             }
@@ -391,25 +384,22 @@ public final class FaCraftPacket {
             }
 
             // Phase 3: require a RitualStarterItem
-            final FaRitualHelper.StarterResult starterResult = endpoint != null
-                    ? FaRitualHelper.findRitualStarterItem(player, endpoint)
-                    : FaRitualHelper.findRitualStarterItem(player, network);
+            final FaRitualHelper.StarterResult starterResult =
+                    FaRitualHelper.findRitualStarterItem(player, endpoint);
             final ItemStack starterStack = starterResult.stack();
-            final INetwork starterNetwork = starterResult.sourceNetwork();
             final CraftStorageEndpoint starterEndpoint = starterResult.sourceEndpoint();
             if (starterStack.isEmpty()) {
                 RSIntegrationMod.LOGGER.debug("[RSI-FA] tryCraft: no usable RitualStarterItem in inventory or RS");
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
-                rollbackAll(player, be, filledPedestals, network, endpoint);
+                rollbackAll(player, be, filledPedestals, endpoint);
                 return;
             }
 
             // Phase 4: commit ledger first
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
-                rollbackAll(player, be, filledPedestals, network, endpoint);
+                rollbackAll(player, be, filledPedestals, endpoint);
                 if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
-                else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
@@ -419,7 +409,7 @@ public final class FaCraftPacket {
                 Object essenceMgr = Reflect.getMethodOrThrow(FAReflection.hephaestusForgeBEClass, "getEssenceManager", "getEssenceManager").invoke(be);
                 Object essencesStorage = Reflect.getMethodOrThrow(FAReflection.essenceManagerClass, "getStorage", "getStorage").invoke(essenceMgr);
                 BooleanConsumerProxy callback = new BooleanConsumerProxy(
-                        player, be, filledPedestals, network, starterStack);
+                        player, be, filledPedestals, starterStack);
                 Object proxy = Proxy.newProxyInstance(
                         FAReflection.booleanConsumerClass.getClassLoader(),
                         new Class<?>[]{FAReflection.booleanConsumerClass},
@@ -430,30 +420,30 @@ public final class FaCraftPacket {
 
                 if (callback.rejected) {
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
-                    rollbackAll(player, be, filledPedestals, network, endpoint);
+                    rollbackAll(player, be, filledPedestals, endpoint);
                     if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
-                    else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                     player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                     return;
                 }
             } catch (InvocationTargetException e) {
                 Throwable root = e.getCause() != null ? e.getCause() : e;
                 RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
-                rollbackAll(player, be, filledPedestals, network, endpoint);
+                rollbackAll(player, be, filledPedestals, endpoint);
                 if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
-                else FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
-                rollbackAll(player, be, filledPedestals, network, endpoint);
-                FaRitualHelper.returnStarterToSource(starterStack, player, starterNetwork);
+                rollbackAll(player, be, filledPedestals, endpoint);
+                if (starterEndpoint != null) {
+                    FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                }
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
 
             // Only consume the starter AFTER everything succeeded
-            FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterNetwork);
+            FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterEndpoint);
 
             Object result = FaRitualHelper.invoke(FaRitualHelper.invoke(ritual, "result"), "getResult");
             // Keep the name as a Component: this is server-side, and the client
@@ -511,26 +501,16 @@ public final class FaCraftPacket {
     // ── rollback ───────────────────────────────────────────────
 
     private static void rollbackAll(ServerPlayer player, Object forge,
-                                     List<Object> filledPedestals, INetwork network,
+                                     List<Object> filledPedestals,
                                      @Nullable CraftStorageEndpoint endpoint) {
         for (Object ped : filledPedestals) {
             try {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
-                    if (endpoint != null || network != null) {
-                        if (endpoint != null) {
-                            ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        } else {
-                        ItemStack leftover = CraftStorageEndpoints
-                                .insertLegacy(network, player, stack, false);
-                        if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                        }
-                    } else {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack);
-                    }
+                    ItemStack leftover = endpoint == null ? stack
+                            : endpoint.insert(player, stack, false)
+                            .remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
                 Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "clearStack", "clearStack", Level.class, boolean.class)
                         .invoke(ped, null, false);
@@ -540,20 +520,10 @@ public final class FaCraftPacket {
             int mainSlot = FaRitualHelper.getMainSlot();
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
-                if (endpoint != null || network != null) {
-                    if (endpoint != null) {
-                        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
-                        if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                    } else {
-                    ItemStack leftover = CraftStorageEndpoints
-                            .insertLegacy(network, player, stack, false);
-                    if (!leftover.isEmpty()) {
-                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                    }
-                    }
-                } else {
-                    ItemHandlerHelper.giveItemToPlayer(player, stack);
-                }
+                ItemStack leftover = endpoint == null ? stack
+                        : endpoint.insert(player, stack, false)
+                        .remainder().orElse(ItemStack.EMPTY);
+                if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }
             FaRitualHelper.setForgeSlot(forge, mainSlot, ItemStack.EMPTY);
         } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
@@ -565,22 +535,15 @@ public final class FaCraftPacket {
         private final ServerPlayer player;
         private final Object forge;
         private final List<Object> filledPedestals;
-        private final INetwork network;
         private final ItemStack starterStack;
         boolean rejected;
 
         BooleanConsumerProxy(ServerPlayer player, Object forge,
-                             List<Object> filledPedestals, @Nullable INetwork network) {
-            this(player, forge, filledPedestals, network, null);
-        }
-
-        BooleanConsumerProxy(ServerPlayer player, Object forge,
-                             List<Object> filledPedestals, @Nullable INetwork network,
+                             List<Object> filledPedestals,
                              @Nullable ItemStack starterStack) {
             this.player = player;
             this.forge = forge;
             this.filledPedestals = filledPedestals;
-            this.network = network;
             this.starterStack = starterStack;
         }
 

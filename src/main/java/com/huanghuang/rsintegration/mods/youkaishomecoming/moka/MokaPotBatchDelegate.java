@@ -24,7 +24,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -263,8 +262,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -277,7 +276,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -435,7 +434,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         craftDone = false;
         plannedOperations = 1;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -444,7 +443,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         clearAndRefund();
         craftDone = false;
         plannedOperations = 1;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override

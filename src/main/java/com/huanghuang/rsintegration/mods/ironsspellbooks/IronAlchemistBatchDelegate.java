@@ -165,7 +165,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         if (!validateExecutionContext(player)) return false;
         if (producesFluid()) {
             IFluidHandler tank = level.getBlockEntity(pos).getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
@@ -182,10 +182,10 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
             if (material.isEmpty()) { privateLedger.close(); return false; }
             materials.add(material);
         }
-        if (!privateLedger.commit(network, player)) return false;
+        if (!privateLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (start(player, materials)) return true;
         privateLedger.retainCommittedRefunds(heldInputs);
-        privateLedger.refundCommitted(network, player);
+        privateLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 
@@ -529,7 +529,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(consumed ? List.of() : heldInputs);
         if (!usingSharedLedger && !consumed && ledger != null) {
             ledger.retainCommittedRefunds(heldInputs);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         result = ItemStack.EMPTY;
         actualProduction = null;

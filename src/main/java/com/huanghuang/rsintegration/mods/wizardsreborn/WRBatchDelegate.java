@@ -31,7 +31,6 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -241,9 +240,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // Resolve network early so validateIdle can access it for crystal rituals
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
 
         // Validate idle state per machine type
@@ -668,9 +667,9 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
         this.filledSlotIndices = new ArrayList<>();
@@ -683,7 +682,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -755,7 +754,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!checkWissen()) return false;
 
         // Phase 3: commit all extractions atomically
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         // Phase 4: place items, tracking what we placed for completion detection
         for (int i = 0; i < templates.size(); i++) {
@@ -826,7 +825,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // book requirement with that exact book ingredient.
         List<Ingredient> effectiveIngredients = new ArrayList<>(ingredients);
         if (iteratorTargetLevel >= 2 && !effectiveIngredients.isEmpty()) {
-            var available = MaterialSources.listAllAvailable(player, network);
+            var available = MaterialSources.listAllAvailable(player, storageEndpoint());
             for (int lvl = iteratorTargetLevel - 1; lvl >= 1; lvl--) {
                 ItemStack candidate = WRRecipeHandler.buildEnchantedBookOutput(recipe, lvl);
                 if (candidate.isEmpty()) break;
@@ -865,7 +864,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!checkWissen()) return false;
 
         // Phase 3: commit (physical extraction of center book + first side set).
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         // Phase 4: place center book + first side set on their pedestals.
         this.placedPedestalItems = new HashMap<>();
@@ -971,7 +970,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             sideTemplates.add(taken);
         }
 
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             return false; // lost an extraction race → graceful stop
         }
 
@@ -1119,7 +1118,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!checkWissen()) return false;
 
         // Phase 3: commit
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         // Phase 4: place items
         for (int i = 0; i < templates.size(); i++) {
@@ -1205,7 +1204,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Phase 2: commit
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         // Phase 3: place items
         this.pedestalRefs = pedestals;
@@ -1285,7 +1284,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         this.filledPedestals = new ArrayList<>();
         this.waitTicks = 0;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
 
         // Verify the cached BlockEntity is still valid
@@ -1294,7 +1293,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -1325,7 +1324,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (!ok && !craftStarted && sharedLedger != null && sharedLedger.isCommitted()) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-Batch-WR] Start rejected before machine activation; refunding shared ledger");
-            sharedLedger.refundCommitted(network, player);
+            sharedLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         return ok;
     }
@@ -1752,7 +1751,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         } else {
                             // Distinct by-products are not representable in the
                             // delegate's single-stack return value.
-                            if (storageEndpoint() != null || network != null) {
+                            if (storageEndpoint() != null || storageEndpoint() != null) {
                                 ItemStack leftover = insertIntoStorage(player, stack, false);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1810,7 +1809,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                         if (fromMachine.isEmpty()) {
                             fromMachine = stack;
                         } else {
-                            if (storageEndpoint() != null || network != null) {
+                            if (storageEndpoint() != null || storageEndpoint() != null) {
                                 ItemStack leftover = insertIntoStorage(player, stack, false);
                                 if (!leftover.isEmpty())
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1835,7 +1834,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                     if (fromMachine.isEmpty()) {
                                         fromMachine = r;
                                     } else {
-                                        if (storageEndpoint() != null || network != null) {
+                                        if (storageEndpoint() != null || storageEndpoint() != null) {
                                             ItemStack leftover = insertIntoStorage(player, r, false);
                                             if (!leftover.isEmpty())
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1891,7 +1890,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                                     if (fromMachine.isEmpty()) {
                                         fromMachine = taken;
                                     } else {
-                                        if (storageEndpoint() != null || network != null) {
+                                        if (storageEndpoint() != null || storageEndpoint() != null) {
                                             ItemStack leftover = insertIntoStorage(player, taken, false);
                                             if (!leftover.isEmpty()) {
                                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -2117,7 +2116,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (storageEndpoint() != null || network != null) {
+        if (storageEndpoint() != null || storageEndpoint() != null) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             // The player may be offline (server stop / disconnect abort), so this
             // must not assume one is present the way the branch below does.

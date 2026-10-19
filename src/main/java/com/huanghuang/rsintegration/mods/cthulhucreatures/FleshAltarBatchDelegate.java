@@ -152,7 +152,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean tryStartSingleCraft(ServerPlayer player) {
         if (!idle()) return false;
-        if (storageEndpoint() == null) network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         ExtractionLedger privateLedger = new ExtractionLedger();
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
@@ -162,11 +162,11 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
             if (stack.isEmpty()) { privateLedger.close(); return false; }
             materials.add(stack.copy());
         }
-        if (!privateLedger.commit(network, player)) { privateLedger.close(); return false; }
+        if (!privateLedger.commitToEndpoint(storageEndpoint(), player)) { privateLedger.close(); return false; }
         ledger = privateLedger;
         usingSharedLedger = false;
         if (place(materials, 1)) return true;
-        privateLedger.refundCommitted(network, player);
+        privateLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 

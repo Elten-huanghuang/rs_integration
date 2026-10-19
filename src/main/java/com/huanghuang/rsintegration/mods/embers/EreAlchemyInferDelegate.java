@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -15,7 +17,6 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
 import com.refinedmods.refinedstorage.api.util.Action;
 import java.util.ArrayList;
@@ -152,7 +153,7 @@ extends AbstractBatchDelegate {
             return false;
         }
         if (storageEndpoint() == null) {
-            this.network = RSIntegrationNetwork.resolveNetworkFromPlayer((ServerPlayer)player);
+            setStorageEndpoint(CraftStorageEndpoints.resolveDefault((ServerPlayer)player).orElse(null));
         }
         EreAlchemyBatchDelegate.recycleBlockingItems(lvl, pos, this.pedestals, player, storageEndpoint());
         for (EreAlchemyBatchDelegate.PedestalInfo p : this.pedestals) {
@@ -266,7 +267,7 @@ extends AbstractBatchDelegate {
         if (this.machinePos != null && this.level != null && this.level.isLoaded(this.machinePos) && ((current = this.level.getBlockEntity(this.machinePos)) == null || current.isRemoved())) {
             player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
             if (this.ledger != null && this.ledger.isCommitted()) {
-                this.ledger.refundCommitted(this.network, player);
+                this.ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             }
             return false;
         }
@@ -823,10 +824,7 @@ extends AbstractBatchDelegate {
                     ? ItemStack.EMPTY : ing.getItems()[0], 1, false);
             return result.extractedStacks().stream().findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         }
-        if (this.network == null) {
-            return ItemStack.EMPTY;
-        }
-        return RSIntegrationNetwork.extractFromNetwork((INetwork)this.network, (Ingredient)ing, (int)1, this.player);
+        return ItemStack.EMPTY;
     }
 
     private void refundPartial(List<ItemStack> stacks) {
@@ -834,7 +832,7 @@ extends AbstractBatchDelegate {
             this.sharedLedger.rollback(this.player);
             return;
         }
-        if (storageEndpoint() == null && this.network == null) {
+        if (storageEndpoint() == null) {
             for (ItemStack s : stacks) {
                 if (s.isEmpty() || this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, s.copy());
@@ -844,10 +842,6 @@ extends AbstractBatchDelegate {
         for (ItemStack s : stacks) {
             ItemStack leftover;
             if (s.isEmpty()) continue;
-            IStorageTracker tracker = this.network == null ? null : this.network.getItemStorageTracker();
-            if (tracker != null && this.player != null) {
-                tracker.changed(this.player, s.copy());
-            }
             if ((leftover = insertIntoStorage(player, s, false)).isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Refund leftover: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
             if (this.player == null) continue;
@@ -907,7 +901,7 @@ extends AbstractBatchDelegate {
                 }
             }
         }
-        if (storageEndpoint() == null && this.network == null) {
+        if (storageEndpoint() == null) {
             for (ItemStack s2 : toRefund) {
                 if (s2.isEmpty() || this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)s2.copy());
@@ -918,10 +912,6 @@ extends AbstractBatchDelegate {
             for (ItemStack s2 : toRefund) {
                 ItemStack leftover;
                 if (s2.isEmpty()) continue;
-            IStorageTracker tracker = this.network == null ? null : this.network.getItemStorageTracker();
-                if (tracker != null && this.player != null) {
-                    tracker.changed(this.player, (Object)s2.copy());
-                }
                 if ((leftover = insertIntoStorage(player, s2, false)).isEmpty()) continue;
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Survivor refund partial: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
                 if (this.player == null) continue;

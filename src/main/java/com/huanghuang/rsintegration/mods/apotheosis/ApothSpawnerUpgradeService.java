@@ -17,7 +17,6 @@ import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerModels.Entry;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerStatePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import dev.shadowsoffire.apotheosis.Apoth;
 import dev.shadowsoffire.apotheosis.spawn.modifiers.SpawnerModifier;
@@ -61,7 +60,6 @@ public final class ApothSpawnerUpgradeService {
         PENDING.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
         Context context = context(player, dimension, pos);
         CraftStorageEndpoint endpoint = storageEndpoint(player);
-        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (context == null || endpoint == null) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.apotheosis.spawner.context_changed"));
@@ -80,7 +78,7 @@ public final class ApothSpawnerUpgradeService {
         }
         List<String> missing = new ArrayList<>();
         var graph = specs.isEmpty() ? null : CraftingResolver.resolveGraphForSpecsWithTypes(specs,
-                MaterialSources.listAllAvailable(player, endpoint), context.level, player, network,
+                MaterialSources.listAllAvailable(player, endpoint), context.level, player, endpoint,
                 missing, null, false);
         PENDING.put(player.getUUID(), new PendingPlan(dimension, pos, Map.copyOf(selected),
                 now + PREVIEW_TTL_MS));
@@ -141,7 +139,6 @@ public final class ApothSpawnerUpgradeService {
                                                    BlockPos pos, Map<ResourceLocation, Integer> selected) {
         Context context = context(player, dimension, pos);
         CraftStorageEndpoint endpoint = storageEndpoint(player);
-        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (context == null || endpoint == null) return execute(player, dimension, pos, selected, false);
         if (AsyncCraftManager.getInstance().getChain(player) != null) {
             return scan(player, dimension, pos, "rsi.apotheosis.spawner.craft_busy");
@@ -161,13 +158,13 @@ public final class ApothSpawnerUpgradeService {
             List<String> missing = new ArrayList<>();
             var graph = CraftingResolver.resolveGraphForSpecsWithTypes(
                     List.of(new IngredientSpec(modifier.getMainhandInput(), required)),
-                    MaterialSources.listAllAvailable(player, endpoint), context.level, player, network,
+                    MaterialSources.listAllAvailable(player, endpoint), context.level, player, endpoint,
                     missing, null, false);
             // An unresolved root is isolated to this upgrade. Continue scanning
             // so another selected upgrade can still recurse successfully.
             if (!graph.unresolvedDemands().isEmpty() || graph.nodes().isEmpty()) continue;
-            AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
-                    endpoint, graph);
+            AsyncCraftChain chain = new AsyncCraftChain(
+                    player.getUUID(), player.getServer(), endpoint, graph);
             AsyncCraftManager.getInstance().submit(chain);
             chain.onDone(() -> {
                 if (chain.state() == AsyncCraftChain.State.COMPLETED) {
@@ -192,7 +189,6 @@ public final class ApothSpawnerUpgradeService {
         Context context = context(player, dimension, pos);
         if (context == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.context_changed");
         CraftStorageEndpoint endpoint = storageEndpoint(player);
-        INetwork network = CraftStorageEndpoints.legacyNetwork(endpoint);
         if (endpoint == null) return new Snapshot(dimension, pos, List.of(), "rsi.apotheosis.spawner.no_network");
 
         int completed = 0;
@@ -214,7 +210,7 @@ public final class ApothSpawnerUpgradeService {
                     ledger.setStorageEndpoint(endpoint);
                     ItemStack reserved = ledger.reserveFromEndpoint(
                             modifier.getMainhandInput(), 1, endpoint, player);
-                    if (reserved.isEmpty() || !ledger.commit(network, player)) { skipped++; break; }
+                    if (reserved.isEmpty() || !ledger.commitToEndpoint(endpoint, player)) { skipped++; break; }
                     if (!modifier.apply(context.tile)) {
                         ItemStack remaining = endpoint.insert(player, reserved, false)
                                 .remainder().orElse(ItemStack.EMPTY);

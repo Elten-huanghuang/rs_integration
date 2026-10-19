@@ -23,7 +23,6 @@ import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -341,7 +340,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         int totalSouls = GoetySoulCraftingTask.nativeAvailableBrazier(
                 player, (BlockEntity) be);
         int diskSouls = GoetySoulCraftingTask.availableInStorage(
-                player, network, storageEndpoint());
+                player, null, storageEndpoint());
         int combinedSouls = saturatingAdd(totalSouls, diskSouls, 0);
         PreparationResult soulResult = soulPreparationResult(brazierSoulCost, combinedSouls);
         if (soulResult.state() != PreparationState.READY) {
@@ -366,7 +365,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
         this.activationExtractedFromPlayer = null;
@@ -381,7 +380,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -484,7 +483,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // 3. Commit all extractions together — items are now physically extracted
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed for manual ritual prep");
             refundActivationToPlayer();
             return false;
@@ -498,7 +497,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.error(
                             "[RSI-Batch-Goety] Failed to verify material placement on pedestal {}", ped);
                     refundActivationToPlayer();
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                     recoverFromPedestals();
                     return false;
                 }
@@ -535,7 +534,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean startRitualDirectly(Object ritual, ItemStack activationItemStack) {
         try {
             if (!beginSoulTask()) return false;
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed (no ingredients)");
                 refundActivationToPlayer();
                 closeSoulTask();
@@ -544,14 +543,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
-                ledger.refundCommitted(network, player);
+                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 closeSoulTask();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
-                ledger.refundCommitted(network, player);
+                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 closeSoulTask();
                 return false;
             }
@@ -559,7 +558,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to start ritual", e);
             refundActivationToPlayer();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             closeSoulTask();
             return false;
         }
@@ -601,7 +600,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed before ritual start");
             refundActivationToPlayer();
             closeSoulTask();
@@ -622,7 +621,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
-                ledger.refundCommitted(network, player);
+                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 recoverFromPedestals();
                 closeSoulTask();
                 return false;
@@ -630,7 +629,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
-                ledger.refundCommitted(network, player);
+                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 recoverFromPedestals();
                 closeSoulTask();
                 return false;
@@ -639,7 +638,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Placement/start failed:", e);
             refundActivationToPlayer();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             recoverFromPedestals();
             closeSoulTask();
             return false;
@@ -682,7 +681,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             toPlace.set(slot++, taken.copy());
         }
 
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Ledger commit failed for brazier craft");
             return false;
         }
@@ -709,7 +708,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
                     NonNullList.withSize(containerSize, ItemStack.EMPTY));
             Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
 
@@ -720,7 +719,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
             Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
             Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
@@ -732,7 +731,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
             Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
             Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             closeSoulTask();
             return false;
         }
@@ -793,7 +792,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // Keep the chain-selected endpoint.  Re-resolving here would make a
         // BD graph node fail simply because no RS INetwork exists at the altar.
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.activationExtractedFromPlayer = null;
         this.pendingManualActivation = ItemStack.EMPTY;
@@ -1402,7 +1401,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         // (abortSilently does NOT refund the ledger).
         if (player == null) {
             for (ItemStack stack : items) {
-                if (!stack.isEmpty() && network != null) {
+                if (!stack.isEmpty() && storageEndpoint() != null) {
                     insertIntoStorage(player, stack.copy(), false);
                 }
             }
@@ -1519,7 +1518,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (cost <= 0) return true;
         int nativeAvailable = GoetySoulCraftingTask.nativeAvailableDarkAltar(player, altar);
         int diskAvailable = GoetySoulCraftingTask.availableInStorage(
-                player, network, storageEndpoint());
+                player, null, storageEndpoint());
         int combined = saturatingAdd(nativeAvailable,
                 Math.max(0, diskAvailable), 0);
         RSIntegrationMod.LOGGER.debug(
@@ -1546,7 +1545,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         closeSoulTask();
         if (isBrazier || soulCost <= 0 || ritualRecipe == null) return true;
         soulTask = GoetySoulCraftingTask.reserveDarkAltar(
-                player, network, storageEndpoint(), ritualRecipe,
+                player, null, storageEndpoint(), ritualRecipe,
                 magicResourceTaskReservation());
         if (soulTask == null) return true;
         if (!soulTask.prepareBeforeStart(altar)) {
@@ -1568,7 +1567,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         closeSoulTask();
         if (!isBrazier || brazierSoulCost <= 0 || brazierRecipeObj == null) return true;
         soulTask = GoetySoulCraftingTask.reserveBrazier(
-                player, network, storageEndpoint(), brazierRecipeObj,
+                player, null, storageEndpoint(), brazierRecipeObj,
                 magicResourceTaskReservation());
         if (soulTask == null) return true;
         if (!soulTask.prepareBeforeStart(brazier)) {
@@ -1732,7 +1731,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (stack != null && !stack.isEmpty()) {
                 if (usingSharedLedger) {
                     // Shared ledger owns the refund — don't double-insert.
-                } else if (storageEndpoint() != null || network != null) {
+                } else if (storageEndpoint() != null || storageEndpoint() != null) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1759,7 +1758,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 if (usingSharedLedger) {
                     // Shared ledger will refund the original extraction — do NOT
                     // re-insert items into RS or we double-refund (dupe exploit).
-                } else if (refundToRS && (storageEndpoint() != null || network != null)) {
+                } else if (refundToRS && (storageEndpoint() != null || storageEndpoint() != null)) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1780,7 +1779,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                         if (!s.isEmpty()) {
                             if (usingSharedLedger) {
                                 // Shared ledger will refund — do not double-insert
-                            } else if (refundToRS && (storageEndpoint() != null || network != null)) {
+                            } else if (refundToRS && (storageEndpoint() != null || storageEndpoint() != null)) {
                                 ItemStack leftover = insertIntoStorage(player, s, false);
                                 if (!leftover.isEmpty()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1809,7 +1808,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = pendingRitualResult;
         pendingRitualResult = ItemStack.EMPTY;
         ItemStack remainder = result;
-        if (storageEndpoint() != null || network != null) {
+        if (storageEndpoint() != null || storageEndpoint() != null) {
             remainder = insertIntoStorage(player, result.copy(), false);
         }
         if (!remainder.isEmpty() && player != null) {

@@ -131,9 +131,9 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             if (storageEndpoint() == null) {
-                this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+                setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             }
-            if (network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -149,7 +149,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
             return tryStartWithMaterials(player, materials, ledger);
         }
     }
@@ -319,7 +319,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
             return;
         }
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         for (int i = 0; i < handler.getSlots(); i++) {
             ItemStack extracted = handler.extractItem(i, 64, false);

@@ -229,12 +229,11 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         // Later operations keep this batch's reusable catalysts installed.
         if (!pedestalCatalystsInstalled && pedestalLayout != null) {
             if (!hasStorageAccess()) {
-                network = CraftPacketUtils.resolveNetworkForCraft(
-                        player, level.dimension(), machinePos);
+                setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                        player, level.dimension(), machinePos).orElse(null));
             }
-            int recovered = storageEndpoint() != null
-                    ? ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, storageEndpoint())
-                    : ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, network);
+            int recovered = ArsPedestalRecovery.recover(
+                    level, pedestalLayout.pedestalPositions(), player, storageEndpoint());
             if (recovered > 0) {
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-ArsImbuement] Recovered {} occupied pedestal stack(s) into RS",
@@ -542,14 +541,14 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     private void refundRejectedStart(ServerPlayer player, ServerLevel level,
                                      List<ItemStack> materials) {
         if (!hasStorageAccess()) {
-            network = CraftPacketUtils.resolveNetworkForCraft(
-                    player, level.dimension(), machinePos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), machinePos).orElse(null));
         }
         for (ItemStack material : materials) {
             if (material == null || material.isEmpty()) continue;
             ItemStack remainder = insertIntoStorage(player, material, false);
             if (!remainder.isEmpty()) {
-                PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
             }
         }
         RSIntegrationMod.LOGGER.debug(
@@ -559,11 +558,11 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
 
     private void returnCatalyst(ServerPlayer player, ServerLevel level, ItemStack catalyst) {
         if (!hasStorageAccess()) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), machinePos).orElse(null));
         }
         ItemStack remainder = insertIntoStorage(player, catalyst, false);
         if (!remainder.isEmpty()) {
-            PlayerUtils.safeGiveToPlayer(player, remainder, network);
+            PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
         }
     }
 

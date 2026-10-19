@@ -86,13 +86,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean tryStartSingleCraft(ServerPlayer player) {
         this.player = player;
-        if (storageEndpoint() != null) {
-            // The endpoint is authoritative.  Do not re-resolve a native RS
-            // network here, otherwise a BD selection can silently switch back.
-            this.network = null;
-        } else {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
-            if (this.network != null) this.storageEndpoint = CraftStorageEndpoints.fromLegacyNetwork(this.network);
+        if (storageEndpoint() == null) {
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
         if (!acquireStaff(player)) return false;
         if (RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()
@@ -112,19 +107,19 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             }
             materials.add(stack);
         }
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             releaseNetworkStaff();
             return false;
         }
         if (!placeMaterials(materials)) {
             clearPlacedMaterials();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             releaseNetworkStaff();
             return false;
         }
         if (!invokeNativeStart()) {
             clearPlacedMaterials();
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             releaseNetworkStaff();
             return false;
         }
@@ -139,7 +134,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         // The chain already selected the storage endpoint.  Do not replace a
         // BD endpoint with a fresh RS lookup during graph dispatch.
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
         if (!acquireStaff(player)) return false;
         if (RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()
@@ -370,9 +365,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
                 LithumAltarStateReader.Snapshot snapshot = LithumAltarStateReader.read(level, pos);
                 if (snapshot != null && snapshot.maxEnergy() > 0
                         && snapshot.currentEnergy() < snapshot.maxEnergy()
-                        && !(storageEndpoint() != null
-                        ? fuelHelper.ensureFuel(level, storageEndpoint(), player)
-                        : fuelHelper.ensureFuel(level, network, player))) {
+                        && !fuelHelper.ensureFuel(level, storageEndpoint(), player)) {
                     warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
                 }
             }
@@ -447,15 +440,13 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearPlacedMaterials();
-        if (storageEndpoint() != null) fuelHelper.refundUnused(level, storageEndpoint(), player);
-        else fuelHelper.refundUnused(level, network, player);
+        fuelHelper.refundUnused(level, storageEndpoint(), player);
         releaseNetworkStaff();
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        if (storageEndpoint() != null) fuelHelper.refundUnused(level, storageEndpoint(), player);
-        else fuelHelper.refundUnused(level, network, player);
+        fuelHelper.refundUnused(level, storageEndpoint(), player);
         releaseNetworkStaff();
         pendingResult = ItemStack.EMPTY;
         clearedRecipeTicks = 0;

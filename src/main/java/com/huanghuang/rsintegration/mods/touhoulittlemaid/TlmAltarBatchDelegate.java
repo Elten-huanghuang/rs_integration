@@ -21,7 +21,6 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -346,7 +345,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         this.ledger = new ExtractionLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.craftEverConfirmed = false;
         this.usingSharedLedger = false;
@@ -358,7 +357,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -399,12 +398,12 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         // Phase 2: Commit BEFORE placing — commit failure means no items were
         // physically extracted, so there is nothing to clean up from machine slots.
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] Ledger commit failed");
             return false;
         }
         if (!applyReservedPowerTopUp(player)) {
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
 
@@ -461,7 +460,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.sharedLedger = sharedLedger;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.usingSharedLedger = true;
         this.craftEverConfirmed = false;
@@ -473,7 +472,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -672,14 +671,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         var item = ForgeRegistries.ITEMS.getValue(PP_ID);
         if (item == null) return false;
         ItemStack reserved = targetLedger.reserveExactAcrossNetworkAndInventory(
-                new ItemStack(item), needed, network, player);
+                new ItemStack(item), needed, storageEndpoint(), player);
         if (reserved.isEmpty()) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.tlm.error.insufficient_power",
                     String.format("%.1f", current), String.format("%.1f", cost)));
             return false;
         }
-        if (commitSeparately && !targetLedger.commit(network, player)) return false;
+        if (commitSeparately && !targetLedger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         powerTopUpLedger = commitSeparately ? targetLedger : null;
         powerBeforeTopUp = current;
@@ -731,7 +730,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             }
         }
         if (powerTopUpLedger != null && powerTopUpLedger.isCommitted()) {
-            powerTopUpLedger.refundCommitted(network, player);
+            powerTopUpLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
         clearPowerTopUpState();
     }
@@ -867,7 +866,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     if (!expected.isEmpty() && !ItemStack.isSameItemSameTags(stack, expected)) {
                         continue;
                     }
-                    if (storageEndpoint() != null || network != null) {
+                    if (storageEndpoint() != null || storageEndpoint() != null) {
                         ItemStack leftover = insertIntoStorage(player, stack, false);
                         if (!leftover.isEmpty()) {
                             ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -900,7 +899,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 ItemStack stack = handler.getStackInSlot(0);
                 if (!stack.isEmpty()) {
                     if (!usingSharedLedger && refundToRS) {
-                        if (storageEndpoint() != null || network != null) {
+                        if (storageEndpoint() != null || storageEndpoint() != null) {
                             ItemStack leftover = insertIntoStorage(player, stack, false);
                             if (!leftover.isEmpty()) {
                                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1046,10 +1045,14 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         for (ItemStack stack : player.getInventory().items) {
             if (isPowerPoint(stack)) count += stack.getCount();
         }
-        // Selected backend snapshot.  The RS cache fallback remains only for
-        // legacy callers that did not have an endpoint context.
-        if (endpoint != null) {
-            var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        CraftStorageEndpoint resolved = endpoint;
+        if (resolved == null && dim != null && pos != null) {
+            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
+            resolved = CraftPacketUtils.resolveEndpointForCraft(
+                    player, key, pos).orElse(null);
+        }
+        if (resolved != null) {
+            var snapshot = resolved.snapshot(player).snapshot().orElse(null);
             if (snapshot != null) {
                 for (var entry : snapshot.items()) {
                     if (isPowerPoint(entry.stack())) {
@@ -1057,24 +1060,6 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                                 (long) count + entry.amount());
                     }
                 }
-            }
-            return count;
-        }
-
-        // RS network
-        INetwork network = null;
-        if (dim != null && pos != null) {
-            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, dim);
-            network = CraftPacketUtils.resolveNetworkForCraft(player, key, pos);
-        }
-        if (network == null) {
-            network = RSIntegrationNetwork
-                    .resolveNetworkFromPlayer(player);
-        }
-        if (network != null) {
-            for (var entry : network.getItemStorageCache().getList().getStacks()) {
-                ItemStack stack = entry.getStack();
-                if (isPowerPoint(stack)) count += stack.getCount();
             }
         }
         return count;

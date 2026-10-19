@@ -18,7 +18,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -263,7 +262,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
 
@@ -283,7 +282,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -356,7 +355,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
         if (!checkCrucibleWater()) return false;
 
         // Phase 2: commit all extractions atomically
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Ledger commit failed");
             return false;
         }
@@ -442,7 +441,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
         }
 
         // Phase 2: Commit
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Worktable ledger commit failed");
             return false;
         }
@@ -519,7 +518,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
             return false;
         }
 
-        if (!ledger.commit(network, player)) {
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Ritual ledger commit failed");
             clearInstalledRitualInputs();
             return false;
@@ -976,7 +975,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
             if (current == null || current.isRemoved()) {
                 player.sendSystemMessage(Component.translatable("rsi.error.machine_missing"));
                 if (ledger != null && ledger.isCommitted()) {
-                    ledger.refundCommitted(network, player);
+                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 }
                 return false;
             }
@@ -1133,7 +1132,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     private void returnPendingRemainders(ServerPlayer player) {
         for (ItemStack remainder : pendingRemainders) {
             ItemStack leftover = insertIntoStorage(player, remainder.copy(), false);
-            if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, network);
+            if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());
         }
         pendingRemainders.clear();
     }
@@ -1357,7 +1356,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     private void refundAll() {
         ExtractionLedger activeLedger = usingSharedLedger && sharedLedger != null ? sharedLedger : ledger;
         if (activeLedger == null || !activeLedger.isCommitted()) return;
-        activeLedger.refundCommitted(network, player);
+        activeLedger.refundCommittedToEndpoint(storageEndpoint(), player);
     }
 
     // ── Plan warnings ─────────────────────────────────────────────

@@ -99,21 +99,20 @@ public final class NativeItemTaskSubmissionService {
             transactionEndpoint = null;
             network = null;
         }
-        return submitTransaction(task, data, player, transactionEndpoint, network,
+        return submitTransaction(task, data, player, transactionEndpoint,
                 (int) remaining, display);
     }
 
     /** Returns false only when no mutation occurred and FTB may safely retry natively. */
     private static boolean submitTransaction(ItemTask task, TeamData data, ServerPlayer player,
                                              @Nullable CraftStorageEndpoint endpoint,
-                                             @Nullable INetwork network, int count,
-                                             ItemStack display) {
+                                             int count, ItemStack display) {
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setStorageEndpoint(endpoint);
             int mark = ledger.reservationMark();
             Ingredient ingredient = new ItemTaskIngredient(task, display);
-            int reserved = ledger.reserveUpToFromMainInventoryThenNetwork(
-                    ingredient, count, player, network);
+            int reserved = ledger.reserveUpToFromMainInventoryThenEndpoint(
+                    ingredient, count, player, endpoint);
             if (reserved <= 0) {
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-FTBQuests] No ledger match for task={} endpoint={}; trying native inventory submission",
@@ -129,7 +128,7 @@ public final class NativeItemTaskSubmissionService {
             boolean committed;
             try (QuestInventorySubmissionContext.Scope ignored =
                          QuestInventorySubmissionContext.open()) {
-                committed = ledger.commit(network, player);
+                committed = ledger.commitToEndpoint(endpoint, player);
             }
             if (!committed) {
                 RSIntegrationMod.LOGGER.warn(
@@ -145,7 +144,7 @@ public final class NativeItemTaskSubmissionService {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-FTBQuests] Team data locked after reserving task {}; refunding {} item(s)",
                         FtbQuestObjectId.getId(task), reserved);
-                ledger.refundCommitted(token, network, player);
+                ledger.refundCommittedToEndpoint(token, endpoint, player);
                 return true;
             }
 
@@ -156,7 +155,7 @@ public final class NativeItemTaskSubmissionService {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-FTBQuests] Reservation exceeds task capacity task={} reserved={} before={} max={}",
                         FtbQuestObjectId.getId(task), reserved, before, task.getMaxProgress());
-                ledger.refundCommitted(token, network, player);
+                ledger.refundCommittedToEndpoint(token, endpoint, player);
                 sendMissing(player, display,
                         Math.max(0L, task.getMaxProgress() - before));
                 return true;
@@ -175,7 +174,7 @@ public final class NativeItemTaskSubmissionService {
                         "[RSI-FTBQuests] Transaction invariant failed for task {}: reserved={}, accepted={}",
                         FtbQuestObjectId.getId(task), reserved, accepted);
                 if (QuestProgressSettlement.shouldRefundRejectedProgress(accepted)) {
-                    ledger.refundCommitted(token, network, player);
+                    ledger.refundCommittedToEndpoint(token, endpoint, player);
                     sendMissing(player, display,
                             Math.max(0L, task.getMaxProgress() - after));
                     return true;

@@ -27,7 +27,6 @@ import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntit
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -169,7 +168,6 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
@@ -202,7 +200,7 @@ public final class WRWandCraftPacket {
             if (!checkWissen(player, be, recipe)) return false;
 
             // Phase 2: commit all extractions atomically
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for WissenCrystallizer");
                 return false;
             }
@@ -222,7 +220,7 @@ public final class WRWandCraftPacket {
                         try { rsi$setContainerItem(be, j, ItemStack.EMPTY); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback setContainerItem failed", ex); }
                     }
                 }
-                refundTemplates(network, endpoint, player, templates);
+                refundTemplates(endpoint, player, templates);
                 return false;
             }
 
@@ -238,7 +236,7 @@ public final class WRWandCraftPacket {
                         rsi$setContainerItem(be, i, ItemStack.EMPTY);
                     }
                 }
-                refundTemplates(network, endpoint, player, templates);
+                refundTemplates(endpoint, player, templates);
                 return false;
             }
         }
@@ -277,7 +275,6 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
@@ -299,7 +296,7 @@ public final class WRWandCraftPacket {
             if (!checkWissen(player, be, recipe)) return false;
 
             // Phase 2: commit all extractions atomically
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneIterator");
                 return false;
             }
@@ -320,7 +317,7 @@ public final class WRWandCraftPacket {
                     for (int j = 0; j < i; j++) {
                         try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", ex); }
                     }
-                    refundTemplates(network, endpoint, player, templates);
+                    refundTemplates(endpoint, player, templates);
                     return false;
                 }
             }
@@ -334,7 +331,7 @@ public final class WRWandCraftPacket {
                 for (int i = 0; i < templates.size(); i++) {
                     try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception exc) { RSIntegrationMod.LOGGER.debug("[RSI-WR] rollback pedestal clear failed", exc); }
                 }
-                refundTemplates(network, endpoint, player, templates);
+                refundTemplates(endpoint, player, templates);
                 return false;
             }
         }
@@ -378,7 +375,6 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
@@ -415,7 +411,7 @@ public final class WRWandCraftPacket {
             if (!checkWissen(player, be, recipe)) return false;
 
             // Phase 2: commit all extractions atomically
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for ArcaneWorkbench");
                 return false;
             }
@@ -440,7 +436,7 @@ public final class WRWandCraftPacket {
                         itemHandler.setStackInSlot(i, ItemStack.EMPTY);
                     }
                 }
-                refundTemplates(network, endpoint, player, templates);
+                refundTemplates(endpoint, player, templates);
                 return false;
             }
         }
@@ -517,7 +513,6 @@ public final class WRWandCraftPacket {
 
         if (!tryAutoCraftMissing(player, ingredients, dim, pos, endpoint)) return false;
 
-        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
 
         List<ItemStack> templates = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
@@ -551,7 +546,7 @@ public final class WRWandCraftPacket {
             if (!checkWissen(player, be, recipe)) return false;
 
             // Phase 2: commit all extractions atomically
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-WR] Ledger commit failed for CrystalRitual");
                 return false;
             }
@@ -577,7 +572,7 @@ public final class WRWandCraftPacket {
                             try { rsi$setContainerItem(pedestals.get(j), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(j)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                         }
                     }
-                    refundTemplates(network, endpoint, player, templates);
+                    refundTemplates(endpoint, player, templates);
                     return false;
                 }
             }
@@ -594,7 +589,7 @@ public final class WRWandCraftPacket {
                         try { rsi$setContainerItem(pedestals.get(i), 0, ItemStack.EMPTY); rsi$syncBlockEntity(pedestals.get(i)); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
                     }
                 }
-                refundTemplates(network, endpoint, player, templates);
+                refundTemplates(endpoint, player, templates);
                 player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_start"));
                 return false;
             }
@@ -630,7 +625,7 @@ public final class WRWandCraftPacket {
                 : CraftPacketUtils.ensureMaterialAvailable(player, altarDim, altarPos, ingredient, count, ledger);
     }
 
-    private static void refundTemplates(INetwork network, @Nullable CraftStorageEndpoint endpoint,
+    private static void refundTemplates(@Nullable CraftStorageEndpoint endpoint,
                                         ServerPlayer player, List<ItemStack> templates) {
         for (ItemStack t : templates) {
             if (t.isEmpty()) continue;
@@ -638,12 +633,6 @@ public final class WRWandCraftPacket {
             if (endpoint != null) {
                 ItemStack leftover = endpoint.insert(player, refund, false).remainder().orElse(ItemStack.EMPTY);
                 if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            } else if (network != null) {
-                ItemStack leftover = CraftStorageEndpoints
-                        .insertLegacy(network, player, refund, false);
-                if (!leftover.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                }
             } else {
                 ItemHandlerHelper.giveItemToPlayer(player, refund);
             }
@@ -669,10 +658,9 @@ public final class WRWandCraftPacket {
         }
         if (filtered.isEmpty()) return true;
 
-        INetwork network = endpoint == null ? CraftPacketUtils.resolveNetworkForCraft(player, dim, pos) : null;
         Map<StackKey, Integer> available = endpoint != null
                 ? MaterialSources.listAllAvailable(player, endpoint)
-                : MaterialSources.listAllAvailable(player, network);
+                : MaterialSources.listAllAvailable(player, endpoint);
 
         List<String> missing = new ArrayList<>();
         List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForIngredients(
@@ -693,7 +681,7 @@ public final class WRWandCraftPacket {
             return false;
         }
 
-        if (!autoSteps.isEmpty() && (network != null || endpoint != null)) {
+        if (!autoSteps.isEmpty() && (endpoint != null)) {
             player.displayClientMessage(
                     Component.translatable("rsi.generic.info.auto_crafting", autoSteps.size()), true);
             List<CraftingResolver.ResolutionStep> wrapped = new ArrayList<>();
@@ -701,7 +689,7 @@ public final class WRWandCraftPacket {
                 wrapped.add(new CraftingResolver.ResolutionStep(id, ModType.GENERIC,
                         new ResourceLocation("minecraft:crafting")));
             }
-            if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, network, endpoint)) {
+            if (!CraftPacketUtils.executeCraftingSteps(player, wrapped, endpoint)) {
                 player.displayClientMessage(
                         Component.translatable("rsi.generic.error.auto_craft_failed"), true);
                 return false;

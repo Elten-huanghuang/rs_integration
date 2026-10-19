@@ -13,7 +13,6 @@ import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -70,8 +69,6 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     private int resonanceToolSlot = -1;
     @Nullable
     private CraftStorageEndpoint toolReturnEndpoint;
-    @Nullable
-    private INetwork toolReturnNetwork;
 
     public record ToolPlanCheck(List<Component> warnings, boolean blocksExecution) {
         public ToolPlanCheck {
@@ -107,7 +104,6 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.resonanceToolView = null;
         this.resonanceToolSlot = -1;
         this.toolReturnEndpoint = null;
-        this.toolReturnNetwork = null;
         return true;
     }
 
@@ -215,9 +211,9 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger local = new ExtractionLedger()) {
             if (storageEndpoint() == null) {
-                network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+                setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             }
-            if (network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             local.setStorageEndpoint(storageEndpoint());
             configureMaterialReservation(local, player);
             for (IngredientSpec spec : specs) {
@@ -226,7 +222,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 if (stack.isEmpty()) return false;
                 materials.add(stack.copyWithCount(spec.count()));
             }
-            if (!local.commit(network, player)) return false;
+            if (!local.commitToEndpoint(storageEndpoint(), player)) return false;
             usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, local)) {
                 for (ItemStack stack : materials) {
@@ -252,7 +248,6 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = sharedLedger.storageEndpoint();
-        toolReturnNetwork = network;
         craftDone = false;
 
         BlockEntity board = myLevel.getBlockEntity(myPos);
@@ -339,19 +334,15 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             resonanceToolView.markDirty(player);
         }
         CraftStorageEndpoint endpoint = toolReturnEndpoint;
-        if (endpoint == null && toolReturnNetwork != null) {
-            endpoint = CraftStorageEndpoints.fromLegacyNetwork(toolReturnNetwork);
-        }
         if (!leftover.isEmpty() && endpoint != null) {
             leftover = endpoint.insert(player, leftover, false)
                     .remainder().orElse(ItemStack.EMPTY);
         }
-        if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, toolReturnNetwork);
+        if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
         reusableTool = ItemStack.EMPTY;
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
-        toolReturnNetwork = null;
     }
 
     @Override
@@ -373,7 +364,6 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
-        toolReturnNetwork = null;
         craftDone = false;
         resetState();
     }

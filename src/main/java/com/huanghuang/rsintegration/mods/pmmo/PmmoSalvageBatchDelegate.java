@@ -156,7 +156,7 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         done = false;
         ledger = null;
         sharedLedger = null;
-        network = null;
+        setStorageEndpoint(null);
         usingSharedLedger = false;
     }
 

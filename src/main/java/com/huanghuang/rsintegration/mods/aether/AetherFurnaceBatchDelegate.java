@@ -21,7 +21,6 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -242,11 +241,11 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             if (storageEndpoint() == null) {
-                this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+                setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             } else {
-                this.network = null;
+                setStorageEndpoint(null);
             }
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -259,7 +258,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterialsImpl(player, materials, false)) {
@@ -284,7 +283,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.usingSharedLedger = shared;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
 
         if (!myLevel.hasChunkAt(myPos)) return false;

@@ -1,8 +1,12 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -104,6 +108,18 @@ public final class CraftStorageEndpoints {
             if (resolved.isPresent()) return resolved;
         }
         return Optional.empty();
+    }
+
+    /** Resolves an explicit machine binding without leaking its native storage type. */
+    public static Optional<CraftStorageEndpoint> resolveBinding(
+            @Nonnull ServerPlayer player,
+            @Nullable ResourceKey<Level> dimension,
+            @Nullable BlockPos position) {
+        if (dimension == null || position == null) return Optional.empty();
+        INetwork network = RSAltarBindingResolver.resolveNetworkForAltar(
+                player, dimension, position);
+        return network == null ? Optional.empty()
+                : Optional.of(fromLegacyNetwork(network));
     }
 
     /** Resolves a persisted backend-qualified reference without exposing native backend types. */

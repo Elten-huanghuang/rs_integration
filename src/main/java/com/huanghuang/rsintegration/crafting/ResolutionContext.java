@@ -13,7 +13,6 @@ import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.util.Diagnostics;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -89,7 +88,7 @@ final class ResolutionContext {
     private Map<String, ItemStack> materialLocks = Map.of();
     final Set<ResourceLocation> activeForcedRecipes = new HashSet<>();
     @Nullable final ServerPlayer player;
-    @Nullable final INetwork network;
+    @Nullable final CraftStorageEndpoint storageEndpoint;
     final boolean bestEffort;
     boolean strictCandidatePass;
     boolean bestEffortFallbackPass;
@@ -121,8 +120,8 @@ final class ResolutionContext {
                       List<ItemStack> available,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
-                      @Nullable INetwork network) {
-        this(level, index, available, preferredRecipes, null, player, network);
+                      @Nullable CraftStorageEndpoint storageEndpoint) {
+        this(level, index, available, preferredRecipes, null, player, storageEndpoint);
     }
 
     ResolutionContext(Level level,
@@ -131,7 +130,7 @@ final class ResolutionContext {
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
-                      @Nullable INetwork network) {
+                      @Nullable CraftStorageEndpoint storageEndpoint) {
         this.level = level;
         this.index = index;
         this.reusableCatalystRoutes = level == null
@@ -142,7 +141,7 @@ final class ResolutionContext {
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
-        this.network = network;
+        this.storageEndpoint = storageEndpoint;
         this.deadlineNanos = resolveDeadlineNanos();
         this.abortOnTimeout = false;
         this.bestEffort = false;
@@ -180,10 +179,10 @@ final class ResolutionContext {
                       Map<CraftingResolver.StackKey, Integer> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
-                      @Nullable INetwork network,
+                      @Nullable CraftStorageEndpoint storageEndpoint,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
-        this(level, index, keyedCounts, preferredRecipes, null, player, network,
+        this(level, index, keyedCounts, preferredRecipes, null, player, storageEndpoint,
                 bestEffort, missingOut, resolveDeadlineNanos(), false);
     }
 
@@ -193,10 +192,10 @@ final class ResolutionContext {
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
-                      @Nullable INetwork network,
+                      @Nullable CraftStorageEndpoint storageEndpoint,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
-        this(level, index, keyedCounts, preferredRecipes, forcedRecipes, player, network,
+        this(level, index, keyedCounts, preferredRecipes, forcedRecipes, player, storageEndpoint,
                 bestEffort, missingOut, resolveDeadlineNanos(), false);
     }
 
@@ -206,7 +205,7 @@ final class ResolutionContext {
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
-                      @Nullable INetwork network,
+                      @Nullable CraftStorageEndpoint storageEndpoint,
                       boolean bestEffort,
                       @Nullable List<String> missingOut,
                       long deadlineNanos,
@@ -221,7 +220,7 @@ final class ResolutionContext {
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
         this.player = player;
-        this.network = network;
+        this.storageEndpoint = storageEndpoint;
         this.deadlineNanos = deadlineNanos;
         this.abortOnTimeout = abortOnTimeout;
         this.bestEffort = bestEffort;

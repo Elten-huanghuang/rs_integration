@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftFluidRecovery;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerTransfer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -62,7 +63,8 @@ public final class UnifiedGridFluidTransfer {
     /** 混合终端与原生流体终端共用结算，异常余量封装为退款物品。 */
     public static void apply(ServerPlayer player, INetwork network, Result result, boolean filling, boolean shift) {
         if (!result.recovery().isEmpty()) {
-            CraftFluidRecovery.retain(player, InkFluidSupport.token(result.recovery()), network);
+            CraftFluidRecovery.retainToEndpoint(player, InkFluidSupport.token(result.recovery()),
+                    CraftStorageEndpoints.fromLegacyNetwork(network));
             RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已封装为退款物品", result.recovery().getAmount());
         }
         player.containerMenu.setCarried(result.cursor());

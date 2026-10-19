@@ -61,8 +61,8 @@ class NativeSubmissionHookTest {
                 "automatic reward/reset must be deferred during item settlement");
         assertFalse(config.contains("ftbquests.ItemTaskSubmissionMixin"),
                 "ItemTask.submitTask is also called by automatic inventory detection");
-        assertTrue(service.contains("reserveUpToFromMainInventoryThenNetwork"),
-                "one transaction must own inventory-first and RS-fallback consumption");
+        assertTrue(service.contains("reserveUpToFromMainInventoryThenEndpoint"),
+                "one transaction must own inventory-first and storage-fallback consumption");
         assertTrue(service.contains("QuestInventorySubmissionContext.open()"),
                 "only RSI's physical settlement may suppress inventory-listener re-entry");
         assertTrue(service.contains("reason=no-display-item"),
@@ -103,8 +103,9 @@ class NativeSubmissionHookTest {
 
         assertFalse(service.contains("if (endpoint == null)"),
                 "JEI quest preview and execution must keep inventory-only planning available");
-        assertTrue(escrow.contains("network != null\n                ? ledger.reserveFromNetwork"),
-                "network reservation must only run when a network exists");
+        assertTrue(escrow.contains("endpoint == null ? ItemStack.EMPTY\n"
+                        + "                : ledger.reserveFromEndpoint"),
+                "storage reservation must only run when an endpoint exists");
         assertTrue(escrow.contains("ledger.reserveFromInventory"),
                 "inventory reservation must remain the no-network fallback");
     }

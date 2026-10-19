@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -231,9 +233,9 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     Component.translatable("rsi.ironfurnaces.error.factory_no_energy"));
         }
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, target.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, target.dimension(), pos).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
         this.factoryMode = ironFurnace.isFactory();
         this.rainbowMode = ironFurnace.isRainbowFurnace();
@@ -336,7 +338,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     CraftPacketUtils.describeIngredient(input)));
             return false;
         }
-        if (commit && !activeLedger.commit(network, player)) return false;
+        if (commit && !activeLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         return startQueuedMaterials(List.of(material));
     }
 
@@ -527,10 +529,10 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private void resolveNetwork(ServerPlayer player) {
         this.player = player;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
-            if (network == null) network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
+            if (storageEndpoint() == null) setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
     }
 
@@ -593,8 +595,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                 candidates.add(stack.copyWithCount((int) amount));
             }
         } else {
-            if (network == null) return false;
-            for (var entry : network.getItemStorageCache().getList().getStacks()) candidates.add(entry.getStack());
+            return false;
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),

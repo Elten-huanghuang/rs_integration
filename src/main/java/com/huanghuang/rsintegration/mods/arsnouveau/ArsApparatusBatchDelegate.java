@@ -241,11 +241,10 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         // Ars refuses to start while any scanned pedestal contains an old item.
         // Recover every stale stack before placing this operation's materials.
         if (!hasStorageAccess()) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), machinePos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), machinePos).orElse(null));
         }
-        int recovered = storageEndpoint() != null
-                ? ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, storageEndpoint())
-                : ArsPedestalRecovery.recover(level, pedestalLayout.pedestalPositions(), player, network);
+        int recovered = ArsPedestalRecovery.recover(
+                level, pedestalLayout.pedestalPositions(), player, storageEndpoint());
         if (recovered > 0) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-ArsApparatus] Recovered {} occupied pedestal stack(s) into RS",
@@ -580,14 +579,14 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
                                      List<ItemStack> materials) {
         if (!ownsRejectedStartRefund(usingSharedLedger)) return;
         if (!hasStorageAccess()) {
-            network = CraftPacketUtils.resolveNetworkForCraft(
-                    player, level.dimension(), machinePos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), machinePos).orElse(null));
         }
         for (ItemStack material : materials) {
             if (material == null || material.isEmpty()) continue;
             ItemStack remainder = insertIntoStorage(player, material, false);
             if (!remainder.isEmpty()) {
-                PlayerUtils.safeGiveToPlayer(player, remainder, network);
+                PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
             }
         }
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Refunded {} material stack(s) after rejected start",
@@ -598,11 +597,11 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
                                            ItemStack stack) {
         if (stack.isEmpty()) return;
         if (!hasStorageAccess()) {
-            network = CraftPacketUtils.resolveNetworkForCraft(
-                    player, level.dimension(), machinePos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), machinePos).orElse(null));
         }
         ItemStack remainder = insertIntoStorage(player, stack, false);
-        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+        if (!remainder.isEmpty()) PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
     }
 
     static boolean ownsRejectedStartRefund(boolean usingSharedLedger) {

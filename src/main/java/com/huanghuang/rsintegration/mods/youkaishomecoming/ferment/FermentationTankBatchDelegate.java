@@ -10,7 +10,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -160,8 +159,8 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -174,7 +173,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -1037,9 +1036,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     private boolean ensureWater(BlockEntity be, IFluidHandler fluidHandler, int deficitMb) {
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
-        if (this.network == null && storageEndpoint() == null) {
+        if (storageEndpoint() == null && storageEndpoint() == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Ferment] No network, cannot get water");
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.ferment_water_warning"));
             return false;
@@ -1074,38 +1073,6 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             }
         }
         return 250; // default: YHK bottles hold 250mb
-    }
-
-    /** Find a water-compatible fluid holder in the RS network. */
-    private static ItemStack findWaterHolder(INetwork network) {
-        for (var entry : network.getItemStorageCache().getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (stack.isEmpty()) continue;
-            // Check if it's a water bottle or water bucket
-            if (stack.is(Items.WATER_BUCKET)
-                    || stack.is(Items.POTION)) // water bottle
-                return stack;
-            // Check for YHK fluid holders (getFluid() returns a YHFluid, not an enum)
-            if (YHKReflection.yhFluidHolderClass != null
-                    && YHKReflection.yhFluidHolderClass.isInstance(stack.getItem())) {
-                try {
-                    Method getFluid = stack.getItem().getClass().getMethod("getFluid");
-                    Object fluid = getFluid.invoke(stack.getItem());
-                    if (fluid != null && YHKReflection.yhFluidClass != null
-                            && YHKReflection.yhFluidClass.isInstance(fluid)) {
-                        // Check if this YHFluid represents water by reading its type
-                        if (yhFluidTypeField != null) {
-                            Object typeHolder = yhFluidTypeField.get(fluid);
-                            if (typeHolder != null && holderAmountMethod != null) {
-                                // It's a fluid holder — accept it as a water source
-                                return stack;
-                            }
-                        }
-                    }
-                } catch (Exception ignored) { /* not a fluid holder or wrong type */ }
-            }
-        }
-        return ItemStack.EMPTY;
     }
 
     private static ItemStack findWaterHolder(CraftStorageEndpoint endpoint,

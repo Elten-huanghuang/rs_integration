@@ -24,7 +24,6 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
@@ -212,14 +211,14 @@ public final class CraftingResolver {
             List<ItemStack> available,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut) {
         ResolutionContext ctx = new ResolutionContext(level,
                 RecipeIndex.get(level),
                 available,
                 buildPreferredRecipes(level),
                 player,
-                network);
+                storageEndpoint);
 
         EdgeTracker edges = new EdgeTracker();
         for (Ingredient ing : needed) {
@@ -238,10 +237,10 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut) {
         return resolveStepsForIngredientsWithTypes(needed, availableKeyed, level,
-                player, network, missingOut, null);
+                player, storageEndpoint, missingOut, null);
     }
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
@@ -249,11 +248,11 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides) {
         return resolveStepsForIngredientsWithTypes(needed, availableKeyed, level,
-                player, network, missingOut, forcedOverrides, false);
+                player, storageEndpoint, missingOut, forcedOverrides, false);
     }
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
@@ -261,7 +260,7 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
@@ -272,7 +271,7 @@ public final class CraftingResolver {
                 prefs,
                 forcedOverrides,
                 player,
-                network,
+                storageEndpoint,
                 bestEffort,
                 missingOut);
 
@@ -302,7 +301,7 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
@@ -313,7 +312,7 @@ public final class CraftingResolver {
                 prefs,
                 forcedOverrides,
                 player,
-                network,
+                storageEndpoint,
                 bestEffort,
                 missingOut);
 
@@ -336,11 +335,11 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, false, -1, null, Map.of());
     }
 
@@ -349,12 +348,12 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
             int timeoutMs) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, false, timeoutMs, null, Map.of());
     }
 
@@ -363,24 +362,24 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
             int timeoutMs,
             ActiveRootRecipe activeRoot) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, false, timeoutMs, activeRoot, Map.of());
     }
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed, Map<StackKey, Integer> availableKeyed,
-            Level level, @Nullable ServerPlayer player, @Nullable INetwork network,
+            Level level, @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, false, timeoutMs, activeRoot, materialLocks);
     }
 
@@ -395,11 +394,11 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, true, -1, null, Map.of());
     }
 
@@ -408,12 +407,12 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
             int timeoutMs) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, true, timeoutMs, null, Map.of());
     }
 
@@ -422,24 +421,24 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
             int timeoutMs,
             ActiveRootRecipe activeRoot) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, true, timeoutMs, activeRoot, Map.of());
     }
 
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
             List<IngredientSpec> needed, Map<StackKey, Integer> availableKeyed,
-            Level level, @Nullable ServerPlayer player, @Nullable INetwork network,
+            Level level, @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, true, timeoutMs, activeRoot, materialLocks);
     }
 
@@ -448,7 +447,7 @@ public final class CraftingResolver {
             Map<StackKey, Integer> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort,
@@ -456,24 +455,24 @@ public final class CraftingResolver {
             int timeoutMs,
             @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks) {
-        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, network,
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, bestEffort, singleVariantRoots, timeoutMs,
                 activeRoot, materialLocks, Set.of());
     }
 
     /** 补做原料沿用同一规划器，并排除当前等待中的生产步骤以阻断跨轮次循环。 */
     static CraftPlanGraph resolveSupplementalGraph(List<IngredientSpec> needed,
-            Map<StackKey, Integer> available, Level level, ServerPlayer player, INetwork network,
+            Map<StackKey, Integer> available, Level level, ServerPlayer player, CraftStorageEndpoint storageEndpoint,
             List<String> missing, Set<ResourceLocation> excludedRecipes,
             Map<ResourceLocation, ResourceLocation> forcedRecipes, Map<String, ItemStack> materialLocks,
             ActiveRootRecipe activeRoot) {
-        return resolveGraphForSpecsWithTypes(needed, available, level, player, network, missing,
+        return resolveGraphForSpecsWithTypes(needed, available, level, player, storageEndpoint, missing,
                 forcedRecipes, false, true, 50, activeRoot, materialLocks, excludedRecipes);
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed, Map<StackKey, Integer> availableKeyed, Level level,
-            @Nullable ServerPlayer player, @Nullable INetwork network, @Nullable List<String> missingOut,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint, @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes) {
@@ -481,10 +480,10 @@ public final class CraftingResolver {
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         ResolutionContext ctx = timeoutMs > 0
                 ? new ResolutionContext(level, index, availableKeyed,
-                        prefs, forcedOverrides, player, network, bestEffort, missingOut,
+                        prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut,
                         ResolutionContext.deadlineAfterMillis(timeoutMs), true)
                 : new ResolutionContext(level, index, availableKeyed,
-                        prefs, forcedOverrides, player, network, bestEffort, missingOut);
+                        prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut);
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         ctx.withMaterialLocks(materialLocks);
         EdgeTracker edges = new EdgeTracker();
@@ -591,12 +590,12 @@ public final class CraftingResolver {
             Map<StackKey, Integer> available,
             Level level,
             @Nullable ServerPlayer player,
-            @Nullable INetwork network,
+            @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut) {
         return resolveStepsForIngredientsWithTypes(
                 needed.stream().map(s -> ingredientOf(s, s.hasTag())).collect(Collectors.toList()),
                 available,
-                level, player, network, missingOut);
+                level, player, storageEndpoint, missingOut);
     }
 
     static boolean ensureIngredient(Ingredient ingredient, int count, ResolutionContext ctx, int depth,

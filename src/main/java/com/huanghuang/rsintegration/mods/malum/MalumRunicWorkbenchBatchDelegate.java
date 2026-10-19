@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -116,10 +115,10 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         this.usingSharedLedger = false;
         this.craftDone = false;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.ledger.setStorageEndpoint(storageEndpoint());
-        if (network == null && !hasStorageAccess()) return false;
+        if (storageEndpoint() == null && !hasStorageAccess()) return false;
 
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
@@ -148,7 +147,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         }
 
         // Phase 2: commit
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
         // Phase 3: execute craft
         // Place primary on workbench
@@ -188,7 +187,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         this.usingSharedLedger = true;
         if (sharedLedger != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
         this.craftDone = false;
 
@@ -367,10 +366,10 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
 
     private void returnStrayItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (storageEndpoint() == null && network == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
+        if (storageEndpoint() == null && storageEndpoint() == null) {
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
-        if (storageEndpoint() != null || network != null) {
+        if (storageEndpoint() != null || storageEndpoint() != null) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -382,7 +381,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
 
     private void refundItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (ledger != null && ledger.isCommitted() && (storageEndpoint() != null || network != null)) {
+        if (ledger != null && ledger.isCommitted() && (storageEndpoint() != null || storageEndpoint() != null)) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -395,7 +394,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     private void reset() {
         expectedOutput = ItemStack.EMPTY;
         craftDone = false;
-        network = null;
+        setStorageEndpoint(null);
         itemHandler = null;
     }
 }

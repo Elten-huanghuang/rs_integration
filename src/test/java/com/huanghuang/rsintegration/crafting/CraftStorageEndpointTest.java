@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
+import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StoragePermission;
@@ -10,6 +11,11 @@ import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -18,10 +24,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftStorageEndpointTest extends BootstrapTest {
     @Test
@@ -48,7 +56,25 @@ class CraftStorageEndpointTest extends BootstrapTest {
                 "BD endpoint must not be reinterpreted as an RS INetwork");
     }
 
-    private static final class RecordingSession implements StorageSession {
+    @Test
+    void delegatesAvailabilityAndFallbackLocation() {
+        StorageNetworkLocation location = new StorageNetworkLocation(
+                ResourceKey.create(Registries.DIMENSION,
+                        new ResourceLocation("minecraft", "overworld")),
+                new BlockPos(12, 64, -3));
+        StorageSession session = new RecordingSession() {
+            @Override public boolean isAvailable() { return true; }
+            @Override public Optional<StorageNetworkLocation> location() {
+                return Optional.of(location);
+            }
+        };
+        CraftStorageEndpoint endpoint = new SessionCraftStorageEndpoint(session);
+
+        assertTrue(endpoint.isAvailable());
+        assertEquals(Optional.of(location), endpoint.location());
+    }
+
+    private static class RecordingSession implements StorageSession {
         private final StorageReference reference;
 
         private RecordingSession() {

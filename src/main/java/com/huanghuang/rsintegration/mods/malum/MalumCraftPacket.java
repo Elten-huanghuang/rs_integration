@@ -21,7 +21,6 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -180,14 +179,11 @@ public final class MalumCraftPacket {
                 recipeId, centerCount, extraCount, spiritCount, emptyPedestalSlots);
 
         // -- Phase 2: reserve all items (deferred extraction via ledger) --
-        CraftStorageEndpoint endpoint = StorageRestockSupport
-                .resolve(player).orElse(null);
-        INetwork network = endpoint == null
-                ? CraftPacketUtils.resolveNetworkForCraft(player, altarDim, pos) : null;
+        CraftStorageEndpoint endpoint = CraftPacketUtils.resolveEndpointForCraft(
+                player, altarDim, pos).orElse(null);
         List<Integer> filledPedestalIndices = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setStorageEndpoint(endpoint);
-            if (endpoint == null && network != null) ledger.setStorageEndpoint(CraftStorageEndpoints.fromLegacyNetwork(network));
             try {
                 // 1. Center item -> altar inventory slot 0
                 if (inputObj != null) {
@@ -196,7 +192,7 @@ public final class MalumCraftPacket {
                         ItemStack stack = endpoint != null
                                 ? ledger.reserveFromEndpoint(centerIng, centerCount, endpoint, player)
                                 : CraftPacketUtils.ensureMaterialAvailable(
-                                player, altarDim, pos, centerIng, centerCount, ledger, network);
+                                player, altarDim, pos, centerIng, centerCount, ledger, endpoint);
                         if (stack.isEmpty()) {
                             player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                     CraftPacketUtils.describeIngredient(centerIng)));
@@ -216,7 +212,7 @@ public final class MalumCraftPacket {
                     ItemStack stack = endpoint != null
                             ? ledger.reserveFromEndpoint(ing, itemCount, endpoint, player)
                             : CraftPacketUtils.ensureMaterialAvailable(
-                            player, altarDim, pos, ing, itemCount, ledger, network);
+                            player, altarDim, pos, ing, itemCount, ledger, endpoint);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                 CraftPacketUtils.describeIngredient(ing)));
@@ -238,7 +234,7 @@ public final class MalumCraftPacket {
                     ItemStack stack = endpoint != null
                             ? ledger.reserveFromEndpoint(spiritIng, sCount, endpoint, player)
                             : CraftPacketUtils.ensureMaterialAvailable(
-                            player, altarDim, pos, spiritIng, sCount, ledger, network);
+                            player, altarDim, pos, spiritIng, sCount, ledger, endpoint);
                     if (stack.isEmpty()) {
                         player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
                                 CraftPacketUtils.describeIngredient(spiritIng)));
@@ -258,7 +254,7 @@ public final class MalumCraftPacket {
             }
 
             // Commit all extractions atomically
-            if (!ledger.commit(network, player)) {
+            if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-Malum] Ledger commit failed for recipe {}", recipeId);
                 clearAltarSlots(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount);
                 clearPedestalsByIndex(pedestals, filledPedestalIndices);
@@ -280,8 +276,8 @@ public final class MalumCraftPacket {
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Malum] craft(Recipe) threw for recipe {}:", recipeId, e);
                 player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
-                refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, endpoint, player);
-                refundAndClearPedestals(pedestals, filledPedestalIndices, network, endpoint, player);
+                refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, endpoint, player);
+                refundAndClearPedestals(pedestals, filledPedestalIndices, endpoint, player);
                 return;
             }
 
@@ -292,8 +288,8 @@ public final class MalumCraftPacket {
                 } catch (Exception e) {
                     RSIntegrationMod.LOGGER.error("[RSI-Malum] craft() threw for recipe {}:", recipeId, e);
                     player.sendSystemMessage(Component.translatable("rsi.malum.error.start_failed"));
-                    refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, network, endpoint, player);
-                    refundAndClearPedestals(pedestals, filledPedestalIndices, network, endpoint, player);
+                    refundAndClearAltar(invMain, invSpirit, inputObj != null ? 1 : 0, spiritCount, endpoint, player);
+                    refundAndClearPedestals(pedestals, filledPedestalIndices, endpoint, player);
                     return;
                 }
 
@@ -348,26 +344,18 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearAltar(Object invMain, Object invSpirit, int mainSlots, int spiritSlots,
-                                            INetwork network, @Nullable CraftStorageEndpoint endpoint,
+                                            @Nullable CraftStorageEndpoint endpoint,
                                             ServerPlayer player) {
         for (int i = 0; i < mainSlots; i++) {
             try {
                 ItemStack stack = (ItemStack) invMain.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(invMain, i);
                 if (!stack.isEmpty()) {
-                    if (endpoint != null || network != null) {
-                        if (endpoint != null) {
-                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        } else {
-                        ItemStack leftover = CraftStorageEndpoints
-                                .insertLegacy(network, player, stack.copy(), false);
-                        if (!leftover.isEmpty() && player != null) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                        }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                    ItemStack leftover = endpoint == null ? stack.copy()
+                            : endpoint.insert(player, stack.copy(), false)
+                            .remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty() && player != null) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
                     setIHandlerSlot(invMain, i, ItemStack.EMPTY);
                 }
@@ -378,19 +366,11 @@ public final class MalumCraftPacket {
                 ItemStack stack = (ItemStack) invSpirit.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
                 if (!stack.isEmpty()) {
-                    if (endpoint != null || network != null) {
-                        if (endpoint != null) {
-                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        } else {
-                        ItemStack leftover = CraftStorageEndpoints
-                                .insertLegacy(network, player, stack.copy(), false);
-                        if (!leftover.isEmpty() && player != null) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                        }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                    ItemStack leftover = endpoint == null ? stack.copy()
+                            : endpoint.insert(player, stack.copy(), false)
+                            .remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty() && player != null) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
                     setIHandlerSlot(invSpirit, i, ItemStack.EMPTY);
                 }
@@ -399,7 +379,7 @@ public final class MalumCraftPacket {
     }
 
     private static void refundAndClearPedestals(List<?> pedestals, List<Integer> indices,
-                                                 INetwork network, @Nullable CraftStorageEndpoint endpoint,
+                                                 @Nullable CraftStorageEndpoint endpoint,
                                                  ServerPlayer player) {
         for (int idx : indices) {
             if (idx < 0 || idx >= pedestals.size()) continue;
@@ -410,19 +390,11 @@ public final class MalumCraftPacket {
                 ItemStack stack = (ItemStack) inv.getClass()
                         .getMethod("getStackInSlot", int.class).invoke(inv, 0);
                 if (!stack.isEmpty()) {
-                    if (endpoint != null || network != null) {
-                        if (endpoint != null) {
-                            ItemStack leftover = endpoint.insert(player, stack.copy(), false).remainder().orElse(ItemStack.EMPTY);
-                            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        } else {
-                        ItemStack leftover = CraftStorageEndpoints
-                                .insertLegacy(network, player, stack.copy(), false);
-                        if (!leftover.isEmpty() && player != null) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                        }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack.copy());
+                    ItemStack leftover = endpoint == null ? stack.copy()
+                            : endpoint.insert(player, stack.copy(), false)
+                            .remainder().orElse(ItemStack.EMPTY);
+                    if (!leftover.isEmpty() && player != null) {
+                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
                     }
                 }
                 inv.getClass().getMethod("setStackInSlot", int.class, ItemStack.class)

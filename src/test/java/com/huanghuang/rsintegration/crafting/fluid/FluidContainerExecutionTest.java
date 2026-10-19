@@ -284,9 +284,9 @@ class FluidContainerExecutionTest extends BootstrapTest {
         ExtractionLedger ledger = new ExtractionLedger();
         assertEquals(1, ledger.reserveFromEndpoint(bucketSpec.ingredient(), 1, () -> session, player).getCount());
         assertEquals(1000, ledger.reserveFromEndpoint(waterSpec.ingredient(), 1000, () -> session, player).getCount());
-        assertFalse(ledger.commit(null, player));
-        ledger.refundCommitted(null, player);
-        ledger.refundCommitted(null, player);
+        assertFalse(ledger.commitToEndpoint(null, player));
+        ledger.refundCommittedToEndpoint(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertEquals(2, refunded.size());
         assertTrue(refunded.get(0).is(Items.BUCKET));
         assertEquals(600, InkFluidSupport.fluid(refunded.get(1)).getAmount());

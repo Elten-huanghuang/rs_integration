@@ -20,24 +20,20 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     private final ExtractionLedger ledger = new ExtractionLedger();
     private final List<Entry> entries = new ArrayList<>();
     private final ServerPlayer player;
-    private final INetwork network;
     private final CraftStorageEndpoint endpoint;
     private boolean committed;
 
     QuestSubmissionEscrow(ServerPlayer player, CraftStorageEndpoint endpoint, INetwork network) {
         this.player = player;
-        this.network = network;
-        this.endpoint = endpoint;
-        this.ledger.setStorageEndpoint(endpoint);
+        this.endpoint = endpoint != null ? endpoint
+                : network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+        this.ledger.setStorageEndpoint(this.endpoint);
     }
 
     boolean reserve(long taskId, Ingredient ingredient, int count) {
         int mark = ledger.reservationMark();
-        ItemStack stack = endpoint != null
-                ? ledger.reserveFromEndpoint(ingredient, count, endpoint, player)
-                : network != null
-                ? ledger.reserveFromNetwork(ingredient, count, network, player)
-                : ItemStack.EMPTY;
+        ItemStack stack = endpoint == null ? ItemStack.EMPTY
+                : ledger.reserveFromEndpoint(ingredient, count, endpoint, player);
         if (stack.isEmpty()) stack = ledger.reserveFromInventory(ingredient, count, player);
         if (stack.isEmpty()) return false;
         entries.add(new Entry(taskId, stack.copy(), ledger.tokenSince(mark)));
@@ -45,7 +41,7 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     }
 
     boolean commit() {
-        committed = ledger.commit(network, player);
+        committed = ledger.commitToEndpoint(endpoint, player);
         return committed;
     }
 
@@ -64,17 +60,15 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     private void refund(ItemStack stack) {
         if (stack.isEmpty()) return;
         ItemStack remainder = ledgerStorageInsert(stack);
-        if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+        if (!remainder.isEmpty()) {
+            PlayerUtils.safeGiveToStorage(player, remainder, endpoint);
+        }
     }
 
     private ItemStack ledgerStorageInsert(ItemStack stack) {
         if (endpoint != null) {
             return endpoint.insert(player, stack, false)
                     .remainder().orElse(ItemStack.EMPTY);
-        }
-        if (network != null) {
-            return CraftStorageEndpoints.fromLegacyNetwork(network)
-                    .insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
         }
         return stack.copy();
     }

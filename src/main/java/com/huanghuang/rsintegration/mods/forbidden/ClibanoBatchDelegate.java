@@ -16,7 +16,6 @@ import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccess
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoFireType;
 import com.stal111.forbidden_arcanus.common.block.entity.clibano.ClibanoMainBlockEntity;
@@ -99,11 +98,11 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         } else {
-            this.network = null;
+            setStorageEndpoint(null);
         }
-        if ((network == null && !hasStorageAccess()) || expectedOutput.isEmpty()) {
+        if ((storageEndpoint() == null && !hasStorageAccess()) || expectedOutput.isEmpty()) {
             resetState();
             resetOperationState();
             return false;
@@ -651,12 +650,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
             }
             return List.copyOf(candidates);
         }
-        if (network == null) return List.of();
-        for (var entry : new ArrayList<>(network.getItemStorageCache().getList().getStacks())) {
-            ItemStack stack = entry.getStack();
-            if (!stack.isEmpty()) candidates.add(stack.copy());
-        }
-        return List.copyOf(candidates);
+        return List.of();
     }
 
     private static int burnDuration(ClibanoMainBlockEntity be, ItemStack stack) {

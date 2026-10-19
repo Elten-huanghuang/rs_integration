@@ -93,8 +93,8 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -107,7 +107,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -219,7 +219,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
 
         // Return first item as the "result", deposit rest to RS
         ItemStack primary = outputs.get(0);
-        if (storageEndpoint() != null || network != null) {
+        if (storageEndpoint() != null || storageEndpoint() != null) {
             for (int i = 1; i < outputs.size(); i++) {
                 insertIntoStorage(player, outputs.get(i), false);
             }
@@ -254,7 +254,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         clearMachineSlotsAndRefund();
         craftDone = false;
         placedBait = ItemStack.EMPTY;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     private void clearMachineSlotsAndRefund() {

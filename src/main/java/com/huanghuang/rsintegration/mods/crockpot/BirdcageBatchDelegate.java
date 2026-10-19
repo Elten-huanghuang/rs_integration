@@ -103,7 +103,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
         this.outputReadyAt = Long.MAX_VALUE;
         this.started = false;
         this.noOutputExpected = false;
-        if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, dimension, pos);
+        if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         return true;
     }
 
@@ -122,9 +122,9 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.size() != 1) return false;
         ItemStack input = CraftPacketUtils.ensureMaterialAvailable(
                 player, dimension, pos, specs.get(0).ingredient(), 1, ledger);
-        if (input.isEmpty() || !ledger.commit(network, player)) return false;
+        if (input.isEmpty() || !ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (!feed(player, input.copyWithCount(1))) {
-            ledger.refundCommitted(network, player);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
         }
         return true;

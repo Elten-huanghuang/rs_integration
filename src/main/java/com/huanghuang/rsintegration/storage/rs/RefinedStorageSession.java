@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StoragePermissionResult;
+import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
@@ -50,6 +51,22 @@ final class RefinedStorageSession implements StorageSession {
 
     @Override
     public StorageReference reference() { return reference; }
+
+    @Override
+    public boolean isAvailable() {
+        try {
+            return driver.isAvailable();
+        } catch (RuntimeException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    @Override
+    public Optional<StorageNetworkLocation> location() {
+        return RefinedStorageReference.parse(reference)
+                .map(location -> new StorageNetworkLocation(
+                        location.dimension(), location.position()));
+    }
 
     @Override
     public StorageItemKey itemKey(ItemStack stack) {

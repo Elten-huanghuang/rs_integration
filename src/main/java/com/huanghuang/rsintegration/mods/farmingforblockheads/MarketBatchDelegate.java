@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.farmingforblockheads;
+
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -15,7 +17,6 @@ import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -102,7 +103,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     public boolean tryStartSingleCraft(ServerPlayer player) {
         if (wrapper == null) return false;
         if (storageEndpoint() == null) {
-            network = CraftPacketUtils.resolveNetworkForCraft(player, null, null);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, null, null).orElse(null));
         }
         if (!hasStorageAccess()) return false;
 
@@ -125,7 +126,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
                 wrapper.getResultItem(player.serverLevel().registryAccess()), preparedExecutions);
         if (!result.isEmpty()) {
             ItemStack remainder = insertIntoStorage(player, result, false);
-            if (!remainder.isEmpty()) PlayerUtils.safeGiveToPlayer(player, remainder, network);
+            if (!remainder.isEmpty()) PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
             resultInserted = true;
         }
 
@@ -140,7 +141,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         if (!hasStorageAccess() || wrapper == null) return false;
 
-        if (!sharedLedger.commit(network, player)) return false;
+        if (!sharedLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         done = true;
         return true;
     }
@@ -191,7 +192,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         // Keep a pre-selected backend endpoint authoritative. RS is only a
         // fallback for legacy callers that did not select an endpoint.
         if (storageEndpoint() == null) {
-            network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
+            setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
         }
         if (!hasStorageAccess()) {
             warnValidation("storage",
@@ -314,7 +315,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
 
         // Materials already committed by chain.  Result is delivered by
         // collectResult — do NOT insert here or the chain flushes it twice.
-        if (!sharedLedger.commit(network, player)) return false;
+        if (!sharedLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         done = true;
         return true;
     }

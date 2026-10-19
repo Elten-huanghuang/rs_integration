@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -21,23 +20,25 @@ public final class CraftFluidRecovery {
     private static final Logger LOGGER = LogManager.getLogger("RS Integration");
     private CraftFluidRecovery() { }
 
-    public static void retain(ServerPlayer player, ItemStack token, @Nullable INetwork network) {
-        retain(player.server, player.getUUID(), player, token, null, network);
+    public static void retainToEndpoint(ServerPlayer player, ItemStack token,
+                                        @Nullable CraftStorageEndpoint endpoint) {
+        retainToEndpoint(player.server, player.getUUID(), player, token, endpoint);
     }
 
-    public static void retain(MinecraftServer server, UUID owner, @Nullable ServerPlayer player,
-                              ItemStack token, @Nullable CraftStorageEndpoint endpoint,
-                              @Nullable INetwork network) {
+    public static void retainToEndpoint(MinecraftServer server, UUID owner,
+                                        @Nullable ServerPlayer player, ItemStack token,
+                                        @Nullable CraftStorageEndpoint endpoint) {
         if (!InkFluidSupport.isToken(token) || token.getTag() == null || token.getCount() <= 0) {
             throw new IllegalArgumentException("流体退款缺少可恢复的身份或数量");
         }
         CompoundTag fluid = token.getTag().copy();
         fluid.putInt("Amount", token.getCount());
-        String networkId = networkId(endpoint, network);
+        String networkId = networkId(endpoint);
         if (player != null && !player.hasDisconnected() && player.getInventory() != null
                 && player.getInventory().getFreeSlot() >= 0 && player.level() != null
                 && player.level().hasChunkAt(player.blockPosition())) {
-            PlayerUtils.safeGiveToPlayer(player, FluidRefundItem.create(fluid, networkId), null);
+            PlayerUtils.safeGiveToStorage(
+                    player, FluidRefundItem.create(fluid, networkId), null);
             player.displayClientMessage(Component.translatable("rsi.fluid_recovery.item_received"), true);
             return;
         }
@@ -51,11 +52,8 @@ public final class CraftFluidRecovery {
     }
 
     @Nullable
-    private static String networkId(@Nullable CraftStorageEndpoint endpoint, @Nullable INetwork network) {
+    private static String networkId(@Nullable CraftStorageEndpoint endpoint) {
         try {
-            if (network != null) {
-                return CraftStorageEndpoints.fromLegacyNetwork(network).session().reference().networkId();
-            }
             if (endpoint != null && "refinedstorage".equals(
                     endpoint.session().reference().backendId().value())) {
                 return endpoint.session().reference().networkId();

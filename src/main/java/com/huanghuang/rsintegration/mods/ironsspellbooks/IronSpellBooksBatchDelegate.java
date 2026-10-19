@@ -92,7 +92,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
@@ -102,9 +102,9 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
             if (stack.isEmpty()) { privateLedger.close(); return false; }
             materials.add(stack.copy());
         }
-        if (!privateLedger.commit(network, player)) return false;
+        if (!privateLedger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (start(player, materials)) return true;
-        privateLedger.refundCommitted(network, player);
+        privateLedger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 

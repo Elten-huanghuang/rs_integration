@@ -13,7 +13,6 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
@@ -360,8 +359,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = new ExtractionLedger()) {
-            if (storageEndpoint() == null) this.network = CraftPacketUtils.resolveNetworkForCraft(player, myDim, myPos);
-            if (this.network == null && !hasStorageAccess()) return false;
+            if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
+            if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
 
             for (IngredientSpec spec : specs) {
@@ -374,7 +373,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 materials.add(reserved.copy());
             }
 
-            if (!ledger.commit(network, player)) return false;
+            if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
             if (!tryStartWithMaterials(player, materials, ledger)) {
@@ -765,7 +764,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         recordFailureRecoveredInputs(clearAndRefund());
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -779,7 +778,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         // 玩家也可以直接手动取回。
         forceChunkLoad(false);
         craftDone = false;
-        network = null;
+        setStorageEndpoint(null);
     }
 
     @Override
@@ -1187,7 +1186,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void refund(ItemStack stack) {
-        if (storageEndpoint() != null || network != null) {
+        if (storageEndpoint() != null || storageEndpoint() != null) {
             ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
             if (!leftover.isEmpty() && player != null)
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);

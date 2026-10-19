@@ -100,8 +100,8 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!hasStorageAccess()) {
-            this.network = CraftPacketUtils.resolveNetworkForCraft(
-                    player, level.dimension(), pos);
+            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
+                    player, level.dimension(), pos).orElse(null));
         }
         if (!hasStorageAccess()) {
             return PreparationResult.retry("Wishing Fountain is not connected to a storage backend");
@@ -135,9 +135,9 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = false;
         List<ItemStack> materials = reserveMaterials(player, ledger);
         if (materials.isEmpty()) return false;
-        if (!ledger.commit(network, player)) return false;
+        if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
         if (start(player, materials)) return true;
-        ledger.refundCommitted(network, player);
+        ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         return false;
     }
 
@@ -359,7 +359,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         ItemStack remainder = insertIntoStorage(player, stack, false);
         if (remainder.isEmpty()) return;
         if (player != null) {
-            PlayerUtils.safeGiveToPlayer(player, remainder, network);
+            PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
         } else if (level != null && pos != null) {
             level.addFreshEntity(new ItemEntity(level, pos.getX() + 0.5D,
                     pos.getY() + 1.0D, pos.getZ() + 0.5D, remainder.copy()));

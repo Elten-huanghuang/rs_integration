@@ -87,7 +87,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
                 new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.WATER_BUCKET))))));
         assertEquals(1, ledger.reserveFromEndpoint(Ingredient.of(Items.WATER_BUCKET), 1, endpoint, player).getCount());
         when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(new StorageSnapshot(backend, List.of())));
-        assertFalse(ledger.commit(null, player));
+        assertFalse(ledger.commitToEndpoint(null, player));
         verify(session, never()).extractMatching(any(), any(), anyLong(), eq(false));
     }
 
@@ -96,9 +96,9 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         List<ItemStack> actual = List.of(named("first", 2), named("second", 1),
                 new ItemStack(Items.GOLD_INGOT, 2));
         reserve(5, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 5, actual));
-        assertTrue(ledger.commit(null, player));
-        ledger.refundCommitted(null, player);
-        ledger.refundCommitted(null, player);
+        assertTrue(ledger.commitToEndpoint(null, player));
+        ledger.refundCommittedToEndpoint(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(actual, refunds);
     }
 
@@ -113,7 +113,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(250, ledger.reserveFromEndpoint(fluidIngredient, 250, endpoint, player).getCount());
         when(session.extractMatching(player, fluidIngredient, 250, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 250, List.of(fluid)));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
 
         ItemStack remainder = fluid.copyWithCount(100);
         doReturn(StorageOperationResult.inserted(StorageOperationMode.PERFORM, fluid, remainder))
@@ -121,8 +121,8 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
         try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
             savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
-            ledger.refundCommitted(null, player);
-            ledger.refundCommitted(null, player);
+            ledger.refundCommittedToEndpoint(null, player);
+            ledger.refundCommittedToEndpoint(null, player);
         }
         ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
         verify(recovery).retainRaw(eq(player.getUUID()), captured.capture(), isNull());
@@ -142,12 +142,12 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(250, ledger.reserveFromEndpoint(fluidIngredient, 250, endpoint, player).getCount());
         when(session.extractMatching(player, fluidIngredient, 250, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 250, List.of(fluid)));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
 
         UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
         try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
             savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
-            ledger.refundCommitted(null, null);
+            ledger.refundCommittedToEndpoint(null, null);
         }
         ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);
         verify(recovery).retainRaw(eq(owner), captured.capture(), isNull());
@@ -162,7 +162,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         reserve(5, StorageOperationResult.failedExtraction(StorageOperationMode.PERFORM, 5,
                 StorageOperationStatus.INVALID_RESPONSE, actual, List.of(recovery),
                 StorageDiagnosticCode.BACKEND_EXCEPTION));
-        assertFalse(ledger.commit(null, player));
+        assertFalse(ledger.commitToEndpoint(null, player));
         assertEquals(ExtractionLedger.State.ROLLED_BACK, ledger.state());
         assertStacks(List.of(actual.get(0), actual.get(1), recovery), refunds);
     }
@@ -173,7 +173,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         ItemStack recovery = new ItemStack(Items.DIAMOND);
         reserve(5, StorageOperationResult.indeterminateExtraction(5,
                 List.of(confirmed), List.of(recovery), StorageDiagnosticCode.BACKEND_EXCEPTION));
-        assertFalse(ledger.commit(null, player));
+        assertFalse(ledger.commitToEndpoint(null, player));
         assertStacks(List.of(confirmed, recovery), refunds);
     }
 
@@ -186,7 +186,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         when(session.extractMatching(player, ingredient, 2, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2, List.of(first)),
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2, List.of(second)));
-        assertFalse(ledger.commit(null, player));
+        assertFalse(ledger.commitToEndpoint(null, player));
         assertStacks(List.of(first, second), refunds);
     }
 
@@ -194,10 +194,10 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     void recoveredRefundsRetainOnlyActualVariantQuantitiesAcrossRepeatedCleanup() {
         reserve(5, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 5,
                 List.of(named("first", 2), named("second", 3))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         ledger.retainCommittedRefunds(List.of(named("second", 2), named("unknown", 5)));
         ledger.retainCommittedRefunds(List.of(named("second", 3), named("first", 2)));
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("second", 2)), refunds);
     }
 
@@ -205,9 +205,9 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     void releasingOneVariantDoesNotReleaseOtherVariantsInTheSameEntry() {
         reserve(5, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 5,
                 List.of(named("first", 2), named("second", 3))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         ledger.releaseCommittedEntries(List.of(named("second", 2)));
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("first", 2), named("second", 1)), refunds);
     }
 
@@ -222,10 +222,10 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
                         List.of(named("first", 1), named("second", 1))),
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2,
                         List.of(named("third", 2))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         ledger.settleCommitted(secondToken);
-        ledger.refundCommitted(firstToken, null, player);
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(firstToken, null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("first", 1), named("second", 1)), refunds);
     }
 
@@ -249,9 +249,9 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1, List.of(named("second", 1))));
         when(session.extractMatching(player, gold, 1, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1, List.of(new ItemStack(Items.GOLD_INGOT))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         verify(session).snapshotItems(player, java.util.Set.of(Items.IRON_INGOT, Items.GOLD_INGOT));
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("first", 1), named("second", 1), new ItemStack(Items.GOLD_INGOT)), refunds);
     }
 
@@ -265,7 +265,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         when(session.extractMatching(player, custom, 2, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2,
                         List.of(new ItemStack(Items.GOLD_INGOT, 2))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         verify(session, times(2)).snapshotItems(player);
         verify(session, never()).snapshotItems(eq(player), anySet());
     }
@@ -276,7 +276,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(1, ledger.reserveFromEndpoint(strict, 1, endpoint, player).getCount());
         when(session.snapshotItems(player, java.util.Set.of(Items.IRON_INGOT))).thenReturn(
                 StorageSnapshotResult.success(new StorageSnapshot(backend, List.of(stored(named("second", 20))))));
-        assertFalse(ledger.commit(null, player));
+        assertFalse(ledger.commitToEndpoint(null, player));
         verify(session, never()).extractMatching(any(), any(), anyLong(), anyBoolean());
     }
 
@@ -288,14 +288,14 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(1, ledger.reserveFromEndpoint(catalyst, 1, endpoint, player).getCount());
         ledger.cancelLastReservation();
         reserve(2, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2, List.of(named("second", 2))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         verify(session, never()).extractMatching(player, catalyst, 1, false);
         var field = ExtractionLedger.class.getDeclaredField("settlementLedger");
         field.setAccessible(true);
         StorageSettlementLedger mirror = (StorageSettlementLedger) field.get(ledger);
         assertEquals(StorageSettlementLedger.State.COMMITTED, mirror.state());
         assertEquals(1, mirror.size());
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("second", 2)), refunds);
     }
 
@@ -314,7 +314,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
             ledger.preferResonanceFor(catalyst);
             assertEquals(1, ledger.reserveFromEndpoint(catalyst, 1, endpoint, player).getCount());
             assertEquals(1, ledger.reserveFromEndpoint(ingredient, 1, endpoint, player).getCount());
-            assertFalse(ledger.commit(null, player));
+            assertFalse(ledger.commitToEndpoint(null, player));
             verify(view).extractExactView(eq(0), any(), eq(1), eq(true));
             verify(view, never()).extractExactView(anyInt(), any(), anyInt(), eq(false));
             verify(session, never()).extractMatching(any(), any(), anyLong(), anyBoolean());
@@ -333,8 +333,8 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
             if (stack.getTag().getString("variant").equals("second")) throw new IllegalStateException("after insert");
             return StorageOperationResult.inserted(StorageOperationMode.PERFORM, stack, ItemStack.EMPTY);
         }).when(session).insert(eq(player), any(ItemStack.class), eq(false));
-        assertFalse(ledger.commit(null, player));
-        ledger.refundCommitted(null, player);
+        assertFalse(ledger.commitToEndpoint(null, player));
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("first", 1), named("second", 2), named("third", 2)), refunds);
     }
 
@@ -342,14 +342,14 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     void committedRefundExceptionDoesNotRetryOrSkipOtherFragments() {
         reserve(3, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 3,
                 List.of(named("first", 1), named("second", 2))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         doAnswer(call -> {
             ItemStack stack = call.getArgument(1);
             refunds.add(stack.copy());
             throw new IllegalStateException("after insert");
         }).when(session).insert(eq(player), any(ItemStack.class), eq(false));
-        ledger.refundCommitted(null, player);
-        ledger.refundCommitted(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
+        ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("first", 1), named("second", 2)), refunds);
     }
 
@@ -363,11 +363,11 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2, List.of(named("same", 2))));
         when(session.extractMatching(player, ingredient, 3, false)).thenReturn(
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 3, List.of(named("same", 3))));
-        assertTrue(ledger.commit(null, player));
+        assertTrue(ledger.commitToEndpoint(null, player));
         ledger.releaseCommittedEntries(List.of(named("same", 2)));
-        ledger.refundCommitted(secondToken, null, player);
+        ledger.refundCommittedToEndpoint(secondToken, null, player);
         assertStacks(List.of(named("same", 1)), refunds);
-        ledger.refundCommitted(firstToken, null, player);
+        ledger.refundCommittedToEndpoint(firstToken, null, player);
         assertStacks(List.of(named("same", 1), named("same", 2)), refunds);
     }
 
