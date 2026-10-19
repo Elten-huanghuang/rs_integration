@@ -32,8 +32,6 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
@@ -722,15 +720,6 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(GenericCraftPacket.shouldUseAsyncPurePreview(true, false));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(true, true));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(false, false));
-    }
-
-    @Test
-    void backgroundPlanningNoticeUsesTheStableTranslationKey() {
-        Component notice = GenericCraftPacket.backgroundPlanningNotice();
-
-        assertTrue(notice.getContents() instanceof TranslatableContents);
-        assertEquals("rsi.plan.info.background_started",
-                ((TranslatableContents) notice.getContents()).getKey());
     }
 
     @Test

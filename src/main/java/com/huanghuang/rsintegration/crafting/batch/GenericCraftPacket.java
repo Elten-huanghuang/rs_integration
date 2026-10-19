@@ -1345,7 +1345,6 @@ public final class GenericCraftPacket {
                         player.sendSystemMessage(Component.translatable(key));
                     }
                 });
-        player.sendSystemMessage(backgroundPlanningNotice());
         RSIntegrationMod.debug("[RSI-exec] queued async {} planning recipe={} repeat={}",
                 planKind, recipeId, repeatCount);
     }
@@ -4127,7 +4126,6 @@ public final class GenericCraftPacket {
                                 null, null, true, fallbackReason.orElseThrow(),
                                 reuseValidatedSnapshot, sink, planStorageReference, materialLocks);
                     });
-            sink.notice(backgroundPlanningNotice());
             return;
         }
         if (directTerminalPlan) {
@@ -5406,10 +5404,6 @@ public final class GenericCraftPacket {
                                               boolean overridesProjectable, boolean hasMaterialLocks) {
         return shouldUseAsyncPurePreview(!mainThreadOnly && overridesProjectable && !hasMaterialLocks,
                 directTerminalPlan);
-    }
-
-    static Component backgroundPlanningNotice() {
-        return Component.translatable("rsi.plan.info.background_started");
     }
 
     record PreviewStep(ResolutionStep step, int batches) {}
