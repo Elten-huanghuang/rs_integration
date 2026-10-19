@@ -11,7 +11,12 @@ final class VanillaCraftingTickBudget {
     }
 
     ChainAllowance allowance(int perChainLimit) {
-        return new ChainAllowance(this, Math.max(1, perChainLimit));
+        return allowance(perChainLimit, 0);
+    }
+
+    ChainAllowance allowance(int perChainLimit, int alreadyUsed) {
+        int remaining = Math.max(0, Math.max(0, perChainLimit) - Math.max(0, alreadyUsed));
+        return new ChainAllowance(this, remaining);
     }
 
     int used() {
@@ -20,6 +25,10 @@ final class VanillaCraftingTickBudget {
 
     int limit() {
         return limit;
+    }
+
+    int remaining() {
+        return Math.max(0, limit - used);
     }
 
     private int claimUpTo(int requested) {
@@ -35,7 +44,7 @@ final class VanillaCraftingTickBudget {
 
         private ChainAllowance(VanillaCraftingTickBudget global, int limit) {
             this.global = global;
-            this.limit = limit;
+            this.limit = Math.max(0, limit);
         }
 
         int remaining() {

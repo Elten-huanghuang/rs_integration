@@ -92,6 +92,10 @@ final class FlatCraftExecutor {
                     specs = specs.stream().map(spec -> SelfAmplifyingRecipePolicy
                             .excludeNonProductiveSelfCandidate(spec, terminalOutput)).toList();
                 }
+                StableRecipeBatch.Outcome stableBatch = StableRecipeBatch.tryExecute(
+                        level, step, online, workingInventory, executionLedger, context);
+                if (stableBatch == StableRecipeBatch.Outcome.SUCCESS) continue;
+                if (stableBatch == StableRecipeBatch.Outcome.FAILURE) return false;
                 for (int execution = 0; execution < executions; execution++) {
                     if (!executeCraftingOnce(craftingRecipe, specs, stepId, online,
                             workingInventory, executionLedger, allowPhysicalFallback,

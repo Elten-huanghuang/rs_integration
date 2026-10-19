@@ -34,6 +34,15 @@ class VanillaCraftingTickBudgetTest {
     }
 
     @Test
+    void zeroRemainingChainAllowanceCannotClaimOperations() {
+        VanillaCraftingTickBudget budget = new VanillaCraftingTickBudget(5);
+        var chain = budget.allowance(5, 5);
+
+        assertEquals(0, chain.claimUpTo(5));
+        assertEquals(0, budget.used());
+    }
+
+    @Test
     void roundRobinStartRotatesWithoutDroppingChains() {
         List<String> chains = List.of("a", "b", "c");
 

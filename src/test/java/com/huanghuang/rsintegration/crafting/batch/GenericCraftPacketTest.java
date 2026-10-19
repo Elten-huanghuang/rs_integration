@@ -689,57 +689,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void pureCraftingChainUsesConfiguredOperationThreshold() {
-        List<CraftingResolver.ResolutionStep> steps = List.of(
-                new CraftingResolver.ResolutionStep(
-                        new ResourceLocation("test", "intermediate"), ModType.GENERIC,
-                        new ResourceLocation("minecraft", "crafting"),
-                        List.of(), List.of(), false, 3),
-                genericStep("terminal", 5));
-
-        assertEquals(8, GenericCraftPacket.totalExecutions(steps));
-        assertFalse(GenericCraftPacket.shouldExecuteGenericChainAsync(steps, 8));
-        assertTrue(GenericCraftPacket.shouldExecuteGenericChainAsync(steps, 7));
-    }
-
-    @Test
-    void typedMachineStepCanNeverUseTheSynchronousCraftingExecutor() {
-        List<CraftingResolver.ResolutionStep> generic = List.of(genericStep("terminal", 1));
-        List<CraftingResolver.ResolutionStep> physical = List.of(
-                new CraftingResolver.ResolutionStep(
-                        new ResourceLocation("goety", "moonstone_plague"), ModType.CUSTOM_GUI,
-                        new ResourceLocation("goety", "ritual"),
-                        List.of(), List.of(), false, 1));
-
-        assertTrue(GenericCraftPacket.canExecuteSynchronously(generic));
-        assertFalse(GenericCraftPacket.canExecuteSynchronously(physical));
-    }
-
-    @Test
-    void cachedPurePlanRoutesOnlyTypedOrLargeNetworkChainsAsynchronously() {
-        List<CraftingResolver.ResolutionStep> smallGeneric = List.of(
-                genericStep("intermediate", 1), genericStep("terminal", 1));
-        List<CraftingResolver.ResolutionStep> largeGeneric = List.of(
-                genericStep("intermediate", 5), genericStep("terminal", 4));
-        List<CraftingResolver.ResolutionStep> physical = List.of(
-                genericStep("intermediate", 1),
-                new CraftingResolver.ResolutionStep(
-                        new ResourceLocation("minecraft", "iron_ingot"), ModType.CUSTOM_GUI,
-                        new ResourceLocation("minecraft", "blasting"),
-                        List.of(), List.of(), false, 1),
-                genericStep("terminal", 1));
-
-        assertEquals(GenericCraftPacket.CachedPurePlanExecution.SYNCHRONOUS,
-                GenericCraftPacket.selectCachedPurePlanExecution(smallGeneric, true, 8));
-        assertEquals(GenericCraftPacket.CachedPurePlanExecution.ASYNCHRONOUS,
-                GenericCraftPacket.selectCachedPurePlanExecution(largeGeneric, true, 8));
-        assertEquals(GenericCraftPacket.CachedPurePlanExecution.ASYNCHRONOUS,
-                GenericCraftPacket.selectCachedPurePlanExecution(physical, true, 8));
-        assertEquals(GenericCraftPacket.CachedPurePlanExecution.REPLAN,
-                GenericCraftPacket.selectCachedPurePlanExecution(physical, false, 8));
-    }
-
-    @Test
     void pureCraftingOperationCountSaturates() {
         List<CraftingResolver.ResolutionStep> steps = List.of(
                 genericStep("first", Integer.MAX_VALUE), genericStep("second", 1));
@@ -752,34 +701,6 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new ResourceLocation("test", path), ModType.GENERIC,
                 new ResourceLocation("minecraft", "crafting"),
                 List.of(), List.of(), false, executions);
-    }
-
-    @Test
-    void smithingWaitsForAsynchronousIntermediateBeforeTerminalStep() {
-        ResourceLocation intermediateId = new ResourceLocation("test", "dark_helmet");
-        ResourceLocation smithingId = new ResourceLocation("test", "divine_gold_helmet");
-        var intermediate = new CraftingResolver.ResolutionStep(
-                intermediateId, ModType.CUSTOM_GUI, new ResourceLocation("test", "machine"));
-
-        List<CraftingResolver.ResolutionStep> chain = GenericCraftPacket.smithingAsyncSteps(
-                List.of(intermediate), smithingId, 3);
-
-        assertEquals(2, chain.size());
-        assertEquals(intermediateId, chain.get(0).recipeId());
-        assertEquals(smithingId, chain.get(1).recipeId());
-        assertEquals(ModType.GENERIC, chain.get(1).modType());
-        assertEquals(3, chain.get(1).executions());
-    }
-
-    @Test
-    void genericOnlySmithingIntermediatesStaySynchronous() {
-        var intermediate = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "dark_helmet"), ModType.GENERIC,
-                new ResourceLocation("minecraft", "crafting"));
-
-        assertTrue(GenericCraftPacket.smithingAsyncSteps(
-                List.of(intermediate), new ResourceLocation("test", "divine_gold_helmet"), 1)
-                .isEmpty());
     }
 
     @Test

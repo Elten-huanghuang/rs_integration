@@ -19,9 +19,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** Owns the standard launch lifecycle for an explicitly classified flat adapter. */
-public final class LegacyFlatExecutionService {
-    private LegacyFlatExecutionService() {}
+/** 统一提交扁平步骤和图步骤，并在当前 tick 内尽可能立即推进。 */
+public final class CraftExecutionService {
+    private CraftExecutionService() {}
 
     public static AsyncCraftChain launch(
             ServerPlayer player, INetwork network,
@@ -54,12 +54,12 @@ public final class LegacyFlatExecutionService {
                 .findFirst().orElse(ModType.GENERIC);
         LegacyExecutionMetrics.record(reason, recipeId, legacyType);
         RSIntegrationMod.LOGGER.info(
-                "[RSI-Craft] legacy flat launch recipe={} reason={} modType={} steps={}",
+                "[RSI-Craft] execution chain submit recipe={} reason={} modType={} steps={}",
                 recipeId, reason, legacyType.id(), chainSteps.size());
 
         AsyncCraftChain chain = new AsyncCraftChain(
                 player.getUUID(), player.getServer(), network, storageEndpoint, chainSteps);
-        return submit(player, chain, chainSteps.size(), targetOutput,
+        return submit(player, chain, chainSteps.size(), recipeId, targetOutput,
                 outputDestination, completionWiring);
     }
 
@@ -84,27 +84,34 @@ public final class LegacyFlatExecutionService {
         Objects.requireNonNull(terminalStep, "terminalStep");
         LegacyExecutionMetrics.record(reason, recipeId, terminalStep.modType());
         RSIntegrationMod.LOGGER.info(
-                "[RSI-Craft] legacy incomplete-graph launch recipe={} reason={} modType={} graphNodes={}",
+                "[RSI-Craft] execution graph submit recipe={} reason={} modType={} graphNodes={}",
                 recipeId, reason, terminalStep.modType().id(), inputGraph.nodes().size());
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
                 storageEndpoint, inputGraph, terminalStep, repeatCount);
-        return submit(player, chain, chain.stepsCount(), targetOutput,
+        return submit(player, chain, chain.stepsCount(), recipeId, targetOutput,
                 outputDestination, completionWiring);
     }
 
     private static AsyncCraftChain submit(
             ServerPlayer player, AsyncCraftChain chain, int displayedSteps,
+            ResourceLocation recipeId,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             Consumer<AsyncCraftChain> completionWiring) {
         chain.setTargetOutput(targetOutput);
         chain.setOutputDestination(outputDestination);
         completionWiring.accept(chain);
-        AsyncCraftManager.getInstance().submit(chain);
-        player.sendSystemMessage(TextBuilder.translate(
-                outputDestination == OutputDestination.PLAYER_INVENTORY
-                        ? "rsi.async.chain_started_player"
-                        : "rsi.async.chain_started",
-                displayedSteps).build());
+        boolean completed = AsyncCraftManager.getInstance().submitAndAdvance(
+                chain, player.getServer());
+        if (!completed) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Craft] execution chain deferred craftId={} recipe={} state={} steps={}",
+                    chain.getCraftId(), recipeId, chain.state(), displayedSteps);
+            player.sendSystemMessage(TextBuilder.translate(
+                    outputDestination == OutputDestination.PLAYER_INVENTORY
+                            ? "rsi.async.chain_started_player"
+                            : "rsi.async.chain_started",
+                    displayedSteps).build());
+        }
         return chain;
     }
 }

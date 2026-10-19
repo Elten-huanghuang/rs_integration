@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * Pure batch-window calculations shared by flat and graph execution.
@@ -38,6 +39,14 @@ final class BatchDispatchPlanner {
     static AsyncCraftChain.VanillaBatchSlice planVanillaBatchSlice(
             List<CraftingResolver.ResolutionStep> sourceSteps,
             int startIdx, int currentRemaining, int operationBudget) {
+        return planVanillaBatchSlice(sourceSteps, startIdx, currentRemaining,
+                operationBudget, ignored -> false);
+    }
+
+    static AsyncCraftChain.VanillaBatchSlice planVanillaBatchSlice(
+            List<CraftingResolver.ResolutionStep> sourceSteps,
+            int startIdx, int currentRemaining, int operationBudget,
+            Predicate<CraftingResolver.ResolutionStep> stableBatchable) {
         int budget = Math.max(1, operationBudget);
         int i = Math.max(0, startIdx);
         int remaining = Math.max(0, currentRemaining);
@@ -50,9 +59,11 @@ final class BatchDispatchPlanner {
             }
             int stepExecutions = i == startIdx && remaining > 0
                     ? remaining : step.executions();
-            int sliceExecutions = Math.min(stepExecutions, budget);
+            boolean batchable = stableBatchable.test(step);
+            int sliceExecutions = batchable ? stepExecutions
+                    : Math.min(stepExecutions, budget);
             sliceSteps.add(copyWithExecutions(step, sliceExecutions));
-            budget -= sliceExecutions;
+            budget -= batchable ? 1 : sliceExecutions;
             stepExecutions -= sliceExecutions;
             if (stepExecutions > 0) {
                 return new AsyncCraftChain.VanillaBatchSlice(

@@ -4,7 +4,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Array;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import java.util.Arrays;
 import java.util.function.Function;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -50,7 +49,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nonnull;
@@ -239,7 +237,6 @@ public final class CraftPacketUtils {
                                                @Nonnull List<CraftingResolver.ResolutionStep> steps,
                                                @Nullable INetwork network,
                                                @Nullable CraftStorageEndpoint endpoint) {
-        RecipeManager rm = player.serverLevel().getRecipeManager();
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
         CraftLogContext ctx = CraftLogContext.create(player.getUUID(), primaryRecipe);
@@ -247,192 +244,50 @@ public final class CraftPacketUtils {
             ledger.setLogContext(ctx);
             if (endpoint != null) ledger.setStorageEndpoint(endpoint);
             List<ItemStack> virtualInventory = new ArrayList<>();
-
-            RSIntegrationMod.LOGGER.debug(ctx.format("Starting {} steps"), steps.size());
-
-            // Phase 1: process each step, feeding outputs forward into virtual inventory
-            for (int stepIdx = 0; stepIdx < steps.size(); stepIdx++) {
-                CraftingResolver.ResolutionStep rstep = steps.get(stepIdx);
-                ResourceLocation stepId = rstep.recipeId();
-                int executions = rstep.executions();
-                Recipe<?> recipe = rm.byKey(stepId).orElse(null);
-                if (recipe == null) {
-                    RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: recipe not found"), stepIdx + 1, steps.size(), stepId);
-                    continue;
+            FlatCraftExecutor.Host host = new FlatCraftExecutor.Host() {
+                @Override
+                public ItemStack reserve(ExtractionLedger target, Ingredient ingredient,
+                                         int amount, ServerPlayer online) {
+                    ItemStack reserved = endpoint != null
+                            ? target.reserveFromEndpoint(ingredient, amount, endpoint, online)
+                            : network != null
+                            ? target.reserveFromNetwork(ingredient, amount, network, online)
+                            : ItemStack.EMPTY;
+                    return reserved.isEmpty()
+                            ? target.reserveFromInventory(ingredient, amount, online)
+                            : reserved;
                 }
 
-                RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {} x{} type={} virtualInvBefore={}"),
-                        stepIdx + 1, steps.size(), stepId, executions, recipe.getClass().getSimpleName(),
-                        virtualInventory.stream().map(s -> BuiltInRegistries.ITEM.getKey(s.getItem()) + "x" + s.getCount()).toList());
+                @Override
+                public void onMissing(Ingredient ingredient, ResourceLocation stepId,
+                                      ExtractionLedger target, boolean allowPhysicalFallback) {
+                    RSIntegrationMod.LOGGER.error(ctx.format(
+                            "Step {}: missing ingredient, aborting"), stepId);
+                }
 
-                if (recipe instanceof CraftingRecipe craftingRecipe) {
-                    List<IngredientSpec> specs = extractCraftingIngredientSpecs(craftingRecipe);
-                    ItemStack[] consumed = new ItemStack[Math.min(specs.size(), 9)];
-                    for (int idx = 0; idx < specs.size(); idx++) {
-                        IngredientSpec spec = specs.get(idx);
-                        if (spec.isEmpty()) continue;
-                        Ingredient ing = spec.ingredient();
-
-                        int stillNeeded = requiredCount(spec, executions);
-                        var iter = virtualInventory.iterator();
-                        while (iter.hasNext() && stillNeeded > 0) {
-                            ItemStack vItem = iter.next();
-                            if (IngredientMatcher.test(ing, vItem)) {
-                                int take = Math.min(stillNeeded, vItem.getCount());
-                                consumed[idx] = vItem.copyWithCount(1);
-                                vItem.shrink(take);
-                                stillNeeded -= take;
-                                if (vItem.isEmpty()) iter.remove();
-                            }
-                        }
-
-                        if (stillNeeded > 0) {
-                            ItemStack reserved = endpoint != null
-                                    ? ledger.reserveFromEndpoint(ing, stillNeeded, endpoint, player)
-                                    : ItemStack.EMPTY;
-                            if (reserved.isEmpty()) {
-                                reserved = ledger.reserveFromInventory(ing, stillNeeded, player);
-                            }
-                            if (reserved.isEmpty()) {
-                                RSIntegrationMod.LOGGER.error(ctx.format("Step {}/{} {}: missing ingredient, aborting"),
-                                        stepIdx + 1, steps.size(), stepId);
-                                return false;
-                            }
-                            consumed[idx] = reserved.copyWithCount(1);
-                            stillNeeded -= reserved.getCount();
-                            RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: reserved {} from ledger"),
-                                    stepIdx + 1, steps.size(), stepId,
-                                    BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount());
-                        }
-                    }
-
-                    ItemStack[] reusableState = Arrays.stream(consumed)
-                            .map(stack -> stack == null ? ItemStack.EMPTY : stack.copy())
-                            .toArray(ItemStack[]::new);
-                    for (int operation = 0; operation < executions; operation++) {
-                        ItemStack[] operationInputs = new ItemStack[consumed.length];
-                        for (int i = 0; i < consumed.length; i++) {
-                            ItemStack source = specs.get(i).role() == DemandRole.CATALYST
-                                    ? reusableState[i] : consumed[i];
-                            operationInputs[i] = source == null || source.isEmpty()
-                                    ? ItemStack.EMPTY
-                                    : source.copyWithCount(Math.max(1, specs.get(i).count()));
-                        }
-
-                        ItemStack result = assembleCraftingOutput(
-                                craftingRecipe, operationInputs, player);
-                        if (result.isEmpty()) {
-                            result = ModRecipeHandlers.tryGetResultItem(
-                                    craftingRecipe, player.serverLevel().registryAccess());
-                        }
-                        if (result.isEmpty()) return false;
-                        addToVirtual(virtualInventory, result);
-
-                        List<ItemStack> remainders = getRecipeRemaindersBySpec(
-                                craftingRecipe, operationInputs);
-                        for (int i = 0; i < specs.size(); i++) {
-                            ItemStack remainder = i < remainders.size()
-                                    ? remainders.get(i) : ItemStack.EMPTY;
-                            if (specs.get(i).role() == DemandRole.CATALYST) {
-                                if (remainder.isEmpty()) {
-                                    boolean exhaustedGoetyTotem = operation + 1 == executions
-                                            && GoetySoulTotemCrafting.isSoulTotem(operationInputs[i]);
-                                    if (!exhaustedGoetyTotem) return false;
-                                    reusableState[i] = ItemStack.EMPTY;
-                                    continue;
-                                }
-                                if (operation + 1 < executions
-                                        && !IngredientMatcher.test(
-                                        craftingRecipe.getIngredients().get(i), remainder)) {
-                                    return false;
-                                }
-                                reusableState[i] = remainder.copy();
-                            } else if (!remainder.isEmpty()) {
-                                addToVirtual(virtualInventory, remainder);
-                            }
-                        }
-                    }
-                    for (int i = 0; i < specs.size(); i++) {
-                        if (specs.get(i).role() == DemandRole.CATALYST
-                                && reusableState[i] != null && !reusableState[i].isEmpty()) {
-                            addToVirtual(virtualInventory, reusableState[i]);
-                        }
-                    }
+                @Override
+                public void logVirtualInventory(String context) {
                     RSIntegrationMod.LOGGER.debug(ctx.format(
-                            "Step {}/{} {}: completed {} stateful crafting operation(s)"),
-                            stepIdx + 1, steps.size(), stepId, executions);
-                    // Primary outputs and remainders were accumulated per operation.
-                } else {
-                    // Non-crafting recipe (sawmill, custom mod type, etc.)
-                    List<IngredientSpec> specs = extractIngredientSpecs(recipe);
-                    if (specs == null || specs.isEmpty()) {
-                        RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: no ingredient specs, skipping"),
-                                stepIdx + 1, steps.size(), stepId);
-                        continue;
-                    }
-
-                    for (IngredientSpec spec : specs) {
-                        if (spec.isEmpty()) continue;
-                        int stillNeeded = requiredCount(spec, executions);
-                        var iter = virtualInventory.iterator();
-                        while (iter.hasNext() && stillNeeded > 0) {
-                            ItemStack vItem = iter.next();
-                            if (IngredientMatcher.test(spec.ingredient(), vItem)) {
-                                int take = Math.min(stillNeeded, vItem.getCount());
-                                vItem.shrink(take);
-                                stillNeeded -= take;
-                                if (vItem.isEmpty()) iter.remove();
-                            }
-                        }
-                        if (stillNeeded > 0) {
-                            ItemStack[] opts = spec.ingredient().getItems();
-                            RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: need {} more of {}, reserving from ledger..."),
-                                    stepIdx + 1, steps.size(), stepId, stillNeeded,
-                                    opts.length > 0 ? BuiltInRegistries.ITEM.getKey(opts[0].getItem()) : "?");
-                            ItemStack reserved = endpoint != null
-                                    ? ledger.reserveFromEndpoint(spec.ingredient(), stillNeeded, endpoint, player)
-                                    : ItemStack.EMPTY;
-                            if (reserved.isEmpty()) {
-                                reserved = ledger.reserveFromInventory(spec.ingredient(), stillNeeded, player);
-                            }
-                            if (reserved.isEmpty()) {
-                                RSIntegrationMod.LOGGER.error(ctx.format("Step {}/{} {}: missing ingredient, aborting"),
-                                        stepIdx + 1, steps.size(), stepId);
-                                return false;
-                            }
-                            stillNeeded -= reserved.getCount();
-                            RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: reserved {} from ledger (stillNeeded={})"),
-                                    stepIdx + 1, steps.size(), stepId,
-                                    BuiltInRegistries.ITEM.getKey(reserved.getItem()) + "x" + reserved.getCount(),
-                                    stillNeeded);
-                        }
-                    }
-
-                    ItemStack result = RecipeIndex.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-                    if (!result.isEmpty()) {
-                        addToVirtual(virtualInventory, result.copyWithCount(StepExecutor.mulCount(result.getCount(), executions)));
-                        RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: produced {} to virtual"),
-                                stepIdx + 1, steps.size(), stepId,
-                                BuiltInRegistries.ITEM.getKey(result.getItem()) + "x" + StepExecutor.mulCount(result.getCount(), executions));
-                    }
-                    // Add secondary outputs (byproducts) to virtual inventory
-                    for (ItemStack secondary : RecipeIndex.tryGetSecondaryOutputs(recipe, player.serverLevel().registryAccess())) {
-                        addToVirtual(virtualInventory, secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions)));
-                    }
-                    if (result.isEmpty()) {
-                        RSIntegrationMod.LOGGER.debug(ctx.format("Step {}/{} {}: result empty, nothing added to virtual"),
-                                stepIdx + 1, steps.size(), stepId);
-                    }
+                            "Virtual inventory " + context));
                 }
-            }
 
-            // Phase 2: commit all real extractions atomically
+                @Override
+                public void logLedgerState(ExtractionLedger target) {
+                    RSIntegrationMod.LOGGER.debug(ctx.format(
+                            "Ledger state " + target.state()));
+                }
+            };
+            boolean crafted = FlatCraftExecutor.execute(steps, player, virtualInventory,
+                    ledger, true, new FlatCraftExecutor.Context(
+                            player.serverLevel(), ctx, steps, null, host, Map.of()));
+            if (!crafted) return false;
+
             if (!ledger.commit(network, player)) {
                 RSIntegrationMod.LOGGER.error(ctx.format("executeCraftingSteps: commit failed for {} steps"), steps.size());
                 return false;
             }
 
-            // Phase 3: flush remaining virtual inventory into RS network;
+            // Flush remaining virtual inventory into the selected storage;
             // any remainder that doesn't fit goes to the player (split into
             // max-stack-size chunks to prevent item-entity explosions).
             for (ItemStack vi : virtualInventory) {
@@ -454,16 +309,6 @@ public final class CraftPacketUtils {
 
             return true;
         }
-    }
-
-    private static void addToVirtual(List<ItemStack> virtualInventory, ItemStack result) {
-        for (ItemStack vi : virtualInventory) {
-            if (ItemStack.isSameItemSameTags(vi, result)) {
-                vi.grow(result.getCount());
-                return;
-            }
-        }
-        virtualInventory.add(result.copy());
     }
 
     /**

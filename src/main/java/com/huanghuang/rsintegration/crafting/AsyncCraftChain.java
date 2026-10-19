@@ -2708,6 +2708,18 @@ public final class AsyncCraftChain {
     public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }
     public boolean isAborted() { return state == State.ABORTED; }
     public State state() { return state; }
+    /**
+     * 当前 tick 内是否还能继续推进纯工作台步骤。
+     * 真实机器等待、玩家交互等待和最终结算仍保持原有的 tick 边界。
+     */
+    boolean canAdvanceImmediately(boolean vanillaBudgetAvailable) {
+        if (isDone() || useGraphExecution || waitingForMachineLease) return false;
+        if (state == State.PENDING) return true;
+        if (state != State.EXECUTING) return false;
+        if (currentStepIdx >= steps.size()) return true;
+        if (vanillaBudgetAvailable) return true;
+        return steps.get(currentStepIdx).modType() != ModType.GENERIC;
+    }
     public String abortReason() { return abortReason; }
     @Nullable public TerminationCoordinator.Report terminationReport() { return terminationReport; }
     /** @return the stable identity of this craft run */
@@ -3064,12 +3076,23 @@ public final class AsyncCraftChain {
 
     /** Execute one bounded slice of consecutive vanilla steps. */
     private int executeVanillaBatch(int startIdx, ServerPlayer online, int operationBudget) {
-        VanillaBatchSlice slice = planVanillaBatchSlice(
-                steps, startIdx, stepRemaining, operationBudget);
-        stepRemaining = slice.remainingExecutions();
-        if (!slice.steps().isEmpty()) {
-            executeVanillaStepsInline(slice.steps(), online);
+        ServerLevel level = server.overworld();
+        boolean pureChain = steps.stream().allMatch(step ->
+                step.modType() == ModType.GENERIC
+                        && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
+        VanillaBatchSlice slice = BatchDispatchPlanner.planVanillaBatchSlice(
+                steps, startIdx, stepRemaining, operationBudget,
+                step -> pureChain && level != null && StableRecipeBatch.isEligible(
+                        level, step, targetOutput, supplementalMaterialLocks));
+        if (!slice.steps().isEmpty()
+                && !executeVanillaStepsInline(slice.steps(), online)) {
+            if (state != State.ABORTED) {
+                abort("Vanilla batch execution failed",
+                        Component.translatable("rsi.generic.error.auto_craft_failed"));
+            }
+            return startIdx;
         }
+        stepRemaining = slice.remainingExecutions();
         return slice.nextStepIndex();
     }
 

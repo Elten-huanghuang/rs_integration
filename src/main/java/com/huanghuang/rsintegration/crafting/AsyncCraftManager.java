@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -30,6 +31,8 @@ public final class AsyncCraftManager {
     private OperationServices operationServices = new OperationServices();
     private int roundRobinCursor;
     private final ConcurrentLinkedQueue<Runnable> completionQueue = new ConcurrentLinkedQueue<>();
+    @Nullable
+    private CraftTickWindow tickWindow;
 
     void enqueueCompletion(Runnable callback) {
         if (callback != null) completionQueue.add(callback);
@@ -52,6 +55,19 @@ public final class AsyncCraftManager {
         });
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: craft={} player={} steps={}",
                 craftId, playerId, chain.stepsCount());
+    }
+
+    /**
+     * 注册后立即推进。纯工作台任务可在当前服务器 tick 内完成；
+     * 预算耗尽、机器等待或结算跨 tick 时保留为活动链。
+     * 必须在服务器线程调用。
+     */
+    public boolean submitAndAdvance(AsyncCraftChain chain, MinecraftServer server) {
+        Objects.requireNonNull(chain, "chain");
+        Objects.requireNonNull(server, "server");
+        submit(chain);
+        tickChain(chain, beginTickWindow(server));
+        return chain.isDone();
     }
 
     public boolean hasActiveChainFor(UUID playerId) {
@@ -181,42 +197,23 @@ public final class AsyncCraftManager {
         MinecraftServer server = event.getServer();
         if (server == null || server.getPlayerList() == null) return;
 
+        CraftTickWindow window = beginTickWindow(server);
         long tickStart = System.nanoTime();
-
         List<AsyncCraftChain> snapshot = activeChains.snapshot();
-        int globalLimit = configuredGlobalVanillaLimit();
         int perChainLimit = configuredPerChainVanillaLimit();
-        long tickBudgetNanos = configuredServerTickBudgetNanos();
-        VanillaCraftingTickBudget vanillaBudget = new VanillaCraftingTickBudget(globalLimit);
         int deferredChains = 0;
         int start = snapshot.isEmpty() ? 0 : Math.floorMod(roundRobinCursor, snapshot.size());
         int processed = 0;
         for (int offset = 0; offset < snapshot.size(); offset++) {
-            if (System.nanoTime() - tickStart >= tickBudgetNanos) {
+            if (!window.hasTime()) {
                 deferredChains += snapshot.size() - offset;
                 break;
             }
             AsyncCraftChain chain = snapshot.get((start + offset) % snapshot.size());
-            VanillaCraftingTickBudget.ChainAllowance allowance =
-                    vanillaBudget.allowance(perChainLimit);
-            try {
-                chain.tick(allowance);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", e);
-                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                try {
-                    chain.abort("Internal error: " + msg,
-                            Component.translatable("rsi.async.abort.internal_error", msg));
-                } catch (Exception | LinkageError terminationError) {
-                    RSIntegrationMod.LOGGER.error(
-                            "[RSI-AsyncMgr] Chain termination also failed; keeping craft {} registered for audit",
-                            chain.getCraftId(), terminationError);
-                }
-            }
-            if (chain.isDone()) {
-                activeChains.remove(chain.getCraftId());
-            }
-            if (!chain.isDone() && chain.isWaitingForVanillaBudget() && allowance.remaining() == 0) {
+            boolean completed = tickChain(chain, window);
+            if (!completed && chain.isWaitingForVanillaBudget()
+                    && window.remainingVanillaOperations(
+                    chain.getCraftId(), perChainLimit) == 0) {
                 deferredChains++;
             }
             processed++;
@@ -226,7 +223,7 @@ public final class AsyncCraftManager {
         }
         int callbacksRemaining = configuredCompletionCallbacksPerTick();
         for (Runnable callback; callbacksRemaining > 0
-                && System.nanoTime() - tickStart < tickBudgetNanos
+                && window.hasTime()
                 && (callback = completionQueue.poll()) != null; callbacksRemaining--) {
             try { callback.run(); }
             catch (RuntimeException | LinkageError e) { RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Completion callback failed", e); }
@@ -235,8 +232,57 @@ public final class AsyncCraftManager {
                 System.nanoTime() - tickStart);
         if (!snapshot.isEmpty()) {
             PerformanceMonitor.recordVanillaTickBudget(
-                    vanillaBudget.used(), vanillaBudget.limit(), deferredChains);
+                    window.usedVanillaOperations(), window.vanillaOperationLimit(), deferredChains);
         }
+    }
+
+    private boolean tickChain(AsyncCraftChain chain, CraftTickWindow window) {
+        if (window.alreadyAdvanced(chain.getCraftId())) {
+            return chain.isDone();
+        }
+        int perChainLimit = configuredPerChainVanillaLimit();
+        int maxPasses = Math.max(2, chain.stepsCount() + 2);
+        boolean firstPass = true;
+        for (int pass = 0; pass < maxPasses && !chain.isDone(); pass++) {
+            if (!window.hasTime()) break;
+            int remaining = window.remainingVanillaOperations(
+                    chain.getCraftId(), perChainLimit);
+            if (!firstPass && !chain.canAdvanceImmediately(remaining > 0)) break;
+            VanillaCraftingTickBudget.ChainAllowance allowance =
+                    window.allowance(chain.getCraftId(), perChainLimit);
+            try {
+                chain.tick(allowance);
+            } catch (Exception exception) {
+                RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", exception);
+                String message = exception.getMessage() == null
+                        ? exception.getClass().getSimpleName() : exception.getMessage();
+                try {
+                    chain.abort("Internal error: " + message,
+                            Component.translatable("rsi.async.abort.internal_error", message));
+                } catch (Exception | LinkageError terminationError) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-AsyncMgr] Chain termination also failed; keeping craft {} registered for audit",
+                            chain.getCraftId(), terminationError);
+                }
+            } finally {
+                window.markAdvanced(chain.getCraftId());
+                window.record(chain.getCraftId(), allowance.used());
+            }
+            firstPass = false;
+        }
+        if (chain.isDone()) {
+            activeChains.remove(chain.getCraftId());
+        }
+        return chain.isDone();
+    }
+
+    private synchronized CraftTickWindow beginTickWindow(MinecraftServer server) {
+        long serverTick = server.getTickCount();
+        if (tickWindow == null || tickWindow.serverTick() != serverTick) {
+            tickWindow = new CraftTickWindow(serverTick, System.nanoTime(),
+                    configuredServerTickBudgetNanos(), configuredGlobalVanillaLimit());
+        }
+        return tickWindow;
     }
 
     private static int configuredPerChainVanillaLimit() {

@@ -1091,27 +1091,20 @@ public final class GenericCraftPacket {
             steps.add(genericTerminalStep(recipeId, repeatCount));
             RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
                     recipeId);
-            CachedPurePlanExecution execution = selectCachedPurePlanExecution(
-                    steps, storageEndpoint != null,
-                    RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
-            if (execution == CachedPurePlanExecution.REPLAN) {
+            boolean hasPhysicalSteps = steps.stream()
+                    .anyMatch(step -> step.modType() != ModType.GENERIC);
+            if (hasPhysicalSteps && storageEndpoint == null) {
                 RSIntegrationMod.debug(
                         "[RSI-Generic] Cached pure plan for {} contains physical steps but has no storage endpoint; resolving again",
                         recipeId);
                 return false;
             }
-            if (execution == CachedPurePlanExecution.ASYNCHRONOUS
-                    || outputDestination == OutputDestination.PLAYER_INVENTORY) {
-                LegacyExecutionMetrics.Reason reason = canExecuteSynchronously(steps)
-                        ? LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD
-                        : LegacyExecutionMetrics.rejectedGraphReason(steps);
-                launchAsyncChain(player, steps, reason,
-                        network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-            } else {
-                executeSyncLoop(player, steps, network, storageEndpoint, recipeId, repeatCount,
-                        "Intermediate crafting failed");
-            }
+            LegacyExecutionMetrics.Reason reason = hasPhysicalSteps
+                    ? LegacyExecutionMetrics.rejectedGraphReason(steps)
+                    : LegacyExecutionMetrics.Reason.PLANNED_CHAIN;
+            launchAsyncChain(player, steps, reason,
+                    network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
             return true;
         }
         if (cached.resolvedGraph() == null) {
@@ -1135,16 +1128,9 @@ public final class GenericCraftPacket {
             RSIntegrationMod.debug(
                     "[RSI-Generic] Executing revalidated typed preview graph for {} nodes={}",
                     recipeId, completeGraph.nodes().size());
-            if (!canExecuteSynchronously(steps)
-                    || outputDestination == OutputDestination.PLAYER_INVENTORY
-                    || storageEndpoint != null && shouldExecuteGenericChainAsync(steps)) {
-                launchGraphAsyncChain(player, completeGraph, terminalStep, network, storageEndpoint,
-                        repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem,
-                        targetOutput, outputDestination, machineSelectionMode, materialLocks);
-            } else {
-                executeSyncLoop(player, steps, network, storageEndpoint, recipeId, repeatCount,
-                        "Intermediate crafting failed");
-            }
+            launchGraphAsyncChain(player, completeGraph, terminalStep, network, storageEndpoint,
+                    repeatCount, recipeId, forcedRecipes, dim, pos, inferMode, baseItem,
+                    targetOutput, outputDestination, machineSelectionMode, materialLocks);
             return true;
         } catch (IllegalArgumentException | ArithmeticException exception) {
             RSIntegrationMod.LOGGER.debug(
@@ -1277,7 +1263,7 @@ public final class GenericCraftPacket {
                             "[RSI-exec] async pure plan ready recipe={} steps={} states={}",
                             recipeId, steps.size(), result.expandedStates());
                     launchEndpointAsyncChain(player, steps,
-                            LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+                            LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                             storageEndpoint, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode, Map.of());
@@ -1428,7 +1414,7 @@ public final class GenericCraftPacket {
                             "[RSI-exec] async physical plan ready recipe={} steps={} states={}",
                             recipeId, steps.size(), result.expandedStates());
                     launchEndpointAsyncChain(player, steps,
-                            LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+                            LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                             storageEndpoint, repeatCount, recipeId, forcedRecipes,
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode, materialLocks);
@@ -2010,9 +1996,12 @@ public final class GenericCraftPacket {
                             : "rsi.generic.preparation.failed_detail",
                     products, stillMissing));
         });
-        AsyncCraftManager.getInstance().submit(chain);
-        player.sendSystemMessage(Component.translatable(
-                "rsi.generic.preparation.started", products, stillMissing));
+        boolean completed = AsyncCraftManager.getInstance().submitAndAdvance(
+                chain, player.getServer());
+        if (!completed) {
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.generic.preparation.started", products, stillMissing));
+        }
     }
 
     private static void launchAsyncChain(ServerPlayer player, List<ResolutionStep> steps,
@@ -2036,7 +2025,7 @@ public final class GenericCraftPacket {
                 ? null : storageEndpoint.session().reference();
         // The resolver already expanded all intermediate executions.
         final int effectiveRepeat = 1;
-        LegacyFlatExecutionService.launch(player, network, storageEndpoint, steps, legacyReason, recipeId,
+        CraftExecutionService.launch(player, network, storageEndpoint, steps, legacyReason, recipeId,
                 targetOutput, outputDestination, runningChain -> {
                     runningChain.setSupplementalPlanningPreferences(forcedRecipes, materialLocks);
                     runningChain.setMachineSelection(recipeId, machineSelectionMode, dim, pos);
@@ -2100,48 +2089,23 @@ public final class GenericCraftPacket {
         var server = player.getServer();
         final StorageReference repeatReference = storageEndpoint == null
                 ? null : storageEndpoint.session().reference();
-        AsyncCraftManager.getInstance().submit(chain);
         chain.onDone(() -> ChainRepeatController.scheduleNext(
                 chain, server, playerId, 1, chain.getMachineCount(),
                 (p, rem) -> queueExecutionRequest(p,
                         next -> tryResolve(next, recipeId, forcedRecipes, dim, pos, rem,
                                 inferMode, baseItem, targetOutput, outputDestination,
                                 machineSelectionMode, repeatReference, materialLocks), recipeId)));
-        player.sendSystemMessage(TextBuilder.translate(
-                outputDestination == OutputDestination.PLAYER_INVENTORY
-                        ? "rsi.async.chain_started_player"
-                        : "rsi.async.chain_started",
-                chain.stepsCount()).build());
-    }
-
-    /** Execute a resolver-expanded GENERIC-only chain once. */
-    private static boolean executeSyncLoop(ServerPlayer player, List<ResolutionStep> steps,
-                                            INetwork network, @Nullable CraftStorageEndpoint storageEndpoint,
-                                            ResourceLocation recipeId,
-                                            int repeatCount, String failMsg) {
-        if (!canExecuteSynchronously(steps)) {
-            RSIntegrationMod.LOGGER.error(
-                    "[RSI-Generic] Refusing synchronous execution of typed machine chain for {}: {}",
-                    recipeId, steps.stream().map(step -> step.modType().id()).toList());
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.error.craft_failed", "physical machine requires async execution"));
-            return false;
+        boolean completed = AsyncCraftManager.getInstance().submitAndAdvance(chain, server);
+        if (!completed) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Craft] execution graph deferred craftId={} recipe={} state={} steps={}",
+                    chain.getCraftId(), recipeId, chain.state(), chain.stepsCount());
+            player.sendSystemMessage(TextBuilder.translate(
+                    outputDestination == OutputDestination.PLAYER_INVENTORY
+                            ? "rsi.async.chain_started_player"
+                            : "rsi.async.chain_started",
+                    chain.stepsCount()).build());
         }
-        if (!CraftPacketUtils.executeCraftingSteps(player, steps, network, storageEndpoint)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Generic] executeCraftingSteps failed for {} (repeatCount={})",
-                    recipeId, repeatCount);
-            player.sendSystemMessage(Component.translatable("rsi.generic.error.craft_failed", failMsg));
-            return false;
-        }
-        Recipe<?> completedRecipe = resolveRecipe(player.serverLevel(), recipeId);
-        ItemStack completedOutput = completedRecipe == null ? ItemStack.EMPTY
-                : ModRecipeHandlers.tryGetResultItem(completedRecipe, player.serverLevel().registryAccess());
-        if (!steps.isEmpty()) {
-            ItemStack synthetic = steps.get(steps.size() - 1).syntheticOutput();
-            if (synthetic != null && !synthetic.isEmpty()) completedOutput = synthetic;
-        }
-        player.sendSystemMessage(CraftPacketUtils.craftCompletedMessage(completedOutput, totalExecutions(steps)));
-        return true;
     }
 
     static int totalExecutions(List<ResolutionStep> steps) {
@@ -2151,40 +2115,6 @@ public final class GenericCraftPacket {
             if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
         }
         return (int) total;
-    }
-
-    static boolean shouldExecuteGenericChainAsync(List<ResolutionStep> steps) {
-        return shouldExecuteGenericChainAsync(
-                steps, RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get());
-    }
-
-    static boolean shouldExecuteGenericChainAsync(
-            List<ResolutionStep> steps, int syncOperationThreshold) {
-        return totalExecutions(steps) > Math.max(0, syncOperationThreshold);
-    }
-
-    enum CachedPurePlanExecution {
-        SYNCHRONOUS,
-        ASYNCHRONOUS,
-        REPLAN
-    }
-
-    static CachedPurePlanExecution selectCachedPurePlanExecution(
-            List<ResolutionStep> steps, boolean hasStorageEndpoint,
-            int syncOperationThreshold) {
-        if (!canExecuteSynchronously(steps)) {
-            return hasStorageEndpoint
-                    ? CachedPurePlanExecution.ASYNCHRONOUS
-                    : CachedPurePlanExecution.REPLAN;
-        }
-        return hasStorageEndpoint
-                && shouldExecuteGenericChainAsync(steps, syncOperationThreshold)
-                ? CachedPurePlanExecution.ASYNCHRONOUS
-                : CachedPurePlanExecution.SYNCHRONOUS;
-    }
-
-    static boolean canExecuteSynchronously(List<ResolutionStep> steps) {
-        return steps.stream().allMatch(step -> step.modType() == ModType.GENERIC);
     }
 
     static ResolutionStep genericTerminalStep(ResourceLocation recipeId, int repeatCount) {
@@ -2206,16 +2136,6 @@ public final class GenericCraftPacket {
         return new ResolutionStep(recipeId, ModType.GENERIC,
                 new ResourceLocation("minecraft:smithing"), List.of(), List.of(), false,
                 Math.max(1, repeatCount));
-    }
-
-    static List<ResolutionStep> smithingAsyncSteps(
-            List<ResolutionStep> intermediateSteps, ResourceLocation recipeId, int repeatCount) {
-        if (intermediateSteps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
-            return List.of();
-        }
-        List<ResolutionStep> chain = new ArrayList<>(intermediateSteps);
-        chain.add(smithingTerminalStep(recipeId, repeatCount));
-        return List.copyOf(chain);
     }
 
     static ResolutionStep backgroundPhysicalTerminalStep(
@@ -2791,7 +2711,7 @@ public final class GenericCraftPacket {
                 UUID playerId = player.getUUID();
                 var server = player.getServer();
                 final CraftStorageEndpoint selectedStorageEndpoint = storageEndpoint;
-                LegacyFlatExecutionService.launchIncompleteGraph(
+                CraftExecutionService.launchIncompleteGraph(
                         player, network, storageEndpoint, inputGraph, terminalStep, repeatCount,
                         LegacyExecutionMetrics.fromTerminalDecision(graphDecision.reason()),
                         recipeId, targetOutput, outputDestination,
@@ -2898,38 +2818,34 @@ public final class GenericCraftPacket {
             if (!allSteps.isEmpty() && graphMissing.isEmpty()) {
                 boolean legacySyntheticStep = allSteps.stream().anyMatch(
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
-                boolean needsAsync = outputDestination == OutputDestination.PLAYER_INVENTORY
-                        || allSteps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
+                boolean physicalSteps = allSteps.stream().anyMatch(
+                        step -> step.modType() != ModType.GENERIC);
                 boolean selfAmplifying = isSelfAmplifyingRecipe(
                         recipe, player.serverLevel().registryAccess());
-                if (needsAsync && storageEndpoint != null && !legacySyntheticStep) {
+                if (physicalSteps && storageEndpoint == null) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.network_unavailable"));
+                    return;
+                }
+                if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
                     ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
                     recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                    if (!selfAmplifying) {
-                        try {
-                            CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                    inputGraph, terminalStep, recipeOutput);
-                            launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                    network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                            return;
-                        } catch (IllegalArgumentException | ArithmeticException exception) {
-                            RSIntegrationMod.LOGGER.warn(
-                                    "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
-                                    recipeId, exception.getMessage());
-                        }
+                    try {
+                        CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                inputGraph, terminalStep, recipeOutput);
+                        launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
+                        return;
+                    } catch (IllegalArgumentException | ArithmeticException exception) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
+                                recipeId, exception.getMessage());
                     }
                 }
-                if (allSteps.stream().anyMatch(s -> s.modType() != ModType.GENERIC
-                        || s.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP))) {
-                    // Multi-block intermediates → async chain
+                if (physicalSteps || legacySyntheticStep) {
                     List<ResolutionStep> execSteps = genericExecutionSteps(
                             allSteps, recipeId, repeatCount);
-                    if (storageEndpoint == null) {
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.generic.error.network_unavailable"));
-                        return;
-                    }
                     launchAsyncChain(player, execSteps,
                             selfAmplifying
                                     ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
@@ -2938,20 +2854,15 @@ public final class GenericCraftPacket {
                             dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
                     return;
                 }
-                // All GENERIC steps → execute sync chain
                 List<ResolutionStep> execSteps = genericExecutionSteps(
                         allSteps, recipeId, repeatCount);
-                if (storageEndpoint != null && (outputDestination == OutputDestination.PLAYER_INVENTORY
-                        || shouldExecuteGenericChainAsync(execSteps))) {
-                    launchAsyncChain(player, execSteps,
-                            outputDestination == OutputDestination.PLAYER_INVENTORY
-                                    ? LegacyExecutionMetrics.Reason.GRAPH_COMPOSITION_REJECTED
-                                    : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
-                            network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                    return;
-                }
-                executeSyncLoop(player, execSteps, network, storageEndpoint, recipeId, repeatCount, "Intermediate crafting failed");
+                launchAsyncChain(player, execSteps,
+                        selfAmplifying
+                                ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
+                                : LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
+                        network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
+                        dim, pos, inferMode, baseItem, targetOutput, outputDestination,
+                        machineSelectionMode, materialLocks);
                 return;
             }
         }
@@ -2999,42 +2910,42 @@ public final class GenericCraftPacket {
             if (planSteps != null && !planSteps.isEmpty() && missingCheck.isEmpty()) {
                 boolean legacySyntheticStep = planSteps.stream().anyMatch(
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
-                boolean needsAsync = outputDestination == OutputDestination.PLAYER_INVENTORY
-                        || planSteps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
+                boolean physicalSteps = planSteps.stream().anyMatch(
+                        step -> step.modType() != ModType.GENERIC);
                 boolean selfAmplifying = isSelfAmplifyingRecipe(
                         recipe, player.serverLevel().registryAccess());
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
                 ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
                 execSteps2.add(terminalStep);
-                if (needsAsync && storageEndpoint != null && !legacySyntheticStep) {
-                    recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                    if (!selfAmplifying) {
-                        try {
-                            CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                    inputGraph, terminalStep, recipeOutput);
-                            launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                    network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                    inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                            return;
-                        } catch (IllegalArgumentException | ArithmeticException exception) {
-                            RSIntegrationMod.LOGGER.warn(
-                                    "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
-                                    recipeId, exception.getMessage());
-                        }
-                    }
-                }
-                if (storageEndpoint != null && (needsAsync || shouldExecuteGenericChainAsync(execSteps2))) {
-                    launchAsyncChain(player, execSteps2,
-                            needsAsync
-                                    ? selfAmplifying
-                                    ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
-                                    : LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
-                                    : LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
-                            network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
+                if (physicalSteps && storageEndpoint == null) {
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.network_unavailable"));
                     return;
                 }
-                executeSyncLoop(player, execSteps2, network, storageEndpoint, recipeId, repeatCount, "Intermediate crafting failed");
+                if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
+                    recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
+                    try {
+                        CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                inputGraph, terminalStep, recipeOutput);
+                        launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
+                        return;
+                    } catch (IllegalArgumentException | ArithmeticException exception) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
+                                recipeId, exception.getMessage());
+                    }
+                }
+                launchAsyncChain(player, execSteps2,
+                        physicalSteps || selfAmplifying
+                                ? selfAmplifying
+                                ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
+                                : LegacyExecutionMetrics.rejectedGraphReason(execSteps2)
+                                : LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
+                        network, storageEndpoint, repeatCount, recipeId, forcedRecipes,
+                        dim, pos, inferMode, baseItem, targetOutput, outputDestination,
+                        machineSelectionMode, materialLocks);
                 return;
             }
             // planSteps=0 with missing=[] means everything is directly available; not a failure
@@ -3117,61 +3028,53 @@ public final class GenericCraftPacket {
                     List<ResolutionStep> interSteps =
                             ExecutionEquivalence.projectFlatSteps(smithingInputGraph);
                     if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
-                    List<ResolutionStep> asyncSteps = smithingAsyncSteps(
-                            interSteps, recipeId, repeatCount);
-                    if (asyncSteps.isEmpty()) {
-                        if (!CraftPacketUtils.executeCraftingSteps(player, interSteps, network, storageEndpoint)) {
-                            player.sendSystemMessage(Component.translatable(
-                                    "rsi.generic.error.craft_failed", "Smithing intermediate failed"));
-                            return;
-                        }
-                    } else {
-                        ResolutionStep terminalStep = asyncSteps.get(asyncSteps.size() - 1);
+                        ResolutionStep terminalStep = smithingTerminalStep(recipeId, repeatCount);
                         boolean legacySyntheticStep = interSteps.stream().anyMatch(
                                 step -> step.recipeId().equals(
                                         CraftingResolver.TAINT_EARTH_HEART_STEP));
-                        if (!legacySyntheticStep) {
+                        boolean physicalSteps = interSteps.stream().anyMatch(
+                                step -> step.modType() != ModType.GENERIC);
+                        boolean selfAmplifying = isSelfAmplifyingRecipe(
+                                recipe, player.serverLevel().registryAccess());
+                        if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
                             ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
                                     recipe, player.serverLevel().registryAccess());
                             recipeOutput = selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                            boolean selfAmplifying = isSelfAmplifyingRecipe(
-                                    recipe, player.serverLevel().registryAccess());
-                            if (!selfAmplifying) {
-                                try {
-                                    CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
-                                            smithingInputGraph, terminalStep, recipeOutput);
-                                    launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                            network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                            inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                                    return;
-                                } catch (IllegalArgumentException | ArithmeticException exception) {
-                                    RSIntegrationMod.LOGGER.warn(
-                                            "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
-                                            recipeId, exception.getMessage());
-                                }
+                            try {
+                                CraftPlanGraph completeGraph = composeEquivalentTerminalGraph(
+                                        smithingInputGraph, terminalStep, recipeOutput);
+                                launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                        network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
+                                return;
+                            } catch (IllegalArgumentException | ArithmeticException exception) {
+                                RSIntegrationMod.LOGGER.warn(
+                                        "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
+                                        recipeId, exception.getMessage());
                             }
                         }
+                        List<ResolutionStep> asyncSteps = new ArrayList<>(interSteps);
+                        asyncSteps.add(terminalStep);
                         launchAsyncChain(player, asyncSteps,
-                                isSelfAmplifyingRecipe(
-                                        recipe, player.serverLevel().registryAccess())
+                                physicalSteps || selfAmplifying
+                                        ? selfAmplifying
                                         ? LegacyExecutionMetrics.Reason.SELF_AMPLIFYING_TERMINAL
-                                        : LegacyExecutionMetrics.rejectedGraphReason(asyncSteps),
+                                        : LegacyExecutionMetrics.rejectedGraphReason(asyncSteps)
+                                        : LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                                 network, storageEndpoint, repeatCount, recipeId,
                                 forcedRecipes, dim, pos, inferMode, baseItem, targetOutput,
                                 outputDestination, machineSelectionMode, materialLocks);
                         return;
                     }
-                    }
                 }
             }
         }
 
-        if (storageEndpoint != null && recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)
-                && shouldExecuteGenericChainAsync(
-                List.of(genericTerminalStep(recipeId, repeatCount)))) {
+        if (storageEndpoint != null && recipe instanceof CraftingRecipe
+                && !isPhysicalMachineRecipe(recipe, modType)) {
             launchAsyncChain(player,
                     List.of(genericTerminalStep(recipeId, repeatCount)),
-                    LegacyExecutionMetrics.Reason.PURE_CHAIN_OPERATION_THRESHOLD,
+                    LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                     network, storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                     inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
             return;

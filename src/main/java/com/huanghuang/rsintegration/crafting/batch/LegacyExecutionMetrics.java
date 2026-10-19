@@ -25,7 +25,7 @@ public final class LegacyExecutionMetrics {
         SELF_AMPLIFYING_TERMINAL,
         TAINT_SYNTHETIC_STEP,
         DIRECT_TERMINAL_RESERVATION,
-        PURE_CHAIN_OPERATION_THRESHOLD,
+        PLANNED_CHAIN,
         GRAPH_COMPOSITION_REJECTED
     }
 

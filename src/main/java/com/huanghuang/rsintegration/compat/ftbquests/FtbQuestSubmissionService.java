@@ -115,20 +115,8 @@ public final class FtbQuestSubmissionService {
             return;
         }
 
-        if (steps.stream().allMatch(step -> step.modType() == ModType.GENERIC)) {
-            if (CraftPacketUtils.executeCraftingSteps(player, steps, network, endpoint)) {
-                if (FtbQuestSubmissionExecutor.submit(player, questId, endpoint)) {
-                    continueIfNeeded(player, questId, endpoint, remaining);
-                }
-            } else {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.auto_craft_failed"));
-            }
-            return;
-        }
-
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(), network,
                 endpoint, plan.graph());
-        AsyncCraftManager.getInstance().submit(chain);
         chain.onDone(() -> {
             ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
             if (current == null) return;
@@ -141,8 +129,12 @@ public final class FtbQuestSubmissionService {
                         chain.abortReason()));
             }
         });
-        player.sendSystemMessage(Component.translatable("rsi.ftb_quest.info.crafting_started",
-                steps.size()));
+        boolean completed = AsyncCraftManager.getInstance()
+                .submitAndAdvance(chain, player.getServer());
+        if (!completed) {
+            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.info.crafting_started",
+                    steps.size()));
+        }
     }
 
     private static void continueIfNeeded(ServerPlayer player, long questId,

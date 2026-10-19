@@ -127,6 +127,34 @@ public final class ExtractionLedger implements AutoCloseable {
         if (!ingredient.isEmpty()) preferredResonanceIngredients.add(ingredient);
     }
 
+    public boolean hasPreferredResonanceReservations() {
+        return !preferredResonanceIngredients.isEmpty();
+    }
+
+    /** 批量执行前的只读可用量探针，避免多个 int 来源相加时溢出。 */
+    public long countAvailableExactForBatch(@Nonnull ItemStack template,
+                                            @Nonnull ServerPlayer player) {
+        requireState(State.IDLE, State.RESERVING);
+        if (template.isEmpty()) return 0L;
+        long available = countExactAvailableInInventoryLong(player, template);
+        if (storageEndpoint != null) {
+            StorageSnapshot snapshot = reservationSnapshot(storageEndpoint, player);
+            if (snapshot != null) {
+                long stored = snapshot.countExact(storageEndpoint.session().itemKey(template));
+                long pending = pendingNet.getOrDefault(
+                        CraftingResolver.StackKey.of(template, true), 0);
+                available = saturatedAdd(available, Math.max(0L, stored - pending));
+            }
+        } else {
+            INetwork network = legacyNetwork();
+            if (network != null) {
+                available = saturatedAdd(available, Math.max(0L,
+                        countExactAvailableInNetwork(network, template, player)));
+            }
+        }
+        return available;
+    }
+
     /**
      * Returns the backend selected for this ledger. Delegates use this to keep
      * machine execution on the same storage session that performed planning
@@ -1423,6 +1451,30 @@ public final class ExtractionLedger implements AutoCloseable {
         return Math.max(0, available - pendingInv.getOrDefault(key, 0));
     }
 
+    private long countExactAvailableInInventoryLong(ServerPlayer player, ItemStack template) {
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
+        long available = 0L;
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stack)) {
+                available = saturatedAdd(available, stack.getCount());
+            }
+        }
+        for (ItemStack stack : player.getInventory().offhand) {
+            if (!stack.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stack)) {
+                available = saturatedAdd(available, stack.getCount());
+            }
+        }
+        for (IItemHandler backpack : findAllBackpackInventories(player)) {
+            for (int slot = 0; slot < backpack.getSlots(); slot++) {
+                ItemStack stored = backpack.getStackInSlot(slot);
+                if (MaterialMatcher.sameRuntimeFragment(template, stored)) {
+                    available = saturatedAdd(available, stored.getCount());
+                }
+            }
+        }
+        return Math.max(0L, available - pendingInv.getOrDefault(key, 0));
+    }
+
     private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
         int available = countExactAvailableInInventory(player, template);
@@ -1742,7 +1794,8 @@ public final class ExtractionLedger implements AutoCloseable {
     /** Collect consumable backpack inventories from the main inventory and Curios. */
     static List<IItemHandler> findAllBackpackInventories(ServerPlayer player) {
         List<IItemHandler> result = new ArrayList<>();
-        if (!ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return result;
+        if (ModList.get() == null
+                || !ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return result;
 
         // Main inventory
         for (ItemStack stack : player.getInventory().items) {
