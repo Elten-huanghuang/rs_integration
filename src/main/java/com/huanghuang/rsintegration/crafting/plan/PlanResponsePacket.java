@@ -23,6 +23,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
+import io.netty.buffer.Unpooled;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -64,6 +65,12 @@ public final class PlanResponsePacket {
         return value;
     }
 
+    private static long readNonNegativeVarLong(FriendlyByteBuf buf, String field) {
+        long value = buf.readVarLong();
+        if (value < 0L) throw new DecoderException(field + " must be non-negative: " + value);
+        return value;
+    }
+
     /**
      * {@link FriendlyByteBuf#readComponent()} returns null for a JSON {@code null}
      * payload; normalize it so downstream rendering never sees a null element.
@@ -85,6 +92,28 @@ public final class PlanResponsePacket {
         this.requestId = requestId;
     }
 
+    /** Encodes only the business payload; page transport supplies its own header. */
+    public static byte[] encodePayload(PlanResponse plan, long requestId) {
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            new PlanResponsePacket(plan, requestId).encode(buf);
+            byte[] payload = new byte[buf.readableBytes()];
+            buf.readBytes(payload);
+            return payload;
+        } finally {
+            buf.release();
+        }
+    }
+
+    public static PlanResponsePacket decodePayload(byte[] payload) {
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(payload));
+        try {
+            return decode(buf);
+        } finally {
+            buf.release();
+        }
+    }
+
     public void encode(FriendlyByteBuf buf) {
         int startIndex = buf.writerIndex();
         buf.writeBoolean(plan.success());
@@ -99,7 +128,7 @@ public final class PlanResponsePacket {
         for (PlanStep step : plan.steps()) {
             buf.writeResourceLocation(step.recipeId());
             InkFluidSupport.writePacket(buf, step.output());
-            buf.writeVarInt(step.batches());
+            buf.writeVarLong(step.batches());
             buf.writeVarInt(step.inputs().size());
             for (ItemStack in : step.inputs()) {
                 InkFluidSupport.writePacket(buf, in);
@@ -126,9 +155,9 @@ public final class PlanResponsePacket {
         buf.writeVarInt(plan.materials().size());
         for (Map.Entry<IngredientKey, PlanResponse.Availability> e : plan.materials().entrySet()) {
             e.getKey().write(buf);
-            buf.writeVarInt(e.getValue().needed());
-            buf.writeVarInt(e.getValue().available());
-            buf.writeVarInt(e.getValue().missingCount());
+            buf.writeVarLong(e.getValue().needed());
+            buf.writeVarLong(e.getValue().available());
+            buf.writeVarLong(e.getValue().missingCount());
         }
         // Missing
         buf.writeVarInt(plan.missing().size());
@@ -176,9 +205,9 @@ public final class PlanResponsePacket {
         for (String mt : plan.boundMachineTypes()) buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
         // Leftovers (overproduction from integer batch rounding)
         buf.writeVarInt(plan.leftovers().size());
-        for (Map.Entry<IngredientKey, Integer> e : plan.leftovers().entrySet()) {
+        for (Map.Entry<IngredientKey, Long> e : plan.leftovers().entrySet()) {
             e.getKey().write(buf);
-            buf.writeVarInt(e.getValue());
+            buf.writeVarLong(e.getValue());
         }
         // Clicked ghost-output (NBT-variant target, e.g. WR leveled book) — tail-appended
         buf.writeBoolean(plan.clickedOutput() != null);
@@ -240,7 +269,7 @@ public final class PlanResponsePacket {
         for (int i = 0; i < stepCount; i++) {
             var rid = buf.readResourceLocation();
             ItemStack output = InkFluidSupport.readPacket(buf);
-            int batches = buf.readVarInt();
+            long batches = readNonNegativeVarLong(buf, "step batches");
             int inCount = readBoundedCount(buf);
             List<ItemStack> inputs = new ArrayList<>(inCount);
             for (int j = 0; j < inCount; j++) {
@@ -282,8 +311,10 @@ public final class PlanResponsePacket {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         for (int i = 0; i < matCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
-            materials.put(key, new PlanResponse.Availability(buf.readVarInt(), buf.readVarInt(),
-                    readNonNegativeVarInt(buf, "material shortage")));
+            materials.put(key, new PlanResponse.Availability(
+                    readNonNegativeVarLong(buf, "material needed"),
+                    readNonNegativeVarLong(buf, "material available"),
+                    readNonNegativeVarLong(buf, "material shortage")));
         }
         // Missing
         int missCount = readBoundedCount(buf);
@@ -332,10 +363,10 @@ public final class PlanResponsePacket {
         for (int i = 0; i < boundMtCount; i++) boundMachineTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
         // Leftovers (overproduction)
         int leftoverCount = readBoundedCount(buf);
-        Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
+        Map<IngredientKey, Long> leftovers = new LinkedHashMap<>();
         for (int i = 0; i < leftoverCount; i++) {
             IngredientKey key = IngredientKey.read(buf);
-            leftovers.put(key, buf.readVarInt());
+            leftovers.put(key, readNonNegativeVarLong(buf, "leftover quantity"));
         }
         // Clicked ghost-output — required protocol field.
         ItemStack clickedOutput = buf.readBoolean() ? InkFluidSupport.readPacket(buf) : null;
@@ -442,14 +473,14 @@ public final class PlanResponsePacket {
             for (PlanGraphView.InputView input : node.inputs()) {
                 buf.writeVarInt(input.portIndex());
                 InkFluidSupport.writePacket(buf, input.display());
-                buf.writeVarInt(input.quantity());
+                buf.writeVarLong(input.quantity());
                 buf.writeVarInt(input.roleOrdinal());
             }
             buf.writeVarInt(node.outputs().size());
             for (PlanGraphView.OutputView output : node.outputs()) {
                 buf.writeVarInt(output.portIndex());
                 InkFluidSupport.writePacket(buf, output.display());
-                buf.writeVarInt(output.quantity());
+                buf.writeVarLong(output.quantity());
                 buf.writeVarInt(output.kindOrdinal());
             }
         }
@@ -459,18 +490,18 @@ public final class PlanResponsePacket {
             buf.writeVarInt(edge.consumerPortIndex());
             writeSource(buf, edge.source());
             InkFluidSupport.writePacket(buf, edge.material());
-            buf.writeVarInt(edge.quantity());
+            buf.writeVarLong(edge.quantity());
         }
         buf.writeVarInt(graph.roots().size());
         for (PlanGraphView.RootView root : graph.roots()) {
             InkFluidSupport.writePacket(buf, root.display());
-            buf.writeVarInt(root.quantity());
-            buf.writeVarInt(root.unresolvedQuantity());
+            buf.writeVarLong(root.quantity());
+            buf.writeVarLong(root.unresolvedQuantity());
             buf.writeVarInt(root.allocations().size());
             for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
                 writeSource(buf, allocation.source());
                 InkFluidSupport.writePacket(buf, allocation.material());
-                buf.writeVarInt(allocation.quantity());
+                buf.writeVarLong(allocation.quantity());
             }
         }
         buf.writeVarInt(graph.unresolved().size());
@@ -478,7 +509,7 @@ public final class PlanResponsePacket {
             buf.writeVarInt(unresolved.consumerNodeId());
             buf.writeVarInt(unresolved.consumerPortIndex());
             InkFluidSupport.writePacket(buf, unresolved.display());
-            buf.writeVarInt(unresolved.quantity());
+            buf.writeVarLong(unresolved.quantity());
         }
         buf.writeVarInt(graph.topologicalOrder().size());
         for (int nodeId : graph.topologicalOrder()) buf.writeVarInt(nodeId);
@@ -513,13 +544,13 @@ public final class PlanResponsePacket {
             List<PlanGraphView.InputView> inputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 inputs.add(new PlanGraphView.InputView(readNonNegativeVarInt(buf, "input port"),
-                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "input quantity"),
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarLong(buf, "input quantity"),
                         readNonNegativeVarInt(buf, "input role ordinal")));
             }
             List<PlanGraphView.OutputView> outputs = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 outputs.add(new PlanGraphView.OutputView(readNonNegativeVarInt(buf, "output port"),
-                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "output quantity"),
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarLong(buf, "output quantity"),
                         readNonNegativeVarInt(buf, "output kind ordinal")));
             }
             nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
@@ -529,20 +560,20 @@ public final class PlanResponsePacket {
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             edges.add(new PlanGraphView.EdgeView(readNonNegativeVarInt(buf, "edge consumer node"),
                     readNonNegativeVarInt(buf, "edge consumer port"), readSource(buf), InkFluidSupport.readPacket(buf),
-                    readNonNegativeVarInt(buf, "edge quantity")));
+                    readNonNegativeVarLong(buf, "edge quantity")));
         }
         List<PlanGraphView.RootView> roots = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
             ItemStack display = InkFluidSupport.readPacket(buf);
-            int quantity = readNonNegativeVarInt(buf, "root quantity");
-            int unresolvedQuantity = readNonNegativeVarInt(buf, "root unresolved quantity");
+            long quantity = readNonNegativeVarLong(buf, "root quantity");
+            long unresolvedQuantity = readNonNegativeVarLong(buf, "root unresolved quantity");
             if (unresolvedQuantity > quantity) {
                 throw new DecoderException("root unresolved quantity exceeds root quantity");
             }
             List<PlanGraphView.RootEdgeView> allocations = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 allocations.add(new PlanGraphView.RootEdgeView(readSource(buf),
-                        InkFluidSupport.readPacket(buf), readNonNegativeVarInt(buf, "root allocation quantity")));
+                        InkFluidSupport.readPacket(buf), readNonNegativeVarLong(buf, "root allocation quantity")));
             }
             roots.add(new PlanGraphView.RootView(display, quantity, unresolvedQuantity, allocations));
         }
@@ -551,7 +582,7 @@ public final class PlanResponsePacket {
             unresolved.add(new PlanGraphView.UnresolvedView(
                     readNonNegativeVarInt(buf, "unresolved consumer node"),
                     readNonNegativeVarInt(buf, "unresolved consumer port"), InkFluidSupport.readPacket(buf),
-                    readNonNegativeVarInt(buf, "unresolved quantity")));
+                    readNonNegativeVarLong(buf, "unresolved quantity")));
         }
         List<Integer> topological = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {

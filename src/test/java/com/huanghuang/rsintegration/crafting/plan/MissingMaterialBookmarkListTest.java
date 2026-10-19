@@ -121,7 +121,7 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
 
         assertEquals(List.of(Items.DIAMOND, Items.EMERALD),
                 entries.stream().map(entry -> entry.bookmark().getItem()).toList());
-        assertEquals(List.of(2, 3),
+        assertEquals(List.of(2L, 3L),
                 entries.stream().map(MissingMaterialBookmarkList.TextEntry::missingCount).toList());
     }
 

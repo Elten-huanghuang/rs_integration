@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import java.util.concurrent.ConcurrentHashMap;
@@ -247,9 +248,9 @@ public final class PlanRenderEngine {
                     continue;
                 }
 
-                int needed = entry.getValue().needed();
-                int have = entry.getValue().available();
-                int missing = entry.getValue().missingCount();
+                long needed = entry.getValue().needed();
+                long have = entry.getValue().available();
+                long missing = entry.getValue().missingCount();
                 int border = have >= needed ? C_GREEN : (missing == 0 || have > 0 ? C_ORANGE : C_RED);
 
                 ItemStack stack = entry.getKey().stack(1);
@@ -324,13 +325,14 @@ public final class PlanRenderEngine {
 
     @FunctionalInterface
     public interface MaterialTooltipSink {
-        void setHoveredItem(ItemStack stack, int mouseX, int mouseY, int available, int needed);
+        void setHoveredItem(ItemStack stack, int mouseX, int mouseY,
+                            long available, long needed);
     }
 
     @FunctionalInterface
     public interface MaterialBookmarkSink {
         void addBookmarkButton(ItemStack stack, int x, int y, int width, int height,
-                               int missingCount);
+                               long missingCount);
     }
 
     /** Compact overlay control that keeps the existing material-cell geometry unchanged. */
@@ -427,10 +429,7 @@ public final class PlanRenderEngine {
         return sb.toString();
     }
 
-    public static String formatCompact(int n) {
-        if (n < 1000) return String.valueOf(n);
-        if (n < 10000) return String.format("%.1fK", n / 1000.0);
-        if (n < 1000000) return (n / 1000) + "K";
-        return String.format("%.1fM", n / 1000000.0);
+    public static String formatCompact(long n) {
+        return CompactQuantityFormat.format(n);
     }
 }

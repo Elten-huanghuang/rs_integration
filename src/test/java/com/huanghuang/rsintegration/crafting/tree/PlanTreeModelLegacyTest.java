@@ -38,7 +38,7 @@ class PlanTreeModelLegacyTest extends BootstrapTest {
                 List.of(powder, left, right, target), Map.of(), List.of(), target.recipeId().toString());
 
         PlanTreeModel tree = PlanTreeModel.from(plan);
-        Map<IngredientKey, Integer> demand = PlanTreeModel.grossDemandByKey(tree);
+        Map<IngredientKey, Long> demand = PlanTreeModel.grossDemandByKey(tree);
 
         assertEquals(8, demand.get(IngredientKey.of(new ItemStack(Items.IRON_NUGGET))));
         assertEquals(1, demand.get(IngredientKey.of(new ItemStack(Items.IRON_BLOCK))));

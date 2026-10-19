@@ -46,7 +46,7 @@ public record PlanResponse(
         boolean executionMachineSupportsGui,  // true when the bound execution machine supports remote GUI
         @Nullable ItemStack baseItem,         // JEI-provided base item for FA ApplyModifierRecipe prefill
         Set<String> boundMachineTypes,        // v3.4 availability passport: modType ids of machines the player has bound
-        Map<IngredientKey, Integer> leftovers, // overproduction keyed by exact item+NBT
+        Map<IngredientKey, Long> leftovers, // overproduction keyed by exact item+NBT
         @Nullable ItemStack clickedOutput,    // JEI ghost-output the player clicked (NBT-variant target, e.g. WR leveled book)
         @Nullable PlanGraphView graph,         // server-authored DAG view; null on legacy/fallback plans
         boolean executionBlocked,              // hard prerequisite failure, independent of material availability
@@ -79,7 +79,7 @@ public record PlanResponse(
                         @Nullable Component[] embersInputNames, long embersSeed,
                         boolean embersCanInfer, boolean embersCodeFromCache,
                         boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                         @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
                         boolean executionBlocked, List<MachineCandidateView> machineCandidates) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
@@ -101,7 +101,7 @@ public record PlanResponse(
                         @Nullable Component[] embersInputNames, long embersSeed,
                         boolean embersCanInfer, boolean embersCodeFromCache,
                         boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                         @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
                         boolean executionBlocked, List<MachineCandidateView> machineCandidates,
                         Map<ResourceLocation, StepIssue> stepIssues) {
@@ -129,10 +129,9 @@ public record PlanResponse(
     }
 
     /** Gross tree demand and real stock are separate from the net external shortage. */
-    public record Availability(int needed, int available, int missingCount) {
-        public Availability(int needed, int available) {
-            this(needed, available, (int) Math.max(0L, Math.min(Integer.MAX_VALUE,
-                    (long) needed - available)));
+    public record Availability(long needed, long available, long missingCount) {
+        public Availability(long needed, long available) {
+            this(needed, available, Math.max(0L, needed - available));
         }
 
         public Availability {
@@ -154,7 +153,7 @@ public record PlanResponse(
                         @Nullable Component[] embersInputNames, long embersSeed,
                         boolean embersCanInfer, boolean embersCodeFromCache,
                         boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                         @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
@@ -174,7 +173,7 @@ public record PlanResponse(
                         @Nullable Component[] embersInputNames, long embersSeed,
                         boolean embersCanInfer, boolean embersCodeFromCache,
                         boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                        Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                        Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                         @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
                         boolean executionBlocked) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,

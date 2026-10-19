@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -602,7 +603,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
-                                       Map<Item, Integer> neededCounts,
+                                       Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!"crockpot".equals(recipeModTypeId)) return;
 
@@ -620,7 +621,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (preferred != null) {
             int fuelNeeded = Math.max(1, repeatCount / 4);
-            neededCounts.merge(preferred, fuelNeeded, Integer::sum);
+            neededCounts.merge(preferred, (long) fuelNeeded, SaturatingLongMath::signedAdd);
             itemSource.putIfAbsent(preferred, Ingredient.of(preferred));
             return;
         }

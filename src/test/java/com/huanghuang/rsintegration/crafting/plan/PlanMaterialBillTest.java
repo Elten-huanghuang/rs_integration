@@ -431,7 +431,7 @@ class PlanMaterialBillTest extends BootstrapTest {
                 Map.of(), Map.of(), Map.of(), new ItemStack(Items.DIAMOND),
                 List.of(), 1, null, false);
 
-        assertEquals(Map.of(IngredientKey.of(new ItemStack(Items.GOLD_INGOT)), 3),
+        assertEquals(Map.of(IngredientKey.of(new ItemStack(Items.GOLD_INGOT)), 3L),
                 result.leftovers());
     }
 

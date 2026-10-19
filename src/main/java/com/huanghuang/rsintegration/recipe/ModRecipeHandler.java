@@ -91,6 +91,15 @@ public interface ModRecipeHandler {
         return CraftPacketUtils.requiredCount(spec, executions);
     }
 
+    default long requiredIngredientCountLong(@Nonnull Recipe<?> recipe,
+                                             @Nonnull IngredientSpec spec,
+                                             int inputIndex, long executions) {
+        if (executions <= Integer.MAX_VALUE) {
+            return requiredIngredientCount(recipe, spec, inputIndex, (int) executions);
+        }
+        return CraftPacketUtils.requiredCount(spec, executions);
+    }
+
     /** Secondary/byproduct outputs. Default empty — most mods don't have them. */
     @Nonnull
     default List<ItemStack> getSecondaryOutputs(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access) {

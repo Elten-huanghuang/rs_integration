@@ -9,7 +9,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
-import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
@@ -92,9 +92,8 @@ public final class ApothSpawnerUpgradeService {
                 steps, Map.of(), missing, ApothSpawnerPlanTarget.ID.toString(), null,
                 dimension.toString(), pos.getX(), pos.getY(), pos.getZ(), List.of(), 1,
                 null, null, null, 0L, false, false, false, null, Set.of(),
-                Map.<IngredientKey, Integer>of(), null, graphView);
-        BatchCraftNetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(response));
+                Map.<IngredientKey, Long>of(), null, graphView);
+        PlanResponsePublisher.send(player, response, 0L);
     }
 
     public static Snapshot executePreviewed(ServerPlayer player, ResourceLocation dimension, BlockPos pos) {

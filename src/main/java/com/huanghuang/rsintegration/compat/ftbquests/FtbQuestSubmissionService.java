@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.compat.ftbquests;
 
 import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import java.util.Map;
 import java.util.Set;
 
@@ -12,11 +11,10 @@ import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
-import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
-import net.minecraftforge.network.PacketDistributor;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -64,8 +62,7 @@ public final class FtbQuestSubmissionService {
                 List.of(), Math.max(1, Math.min(repeatCount, 1024)), null, null, null, 0L,
                 false, false, false, null, Set.of(), Map.of(),
                 null, questPlan.graphView());
-        BatchCraftNetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(plan));
+        PlanResponsePublisher.send(player, plan, 0L);
     }
 
     public static void execute(ServerPlayer player, long questId) {
@@ -172,7 +169,6 @@ public final class FtbQuestSubmissionService {
                 0, 0, 0,
                 List.of(Component.translatable("rsi.plan.failure.planning_timeout")),
                 Math.max(1, Math.min(repeatCount, 1024)));
-        BatchCraftNetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player), new PlanResponsePacket(failure));
+        PlanResponsePublisher.send(player, failure, 0L);
     }
 }

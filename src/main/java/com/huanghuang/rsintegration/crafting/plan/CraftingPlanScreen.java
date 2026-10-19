@@ -24,6 +24,7 @@ import com.huanghuang.rsintegration.crafting.batch.PrepareIntermediateMaterialsP
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
@@ -180,9 +181,10 @@ public final class CraftingPlanScreen extends Screen {
     private static final int STRIP_GAP = 8;
     private final List<CostHit> costHits = new ArrayList<>();
     private record CostHit(int x, int y, int w, int h, IngredientKey key) {}
-    private record StripEntry(ItemStack display, IngredientKey key, int count, int available, boolean enough) {}
+    private record StripEntry(ItemStack display, IngredientKey key, long count, long available,
+                              boolean enough) {}
     private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
-    private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, int missingCount) {}
+    private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, long missingCount) {}
     private int bookmarkAllActionX, bookmarkAllActionY;
     private int bookmarkAllActionW, bookmarkAllActionH;
     @Nullable
@@ -298,7 +300,7 @@ public final class CraftingPlanScreen extends Screen {
     private ItemStack hoveredItemForTooltip = ItemStack.EMPTY;
     private List<Component> hoveredStepWarnings = List.of();
     private int hoveredTooltipX, hoveredTooltipY;
-    private int hoveredTooltipAvail, hoveredTooltipNeeded;
+    private long hoveredTooltipAvail, hoveredTooltipNeeded;
 
     protected CraftingPlanScreen(PlanResponse plan, long requestId) {
         super(Component.translatable("rsi.plan.title",
@@ -817,9 +819,9 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void registerBookmarkHit(ItemStack stack, int x, int y, int width, int height,
-                                     int missingCount) {
+                                     long missingCount) {
         BookmarkHit hit = new BookmarkHit(x, y, width, height,
-                stack.copyWithCount(1), Math.max(1, missingCount));
+                stack.copyWithCount(1), Math.max(1L, missingCount));
         bookmarkHits.add(hit);
         if (mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height) {
             hoveredBookmark = hit;
@@ -1301,13 +1303,13 @@ public final class CraftingPlanScreen extends Screen {
 
     private int drawStepCard(GuiGraphics gfx, Font font, int x, int y, int cardW,
                               ItemStack output, String outputName,
-                              PlanStep step, int batches, int idx, int animIdx) {
+                              PlanStep step, long batches, int idx, int animIdx) {
         return drawStepCard(gfx, font, x, y, cardW, output, outputName, step, batches, idx, animIdx, false);
     }
 
     private int drawStepCard(GuiGraphics gfx, Font font, int x, int y, int cardW,
                               ItemStack output, String outputName,
-                              PlanStep step, int batches, int idx, int animIdx,
+                              PlanStep step, long batches, int idx, int animIdx,
                               boolean showFoldToggle) {
         boolean isMultiblock = step != null
                 && step.modType() != null
@@ -1369,7 +1371,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // ── Batch count ───────────────────────────────────────
         if (batches > 1) {
-            String batchStr = batches + "x";
+            String batchStr = PlanRenderEngine.formatCompact(batches) + "x";
             gfx.drawString(font, batchStr, cx, cy + SLOT_SIZE / 2 - font.lineHeight / 2, C_BATCH_TEXT);
             cx += font.width(batchStr) + 6;
         }
@@ -1385,8 +1387,8 @@ public final class CraftingPlanScreen extends Screen {
                     int sx = gridLeft + col * (GRID_SLOT + GRID_GAP);
                     int sy = gridTop + row * (GRID_SLOT + GRID_GAP);
                     ItemStack gs = step.inputs().get(i);
-                    int gTotal = step.totalInputCount(i, step.batches());
-                    int gDisp = batches > 1 ? gs.getCount() : gTotal;
+                    long gTotal = step.totalInputCount(i, step.batches());
+                    long gDisp = batches > 1 ? gs.getCount() : gTotal;
                     drawGridSlot(gfx, font, sx, sy, gs, gTotal, gDisp);
                 }
                 int totalCells = step.recipeWidth() * step.recipeHeight();
@@ -1405,8 +1407,8 @@ public final class CraftingPlanScreen extends Screen {
                     ItemStack in = step.inputs().get(i);
                     int sx = cx + (i % cols) * (SLOT_SIZE + 3);
                     int sy = cy + (i / cols) * (SLOT_SIZE + 3);
-                    int totalNeed = step.totalInputCount(i, step.batches());
-                    int disp = batches > 1 ? in.getCount() : totalNeed;
+                    long totalNeed = step.totalInputCount(i, step.batches());
+                    long disp = batches > 1 ? in.getCount() : totalNeed;
                     drawSlot(gfx, font, sx, sy, in, totalNeed, disp, true);
                 }
                 cx += cols * (SLOT_SIZE + 3) + ARROW_W;
@@ -1419,7 +1421,8 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.chevron(gfx, arrowCx - 2, arrowCy, C_ARROW);
 
         // ── Output slot ───────────────────────────────────────
-        int outAmount = batches > 0 ? output.getCount() * batches : output.getCount();
+        long outAmount = batches > 0
+                ? SaturatingLongMath.multiply(output.getCount(), batches) : output.getCount();
         drawSlot(gfx, font, cx, cy, output, outAmount, outAmount, false);
 
         // ── Output name ───────────────────────────────────────
@@ -1480,7 +1483,7 @@ public final class CraftingPlanScreen extends Screen {
     /** @param needed       threshold for border color
      *  @param displayCount number drawn in corner; 0 = hide, 1 = vanilla decorations */
     private void drawGridSlot(GuiGraphics gfx, Font font, int x, int y,
-                               ItemStack stack, int needed, int displayCount) {
+                               ItemStack stack, long needed, long displayCount) {
         boolean hovered = mouseX >= x - 1 && mouseX <= x + GRID_SLOT + 1
                 && mouseY >= y - 1 && mouseY <= y + GRID_SLOT + 1;
 
@@ -1491,7 +1494,7 @@ public final class CraftingPlanScreen extends Screen {
             return;
         }
 
-        int avail = 0;
+        long avail = 0L;
         PlanResponse.Availability a = plan.availability(stack);
         if (a != null) avail = a.available();
 
@@ -1505,7 +1508,7 @@ public final class CraftingPlanScreen extends Screen {
         if (displayCount > 1) {
             gfx.pose().pushPose();
             gfx.pose().translate(0, 0, 200);
-            String txt = String.valueOf(displayCount);
+            String txt = PlanRenderEngine.formatCompact(displayCount);
             gfx.drawString(font, txt, x + GRID_SLOT - font.width(txt),
                     y + GRID_SLOT - font.lineHeight + 2, 0xFFFFFF);
             gfx.pose().popPose();
@@ -1550,8 +1553,8 @@ public final class CraftingPlanScreen extends Screen {
     /** @param needed       threshold for color (green/orange/red)
      *  @param displayCount number shown in the slot corner; 0 = hide */
     private void drawSlot(GuiGraphics gfx, Font font, int x, int y,
-                           ItemStack stack, int needed, int displayCount, boolean isInput) {
-        int avail = 0;
+                           ItemStack stack, long needed, long displayCount, boolean isInput) {
+        long avail = 0L;
         PlanResponse.Availability a = plan.availability(stack);
         if (a != null) avail = a.available();
 
@@ -1584,7 +1587,7 @@ public final class CraftingPlanScreen extends Screen {
         if (displayCount > 1) {
             gfx.pose().pushPose();
             gfx.pose().translate(0, 0, 200);
-            String txt = String.valueOf(displayCount);
+            String txt = PlanRenderEngine.formatCompact(displayCount);
             gfx.drawString(font, txt, x + SLOT_SIZE - font.width(txt),
                     y + SLOT_SIZE - font.lineHeight + 2, 0xFFFFFF);
             gfx.pose().popPose();
@@ -2171,7 +2174,7 @@ public final class CraftingPlanScreen extends Screen {
                 if (hitRight > hitLeft && hitBottom > hitTop) {
                     registerBookmarkHit(e.display(), hitLeft, hitTop,
                             hitRight - hitLeft, hitBottom - hitTop,
-                            Math.max(1, plan.availability(e.key()).missingCount()));
+                            Math.max(1L, plan.availability(e.key()).missingCount()));
                 }
             }
             String cnt = stripCountText(e, leftover);
@@ -2197,7 +2200,10 @@ public final class CraftingPlanScreen extends Screen {
 
     /** Total-demand entries show "have/need" (e.g. "3/128"); leftover entries show a single surplus count. */
     private static String stripCountText(StripEntry e, boolean leftover) {
-        return leftover ? String.valueOf(e.count()) : e.available() + "/" + e.count();
+        return leftover
+                ? PlanRenderEngine.formatCompact(e.count())
+                : PlanRenderEngine.formatCompact(e.available()) + "/"
+                + PlanRenderEngine.formatCompact(e.count());
     }
 
     /** Pan the camera so the node with this key sits at the viewport center. */
@@ -3033,7 +3039,8 @@ public final class CraftingPlanScreen extends Screen {
         gfx.drawString(font, name, tx, y + (rowH - font.lineHeight) / 2, 0xFFBBCCBB, false);
 
         // Step index + batch (▶ signals the row expands on click).
-        String summary = "▶ Step " + (idx + 1) + "  ×" + step.batches();
+        String summary = "▶ Step " + (idx + 1) + "  ×"
+                + PlanRenderEngine.formatCompact(step.batches());
         int sw = font.width(summary);
         gfx.drawString(font, summary, x + cardW - sw - 8, y + (rowH - font.lineHeight) / 2, 0xFF889988, false);
 
@@ -3058,14 +3065,14 @@ public final class CraftingPlanScreen extends Screen {
         };
     }
 
-    private int stepAccent(PlanStep step, int batches) {
+    private int stepAccent(PlanStep step, long batches) {
         if (step == null || step.inputs().isEmpty()) return C_ACCENT_NEUTRAL;
         for (int inputIndex = 0; inputIndex < step.inputs().size(); inputIndex++) {
             ItemStack in = step.inputs().get(inputIndex);
             if (in.isEmpty()) continue;
             PlanResponse.Availability a = plan.availability(in);
-            int avail = a != null ? a.available() : 0;
-            int need = step.totalInputCount(inputIndex, batches);
+            long avail = a != null ? a.available() : 0L;
+            long need = step.totalInputCount(inputIndex, batches);
             if (avail < need) return C_ACCENT_MISSING;
         }
         return C_ACCENT_READY;

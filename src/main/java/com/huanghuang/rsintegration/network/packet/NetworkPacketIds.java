@@ -138,4 +138,6 @@ public final class NetworkPacketIds {
     public static final int UNIFIED_DISK_TOOLTIP_REQUEST = 152;
     public static final int UNIFIED_DISK_TOOLTIP_RESPONSE = 153;
     public static final int RESONANT_MAGIC_SYNC = 154;
+    /** 完整 PlanResponse 的业务载荷分页传输。 */
+    public static final int PLAN_RESPONSE_PAGE = 155;
 }

@@ -22,7 +22,7 @@ import java.util.List;
 public final class PlanTreeNode {
     public final IngredientKey key;
     public final ItemStack displayStack;
-    public int amount;
+    public long amount;
     public final int depth;
     @Nullable
     public final PlanStep step;    // null = leaf (raw material)
@@ -34,11 +34,11 @@ public final class PlanTreeNode {
     public final List<PlanTreeNode> children = new ArrayList<>();
 
     /** Quantity carried by the producer edge that created this view reference. */
-    public int edgeQuantity;
+    public long edgeQuantity;
     /** True when this raw-material edge is sourced from the initial pool. */
     public boolean initialSource;
     /** Number of unresolved units attached to this input port. */
-    public int unresolved;
+    public long unresolved;
     /** Output kind for producer nodes (PRIMARY/SECONDARY/REMAINDER/SYNTHETIC ordinal). */
     public int outputKindOrdinal;
 
@@ -46,8 +46,8 @@ public final class PlanTreeNode {
     public boolean expanded = true;
 
     // ---- availability (from PlanResponse.materials) ----
-    public int available;
-    public int needed;
+    public long available;
+    public long needed;
 
     // ---- step prerequisites (server-authoritative) ----
     public List<Component> warnings = List.of();
@@ -71,22 +71,22 @@ public final class PlanTreeNode {
     @Nullable
     public ItemStack lockedMaterial;
 
-    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, long amount,
                         int depth, @Nullable PlanStep step) {
         this(key, displayStack, amount, depth, step, null, DemandRole.CONSUMED);
     }
 
-    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, long amount,
                         int depth, @Nullable PlanStep step, DemandRole demandRole) {
         this(key, displayStack, amount, depth, step, null, demandRole);
     }
 
-    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, long amount,
                         int depth, @Nullable PlanStep step, @Nullable Integer graphNodeId) {
         this(key, displayStack, amount, depth, step, graphNodeId, DemandRole.CONSUMED);
     }
 
-    public PlanTreeNode(IngredientKey key, ItemStack displayStack, int amount,
+    public PlanTreeNode(IngredientKey key, ItemStack displayStack, long amount,
                         int depth, @Nullable PlanStep step, @Nullable Integer graphNodeId,
                         DemandRole demandRole) {
         this.key = key;

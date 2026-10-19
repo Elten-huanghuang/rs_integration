@@ -31,6 +31,9 @@ class ApprenticeCodexRecipeHandlerTest {
         assertEquals(2, ApprenticeCodexRecipeHandler.requiredCatalystCount(9));
         assertEquals(2, ApprenticeCodexRecipeHandler.requiredCatalystCount(16));
         assertEquals(3, ApprenticeCodexRecipeHandler.requiredCatalystCount(17));
+        assertEquals(268_435_456L,
+                ApprenticeCodexRecipeHandler.requiredCatalystCountLong(
+                        (long) Integer.MAX_VALUE + 1L));
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
@@ -773,11 +774,12 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
-                                       Map<Item, Integer> neededCounts,
+                                       Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!"immortalers_delight".equals(recipeModTypeId)) return;
         int fuelNeeded = Math.max(1, repeatCount / 4);
-        neededCounts.merge(Items.LAPIS_LAZULI, fuelNeeded, Integer::sum);
+        neededCounts.merge(Items.LAPIS_LAZULI, (long) fuelNeeded,
+                SaturatingLongMath::signedAdd);
         // Include lapis blocks as an acceptable source — RS recursive
         // resolution will show the decomposition in the plan tree
         itemSource.putIfAbsent(Items.LAPIS_LAZULI,

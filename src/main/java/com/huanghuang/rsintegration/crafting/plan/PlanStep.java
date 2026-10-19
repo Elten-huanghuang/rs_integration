@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
@@ -20,7 +21,7 @@ import java.util.List;
 public record PlanStep(
         ResourceLocation recipeId,
         ItemStack output,
-        int batches,
+        long batches,
         List<ItemStack> inputs,
         List<ResourceLocation> alternatives,
         @Nullable ModType modType,
@@ -43,7 +44,7 @@ public record PlanStep(
         }
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings,
                     int recipeWidth, int recipeHeight, List<String> alternativeModTypes) {
@@ -51,7 +52,7 @@ public record PlanStep(
                 recipeWidth, recipeHeight, alternativeModTypes, Collections.emptyList());
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings,
                     int recipeWidth, int recipeHeight) {
@@ -59,36 +60,36 @@ public record PlanStep(
                 recipeWidth, recipeHeight, Collections.emptyList(), Collections.emptyList());
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType, int depth, boolean hasOrSiblings) {
         this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
                 0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives,
                     @Nullable ModType modType) {
         this(recipeId, output, batches, inputs, alternatives, modType, 0, false,
                 0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs, List<ResourceLocation> alternatives) {
         this(recipeId, output, batches, inputs, alternatives, null, 0, false,
                 0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
-    public PlanStep(ResourceLocation recipeId, ItemStack output, int batches,
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
                     List<ItemStack> inputs) {
         this(recipeId, output, batches, inputs, Collections.emptyList(), null, 0, false,
                 0, 0, Collections.emptyList(), Collections.emptyList());
     }
 
-    public int totalInputCount() {
-        int n = 0;
+    public long totalInputCount() {
+        long n = 0L;
         for (int i = 0; i < inputs.size(); i++) {
-            n = saturatingAdd(n, totalInputCount(i, batches));
+            n = SaturatingLongMath.add(n, totalInputCount(i, batches));
         }
         return n;
     }
@@ -98,15 +99,14 @@ public record PlanStep(
                 ? inputRoles.get(index) : DemandRole.CONSUMED;
     }
 
-    public int totalInputCount(int index, int executions) {
-        if (index < 0 || index >= inputs.size()) return 0;
+    public long totalInputCount(int index, long executions) {
+        if (index < 0 || index >= inputs.size()) return 0L;
         int count = Math.max(0, inputs.get(index).getCount());
         if (inputRole(index) == DemandRole.CATALYST) return count;
         if (isSelfAmplifying() && MaterialMatcher.equivalentRuntimeFragment(inputs.get(index), output)) {
             return count;
         }
-        long total = (long) count * Math.max(1, executions);
-        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+        return SaturatingLongMath.multiply(count, Math.max(1L, executions));
     }
 
     private boolean isSelfAmplifying() {
@@ -119,12 +119,7 @@ public record PlanStep(
         return selfConsumed > 0L && output.getCount() > selfConsumed;
     }
 
-    private static int saturatingAdd(int left, int right) {
-        long total = (long) left + right;
-        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
-    }
-
-    public int totalOutputCount() {
-        return output.getCount() * batches;
+    public long totalOutputCount() {
+        return SaturatingLongMath.multiply(output.getCount(), batches);
     }
 }

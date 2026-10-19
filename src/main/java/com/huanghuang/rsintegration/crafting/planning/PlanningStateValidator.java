@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
@@ -132,7 +133,7 @@ public final class PlanningStateValidator {
         }
         if (graph == null) return true;
         if (!graph.unresolved().isEmpty()) return false;
-        Map<StackKey, Integer> required = requiredInitialSupply(graph);
+        Map<StackKey, Long> required = requiredInitialSupply(graph);
         Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
                 player, endpoint, itemTypes(required));
         return hasRequiredInitialSupply(required, currentAvailable);
@@ -223,9 +224,9 @@ public final class PlanningStateValidator {
                 && hasRequiredInitialSupply(requiredInitialSupply(graph), available);
     }
 
-    private static Map<StackKey, Integer> requiredInitialSupply(PlanGraphView graph) {
+    private static Map<StackKey, Long> requiredInitialSupply(PlanGraphView graph) {
         if (graph == null) return Map.of();
-        Map<StackKey, Integer> required = new HashMap<>();
+        Map<StackKey, Long> required = new HashMap<>();
         for (PlanGraphView.EdgeView edge : graph.edges()) {
             if (edge.source().initial()) mergeRequirement(required, edge.material(), edge.quantity());
         }
@@ -239,16 +240,15 @@ public final class PlanningStateValidator {
         return Map.copyOf(required);
     }
 
-    private static boolean hasRequiredInitialSupply(Map<StackKey, Integer> required,
+    private static boolean hasRequiredInitialSupply(Map<StackKey, Long> required,
                                                     Map<StackKey, Integer> available) {
-        for (Map.Entry<StackKey, Integer> entry : required.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : required.entrySet()) {
             if (available.getOrDefault(entry.getKey(), 0) < entry.getValue()) return false;
         }
         return true;
     }
 
-    private static Set<Item> itemTypes(
-            Map<StackKey, Integer> required) {
+    private static Set<Item> itemTypes(Map<StackKey, Long> required) {
         Set<Item> result = new HashSet<>();
         for (StackKey key : required.keySet()) result.add(key.item());
         return Set.copyOf(result);
@@ -292,15 +292,13 @@ public final class PlanningStateValidator {
         return expected.equals(actual);
     }
 
-    private static void mergeRequirement(Map<StackKey, Integer> required,
-                                         ItemStack stack, int quantity) {
-        if (stack == null || stack.isEmpty() || quantity <= 0) return;
+    private static void mergeRequirement(Map<StackKey, Long> required,
+                                         ItemStack stack, long quantity) {
+        if (stack == null || stack.isEmpty() || quantity <= 0L) return;
         String tag = stack.getTag() == null || stack.getTag().isEmpty()
                 ? null : stack.getTag().toString();
-        required.merge(new StackKey(stack.getItem(), tag), quantity, (left, right) -> {
-            long total = (long) left + right;
-            return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
-        });
+        required.merge(new StackKey(stack.getItem(), tag), quantity,
+                SaturatingLongMath::add);
     }
 
     private static String networkIdentity(String fingerprint) {

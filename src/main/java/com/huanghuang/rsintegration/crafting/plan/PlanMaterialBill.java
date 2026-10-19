@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import net.minecraft.world.item.Item;
@@ -21,7 +22,7 @@ import java.util.Set;
 public final class PlanMaterialBill {
     private PlanMaterialBill() {}
 
-    public static Result summarize(Map<Item, Integer> neededCounts,
+    public static Result summarize(Map<Item, ? extends Number> neededCounts,
                                    Map<Item, Ingredient> itemSources,
                                    Map<Item, Integer> itemAvailable,
                                    Map<StackKey, Integer> stackAvailable,
@@ -37,10 +38,12 @@ public final class PlanMaterialBill {
         boolean feasible = !hasMissing
                 && netMaterials.values().stream().allMatch(PlanResponse.Availability::isEnough);
 
-        Map<IngredientKey, Integer> leftovers = new LinkedHashMap<>();
-        for (Map.Entry<Item, Integer> entry : neededCounts.entrySet()) {
-            if (entry.getValue() >= 0 || entry.getKey() == targetOutput.getItem()) continue;
-            leftovers.put(IngredientKey.of(new ItemStack(entry.getKey())), -entry.getValue());
+        Map<IngredientKey, Long> leftovers = new LinkedHashMap<>();
+        for (Map.Entry<Item, ? extends Number> entry : neededCounts.entrySet()) {
+            long count = entry.getValue() == null ? 0L : entry.getValue().longValue();
+            if (count >= 0L || entry.getKey() == targetOutput.getItem()) continue;
+            leftovers.put(IngredientKey.of(new ItemStack(entry.getKey())),
+                    count == Long.MIN_VALUE ? Long.MAX_VALUE : -count);
         }
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = graph == null
@@ -55,27 +58,29 @@ public final class PlanMaterialBill {
     }
 
     private static Map<IngredientKey, PlanResponse.Availability> buildNetMaterials(
-            Map<Item, Integer> neededCounts,
+            Map<Item, ? extends Number> neededCounts,
             Map<Item, Ingredient> itemSources,
             Map<Item, Integer> itemAvailable,
             Map<StackKey, Integer> stackAvailable) {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         Set<String> mergedTagKeys = new HashSet<>();
-        for (Map.Entry<Item, Integer> entry : neededCounts.entrySet()) {
-            if (entry.getValue() <= 0) continue;
-            int needed = entry.getValue();
+        for (Map.Entry<Item, ? extends Number> entry : neededCounts.entrySet()) {
+            long needed = entry.getValue() == null ? 0L : entry.getValue().longValue();
+            if (needed <= 0L) continue;
             Item displayItem = entry.getKey();
             Ingredient source = itemSources.get(displayItem);
             if (source != null && source.getItems().length > 1) {
                 String tagKey = source.toJson().toString();
                 if (!mergedTagKeys.add(tagKey)) continue;
-                int netNeeded = 0;
-                int totalHave = 0;
+                long netNeeded = 0L;
+                long totalHave = 0L;
                 for (ItemStack option : source.getItems()) {
                     if (option.isEmpty()) continue;
                     Item optionItem = option.getItem();
-                    netNeeded += neededCounts.getOrDefault(optionItem, 0);
-                    totalHave += itemAvailable.getOrDefault(optionItem, 0);
+                    netNeeded = SaturatingLongMath.signedAdd(netNeeded,
+                            countOf(neededCounts, optionItem));
+                    totalHave = SaturatingLongMath.add(totalHave,
+                            itemAvailable.getOrDefault(optionItem, 0));
                 }
                 materials.put(IngredientKey.of(new ItemStack(displayItem)),
                         new PlanResponse.Availability(Math.max(0, netNeeded), totalHave));
@@ -83,7 +88,7 @@ public final class PlanMaterialBill {
             }
 
             boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
-            int have = nbtStrict
+            long have = nbtStrict
                     ? countNbtMatching(source, stackAvailable)
                     : itemAvailable.getOrDefault(displayItem, 0);
             ItemStack materialDisplay = new ItemStack(displayItem);
@@ -97,7 +102,7 @@ public final class PlanMaterialBill {
     }
 
     private static Map<IngredientKey, PlanResponse.Availability> buildLegacyNetMaterials(
-            Map<Item, Integer> neededCounts,
+            Map<Item, ? extends Number> neededCounts,
             Map<Item, Ingredient> itemSources,
             Map<Item, Integer> itemAvailable,
             Map<StackKey, Integer> stackAvailable,
@@ -106,7 +111,8 @@ public final class PlanMaterialBill {
             int repeatCount) {
         Map<IngredientKey, PlanResponse.Availability> materials = buildNetMaterials(
                 neededCounts, itemSources, itemAvailable, stackAvailable);
-        Map<IngredientKey, Integer> gross = buildGrossDemand(targetOutput, steps, repeatCount, null);
+        Map<IngredientKey, Long> gross = buildGrossDemand(
+                targetOutput, steps, repeatCount, null);
         Set<Item> nbtItems = new HashSet<>();
         for (IngredientKey key : gross.keySet()) {
             Ingredient source = itemSources.get(key.item());
@@ -128,10 +134,10 @@ public final class PlanMaterialBill {
                     .allMatch(key -> key.stack(1).hasTag());
             if (!allTagged) continue;
             materials.entrySet().removeIf(entry -> entry.getKey().item() == item);
-            for (Map.Entry<IngredientKey, Integer> entry : gross.entrySet()) {
+            for (Map.Entry<IngredientKey, Long> entry : gross.entrySet()) {
                 IngredientKey key = entry.getKey();
                 if (key.item() != item) continue;
-                int produced = 0;
+                long produced = 0L;
                 int terminalStep = terminalStepIndex(targetOutput, steps);
                 for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
                     // The final step matching the requested output is the
@@ -139,12 +145,12 @@ public final class PlanMaterialBill {
                     if (stepIndex == terminalStep) continue;
                     PlanStep step = steps.get(stepIndex);
                     if (IngredientKey.of(step.output()).equals(key)) {
-                        long total = (long) produced + step.totalOutputCount();
-                        produced = total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+                        produced = SaturatingLongMath.add(
+                                produced, step.totalOutputCount());
                     }
                 }
-                int externalNeeded = Math.max(0, entry.getValue() - produced);
-                if (externalNeeded == 0) continue;
+                long externalNeeded = Math.max(0L, entry.getValue() - produced);
+                if (externalNeeded == 0L) continue;
                 ItemStack display = key.stack(1);
                 materials.put(key, new PlanResponse.Availability(
                         externalNeeded, countExactStack(display, stackAvailable)));
@@ -153,7 +159,12 @@ public final class PlanMaterialBill {
         return materials;
     }
 
-    private static Map<IngredientKey, Integer> buildGrossDemand(ItemStack targetOutput,
+    private static long countOf(Map<Item, ? extends Number> counts, Item item) {
+        Number count = counts.get(item);
+        return count == null ? 0L : count.longValue();
+    }
+
+    private static Map<IngredientKey, Long> buildGrossDemand(ItemStack targetOutput,
                                                                   List<PlanStep> steps,
                                                                   int repeatCount,
                                                                   @Nullable PlanGraphView graph) {
@@ -189,7 +200,7 @@ public final class PlanMaterialBill {
             PlanGraphView graph,
             Map<Item, Integer> itemAvailable,
             Map<StackKey, Integer> stackAvailable) {
-        Map<IngredientKey, Integer> needed = new LinkedHashMap<>();
+        Map<IngredientKey, Long> needed = new LinkedHashMap<>();
         for (PlanGraphView.EdgeView edge : graph.edges()) {
             if (edge.source().initial()) {
                 mergeDemand(needed, edge.material(), edge.quantity());
@@ -207,10 +218,10 @@ public final class PlanMaterialBill {
         }
 
         Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
-        for (Map.Entry<IngredientKey, Integer> entry : needed.entrySet()) {
+        for (Map.Entry<IngredientKey, Long> entry : needed.entrySet()) {
             IngredientKey key = entry.getKey();
             ItemStack display = key.stack(1);
-            int available = display.hasTag()
+            long available = display.hasTag()
                     ? countExactStack(display, stackAvailable)
                     : itemAvailable.getOrDefault(key.item(), 0);
             result.put(key, new PlanResponse.Availability(entry.getValue(), available));
@@ -218,14 +229,11 @@ public final class PlanMaterialBill {
         return result;
     }
 
-    private static void mergeDemand(Map<IngredientKey, Integer> demand,
-                                    ItemStack material, int quantity) {
-        if (material == null || material.isEmpty() || quantity <= 0) return;
+    private static void mergeDemand(Map<IngredientKey, Long> demand,
+                                    ItemStack material, long quantity) {
+        if (material == null || material.isEmpty() || quantity <= 0L) return;
         IngredientKey key = IngredientKey.of(material);
-        demand.merge(key, quantity, (left, right) -> {
-            long total = (long) left + right;
-            return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
-        });
+        demand.merge(key, quantity, SaturatingLongMath::add);
     }
 
     private static Map<IngredientKey, PlanResponse.Availability> buildDisplayMaterials(
@@ -237,11 +245,11 @@ public final class PlanMaterialBill {
             List<PlanStep> steps,
             int repeatCount,
             @Nullable PlanGraphView graph) {
-        Map<IngredientKey, Integer> grossDemand =
+        Map<IngredientKey, Long> grossDemand =
                 buildGrossDemand(targetOutput, steps, repeatCount, graph);
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = new LinkedHashMap<>();
-        for (Map.Entry<IngredientKey, Integer> entry : grossDemand.entrySet()) {
+        for (Map.Entry<IngredientKey, Long> entry : grossDemand.entrySet()) {
             IngredientKey key = entry.getKey();
             ItemStack display = key.stack(1);
             // Graph allocations preserve the concrete NBT selected by the
@@ -258,7 +266,7 @@ public final class PlanMaterialBill {
             }
             Ingredient source = itemSources.get(key.item());
             boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
-            int have;
+            long have;
             IngredientKey materialKey = key;
             if (source != null && !nbtStrict) {
                 // A vanilla Ingredient may expose a tagged JEI display stack while
@@ -292,19 +300,21 @@ public final class PlanMaterialBill {
         return displayMaterials;
     }
 
-    private static int countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
-        int total = 0;
+    private static long countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
+        long total = 0L;
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            if (IngredientMatcher.test(ingredient, entry.getKey())) total += entry.getValue();
+            if (IngredientMatcher.test(ingredient, entry.getKey())) {
+                total = SaturatingLongMath.add(total, entry.getValue());
+            }
         }
         return total;
     }
 
-    private static int countExactStack(ItemStack expected, Map<StackKey, Integer> available) {
-        int total = 0;
+    private static long countExactStack(ItemStack expected, Map<StackKey, Integer> available) {
+        long total = 0L;
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
             if (MaterialMatcher.equivalentRuntimeFragment(entry.getKey().toStack(), expected)) {
-                total += entry.getValue();
+                total = SaturatingLongMath.add(total, entry.getValue());
             }
         }
         return total;
@@ -312,7 +322,7 @@ public final class PlanMaterialBill {
 
     public record Result(boolean feasible,
                          Map<IngredientKey, PlanResponse.Availability> materials,
-                         Map<IngredientKey, Integer> leftovers) {
+                          Map<IngredientKey, Long> leftovers) {
         public Result {
             materials = Collections.unmodifiableMap(new LinkedHashMap<>(materials));
             leftovers = Collections.unmodifiableMap(new LinkedHashMap<>(leftovers));

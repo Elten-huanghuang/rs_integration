@@ -21,6 +21,7 @@ import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -1052,6 +1053,12 @@ public final class CraftPacketUtils {
                 ? spec.count() : mulCount(spec.count(), Math.max(1, executions));
     }
 
+    public static long requiredCount(IngredientSpec spec, long executions) {
+        return spec.role() == DemandRole.CATALYST
+                ? spec.count()
+                : SaturatingLongMath.multiply(spec.count(), Math.max(1L, executions));
+    }
+
     public static int remainderExecutions(ItemStack remainder, List<IngredientSpec> specs,
                                           int executions) {
         for (IngredientSpec spec : specs) {
@@ -1469,7 +1476,7 @@ public final class CraftPacketUtils {
      */
     public static void addFuelToMaterials(Map<Item, Integer> itemAvailable,
                                            Map<Item, Ingredient> itemSource,
-                                           Map<Item, Integer> neededCounts,
+                                           Map<Item, Long> neededCounts,
                                            int repeatCount) {
         Item bestFuel = null;
         int bestScore = 0;
@@ -1493,7 +1500,7 @@ public final class CraftPacketUtils {
             bestFuel = Items.COAL;
         }
         int fuelNeeded = Math.max(1, repeatCount / 4);
-        neededCounts.merge(bestFuel, fuelNeeded, Integer::sum);
+        neededCounts.merge(bestFuel, (long) fuelNeeded, SaturatingLongMath::signedAdd);
         itemSource.putIfAbsent(bestFuel, Ingredient.of(bestFuel));
     }
 }

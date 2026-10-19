@@ -229,7 +229,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
                 Set.of(), Map.of(), null, graph);
 
         PlanTreeModel tree = PlanTreeModel.from(plan);
-        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(tree);
+        Map<IngredientKey, Long> gross = PlanTreeModel.grossDemandByKey(tree);
 
         assertEquals(2, tree.graphReferenceCounts().get(40));
         assertEquals(8, gross.get(IngredientKey.of(new ItemStack(Items.IRON_NUGGET))));
@@ -298,7 +298,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
                 List.of(), 3, null, null, null, 0, false, false, false, null,
                 Set.of(), Map.of(), null, graph);
 
-        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+        Map<IngredientKey, Long> gross = PlanTreeModel.grossDemandByKey(
                 PlanTreeModel.from(plan));
 
         assertEquals(1, gross.get(IngredientKey.of(new ItemStack(Items.IRON_BLOCK))));
@@ -393,7 +393,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
     void graphInputRolesKeepSharedCatalystAtOne() {
         ItemStack catalyst = new ItemStack(Items.DIAMOND);
         PlanTreeModel tree = PlanTreeModel.from(sharedCatalystPlan(catalyst, catalyst));
-        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(tree);
+        Map<IngredientKey, Long> gross = PlanTreeModel.grossDemandByKey(tree);
 
         assertEquals(1, gross.get(IngredientKey.of(catalyst)));
         assertEquals(DemandRole.CATALYST, tree.root.children.get(0).children.get(1).demandRole);
@@ -408,7 +408,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
         ItemStack second = new ItemStack(Items.DIAMOND);
         second.getOrCreateTag().putString("tool", "second");
 
-        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+        Map<IngredientKey, Long> gross = PlanTreeModel.grossDemandByKey(
                 PlanTreeModel.from(sharedCatalystPlan(first, second)));
 
         assertEquals(1, gross.get(IngredientKey.of(first)));
@@ -446,7 +446,7 @@ class PlanTreeModelGraphTest extends BootstrapTest {
                 List.of(), 1, null, null, null, 0, false, false, false, null,
                 Set.of(), Map.of(), null, graph);
 
-        Map<IngredientKey, Integer> gross = PlanTreeModel.grossDemandByKey(
+        Map<IngredientKey, Long> gross = PlanTreeModel.grossDemandByKey(
                 PlanTreeModel.from(plan));
 
         assertEquals(2, gross.get(IngredientKey.of(new ItemStack(Items.DIAMOND))));

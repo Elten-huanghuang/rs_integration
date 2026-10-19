@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -57,7 +58,8 @@ public record PlanGraphView(
                             || output.kind() == OutputKind.DYNAMIC)
                     .findFirst()
                     .map(output -> output.material().toStack(
-                            Math.max(1, output.quantity() / Math.max(1, node.executions()))))
+                            Math.max(1, SaturatingLongMath.clampToInt(
+                                    output.quantity() / Math.max(1, node.executions())))))
                     .orElseGet(() -> node.syntheticOutput() != null
                             ? node.syntheticOutput().copy() : ItemStack.EMPTY);
             List<InputView> inputs = node.inputs().stream()
@@ -65,8 +67,8 @@ public record PlanGraphView(
                             input.quantity(), input.role().ordinal()))
                     .toList();
             List<OutputView> outputs = node.outputs().stream()
-                    .map(output -> new OutputView(output.id().index(),
-                            output.material().toStack(output.quantity()),
+                .map(output -> new OutputView(output.id().index(),
+                            output.material().toStack(SaturatingLongMath.clampToInt(output.quantity())),
                             output.quantity(), output.kind().ordinal()))
                     .toList();
             nodes.add(new NodeView(node.id().value(), node.recipeId(), node.modTypeId(),
@@ -78,14 +80,17 @@ public record PlanGraphView(
             SourceView source = source(allocation.source());
             return new EdgeView(allocation.consumer().nodeId().value(),
                     allocation.consumer().index(), source,
-                    allocation.material().toStack(allocation.quantity()), allocation.quantity());
+                    allocation.material().toStack(
+                            SaturatingLongMath.clampToInt(allocation.quantity())),
+                    allocation.quantity());
         }).toList();
 
         List<RootView> roots = graph.rootDemands().stream()
                 .map(root -> new RootView(root.displayHint(), root.quantity(), root.unresolvedQuantity(),
                         root.allocations().stream()
                                 .map(allocation -> new RootEdgeView(source(allocation.source()),
-                                        allocation.material().toStack(allocation.quantity()),
+                                        allocation.material().toStack(
+                                                SaturatingLongMath.clampToInt(allocation.quantity())),
                                         allocation.quantity()))
                                 .toList()))
                 .toList();
@@ -136,7 +141,8 @@ public record PlanGraphView(
         public PlanStep asPlanStep() {
             int runCount = Math.max(1, executions);
             List<ItemStack> displayInputs = inputs.stream()
-                    .map(input -> input.display().copyWithCount(input.perExecutionQuantity(runCount)))
+                    .map(input -> input.display().copyWithCount(
+                            SaturatingLongMath.clampToInt(input.perExecutionQuantity(runCount))))
                     .toList();
             List<DemandRole> inputRoles = inputs.stream().map(InputView::role).toList();
             return new PlanStep(recipeId, primaryOutput.copy(), runCount,
@@ -145,12 +151,12 @@ public record PlanGraphView(
         }
     }
 
-    public record InputView(int portIndex, ItemStack display, int quantity, int roleOrdinal) {
+    public record InputView(int portIndex, ItemStack display, long quantity, int roleOrdinal) {
         public InputView { display = display.copyWithCount(1); }
 
-        private int perExecutionQuantity(int executions) {
+        private long perExecutionQuantity(int executions) {
             if (roleOrdinal == DemandRole.CATALYST.ordinal()) return quantity;
-            return Math.max(1, (quantity + executions - 1) / executions);
+            return Math.max(1L, SaturatingLongMath.ceilDiv(quantity, executions));
         }
 
         public DemandRole role() {
@@ -160,7 +166,7 @@ public record PlanGraphView(
         }
     }
 
-    public record OutputView(int portIndex, ItemStack display, int quantity, int kindOrdinal) {
+    public record OutputView(int portIndex, ItemStack display, long quantity, int kindOrdinal) {
         public OutputView { display = display.copyWithCount(1); }
         public OutputKind kind() {
             OutputKind[] values = OutputKind.values();
@@ -177,11 +183,11 @@ public record PlanGraphView(
     }
 
     public record EdgeView(int consumerNodeId, int consumerPortIndex, SourceView source,
-                           ItemStack material, int quantity) {
+                           ItemStack material, long quantity) {
         public EdgeView { material = material.copyWithCount(1); }
     }
 
-    public record RootView(ItemStack display, int quantity, int unresolvedQuantity,
+    public record RootView(ItemStack display, long quantity, long unresolvedQuantity,
                            List<RootEdgeView> allocations) {
         public RootView {
             display = display.copyWithCount(1);
@@ -189,12 +195,12 @@ public record PlanGraphView(
         }
     }
 
-    public record RootEdgeView(SourceView source, ItemStack material, int quantity) {
+    public record RootEdgeView(SourceView source, ItemStack material, long quantity) {
         public RootEdgeView { material = material.copyWithCount(1); }
     }
 
     public record UnresolvedView(int consumerNodeId, int consumerPortIndex,
-                                 ItemStack display, int quantity) {
+                                 ItemStack display, long quantity) {
         public UnresolvedView { display = display.copyWithCount(1); }
     }
 }

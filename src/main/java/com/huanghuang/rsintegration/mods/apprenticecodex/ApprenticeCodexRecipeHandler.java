@@ -82,9 +82,24 @@ final class ApprenticeCodexRecipeHandler implements ModRecipeHandler {
                 recipe, spec, inputIndex, executions);
     }
 
+    @Override
+    public long requiredIngredientCountLong(Recipe<?> recipe, IngredientSpec spec,
+                                            int inputIndex, long executions) {
+        if (essenceSmoker && inputIndex == 0) {
+            return requiredCatalystCountLong(executions);
+        }
+        return ModRecipeHandler.super.requiredIngredientCountLong(
+                recipe, spec, inputIndex, executions);
+    }
+
     static int requiredCatalystCount(int executions) {
         if (executions <= 0) return 0;
         return 1 + (executions - 1) / ESSENCE_SMOKER_MATERIAL_SLOTS;
+    }
+
+    static long requiredCatalystCountLong(long executions) {
+        if (executions <= 0L) return 0L;
+        return 1L + (executions - 1L) / ESSENCE_SMOKER_MATERIAL_SLOTS;
     }
 
     @Override

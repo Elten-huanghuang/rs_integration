@@ -44,7 +44,7 @@ public record PlanResponseDraft(
         boolean executionMachineSupportsGui,
         @Nullable ItemStack baseItem,
         Set<String> boundMachineTypes,
-        Map<IngredientKey, Integer> leftovers,
+        Map<IngredientKey, Long> leftovers,
         @Nullable ItemStack clickedOutput,
         @Nullable PlanGraphView graph,
         boolean executionBlocked,
@@ -65,7 +65,7 @@ public record PlanResponseDraft(
                              @Nullable Component[] embersInputNames, long embersSeed,
                              boolean embersCanInfer, boolean embersCodeFromCache,
                              boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                             Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                             Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                              @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
                              boolean executionBlocked, List<MachineCandidateView> machineCandidates) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
@@ -88,7 +88,7 @@ public record PlanResponseDraft(
                              @Nullable Component[] embersInputNames, long embersSeed,
                              boolean embersCanInfer, boolean embersCodeFromCache,
                              boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                             Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                             Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                              @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,
                 executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
@@ -109,7 +109,7 @@ public record PlanResponseDraft(
                              @Nullable Component[] embersInputNames, long embersSeed,
                              boolean embersCanInfer, boolean embersCodeFromCache,
                              boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
-                             Set<String> boundMachineTypes, Map<IngredientKey, Integer> leftovers,
+                             Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
                              @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
                              boolean executionBlocked) {
         this(success, targetName, targetResult, steps, materials, missing, recipeId,

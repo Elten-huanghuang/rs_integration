@@ -736,7 +736,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Map<Item, Integer> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
-                                       Map<Item, Integer> neededCounts,
+                                       Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!"farmersdelight_cooking_pot".equals(recipeModTypeId)) return;
         int containerNeeded = repeatCount;

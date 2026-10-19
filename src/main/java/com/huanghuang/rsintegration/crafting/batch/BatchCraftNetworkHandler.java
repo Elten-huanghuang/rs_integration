@@ -10,6 +10,7 @@ import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.NetworkDirection;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePagePacket;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
@@ -39,6 +40,10 @@ public final class BatchCraftNetworkHandler {
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.PLAN_RESPONSE, PlanResponsePacket.class,
                 PlanResponsePacket::encode, PlanResponsePacket::decode, PlanResponsePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PLAN_RESPONSE_PAGE, PlanResponsePagePacket.class,
+                PlanResponsePagePacket::encode, PlanResponsePagePacket::decode,
+                PlanResponsePagePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_STARTED, CraftStartedPacket.class,
                 CraftStartedPacket::encode, CraftStartedPacket::decode, CraftStartedPacket::handle,

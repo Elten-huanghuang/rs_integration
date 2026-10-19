@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.mods.embers.EmbersMachineHints;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
@@ -115,7 +116,7 @@ public final class PlanTreeModel {
                     || !reachableOutputs.contains(step.output().getItem())) continue;
             ItemStack output = step.output().copyWithCount(1);
             if (output.isEmpty()) continue;
-            int amount = Math.max(1, step.totalOutputCount());
+            long amount = Math.max(1L, step.totalOutputCount());
             PlanTreeNode unlinked = new PlanTreeNode(IngredientKey.of(output), output,
                     amount, 1, step);
             unlinked.limited = step.alternatives().size() > maxTreeCandidates();
@@ -219,7 +220,7 @@ public final class PlanTreeModel {
                     ? output.display().copyWithCount(1)
                     : graphNode.primaryOutput().copyWithCount(1);
             if (display.isEmpty()) continue;
-            int quantity = output != null ? output.quantity()
+            long quantity = output != null ? output.quantity()
                     : Math.max(1, display.getCount() * graphNode.executions());
             PlanTreeNode omitted = new PlanTreeNode(IngredientKey.of(display), display,
                     quantity, 1, step, nodeId);
@@ -253,7 +254,7 @@ public final class PlanTreeModel {
     }
 
     private static PlanTreeNode buildGraphReference(PlanGraphView.SourceView source,
-                                                     ItemStack material, int quantity,
+                                                     ItemStack material, long quantity,
                                                      DemandRole role, int depth,
                                                      PlanGraphView graph,
                                                      Map<Integer, PlanGraphView.NodeView> nodes,
@@ -366,9 +367,10 @@ public final class PlanTreeModel {
                 result.add(child);
                 continue;
             }
-            existing.amount = saturatingAdd(existing.amount, child.amount);
-            existing.edgeQuantity = saturatingAdd(existing.edgeQuantity, child.edgeQuantity);
-            existing.unresolved = saturatingAdd(existing.unresolved, child.unresolved);
+            existing.amount = SaturatingLongMath.add(existing.amount, child.amount);
+            existing.edgeQuantity = SaturatingLongMath.add(
+                    existing.edgeQuantity, child.edgeQuantity);
+            existing.unresolved = SaturatingLongMath.add(existing.unresolved, child.unresolved);
             // Availability is a shared inventory total, not a per-branch
             // quantity. Keep one copy; amount carries the summed branch demand.
             existing.available = Math.max(existing.available, child.available);
@@ -421,7 +423,7 @@ public final class PlanTreeModel {
 
     private static void mergeGraphReference(Map<GraphReferenceKey, GraphReference> merged,
                                             PlanGraphView.SourceView source,
-                                            ItemStack material, int quantity, DemandRole role) {
+                                            ItemStack material, long quantity, DemandRole role) {
         GraphReferenceKey key = new GraphReferenceKey(source, IngredientKey.of(material), role);
         merged.compute(key, (ignored, existing) -> existing == null
                 ? new GraphReference(source, material, quantity, role)
@@ -431,24 +433,26 @@ public final class PlanTreeModel {
     private record GraphReferenceKey(PlanGraphView.SourceView source, IngredientKey material,
                                      DemandRole role) {}
 
-    private record GraphReference(PlanGraphView.SourceView source, ItemStack material, int quantity,
+    private record GraphReference(PlanGraphView.SourceView source, ItemStack material, long quantity,
                                   DemandRole role) {
         private GraphReference {
             material = material.copyWithCount(1);
         }
 
-        private GraphReference add(int additional) {
-            return new GraphReference(source, material, saturatingAdd(quantity, additional), role);
+        private GraphReference add(long additional) {
+            return new GraphReference(source, material,
+                    SaturatingLongMath.add(quantity, additional), role);
         }
     }
 
-    private record UnresolvedReference(ItemStack display, int quantity, DemandRole role) {
+    private record UnresolvedReference(ItemStack display, long quantity, DemandRole role) {
         private UnresolvedReference {
             display = display.copyWithCount(1);
         }
 
-        private UnresolvedReference add(int additional) {
-            return new UnresolvedReference(display, saturatingAdd(quantity, additional), role);
+        private UnresolvedReference add(long additional) {
+            return new UnresolvedReference(display,
+                    SaturatingLongMath.add(quantity, additional), role);
         }
     }
 
@@ -478,29 +482,29 @@ public final class PlanTreeModel {
      * card material panel display exactly the numbers the tree renders, including intermediate
      * demand as well as external materials.
      */
-    public static Map<IngredientKey, Integer> grossDemandByKey(PlanTreeModel model) {
-        Map<IngredientKey, Integer> consumed = new LinkedHashMap<>();
-        Map<IngredientKey, Integer> catalystPeak = new LinkedHashMap<>();
+    public static Map<IngredientKey, Long> grossDemandByKey(PlanTreeModel model) {
+        Map<IngredientKey, Long> consumed = new LinkedHashMap<>();
+        Map<IngredientKey, Long> catalystPeak = new LinkedHashMap<>();
         accumulateChildDemand(model.root, consumed, catalystPeak);
-        Map<IngredientKey, Integer> out = new LinkedHashMap<>(consumed);
-        for (Map.Entry<IngredientKey, Integer> entry : catalystPeak.entrySet()) {
-            out.merge(entry.getKey(), entry.getValue(), PlanTreeModel::saturatingAdd);
+        Map<IngredientKey, Long> out = new LinkedHashMap<>(consumed);
+        for (Map.Entry<IngredientKey, Long> entry : catalystPeak.entrySet()) {
+            out.merge(entry.getKey(), entry.getValue(), SaturatingLongMath::add);
         }
         return out;
     }
 
     private static void accumulateChildDemand(PlanTreeNode parent,
-                                              Map<IngredientKey, Integer> consumed,
-                                              Map<IngredientKey, Integer> catalystPeak) {
-        Map<IngredientKey, Integer> catalystsForStep = new LinkedHashMap<>();
+                                              Map<IngredientKey, Long> consumed,
+                                              Map<IngredientKey, Long> catalystPeak) {
+        Map<IngredientKey, Long> catalystsForStep = new LinkedHashMap<>();
         for (PlanTreeNode child : parent.children) {
             if (child.demandRole == DemandRole.CATALYST) {
-                catalystsForStep.merge(child.key, child.amount, PlanTreeModel::saturatingAdd);
+                catalystsForStep.merge(child.key, child.amount, SaturatingLongMath::add);
             } else {
-                consumed.merge(child.key, child.amount, PlanTreeModel::saturatingAdd);
+                consumed.merge(child.key, child.amount, SaturatingLongMath::add);
             }
         }
-        for (Map.Entry<IngredientKey, Integer> entry : catalystsForStep.entrySet()) {
+        for (Map.Entry<IngredientKey, Long> entry : catalystsForStep.entrySet()) {
             catalystPeak.merge(entry.getKey(), entry.getValue(), Math::max);
         }
         for (PlanTreeNode child : parent.children) {
@@ -518,12 +522,12 @@ public final class PlanTreeModel {
         // 总需求可能由库存和新产物共同满足；原料只能按服务端实际执行次数展开。
         // 共享步骤保留各分支的需求引用，但与图模式一样只展开一次生产成本。
         if (!expandedSteps.add(parentStep)) return;
-        int parentBatches = Math.max(1, parentStep.batches());
+        long parentBatches = Math.max(1L, parentStep.batches());
         // Merge same-item inputs (e.g. the nine gold-ingot slots of a 3×3 recipe) into one
         // entry, summing counts — the tree shows "gold ingot ×9", not nine "×1" nodes.
         // Empty grid slots carry no ingredient and are skipped.
         LinkedHashMap<DemandKey, ItemStack> reps = new LinkedHashMap<>();
-        LinkedHashMap<DemandKey, Integer> counts = new LinkedHashMap<>();
+        LinkedHashMap<DemandKey, Long> counts = new LinkedHashMap<>();
         for (int inputIndex = 0; inputIndex < parentStep.inputs().size(); inputIndex++) {
             ItemStack input = parentStep.inputs().get(inputIndex);
             if (input.isEmpty()) continue;
@@ -532,14 +536,14 @@ public final class PlanTreeModel {
             reps.putIfAbsent(demandKey, input);
             counts.merge(demandKey,
                     parentStep.totalInputCount(inputIndex, parentBatches),
-                    PlanTreeModel::saturatingAdd);
+                    SaturatingLongMath::add);
         }
 
         for (Map.Entry<DemandKey, ItemStack> e : reps.entrySet()) {
             IngredientKey inputKey = e.getKey().material();
             DemandRole role = e.getKey().role();
             ItemStack input = e.getValue();
-            int amount = counts.get(e.getKey());
+            long amount = counts.get(e.getKey());
             PlanStep childStep = producers.get(inputKey);
 
             if (childStep != null) {
@@ -568,11 +572,6 @@ public final class PlanTreeModel {
                 parent.children.add(leaf);
             }
         }
-    }
-
-    private static int saturatingAdd(int left, int right) {
-        long total = (long) left + right;
-        return total >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
     }
 
     private record DemandKey(IngredientKey material, DemandRole role) {}

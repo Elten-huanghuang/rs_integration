@@ -58,7 +58,7 @@ public final class MissingMaterialBookmarkList {
             }
             ItemStack stack = match.stack().copyWithCount(1);
             PlanResponse.Availability availability = plan.availability(stack);
-            int shortage = availability == null ? 1
+            long shortage = availability == null ? 1L
                     : Math.max(1, availability.missingCount());
             result.add(new TextEntry(stack.getHoverName().getString(), stack, shortage));
         }
@@ -74,7 +74,7 @@ public final class MissingMaterialBookmarkList {
             if (usedCandidates.contains(i)) continue;
             ItemStack stack = candidates.get(i);
             PlanResponse.Availability availability = plan.availability(stack);
-            int shortage = availability == null ? 1
+            long shortage = availability == null ? 1L
                     : Math.max(1, availability.missingCount());
             result.add(new TextEntry(stack.getHoverName().getString(),
                     stack.copyWithCount(1), shortage));
@@ -125,11 +125,11 @@ public final class MissingMaterialBookmarkList {
         return (stripped == null ? "" : stripped.trim()).toLowerCase(Locale.ROOT);
     }
 
-    public record TextEntry(String label, ItemStack bookmark, int missingCount) {
+    public record TextEntry(String label, ItemStack bookmark, long missingCount) {
         public TextEntry {
             label = label == null ? "" : label;
             bookmark = bookmark == null ? ItemStack.EMPTY : bookmark.copyWithCount(1);
-            missingCount = Math.max(0, missingCount);
+            missingCount = Math.max(0L, missingCount);
         }
 
         public boolean bookmarkable() {

@@ -54,9 +54,9 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
             buf.writeVarInt(1);
             com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
                     new ItemStack(net.minecraft.world.item.Items.IRON_INGOT)).write(buf);
-            buf.writeVarInt(2);
-            buf.writeVarInt(0);
-            buf.writeVarInt(-1);
+            buf.writeVarLong(2);
+            buf.writeVarLong(0);
+            buf.writeVarLong(-1);
             assertThrows(DecoderException.class, () -> PlanResponsePacket.decode(buf));
         } finally {
             buf.release();

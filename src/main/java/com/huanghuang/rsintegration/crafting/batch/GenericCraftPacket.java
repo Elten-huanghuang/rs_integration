@@ -66,6 +66,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
@@ -4910,14 +4911,15 @@ public final class GenericCraftPacket {
         // causes matchBestAvailable fallback to return arbitrary items from
         // the ingredient array, producing bizarre material requirements.
         Map<Item, Integer> matAvailable = new HashMap<>(itemAvailable);
-        Map<Item, Integer> neededCounts = new LinkedHashMap<>();
+        Map<Item, Long> neededCounts = new LinkedHashMap<>();
         Map<Item, Ingredient> itemSource = new HashMap<>();
         for (IngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
             Map<Item, Integer> consumed = consumeIngredientCount(
                     spec.ingredient(), spec.count(), matAvailable);
             for (Map.Entry<Item, Integer> entry : consumed.entrySet()) {
-                neededCounts.merge(entry.getKey(), entry.getValue(), Integer::sum);
+                neededCounts.merge(entry.getKey(), entry.getValue().longValue(),
+                        SaturatingLongMath::signedAdd);
                 itemSource.putIfAbsent(entry.getKey(), spec.ingredient());
             }
         }
@@ -4929,7 +4931,8 @@ public final class GenericCraftPacket {
                 // execution. Its later outputs may feed later executions, but
                 // the final output cannot erase that startup requirement.
                 if (!isSelfAmplifyingRecipe(recipe, player.serverLevel().registryAccess())) {
-                    neededCounts.merge(step.output().getItem(), -step.totalOutputCount(), Integer::sum);
+                    neededCounts.merge(step.output().getItem(), -step.totalOutputCount(),
+                            SaturatingLongMath::signedAdd);
                 }
                 continue;
             }
@@ -4946,12 +4949,12 @@ public final class GenericCraftPacket {
                     if (spec.isEmpty()) continue;
                     ItemStack matched = matchAndConsume(spec.ingredient(), matAvailable);
                     if (matched != null) {
-                        int required = stepHandler != null
-                                ? stepHandler.requiredIngredientCount(
+                        long required = stepHandler != null
+                                ? stepHandler.requiredIngredientCountLong(
                                         stepRecipe, spec, stepInputIndex, step.batches())
                                 : CraftPacketUtils.requiredCount(spec, step.batches());
                         neededCounts.merge(matched.getItem(),
-                                required, Integer::sum);
+                                required, SaturatingLongMath::signedAdd);
                         itemSource.putIfAbsent(matched.getItem(), spec.ingredient());
                     }
                     stepInputIndex++;
@@ -4961,14 +4964,16 @@ public final class GenericCraftPacket {
         // Subtract what intermediate steps produce (skip target — already done above).
         for (PlanStep step : steps) {
             if (step.recipeId().equals(recipeId)) continue;
-            neededCounts.merge(step.output().getItem(), -step.totalOutputCount(), Integer::sum);
+            neededCounts.merge(step.output().getItem(), -step.totalOutputCount(),
+                    SaturatingLongMath::signedAdd);
         }
 
         // FA smithing: the target output shares the baseItem's Item type, so the
         // target-output subtraction above canceled out the baseItem.  Add it back
         // so the material panel shows the base item as a required material.
         if (faRecipe && baseItem != null && !baseItem.isEmpty()) {
-            neededCounts.merge(baseItem.getItem(), repeatCount, Integer::sum);
+            neededCounts.merge(baseItem.getItem(), (long) repeatCount,
+                    SaturatingLongMath::signedAdd);
         }
 
         // Add fuel requirement for machine recipes that consume fuel items.
@@ -5043,7 +5048,7 @@ public final class GenericCraftPacket {
         Map<IngredientKey, PlanResponse.Availability> materials = directTerminalPlan
                 ? new LinkedHashMap<>(directMaterialView(directPreviewAllocation, available))
                 : new LinkedHashMap<>(materialBill.materials());
-        Map<IngredientKey, Integer> leftovers = materialBill.leftovers();
+        Map<IngredientKey, Long> leftovers = materialBill.leftovers();
         boolean feasible = directTerminalPlan || materialBill.feasible();
         boolean missingExecutionBinding = false;
         for (PlanStep step : steps) {
