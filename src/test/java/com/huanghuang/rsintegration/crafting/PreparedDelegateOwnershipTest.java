@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -82,7 +83,7 @@ class PreparedDelegateOwnershipTest extends BootstrapTest {
             return validationResult;
         }
 
-        @Override public boolean tryStartSingleCraft(ServerPlayer player) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }
         @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
         @Override public void releasePreparationResources() { preparationReleases++; }

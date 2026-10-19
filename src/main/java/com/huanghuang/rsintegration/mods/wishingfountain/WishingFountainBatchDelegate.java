@@ -128,7 +128,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
         this.ledger = new ExtractionLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
@@ -155,7 +155,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);

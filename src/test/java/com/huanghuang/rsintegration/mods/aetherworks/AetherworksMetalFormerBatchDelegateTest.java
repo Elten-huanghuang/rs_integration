@@ -93,7 +93,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             tokens.when(() -> InkFluidSupport.fluid(any(ItemStack.class)))
                     .thenReturn(new FluidStack(Fluids.WATER, 360));
-            assertTrue(fixture.delegate.tryStartWithMaterials(mock(ServerPlayer.class),
+            assertTrue(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                     List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.POTION, 360)),
                     new ExtractionLedger()));
             assertEquals(360, fixture.tank.getFluidAmount());
@@ -150,7 +150,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         fixture.attachPoweredForge();
         when(fixture.ember.getEmber()).thenReturn(0.0);
         assertEquals(PreparationState.RETRY, fixture.prepare().state());
-        assertFalse(fixture.delegate.tryStartWithMaterials(mock(ServerPlayer.class),
+        assertFalse(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                 List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.POTION, 360)),
                 new ExtractionLedger()));
         assertTrue(fixture.machine.inventory.getStackInSlot(0).isEmpty());

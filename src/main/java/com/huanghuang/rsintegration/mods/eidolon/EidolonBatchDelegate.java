@@ -258,7 +258,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -933,7 +933,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);

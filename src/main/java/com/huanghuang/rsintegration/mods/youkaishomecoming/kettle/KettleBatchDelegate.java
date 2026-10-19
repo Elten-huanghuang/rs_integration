@@ -118,7 +118,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -141,7 +141,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!startPreparedOperation(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         insertIntoStorage(player, mat.copy(), false);
@@ -153,7 +153,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());

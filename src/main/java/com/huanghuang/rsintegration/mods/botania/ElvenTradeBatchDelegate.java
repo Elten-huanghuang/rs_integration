@@ -116,7 +116,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
         List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
                 storageEndpoint(), player, getRequiredMaterials());
@@ -128,13 +128,13 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player,
+    public boolean startSingleOperation(@Nonnull ServerPlayer player,
                                        @Nonnull ExtractionLedger sharedLedger) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);

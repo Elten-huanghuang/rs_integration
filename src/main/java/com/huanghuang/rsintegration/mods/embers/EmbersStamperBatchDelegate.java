@@ -194,7 +194,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         return needsStamp ? Component.translatable("rsi.embers_machine.error.stamp_unavailable") : null;
     }
 
-    @Override public boolean tryStartSingleCraft(ServerPlayer player) {
+    @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         ledger = new ExtractionLedger();
         ledger.setStorageEndpoint(storageEndpoint());
@@ -209,7 +209,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         return start(player, materials);
     }
 
-    @Override public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                                    ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);
         return start(player, materials);

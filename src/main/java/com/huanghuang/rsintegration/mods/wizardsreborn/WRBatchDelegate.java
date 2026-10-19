@@ -663,7 +663,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -1257,7 +1257,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // require N sequential machine runs (one side-material set + Wissen per
         // run), and the chain's shared-ledger refundCommitted() would re-refund
         // already-consumed sets on a level-≥2 abort (duplication). Returning null
-        // routes it to the private-ledger tryStartSingleCraft path where the
+        // routes it to the private-ledger startSingleOperation path where the
         // per-level scheduler owns extraction and physical-recovery abort.
         if (machineType == MachineType.ARCANE_ITERATOR) return null;
         List<Ingredient> ingredients = CraftPacketUtils.extractIngredients(recipe);
@@ -1275,7 +1275,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;

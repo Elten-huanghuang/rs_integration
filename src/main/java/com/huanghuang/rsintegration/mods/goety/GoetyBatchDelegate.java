@@ -355,7 +355,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (!initCraftState(player)) return false;
         if (isBrazier) return tryStartBrazierCraft();
         return tryStartDarkAltarCraft();
@@ -755,7 +755,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         if (ritualRecipe == null) return null;
         // Build the ritual's material list self-contained: raw ingredients plus
-        // the activation item. tryStartWithMaterials() consumes the activation
+        // the activation item. startPreparedOperation() consumes the activation
         // (getActivationItem), so getRequiredMaterials() MUST reserve it too.
         //
         // We deliberately do NOT route through collectIngredients()/the recipe
@@ -785,7 +785,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);
@@ -825,7 +825,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         Object ritual = Reflect.invoke(ritualRecipe, GoetyReflection.M_GET_RITUAL).orElse(null);
         if (ritual == null) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Ritual is null for recipe {}",
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] startPreparedOperation: Ritual is null for recipe {}",
                     ((Recipe<?>) ritualRecipe).getId());
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             return false;
@@ -873,7 +873,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 closeSoulTask();
                 return false;
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] tryStartWithMaterials: Failed to start ritual (no materials)", e);
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] startPreparedOperation: Failed to start ritual (no materials)", e);
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
                 refundActivationToPlayer();
                 closeSoulTask();
@@ -883,7 +883,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         List<Object> availablePedestals = findAvailablePedestals(resolveMachineLevel(player), ritual);
         if (availablePedestals.size() < remainingMaterials.size()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] tryStartWithMaterials: insufficient pedestals (need {}, found {})",
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] startPreparedOperation: insufficient pedestals (need {}, found {})",
                     remainingMaterials.size(), availablePedestals.size());
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             refundActivationToPlayer();
@@ -975,7 +975,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         Object bzrRecipe = Reflect.getField(brazier, GoetyReflection.F_RECIPE).orElse(null);
         if (bzrRecipe == null) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set in tryStartWithMaterials: {}",
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set in startPreparedOperation: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
             Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
                     NonNullList.withSize(containerSize, ItemStack.EMPTY));
@@ -995,7 +995,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
         if (!activated) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false in tryStartWithMaterials: {}",
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false in startPreparedOperation: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
             Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
                     NonNullList.withSize(containerSize, ItemStack.EMPTY));

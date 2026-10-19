@@ -85,7 +85,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
 
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return BatchConcurrencyCapabilities.delegateResult(); }
 
-    @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
@@ -108,7 +108,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
         return false;
     }
 
-    @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
         this.ledger = sharedLedger;
         this.sharedLedger = sharedLedger;

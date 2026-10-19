@@ -151,7 +151,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -311,14 +311,14 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@NotNull ServerPlayer player) {
+    public boolean startSingleOperation(@NotNull ServerPlayer player) {
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
         return reserveAndStart(player, ledger, true);
     }
 
     @Override
-    public boolean tryStartSingleCraft(@NotNull ServerPlayer player,
+    public boolean startSingleOperation(@NotNull ServerPlayer player,
                                        @NotNull ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
@@ -343,7 +343,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(@NotNull ServerPlayer player,
+    public boolean startPreparedOperation(@NotNull ServerPlayer player,
                                          @NotNull List<ItemStack> materials,
                                          @NotNull ExtractionLedger sharedLedger) {
         this.player = player;

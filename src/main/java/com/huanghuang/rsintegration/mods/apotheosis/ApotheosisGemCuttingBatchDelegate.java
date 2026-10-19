@@ -77,7 +77,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 3) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
@@ -104,7 +104,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         this.ledger = sharedLedger;

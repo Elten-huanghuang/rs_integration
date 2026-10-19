@@ -281,7 +281,7 @@ class IronAlchemistBrewingTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         List<ItemStack> materials = List.of(token(new FluidStack(Fluids.WATER, 250)), new ItemStack(Items.NETHER_WART));
 
-        assertFalse(delegate.tryStartWithMaterials(player, materials, mock(ExtractionLedger.class)));
+        assertFalse(delegate.startPreparedOperation(player, materials, mock(ExtractionLedger.class)));
         delegate.clearMachineState(null, player);
 
         assertEquals(materials.size(), delegate.failureRecoveredInputs().size());

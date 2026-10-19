@@ -119,7 +119,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -141,7 +141,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
 
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!startPreparedOperation(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty()) {
                         ItemStack leftover = insertIntoStorage(player, mat, false);
@@ -155,7 +155,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.craftDone = false;

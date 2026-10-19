@@ -205,7 +205,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         // 整锅只蒸同一种食材，因此只声明"一条物料"。
         // 执行链的预留是按物料条目逐条发放的：若为每个蒸笼格都声明一条，
         // 一次批量会要求 N 份材料、却只拿得到一份，纽带就断在这里。
-        // 真正的"每格一份"由 tryStartWithInputBuffer 铺料时自行切分，契约只声明总容量。
+        // 真正的"每格一份"由 startBufferedOperation 铺料时自行切分，契约只声明总容量。
         int slots = SteamerBatchConfig.slotCapacity(rackLayers());
         int capacity = Math.min(slots,
                 SteamerBatchConfig.effectiveSlotCapacity(prototype.getMaxStackSize()));
@@ -241,7 +241,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
@@ -264,7 +264,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         for (int i = 0; i < plan.operations(); i++) {
             perSlot.add(input.stack().copyWithCount(1));
         }
-        return tryStartWithMaterials(player, perSlot, sharedLedger);
+        return startPreparedOperation(player, perSlot, sharedLedger);
     }
 
     @Override
@@ -290,7 +290,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -313,7 +313,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!startPreparedOperation(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         insertIntoStorage(player, mat, false);
@@ -325,14 +325,14 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         // usingSharedLedger already set by caller — don't overwrite
         this.craftDone = false;
         // 单份路径下这里会被 upper 调用方/Fabric 默认值覆盖为 1；
-        // 批量路径由 tryStartWithInputBuffer 预先置成整批份数，这里不能重置。
+        // 批量路径由 startBufferedOperation 预先置成整批份数，这里不能重置。
         if (!usingSharedLedger) plannedOperations = 1;
 
         if (materials.isEmpty()) return false;

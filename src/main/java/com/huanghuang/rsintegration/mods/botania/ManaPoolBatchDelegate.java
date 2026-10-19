@@ -188,7 +188,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return affordable <= 0 ? 1 : Math.max(1, Math.min(requested, affordable));
     }
 
-    @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null) return false;
         if (storageEndpoint() == null) {
             setStorageEndpoint(resolveEndpoint(player));
@@ -202,11 +202,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
+    @Override public boolean startSingleOperation(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
         return false;
     }
 
-    @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);
         return materials.size() == 1 && !materials.get(0).isEmpty()

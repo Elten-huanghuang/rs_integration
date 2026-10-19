@@ -189,7 +189,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                         @Nonnull List<ItemStack> materials,
                                         @Nonnull ExtractionLedger sharedLedger) {
         ServerLevel level = getLevel();
@@ -342,8 +342,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        // This delegate uses tryStartWithMaterials for chain integration
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
+        // This delegate uses startPreparedOperation for chain integration
         // Single-craft mode is not supported for Ars Nouveau
         return false;
     }

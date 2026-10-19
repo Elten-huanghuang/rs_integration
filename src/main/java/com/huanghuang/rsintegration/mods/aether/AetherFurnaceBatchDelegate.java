@@ -214,7 +214,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -230,11 +230,11 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan expected = inputBufferPlan(plan.operations());
         if (!expected.enabled() || expected.operations() != plan.operations()) return false;
         plannedOperations = plan.operations();
-        return tryStartWithMaterialsImpl(player, List.of(input.stack().copy()), true);
+        return startPreparedOperationImpl(player, List.of(input.stack().copy()), true);
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -261,7 +261,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterialsImpl(player, materials, false)) {
+            if (!startPreparedOperationImpl(player, materials, false)) {
                 // Craft couldn't start — refund materials back to RS.
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty()) insertIntoStorage(player, mat, false);
@@ -273,12 +273,12 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        return tryStartWithMaterialsImpl(player, materials, true);
+        return startPreparedOperationImpl(player, materials, true);
     }
 
-    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials,
+    private boolean startPreparedOperationImpl(ServerPlayer player, List<ItemStack> materials,
                                               boolean shared) {
         this.player = player;
         this.usingSharedLedger = shared;

@@ -165,7 +165,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (recipe == null || level == null || infuserPos == null || requiredMaterials == null) return false;
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
@@ -196,13 +196,13 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player,
+    public boolean startSingleOperation(@Nonnull ServerPlayer player,
                                        @Nonnull ExtractionLedger sharedLedger) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);

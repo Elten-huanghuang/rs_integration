@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.loadbalancer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -176,7 +177,7 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
             return true;
         }
 
-        @Override public boolean tryStartSingleCraft(ServerPlayer player) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }
         @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
         @Override public void releasePreparationResources() { preparationReleases++; }

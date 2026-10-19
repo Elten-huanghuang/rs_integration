@@ -359,7 +359,7 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
         }
 
         boolean start(int executions) {
-            return delegate.tryStartWithMaterials(player, List.of(token(new FluidStack(Fluids.WATER, amount * executions))),
+            return delegate.startPreparedOperation(player, List.of(token(new FluidStack(Fluids.WATER, amount * executions))),
                     new ExtractionLedger());
         }
 

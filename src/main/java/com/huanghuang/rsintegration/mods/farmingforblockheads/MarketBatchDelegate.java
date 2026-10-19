@@ -79,7 +79,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     /**
      * Market trades are instant exchanges, so all remaining flat operations
      * can share one storage transaction. The caller scales the material spec
-     * to this batch size before invoking {@code tryStartWithMaterials}.
+     * to this batch size before invoking {@code startPreparedOperation}.
      */
     @Override
     public int prepareFlatBatch(int remainingOperations) {
@@ -100,7 +100,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (wrapper == null) return false;
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, null, null).orElse(null));
@@ -121,7 +121,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Direct path: insert result immediately.  The chain path uses the
-        // ledger-overloaded tryStartSingleCraft + collectResult instead.
+        // ledger-overloaded startSingleOperation + collectResult instead.
         ItemStack result = scaledResult(
                 wrapper.getResultItem(player.serverLevel().registryAccess()), preparedExecutions);
         if (!result.isEmpty()) {
@@ -135,7 +135,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+    public boolean startSingleOperation(ServerPlayer player, ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);
 
@@ -306,7 +306,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
     // ── Virtual execution ──────────────────────────────────────────
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);
@@ -332,7 +332,7 @@ public final class MarketBatchDelegate extends AbstractBatchDelegate {
         done = false;
         if (resultInserted) {
             resultInserted = false;
-            return ItemStack.EMPTY; // already inserted in tryStartSingleCraft (direct path)
+            return ItemStack.EMPTY; // already inserted in startSingleOperation (direct path)
         }
         if (wrapper != null) {
             return scaledResult(

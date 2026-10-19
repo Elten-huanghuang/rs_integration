@@ -273,19 +273,6 @@ public final class AsyncCraftChain {
                 ExecutionEquivalence.projectFlatSteps(graph), graph);
     }
 
-    /**
-     * 兼容旧构造器的参数位置；第三参数不再接受原生网络，链状态只保留端点。
-     */
-    @Deprecated
-    public AsyncCraftChain(UUID playerId, MinecraftServer server,
-                           @Nullable CraftStorageEndpoint ignoredEndpoint,
-                           @Nullable CraftStorageEndpoint storageEndpoint,
-                           CraftPlanGraph graph) {
-        this(playerId, server,
-                storageEndpoint != null ? storageEndpoint : ignoredEndpoint,
-                graph);
-    }
-
     public AsyncCraftChain(UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint storageEndpoint,
                            CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
@@ -3583,15 +3570,15 @@ public final class AsyncCraftChain {
                         // combine an input refund with an already-produced result.
                         return delegate;
                     }
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartWithMaterials failed for {}"),
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate startPreparedOperation failed for {}"),
                             step.recipeId());
                     Component failureTarget = stepFailureTarget(step, online);
                     machineStartFailureMessage = Component.translatable(
                             "rsi.async.abort.machine_start_failed", failureTarget);
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", failureTarget));
-                    try { delegate.onBatchFailed(online, "tryStartWithMaterials failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartWithMaterials cleanup"), fe);
+                    try { delegate.onBatchFailed(online, "startPreparedOperation failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during startPreparedOperation cleanup"), fe);
 }
                     // abort() refunds the ledger, so we must NOT refund here
                     return null;
@@ -3601,7 +3588,7 @@ public final class AsyncCraftChain {
                 // point so its delayed world drop cannot be picked up first.
                 armOutputCapture(startedDelegate, online);
             } else {
-                // Private-ledger path: tryStartSingleCraft's ensureMaterialAvailable
+                // Private-ledger path: startSingleOperation's ensureMaterialAvailable
                 // only sees network + player inventory, NOT virtualInventory. In a
                 // multi-step chain, intermediate products from earlier steps live in
                 // virtualInventory and would be invisible here -the craft fails even
@@ -3646,10 +3633,10 @@ public final class AsyncCraftChain {
                         ledger.reset();
                         return delegate;
                     }
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate tryStartSingleCraft failed for {}"),
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate startSingleOperation failed for {}"),
                             step.recipeId());
-                    try { delegate.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during tryStartSingleCraft cleanup"), fe);
+                    try { delegate.onBatchFailed(online, "startSingleOperation failed"); } catch (Exception fe) {
+    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during startSingleOperation cleanup"), fe);
 }
                     return null;
                 }
@@ -4028,14 +4015,14 @@ public final class AsyncCraftChain {
                 // Fallback: each child self-extracts (no virtualInventory visibility)
                 if (!group.startOperation(
                         OperationStartContext.delegateExtracted(online, ledger))) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group tryStartSingleCraft failed for {}"),
+                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group startSingleOperation failed for {}"),
                             step.recipeId());
                     Component failureTarget = stepFailureTarget(step, online);
                     machineStartFailureMessage = Component.translatable(
                             "rsi.async.abort.machine_start_failed", failureTarget);
                     online.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.craft_failed", failureTarget));
-                    try { group.onBatchFailed(online, "tryStartSingleCraft failed"); } catch (Exception fe) {
+                    try { group.onBatchFailed(online, "startSingleOperation failed"); } catch (Exception fe) {
                         RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
                     }
                     return null;

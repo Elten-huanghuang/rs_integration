@@ -66,7 +66,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (recipe == null || stand == null) return false;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -86,7 +86,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;

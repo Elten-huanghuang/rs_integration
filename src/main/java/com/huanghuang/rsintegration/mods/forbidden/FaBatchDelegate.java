@@ -252,7 +252,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -277,7 +277,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         try {
             Boolean active = (Boolean) Reflect.getMethodOrThrow(FAReflection.ritualManagerClass, "isRitualActive", "isRitualActive").invoke(ritualManager);
             if (Boolean.TRUE.equals(active)) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: altar busy, aborting");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startSingleOperation: altar busy, aborting");
                 return false;
             }
         } catch (Exception e) { RSIntegrationMod.debug("[RSI-Batch-FA] Reflection probe failed", e); }
@@ -288,11 +288,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         try {
             foundPedestals = findPedestals(resolveMachineLevel(player));
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: pedestals not found", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startSingleOperation: pedestals not found", e);
             return false;
         }
         if (foundPedestals == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: findPedestals returned null");
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startSingleOperation: findPedestals returned null");
             return false;
         }
 
@@ -319,7 +319,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             totalSlotsNeeded += amt;
         }
         if (totalSlotsNeeded > availablePedestals.size()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: insufficient pedestals (need {}, have {})",
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startSingleOperation: insufficient pedestals (need {}, have {})",
                     totalSlotsNeeded, availablePedestals.size());
             return false;
         }
@@ -329,7 +329,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (mainIng != null && !mainIng.isEmpty()) {
             mainTemplate = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, mainIng, 1, ledger);
             if (mainTemplate.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: main ingredient extraction failed");
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startSingleOperation: main ingredient extraction failed");
                 return false;
             }
         }
@@ -343,7 +343,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
 
             ItemStack t = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, ing, amt, ledger);
             if (t.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartSingleCraft: input[{}] extraction failed", i);
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startSingleOperation: input[{}] extraction failed", i);
                 return false;
             }
             inputTemplates.add(t);
@@ -376,7 +376,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: placement failed:", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startSingleOperation: placement failed:", e);
             rollbackPhysical();
             ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             return false;
@@ -408,7 +408,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] (single) Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player);
         if (starterStack.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: no usable RitualStarterItem in inventory or RS");
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] startSingleOperation: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
             rollbackPhysical();
             ledger.refundCommittedToEndpoint(storageEndpoint(), player);
@@ -435,7 +435,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                     callback.wasCalled, callback.accepted);
 
             if (callback.wasCalled && !callback.accepted) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartSingleCraft: ritual rejected by forge");
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] startSingleOperation: ritual rejected by forge");
                 rollbackPhysical();
                 ledger.refundCommittedToEndpoint(storageEndpoint(), player);
                 returnStarterToSource(starterStack);
@@ -449,7 +449,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             returnStarterToSource(starterStack);
             return false;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartSingleCraft: start ritual failed:", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startSingleOperation: start ritual failed:", e);
             rollbackPhysical();
             ledger.refundCommittedToEndpoint(storageEndpoint(), player);
             returnStarterToSource(starterStack);
@@ -485,7 +485,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
@@ -527,12 +527,12 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         try {
             foundPedestals = findPedestals(resolveMachineLevel(player));
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: pedestals not found", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startPreparedOperation: pedestals not found", e);
             player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
             return false;
         }
         if (foundPedestals == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] tryStartWithMaterials: findPedestals returned null");
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startPreparedOperation: findPedestals returned null");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
             return false;
         }
@@ -587,7 +587,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                 }
             }
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: placement failed:", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startPreparedOperation: placement failed:", e);
             rollbackAll();
             player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             return false;
@@ -635,7 +635,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] Searching for RitualStarterItem...");
         final ItemStack starterStack = findRitualStarterItem(player);
         if (starterStack.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] tryStartWithMaterials: no usable RitualStarterItem in inventory or RS");
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-FA] startPreparedOperation: no usable RitualStarterItem in inventory or RS");
             player.sendSystemMessage(Component.translatable("rsi.fa.error.missing_starter_item"));
             rollbackAll();
             return false;
@@ -708,7 +708,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             returnStarterToSource(starterStack);
             return false;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] tryStartWithMaterials: start ritual failed:", e);
+            RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startPreparedOperation: start ritual failed:", e);
             rollbackAll();
             player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
             returnStarterToSource(starterStack);

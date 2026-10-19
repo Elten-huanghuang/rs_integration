@@ -97,12 +97,12 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player) || materials.size() != 1

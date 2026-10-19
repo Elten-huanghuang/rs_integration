@@ -108,7 +108,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != INPUT_COUNT) return false;
 
@@ -137,7 +137,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         this.ledger = sharedLedger;

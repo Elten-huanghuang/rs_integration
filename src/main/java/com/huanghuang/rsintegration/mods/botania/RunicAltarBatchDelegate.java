@@ -109,7 +109,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
         if (storageEndpoint() == null) return false;
         List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(
@@ -121,13 +121,13 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player,
+    public boolean startSingleOperation(@Nonnull ServerPlayer player,
                                        @Nonnull ExtractionLedger sharedLedger) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);

@@ -218,7 +218,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -467,7 +467,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+    public boolean startBufferedOperation(@Nonnull ServerPlayer player,
                                            @Nonnull InputBufferPlan plan,
                                            @Nonnull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
@@ -495,7 +495,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
 
         bufferedOperations = plan.operations();
-        boolean started = tryStartWithMaterials(player, ordered, sharedLedger);
+        boolean started = startPreparedOperation(player, ordered, sharedLedger);
         if (!started) bufferedOperations = 1;
         return started;
     }
@@ -546,7 +546,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;

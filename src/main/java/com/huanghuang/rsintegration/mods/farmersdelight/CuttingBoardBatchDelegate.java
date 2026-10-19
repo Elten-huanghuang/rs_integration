@@ -205,7 +205,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@NotNull ServerPlayer player) {
+    public boolean startSingleOperation(@NotNull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 2) return false;
         List<ItemStack> materials = new ArrayList<>();
@@ -224,7 +224,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             }
             if (!local.commitToEndpoint(storageEndpoint(), player)) return false;
             usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, local)) {
+            if (!startPreparedOperation(player, materials, local)) {
                 for (ItemStack stack : materials) {
                     if (!stack.isEmpty()) insertIntoStorage(player, stack, false);
                 }
@@ -235,7 +235,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(@NotNull ServerPlayer player,
+    public boolean startPreparedOperation(@NotNull ServerPlayer player,
                                          @NotNull List<ItemStack> materials,
                                          @NotNull ExtractionLedger sharedLedger) {
         if (recipe == null || materials.size() != 2) return false;

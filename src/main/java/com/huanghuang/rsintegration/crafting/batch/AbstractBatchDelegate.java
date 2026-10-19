@@ -110,6 +110,55 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         }
     }
 
+    @Override
+    public boolean startOperation(@Nonnull OperationStartContext context) {
+        if (context.repeatedOperationPlan() != null) return false;
+        if (context.buffered()) {
+            return startBufferedOperation(
+                    context.player(), context.inputBufferPlan(), context.ledger());
+        }
+        List<ItemStack> materials = context.legacyMaterials();
+        if (!materials.isEmpty()) {
+            return startPreparedOperation(context.player(), materials, context.ledger());
+        }
+        return context.materialOwnership() == OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED
+                ? startSingleOperation(context.player())
+                : startSingleOperation(context.player(), context.ledger());
+    }
+
+    /**
+     * 启动已经物理布局好的缓冲批次。实现必须按输入槽和输出端口放置材料。
+     */
+    public boolean startBufferedOperation(
+            @Nonnull ServerPlayer player, @Nonnull InputBufferPlan plan,
+            @Nonnull ExtractionLedger sharedLedger) {
+        return false;
+    }
+
+    /**
+     * 启动由执行链完成预留和布局的单次操作。
+     */
+    public boolean startPreparedOperation(
+            @Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+            @Nonnull ExtractionLedger sharedLedger) {
+        return false;
+    }
+
+    /**
+     * 启动由委托自行提取材料的单次操作。
+     */
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
+        return false;
+    }
+
+    /**
+     * 启动使用执行链共享账本的单次操作。实现不得自行提交共享账本。
+     */
+    public boolean startSingleOperation(
+            @Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
+        return startSingleOperation(player);
+    }
+
     // ── Template methods (final — subclasses override hooks instead) ──
 
     /**

@@ -159,7 +159,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
     @Test
     void cancellationRecoversOnlyRemainingOwnedInputsAndKeepsPartialOutput() throws Exception {
         Fixture fixture = fixture(new CountedRecipe(2, 4, 1));
-        assertTrue(fixture.delegate.tryStartWithInputBuffer(mock(ServerPlayer.class),
+        assertTrue(fixture.delegate.startBufferedOperation(mock(ServerPlayer.class),
                 fixture.delegate.inputBufferPlan(3), new ExtractionLedger()));
         fixture.inventory.setItem(0, new ItemStack(Items.NETHERRACK, 4));
         fixture.inventory.setItem(1, new ItemStack(Items.DIAMOND, 8));
@@ -188,7 +188,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         recipe.first = Ingredient.of(Items.MILK_BUCKET);
         Fixture fixture = fixture(recipe);
         assertFalse(fixture.delegate.supportsInputBuffer());
-        assertTrue(fixture.delegate.tryStartWithMaterials(mock(ServerPlayer.class),
+        assertTrue(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                 List.of(new ItemStack(Items.MILK_BUCKET), new ItemStack(Items.DIAMOND)), new ExtractionLedger()));
         fixture.inventory.setItem(0, new ItemStack(Items.BUCKET));
         fixture.inventory.setItem(1, ItemStack.EMPTY);
@@ -200,7 +200,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
     }
 
     private static boolean startSingle(Fixture fixture, int first, int second) {
-        return fixture.delegate.tryStartWithMaterials(mock(ServerPlayer.class),
+        return fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                 List.of(new ItemStack(Items.NETHERRACK, first), new ItemStack(Items.DIAMOND, second)),
                 new ExtractionLedger());
     }

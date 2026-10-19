@@ -118,7 +118,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
     void rejectedMaterialReservationCannotCompletePreparation() throws Exception {
         Fixture fixture = new Fixture();
 
-        assertFalse(fixture.delegate.tryStartWithMaterials(fixture.player,
+        assertFalse(fixture.delegate.startPreparedOperation(fixture.player,
                 List.of(new ItemStack(Items.STICK)), new ExtractionLedger()));
         assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
         assertFalse(fixture.delegate.isCraftComplete(fixture.level));
@@ -394,7 +394,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         }
 
         boolean start(List<ItemStack> materials) {
-            return delegate.tryStartWithMaterials(player, materials, new ExtractionLedger());
+            return delegate.startPreparedOperation(player, materials, new ExtractionLedger());
         }
 
         void hideItemCapability() {

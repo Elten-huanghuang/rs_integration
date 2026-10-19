@@ -164,7 +164,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         if (!validateExecutionContext(player)) return false;
         if (producesFluid()) {
@@ -190,7 +190,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         ledger = sharedLedger;
         this.sharedLedger = sharedLedger;

@@ -105,7 +105,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = new ExtractionLedger();
@@ -274,7 +274,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player,
+    public boolean startPreparedOperation(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player)) return false;

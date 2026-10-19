@@ -174,7 +174,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+    public boolean startBufferedOperation(@Nonnull ServerPlayer player,
                                            @Nonnull InputBufferPlan plan,
                                            @Nonnull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -238,12 +238,12 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player) || materials.size() != 1) return false;
         ItemStack material = materials.get(0);

@@ -340,7 +340,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
@@ -367,7 +367,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
         ServerLevel level = resolveMachineLevel(player);
         if (recipe == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] tryStartSingleCraft: no recipe set");
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] startSingleOperation: no recipe set");
             return false;
         }
 
@@ -455,7 +455,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;

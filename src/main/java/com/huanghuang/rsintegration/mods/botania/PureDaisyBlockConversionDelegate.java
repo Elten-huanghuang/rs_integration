@@ -111,7 +111,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
         List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
                 storageEndpoint(), player, getRequiredMaterials());
@@ -119,12 +119,12 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger ledger) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger ledger) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger ledger) {
         useSharedLedger(ledger);
         return materials.size() == 1 && start(materials.get(0));

@@ -300,7 +300,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── Private ledger (direct path) ───────────────────────────────
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
@@ -325,7 +325,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── Shared ledger (chain path, getRequiredMaterials returns null/empty) ─
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+    public boolean startSingleOperation(ServerPlayer player, ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
@@ -446,7 +446,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -551,7 +551,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player,
+    public boolean startPreparedOperation(ServerPlayer player,
                                          List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;

@@ -286,7 +286,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
@@ -312,7 +312,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan expected = inputBufferPlan(plan.operations());
         if (!expected.enabled() || expected.operations() != plan.operations()) return false;
         plannedOperations = plan.operations();
-        return tryStartWithMaterials(player, ordered, sharedLedger);
+        return startPreparedOperation(player, ordered, sharedLedger);
     }
 
     @Override
@@ -353,7 +353,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -376,7 +376,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!startPreparedOperation(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         insertIntoStorage(player, mat.copy(), false);
@@ -388,7 +388,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         // usingSharedLedger already set by caller — don't overwrite

@@ -77,7 +77,7 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         ExtractionLedger ownLedger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -111,7 +111,7 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player)) return false;
         CraftedOutputs outputs = craft(recipe, materials,

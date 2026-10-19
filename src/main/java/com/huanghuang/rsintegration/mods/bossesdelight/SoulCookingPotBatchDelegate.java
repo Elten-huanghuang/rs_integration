@@ -173,7 +173,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
      * 展示槽被清空后它就再也装不回来，直接调用单次开局会丢产物。
      */
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
 
@@ -291,7 +291,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
@@ -311,13 +311,13 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan expected = inputBufferPlan(plan.operations());
         if (!expected.enabled() || expected.operations() != plan.operations()) return false;
         plannedOperations = plan.operations();
-        return tryStartWithMaterials(player, ordered, sharedLedger, !container.isEmpty());
+        return startPreparedOperation(player, ordered, sharedLedger, !container.isEmpty());
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        return tryStartWithMaterials(player, materials, sharedLedger, false);
+        return startPreparedOperation(player, materials, sharedLedger, false);
     }
 
     /**
@@ -326,7 +326,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
      * @param containerAppended 材料列表末尾是否追加了容器条目
      *                          （预载路径由契约生成，单次路径由调用方按同一口径拼好）
      */
-    private boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    private boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                           ExtractionLedger sharedLedger, boolean containerAppended) {
         this.player = player;
         this.usingSharedLedger = true;

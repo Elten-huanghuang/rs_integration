@@ -134,7 +134,7 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         return expected.isEmpty() ? null : new ExpectedProduction(expected.copy(), expected.getCount());
     }
 
-    @Override public boolean tryStartSingleCraft(ServerPlayer player) {
+    @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         ledger = new ExtractionLedger();
         ledger.setStorageEndpoint(storageEndpoint());
@@ -149,7 +149,7 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         return start(player, materials);
     }
 
-    @Override public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                                    ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);
         return start(player, materials);

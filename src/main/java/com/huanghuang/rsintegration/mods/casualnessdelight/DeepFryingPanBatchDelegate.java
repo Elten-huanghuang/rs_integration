@@ -124,7 +124,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
 
@@ -201,7 +201,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(ServerPlayer player, InputBufferPlan plan,
+    public boolean startBufferedOperation(ServerPlayer player, InputBufferPlan plan,
                                            ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
                 || plan.operations() <= 0) return false;
@@ -214,11 +214,11 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
                 || input.stack().getCount() != plan.operations()
                 || !specs.get(0).ingredient().test(input.stack())) return false;
         plannedOperations = plan.operations();
-        return tryStartWithMaterials(player, List.of(input.stack()), sharedLedger);
+        return startPreparedOperation(player, List.of(input.stack()), sharedLedger);
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         if (recipe == null || myLevel == null || myPos == null || materials.size() != 1) return false;
         BlockEntity be = myLevel.getBlockEntity(myPos);

@@ -201,7 +201,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
                 : Component.translatable("rsi.wr.alchemy.error.recovery_storage");
     }
 
-    @Override public boolean tryStartSingleCraft(ServerPlayer player) {
+    @Override public boolean startSingleOperation(ServerPlayer player) {
         if (started || !validateExecutionContext(player) || !recoverOldContents(player)) return false;
         this.ledger = new ExtractionLedger();
         ledger.setStorageEndpoint(storageEndpoint());
@@ -216,7 +216,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         return place(player, materials);
     }
 
-    @Override public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                                    ExtractionLedger sharedLedger) {
         useSharedLedger(sharedLedger);
         return place(player, materials);

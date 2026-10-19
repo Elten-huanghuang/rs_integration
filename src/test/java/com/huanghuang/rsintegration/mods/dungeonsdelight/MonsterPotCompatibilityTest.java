@@ -146,7 +146,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
 
         try (ExtractionLedger ledger = new ExtractionLedger();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
-            assertTrue(fixture.delegate.tryStartWithInputBuffer(fixture.player, plan, ledger));
+            assertTrue(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
         assertEquals(4, fixture.inventory.getStackInSlot(0).getCount());
         assertEquals(8, fixture.inventory.getStackInSlot(7).getCount());
@@ -175,7 +175,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         assertFalse(fixture.delegate.inputBufferPlan(20).enabled());
         try (ExtractionLedger ledger = new ExtractionLedger();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
-            assertTrue(fixture.delegate.tryStartWithMaterials(fixture.player,
+            assertTrue(fixture.delegate.startPreparedOperation(fixture.player,
                     List.of(new ItemStack(Items.MILK_BUCKET), new ItemStack(Items.BOWL)), ledger));
         }
         assertEquals(Items.MILK_BUCKET, fixture.inventory.getStackInSlot(0).getItem());
@@ -189,7 +189,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(2);
         try (ExtractionLedger ledger = new ExtractionLedger();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
-            assertFalse(fixture.delegate.tryStartWithInputBuffer(fixture.player, plan, ledger));
+            assertFalse(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
         assertTrue(fixture.inventory.getStackInSlot(0).isEmpty());
         assertTrue(fixture.inventory.getStackInSlot(7).isEmpty());
@@ -203,7 +203,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(4);
         try (ExtractionLedger ledger = new ExtractionLedger();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
-            assertTrue(fixture.delegate.tryStartWithInputBuffer(fixture.player, plan, ledger));
+            assertTrue(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
         fixture.inventory.setStackInSlot(0, new ItemStack(Items.CARROT, 3));
         fixture.inventory.setStackInSlot(7, new ItemStack(Items.BOWL, 6));
@@ -222,9 +222,9 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         assertTrue(second.prepare());
         try (ExtractionLedger ledger = new ExtractionLedger();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
-            assertTrue(first.delegate.tryStartWithInputBuffer(first.player,
+            assertTrue(first.delegate.startBufferedOperation(first.player,
                     first.delegate.inputBufferPlan(3), ledger));
-            assertTrue(second.delegate.tryStartWithInputBuffer(second.player,
+            assertTrue(second.delegate.startBufferedOperation(second.player,
                     second.delegate.inputBufferPlan(2), ledger));
         }
         assertEquals(3, first.inventory.getStackInSlot(0).getCount());

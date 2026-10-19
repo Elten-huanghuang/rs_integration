@@ -122,7 +122,7 @@ class MaterialPlanTest extends BootstrapTest {
         }
 
         @Override
-        public boolean tryStartSingleCraft(ServerPlayer player) {
+        public boolean startOperation(OperationStartContext context) {
             return false;
         }
 

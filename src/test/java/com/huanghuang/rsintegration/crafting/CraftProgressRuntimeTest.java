@@ -4,6 +4,7 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
@@ -325,7 +326,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         }
 
         @Override
-        public boolean tryStartSingleCraft(ServerPlayer player) {
+        public boolean startOperation(OperationStartContext context) {
             return true;
         }
 

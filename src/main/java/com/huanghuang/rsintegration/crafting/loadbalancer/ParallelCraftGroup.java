@@ -437,31 +437,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return startInitialWorkers();
     }
 
-    /** Compatibility adapter for external callers that still use the old group entry point. */
-    @Deprecated
-    @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
-                                         ExtractionLedger sharedLedger) {
-        if (baseSpecs == null || baseSpecs.isEmpty()) return false;
-        return startOperation(OperationStartContext.repeatedChainReserved(
-                player, sharedLedger, operationMaterialPlan(), operations.totalOperations(),
-                baseSpecs.size(), materials));
-    }
-
-    @Deprecated
-    @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
-        this.player = player;
-        this.sharedMaterialMode = false;
-        return startInitialWorkers();
-    }
-
-    @Deprecated
-    @Override
-    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
-        return tryStartSingleCraft(player);
-    }
-
     private boolean startInitialWorkers() {
         if (workers.isEmpty()) {
             beginDraining("no validated workers are available");

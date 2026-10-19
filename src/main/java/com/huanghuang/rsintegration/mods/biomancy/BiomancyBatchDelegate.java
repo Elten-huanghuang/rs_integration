@@ -86,7 +86,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
         if (storageEndpoint() == null) {
@@ -116,7 +116,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.sharedMaterials = true;
         if (isBioForge()) {

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.MonsterPotBatchDelegate;
@@ -163,7 +164,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
 
         @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return capabilities; }
         @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
-        @Override public boolean tryStartSingleCraft(ServerPlayer p) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }
         @Override public ItemStack collectResult(ServerPlayer p) { return ItemStack.EMPTY; }
         @Override public void onBatchFailed(ServerPlayer p, String reason) { }

@@ -12,8 +12,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 public abstract class BotaniaUnavailableBatchDelegate extends AbstractBatchDelegate {
  protected BlockPos pos;
  @Override public boolean validateAndInit(@Nonnull ServerPlayer p,@Nonnull ResourceLocation id,ResourceLocation dim,@Nonnull BlockPos pos){this.pos=pos;this.machineDim=dim;this.machineServer=p.getServer();return false;}
- @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer p){return false;}
- @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}
+ @Override public boolean startSingleOperation(@Nonnull ServerPlayer p){return false;}
+ @Override public boolean startSingleOperation(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}
  @Override public ItemStack collectResult(@Nonnull ServerPlayer p){return ItemStack.EMPTY;}
  @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel l,@Nonnull BlockEntity b){return false;}
  @Override public void onBatchFinished(@Nonnull ServerPlayer p){resetState();}

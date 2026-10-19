@@ -132,7 +132,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+    public boolean startBufferedOperation(@Nonnull ServerPlayer player,
                                            @Nonnull InputBufferPlan plan,
                                            @Nonnull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -177,7 +177,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
                 .toList();
     }
 
-    @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 2) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
@@ -200,7 +200,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         return false;
     }
 
-    @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    @Override public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                                     @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
         this.ledger = sharedLedger;

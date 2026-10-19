@@ -128,7 +128,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         return supportsInputBuffer() ? Math.max(1, inputBufferPlan(share).operations()) : 1;
     }
 
-    @Override public boolean tryStartWithInputBuffer(ServerPlayer player, InputBufferPlan plan,
+    @Override public boolean startBufferedOperation(ServerPlayer player, InputBufferPlan plan,
                                                     ExtractionLedger sharedLedger) {
         if (plan == null || !plan.enabled() || plan.inputs().size() != 2
                 || inputBufferPlan(plan.operations()).operations() != plan.operations()) return false;
@@ -140,7 +140,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
                 plan.operations(), sharedLedger);
     }
 
-    @Override public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    @Override public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                                  ExtractionLedger sharedLedger) {
         return startShared(materials, 1, sharedLedger);
     }
@@ -150,7 +150,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         return place(materials, operations);
     }
 
-    @Override public boolean tryStartSingleCraft(ServerPlayer player) {
+    @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!idle()) return false;
         if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         ExtractionLedger privateLedger = new ExtractionLedger();

@@ -252,11 +252,11 @@ extends AbstractBatchDelegate {
         return this.firstAttemptMaterials.mergeStacks(graphMaterials, supplementalMaterials);
     }
 
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
 
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials, ExtractionLedger sharedLedger) {
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials, ExtractionLedger sharedLedger) {
         ItemStack outputStack;
         BlockEntity current;
         this.sharedLedger = sharedLedger;
@@ -485,7 +485,7 @@ extends AbstractBatchDelegate {
         }
         // Save progress BEFORE extractAndSparkNext so attemptCount reflects the
         // number of completed attempts, not the one about to start.  When this
-        // state is later restored, tryStartWithMaterials will ++attemptCount
+        // state is later restored, startPreparedOperation will ++attemptCount
         // exactly once for the replayed attempt (no double-count).
         if (this.player != null) {
             this.saveProgress(this.player.getUUID());

@@ -252,10 +252,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         return true;
     }
 
-    // ── tryStartSingleCraft ──────────────────────────────────────
+    // ── startSingleOperation ──────────────────────────────────────
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (storageEndpoint() == null && storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myLevel.dimension(), myPos).orElse(null));
         }
@@ -263,19 +263,19 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player, ExtractionLedger sharedLedger) {
+    public boolean startSingleOperation(ServerPlayer player, ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         return tryStartWithExtraction(player, false, sharedLedger);
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
         if (sharedLedger != null) setStorageEndpoint(sharedLedger.storageEndpoint());
-        return tryStartWithMaterialsImpl(player, materials);
+        return startPreparedOperationImpl(player, materials);
     }
 
     @Override
@@ -360,7 +360,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
@@ -716,7 +716,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
-    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials) {
+    private boolean startPreparedOperationImpl(ServerPlayer player, List<ItemStack> materials) {
         if (myLevel == null || crucibleBE == null || recipe == null) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -1210,7 +1210,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     /** Remove templates placed before commit without minting refunds. */
     private void clearUncommittedPlacements() {
         // Shared-ledger callers have already committed the physical extraction
-        // before invoking tryStartWithMaterials. Leave slots intact so the
+        // before invoking startPreparedOperation. Leave slots intact so the
         // terminal cleanup can recover and audit the exact stacks.
         if (usingSharedLedger) return;
         if (invCatalyst != null) {

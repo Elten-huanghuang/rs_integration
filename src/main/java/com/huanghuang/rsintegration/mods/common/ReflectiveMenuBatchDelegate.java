@@ -89,7 +89,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         return BatchConcurrencyCapabilities.delegateResult();
     }
 
-    @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() > inputCount) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
@@ -112,7 +112,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         return false;
     }
 
-    @Override public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    @Override public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                                     @Nonnull List<ItemStack> materials,
                                                     @Nonnull ExtractionLedger sharedLedger) {
         this.ledger = sharedLedger;

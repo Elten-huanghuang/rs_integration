@@ -156,19 +156,19 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
      * 避免无缺料配方被错误地当成“不支持启动”。
      */
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player,
+    public boolean startSingleOperation(@Nonnull ServerPlayer player,
                                        @Nonnull ExtractionLedger sharedLedger) {
-        return tryStartWithMaterials(player, List.of(), sharedLedger);
+        return startPreparedOperation(player, List.of(), sharedLedger);
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         // 兼容仍使用委托自提入口的旧执行器；无材料时账本不会产生提取记录。
-        return tryStartWithMaterials(player, List.of(), new ExtractionLedger());
+        return startPreparedOperation(player, List.of(), new ExtractionLedger());
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                          @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         this.player = player;

@@ -76,7 +76,7 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
     @Override
     public boolean startOperation(OperationStartContext context) {
         if (context.repeatedOperationPlan() != null) return false;
-        if (context.buffered() && tryStartWithInputBuffer(
+        if (context.buffered() && startBufferedOperation(
                 context.player(), context.inputBufferPlan(), context.ledger())) {
             return true;
         }
@@ -87,7 +87,7 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
                     "[RSI-Batch-LetsDo] 输入缓冲启动未成功，退回预扣材料铺料 recipe={} delegate={}",
                     recipe == null ? null : recipe.getId(), getClass().getSimpleName());
         }
-        return tryStartWithMaterials(context.player(), materials, context.ledger());
+        return startPreparedOperation(context.player(), materials, context.ledger());
     }
 
     /** 主产物恒在 7 号槽；这套锅没有"碗食留在展示槽"的兜底。 */

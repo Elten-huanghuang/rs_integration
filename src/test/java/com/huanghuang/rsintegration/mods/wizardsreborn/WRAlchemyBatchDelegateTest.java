@@ -185,7 +185,7 @@ public class WRAlchemyBatchDelegateTest extends BootstrapTest {
         };
         try (MockedStatic<WRAlchemyAccess> access = mockStatic(WRAlchemyAccess.class, CALLS_REAL_METHODS)) {
             access.when(() -> WRAlchemyAccess.number(any(), anyString())).thenReturn(0);
-            assertFalse(harness.delegate.tryStartWithMaterials(mock(ServerPlayer.class),
+            assertFalse(harness.delegate.startPreparedOperation(mock(ServerPlayer.class),
                     List.of(iron, lava), new ExtractionLedger()));
         }
         assertTrue(harness.machine.itemHandler.getStackInSlot(0).is(Items.IRON_INGOT));

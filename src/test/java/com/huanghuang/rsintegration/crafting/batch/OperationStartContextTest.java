@@ -43,14 +43,14 @@ class OperationStartContextTest extends BootstrapTest {
     void delegateExtractedStartPreservesThePrivateExtractionEntryPoint() {
         ServerPlayer player = mock(ServerPlayer.class);
         ExtractionLedger ledger = new ExtractionLedger();
-        IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
-        when(delegate.tryStartSingleCraft(player)).thenReturn(true);
+        AbstractBatchDelegate delegate = mock(AbstractBatchDelegate.class, CALLS_REAL_METHODS);
+        when(delegate.startSingleOperation(player)).thenReturn(true);
 
         assertTrue(delegate.startOperation(
                 OperationStartContext.delegateExtracted(player, ledger)));
 
-        verify(delegate).tryStartSingleCraft(player);
-        verify(delegate, never()).tryStartSingleCraft(player, ledger);
+        verify(delegate).startSingleOperation(player);
+        verify(delegate, never()).startSingleOperation(player, ledger);
     }
 
     @Test
@@ -144,13 +144,13 @@ class OperationStartContextTest extends BootstrapTest {
                 List.of(ItemStack.EMPTY, new ItemStack(Items.COAL), ItemStack.EMPTY,
                         ItemStack.EMPTY, new ItemStack(Items.CHARCOAL)),
                 InputBufferPlan.none());
-        IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
-        when(delegate.tryStartWithMaterials(eq(player), anyList(),
+        AbstractBatchDelegate delegate = mock(AbstractBatchDelegate.class, CALLS_REAL_METHODS);
+        when(delegate.startPreparedOperation(eq(player), anyList(),
                 eq(ledger))).thenReturn(true);
 
         assertTrue(delegate.startOperation(context));
 
-        verify(delegate).tryStartWithMaterials(eq(player), argThat(materials ->
+        verify(delegate).startPreparedOperation(eq(player), argThat(materials ->
                 materials.size() == 5
                         && materials.get(0).isEmpty()
                         && materials.get(1).is(Items.COAL)
@@ -211,9 +211,9 @@ class OperationStartContextTest extends BootstrapTest {
         OperationStartContext context = OperationStartContext.repeatedChainReserved(
                 player, ledger, perOperation, 2, 1,
                 List.of(new ItemStack(Items.COAL), new ItemStack(Items.COAL)));
-        IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
+        AbstractBatchDelegate delegate = mock(AbstractBatchDelegate.class, CALLS_REAL_METHODS);
         assertFalse(delegate.startOperation(context));
-        verify(delegate, never()).tryStartWithMaterials(
+        verify(delegate, never()).startPreparedOperation(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(),
                 org.mockito.ArgumentMatchers.any());
     }

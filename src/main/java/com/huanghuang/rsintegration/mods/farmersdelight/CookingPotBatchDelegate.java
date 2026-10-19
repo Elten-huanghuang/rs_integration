@@ -271,7 +271,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@NotNull ServerPlayer player,
+    public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) {
@@ -315,7 +315,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         plannedOperations = plan.operations();
-        return tryStartWithMaterials(player, ordered, sharedLedger);
+        return startPreparedOperation(player, ordered, sharedLedger);
     }
 
     @Override
@@ -329,7 +329,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -352,7 +352,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterials(player, materials, ledger)) {
+            if (!startPreparedOperation(player, materials, ledger)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         insertIntoStorage(player, mat, false);
@@ -364,7 +364,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.usingSharedLedger = true;
@@ -922,7 +922,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack meal = handler.extractItem(mealDisplaySlot(), 64, false);
         if (!meal.isEmpty()) refundToRSNetwork(meal);
         // Container was reserved via the shared ledger (separated from materials in
-        // tryStartWithMaterials L204-216). When usingSharedLedger=true, the ledger's
+        // startPreparedOperation L204-216). When usingSharedLedger=true, the ledger's
         // refundCommitted() will restore it; delegate must not double-refund.
         ItemStack container = handler.extractItem(containerSlot(), 64, false);
         if (!container.isEmpty() && !usingSharedLedger) refundToRSNetwork(container);

@@ -124,7 +124,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
 
@@ -150,12 +150,12 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
             }
 
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
-            return tryStartWithMaterials(player, materials, ledger);
+            return startPreparedOperation(player, materials, ledger);
         }
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         if (!myLevel.hasChunkAt(myPos)) return false;
 

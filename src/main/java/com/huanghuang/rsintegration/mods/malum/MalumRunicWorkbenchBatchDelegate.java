@@ -109,7 +109,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         this.usingSharedLedger = false;
@@ -180,7 +180,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         this.ledger = sharedLedger;

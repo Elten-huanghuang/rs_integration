@@ -221,7 +221,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
+    public boolean startBufferedOperation(@Nonnull ServerPlayer player,
                                            @Nonnull InputBufferPlan plan,
                                            @Nonnull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
@@ -236,16 +236,16 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan expected = inputBufferPlan(plan.operations());
         if (!expected.enabled() || expected.operations() != plan.operations()) return false;
         plannedOperations = plan.operations();
-        return tryStartWithMaterials(player, List.of(input.stack().copy()), sharedLedger);
+        return startPreparedOperation(player, List.of(input.stack().copy()), sharedLedger);
     }
 
     @Override
-    public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
+    public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         return false;
     }
 
     @Override
-    public boolean tryStartWithMaterials(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
+    public boolean startPreparedOperation(@Nonnull ServerPlayer player, @Nonnull List<ItemStack> materials,
                                          @Nonnull ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;

@@ -189,11 +189,11 @@ extends AbstractBatchDelegate {
         return this.materials.mergeStacks(graphMaterials, supplementalMaterials);
     }
 
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
 
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials, ExtractionLedger sharedLedger) {
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials, ExtractionLedger sharedLedger) {
         ItemStack outputStack;
         BlockEntity current;
         this.sharedLedger = sharedLedger;

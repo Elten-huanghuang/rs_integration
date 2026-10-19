@@ -84,7 +84,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
@@ -127,7 +127,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         useSharedLedger(sharedLedger);

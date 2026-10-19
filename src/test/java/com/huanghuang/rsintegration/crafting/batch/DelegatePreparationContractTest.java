@@ -120,7 +120,7 @@ class DelegatePreparationContractTest {
             return true;
         }
 
-        @Override public boolean tryStartSingleCraft(ServerPlayer player) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
         @Override public void onBatchFinished(ServerPlayer player) {}
         // Non-null so onBatchFailed does not short-circuit on the virtual-delegate path.
@@ -140,7 +140,7 @@ class DelegatePreparationContractTest {
             return valid;
         }
 
-        @Override public boolean tryStartSingleCraft(ServerPlayer player) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }
         @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
         @Override public void onBatchFailed(ServerPlayer player, String reason) {}

@@ -174,37 +174,8 @@ public interface IBatchDelegate {
         return InputBufferPlan.none();
     }
 
-    /**
-     * Start a physically laid-out buffered dispatch. Implementations must place
-     * each input by {@link InputBufferPlan.InputSlot#slot()} and keep output
-     * accounting by {@link InputBufferPlan.OutputPort#port()}.
-     */
-    @Deprecated
-    default boolean tryStartWithInputBuffer(@Nonnull ServerPlayer player,
-                                             @Nonnull InputBufferPlan plan,
-                                             @Nonnull ExtractionLedger sharedLedger) {
-        return false;
-    }
-
-    /**
-     * Unified operation start entry. New delegates may override this method;
-     * legacy delegates are adapted to their existing buffered, ordered-material,
-     * or self-extracting entry point without changing behavior.
-     */
-    default boolean startOperation(@Nonnull OperationStartContext context) {
-        if (context.repeatedOperationPlan() != null) return false;
-        if (context.buffered()) {
-            return tryStartWithInputBuffer(
-                    context.player(), context.inputBufferPlan(), context.ledger());
-        }
-        List<ItemStack> materials = context.legacyMaterials();
-        if (!materials.isEmpty()) {
-            return tryStartWithMaterials(context.player(), materials, context.ledger());
-        }
-        return context.materialOwnership() == OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED
-                ? tryStartSingleCraft(context.player())
-                : tryStartSingleCraft(context.player(), context.ledger());
-    }
+    /** Unified operation start entry. */
+    boolean startOperation(@Nonnull OperationStartContext context);
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 
@@ -244,31 +215,11 @@ public interface IBatchDelegate {
     }
 
     /**
-     * Check machine is idle, extract materials for one craft, place them, and start.
-     * @return true if the craft was successfully started
-     */
-    @Deprecated
-    default boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
-        return false;
-    }
-
-    /**
-     * Variant that uses a shared ledger. The delegate should reserve from
-     * {@code sharedLedger} instead of creating its own, and must NOT commit
-     * (the chain commits once at the end). Default impl falls back to
-     * creating a private ledger for backward compat.
-     */
-    @Deprecated
-    default boolean tryStartSingleCraft(@Nonnull ServerPlayer player, @Nonnull ExtractionLedger sharedLedger) {
-        return tryStartSingleCraft(player);
-    }
-
-    /**
      * Return the ingredient specs for the recipe loaded by {@link #validateAndInit}.
      * Used by {@code AsyncCraftChain} to pre-reserve all multi-block materials
      * from a shared ledger before placing them in the machine.
      *
-     * @return ingredient list in the order expected by {@link #tryStartWithMaterials},
+     * @return ingredient list in the order expected by the prepared-operation hook,
      *         or null if the delegate handles extraction on its own
      */
     @Nullable
@@ -384,7 +335,7 @@ public interface IBatchDelegate {
     }
 
     /**
-     * Whether graph dispatch must call {@link #tryStartSingleCraft(ServerPlayer)}
+     * Whether graph dispatch must call {@code startSingleOperation}
      * with the delegate's private extraction ledger. This is required by
      * machines that consume inputs across multiple internal runs and cannot
      * safely accept one shared graph checkout.
@@ -395,7 +346,7 @@ public interface IBatchDelegate {
 
     /**
      * Merge graph-allocated and directly reserved supplemental materials into
-     * the order expected by {@link #tryStartWithMaterials}. Delegates exposing
+     * the order expected by {@code startPreparedOperation}. Delegates exposing
      * supplemental specs must override this method when concatenation is not
      * their placement order.
      */
@@ -418,34 +369,6 @@ public interface IBatchDelegate {
     @Nullable
     default BatchConcurrencyCapabilities concurrencyCapabilities() {
         return null;
-    }
-
-    /**
-     * Legacy opt-in retained for source compatibility. It is no longer sufficient
-     * by itself to enable cross-node execution.
-     */
-    @Deprecated
-    default boolean supportsConcurrentNodeExecution() {
-        return false;
-    }
-
-    /**
-     * Accept pre-reserved materials from the chain and start the craft.
-     * Materials are in the order returned by {@link #getRequiredMaterials()}.
-     * The delegate must place each stack in the correct machine slot and then
-     * start the craft — it must NOT extract from RS or commit the ledger.
-     *
-     * @param player       the player who initiated the craft
-     * @param materials    pre-reserved ItemStacks matching the spec order
-     * @param sharedLedger the chain's master ledger (for refund reference only,
-     *                     do NOT commit)
-     * @return true if all materials were placed and the craft was started
-     */
-    @Deprecated
-    default boolean tryStartWithMaterials(@Nonnull ServerPlayer player,
-                                          @Nonnull List<ItemStack> materials,
-                                          @Nonnull ExtractionLedger sharedLedger) {
-        return false;
     }
 
     /**

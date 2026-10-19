@@ -167,7 +167,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartSingleCraft(ServerPlayer player) {
+    public boolean startSingleOperation(ServerPlayer player) {
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
@@ -226,7 +226,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
             this.usingSharedLedger = false;
-            if (!tryStartWithMaterialsImpl(player, materials, ledger, false)) {
+            if (!startPreparedOperationImpl(player, materials, ledger, false)) {
                 for (ItemStack mat : materials) {
                     if (!mat.isEmpty())
                         insertIntoStorage(player, mat, false);
@@ -238,12 +238,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean tryStartWithMaterials(ServerPlayer player, List<ItemStack> materials,
+    public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        return tryStartWithMaterialsImpl(player, materials, sharedLedger, true);
+        return startPreparedOperationImpl(player, materials, sharedLedger, true);
     }
 
-    private boolean tryStartWithMaterialsImpl(ServerPlayer player, List<ItemStack> materials,
+    private boolean startPreparedOperationImpl(ServerPlayer player, List<ItemStack> materials,
                                               ExtractionLedger sharedLedger,
                                               boolean shared) {
         this.player = player;
