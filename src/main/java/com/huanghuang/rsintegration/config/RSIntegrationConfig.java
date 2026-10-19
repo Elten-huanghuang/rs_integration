@@ -1246,13 +1246,13 @@ public final class RSIntegrationConfig {
                 .defineInRange("craftingMaxEnsureCalls",
                         DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
         CRAFTING_VANILLA_OPERATIONS_PER_TICK = s
-                .comment("单条合成链每 tick 工作台操作上限",
-                        "限制每条合成链的同步原版合成次数，大任务分多个 tick 继续。")
+                .comment("单条合成链每 tick 原版工作预算",
+                        "稳定批量配方按一次批事务计费；动态或无法安全批量的配方继续按逐次操作计费。")
                 .defineInRange("craftingVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK, 1, 256);
         CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = s
-                .comment("全局每 tick 工作台操作上限",
-                        "所有活动合成链共享的原版合成次数预算，管理器公平分配。")
+                .comment("全局每 tick 原版工作预算",
+                        "所有活动合成链共享；稳定批事务与逐次动态配方共同消耗该预算。")
                 .defineInRange("craftingGlobalVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK, 1, 1024);
         CRAFTING_SERVER_TICK_BUDGET_MS = s
