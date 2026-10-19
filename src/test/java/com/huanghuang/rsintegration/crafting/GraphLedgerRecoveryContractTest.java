@@ -253,7 +253,8 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
             operationKernel = (OperationExecutionKernel) field(chain, "operationKernel");
             for (OutputDeclaration output : graph.nodes().get(0).outputs()) {
                 broker.publishActual(new MaterialSource.ProducerOutput(output.id()),
-                        output.material(), output.material().toStack(output.quantity()));
+                        output.material(), output.material().toStack(
+                                Math.toIntExact(output.quantity())));
             }
             DagScheduler scheduler = (DagScheduler) field(chain, "graphScheduler");
             scheduler.claim(PRODUCER);
@@ -261,7 +262,8 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
             scheduler.claim(CONSUMER);
             admission = admissions.tryAdmitClaimed(new NodeAdmissionCoordinator.Candidate(CONSUMER,
                     graph.allocations().stream().map(allocation -> new MaterialBroker.Request(
-                            allocation.source(), allocation.material(), allocation.quantity())).toList()));
+                            allocation.source(), allocation.material(),
+                            Math.toIntExact(allocation.quantity()))).toList()));
             assertNotNull(admission);
         }
 

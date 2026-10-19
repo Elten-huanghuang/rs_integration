@@ -8,13 +8,13 @@ import java.util.Objects;
 
 public record RootDemand(
         Ingredient ingredient,
-        int quantity,
-        int unresolvedQuantity,
+        long quantity,
+        long unresolvedQuantity,
         ItemStack displayHint,
         List<RootAllocation> allocations,
         DemandRole role
 ) {
-    public RootDemand(Ingredient ingredient, int quantity, int unresolvedQuantity,
+    public RootDemand(Ingredient ingredient, long quantity, long unresolvedQuantity,
                       ItemStack displayHint, List<RootAllocation> allocations) {
         this(ingredient, quantity, unresolvedQuantity, displayHint, allocations,
                 DemandRole.CONSUMED);

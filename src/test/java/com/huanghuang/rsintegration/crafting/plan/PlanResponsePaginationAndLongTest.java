@@ -12,6 +12,7 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -131,5 +132,30 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
         assertThrows(IllegalArgumentException.class,
                 () -> PlanResponsePagePacket.split(1L, 0L, oversized));
         assertTrue(PlanResponsePagePacket.MAX_PAGES <= 64);
+    }
+
+    @Test
+    void planPayloadAcceptsMoreThanFourThousandGraphNodes() {
+        int nodeCount = 4104;
+        ResourceLocation recipeId = ResourceLocation.parse("test:large_graph");
+        List<PlanGraphView.NodeView> nodes = new ArrayList<>(nodeCount);
+        List<Integer> topological = new ArrayList<>(nodeCount);
+        for (int i = 0; i < nodeCount; i++) {
+            nodes.add(new PlanGraphView.NodeView(i, recipeId, "generic", 1,
+                    ItemStack.EMPTY, List.of(), List.of()));
+            topological.add(i);
+        }
+        PlanGraphView graph = new PlanGraphView(1, nodes, List.of(), List.of(), List.of(),
+                topological);
+        PlanResponse plan = new PlanResponse(true, "Large", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), recipeId.toString(), null, null,
+                0, 0, 0, List.of(), 1, null, null, null, 0L,
+                false, false, false, null, Set.of(), Map.of(), null, graph);
+
+        PlanResponse decoded = PlanResponsePacket.decodePayload(
+                PlanResponsePacket.encodePayload(plan, REQUEST_ID)).plan();
+
+        assertEquals(nodeCount, decoded.graph().nodes().size());
+        assertEquals(nodeCount - 1, decoded.graph().nodes().get(nodeCount - 1).nodeId());
     }
 }

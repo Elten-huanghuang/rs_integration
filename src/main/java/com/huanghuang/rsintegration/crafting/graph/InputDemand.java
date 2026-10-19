@@ -8,7 +8,7 @@ import java.util.Objects;
 public record InputDemand(
         InputPortId id,
         Ingredient ingredient,
-        int quantity,
+        long quantity,
         DemandRole role,
         ItemStack displayHint
 ) {

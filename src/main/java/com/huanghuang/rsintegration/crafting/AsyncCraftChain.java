@@ -44,6 +44,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
@@ -412,20 +413,37 @@ public final class AsyncCraftChain {
 
     private void initialiseGraphMaterialFlow(CraftPlanGraph plan) {
         for (CraftNode node : plan.nodes()) graphNodes.put(node.id(), node);
-        Map<InitialLotKey, Integer> initial = new LinkedHashMap<>();
+        Map<InitialLotKey, Long> initial = new LinkedHashMap<>();
         for (MaterialAllocation allocation : plan.allocations()) {
-            graphRequests.computeIfAbsent(allocation.consumer().nodeId(), ignored -> new ArrayList<>())
-                    .add(new MaterialBroker.Request(allocation.source(), allocation.material(),
-                            allocation.quantity()));
+            addBrokerRequests(
+                    graphRequests.computeIfAbsent(allocation.consumer().nodeId(),
+                            ignored -> new ArrayList<>()),
+                    allocation.source(), allocation.material(), allocation.quantity());
             if (allocation.source() instanceof MaterialSource.InitialPool source) {
                 initial.merge(new InitialLotKey(source, allocation.material()),
-                        allocation.quantity(), Integer::sum);
+                        allocation.quantity(), SaturatingLongMath::add);
             }
         }
         if (graphMaterials != null) {
-            for (Map.Entry<InitialLotKey, Integer> entry : initial.entrySet()) {
-                graphMaterials.publish(entry.getKey().source(), entry.getKey().material(), entry.getValue());
+            for (Map.Entry<InitialLotKey, Long> entry : initial.entrySet()) {
+                long remaining = entry.getValue();
+                while (remaining > 0L) {
+                    int chunk = SaturatingLongMath.clampToInt(remaining);
+                    graphMaterials.publish(entry.getKey().source(), entry.getKey().material(), chunk);
+                    remaining -= chunk;
+                }
             }
+        }
+    }
+
+    static void addBrokerRequests(List<MaterialBroker.Request> requests,
+                                  MaterialSource source, MaterialKey material,
+                                  long quantity) {
+        long remaining = quantity;
+        while (remaining > 0L) {
+            int chunk = SaturatingLongMath.clampToInt(remaining);
+            requests.add(new MaterialBroker.Request(source, material, chunk));
+            remaining -= chunk;
         }
     }
 
@@ -1686,8 +1704,8 @@ public final class AsyncCraftChain {
                 .filter(output -> output.kind() == OutputKind.PRIMARY
                         || output.kind() == OutputKind.DYNAMIC)
                 .findFirst()
-                .map(output -> output.material().toStack(Math.max(1,
-                        output.quantity() / Math.max(1, node.executions()))))
+                .map(output -> output.material().toStack(SaturatingLongMath.clampToInt(
+                        Math.max(1L, output.quantity() / Math.max(1, node.executions())))))
                 .orElse(ItemStack.EMPTY);
     }
 
@@ -2201,7 +2219,7 @@ public final class AsyncCraftChain {
         for (OutputDeclaration output : node.outputs()) {
             List<ItemStack> fragments = removeMatchingFragments(
                     remaining, output.material(), output.quantity());
-            int actualCount = fragments.stream().mapToInt(ItemStack::getCount).sum();
+            long actualCount = fragments.stream().mapToLong(ItemStack::getCount).sum();
             checks.add(describeOutputCheck(output, actualCount));
             if (actualCount != output.quantity()) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
@@ -2235,13 +2253,13 @@ public final class AsyncCraftChain {
     }
 
     private static List<ItemStack> removeMatchingFragments(
-            List<ItemStack> stacks, MaterialKey material, int limit) {
-        int remaining = limit;
+            List<ItemStack> stacks, MaterialKey material, long limit) {
+        long remaining = limit;
         List<ItemStack> removed = new ArrayList<>();
         for (ItemStack stack : stacks) {
             if (remaining <= 0) break;
             if (stack.isEmpty() || !MaterialMatcher.matchesOutputDeclaration(material, stack)) continue;
-            int take = Math.min(remaining, stack.getCount());
+            int take = (int) Math.min(remaining, stack.getCount());
             removed.add(stack.copyWithCount(take));
             stack.shrink(take);
             remaining -= take;
@@ -2547,9 +2565,9 @@ public final class AsyncCraftChain {
         if (available < count) return false;
         int remaining = count;
         for (ItemStack stack : pool) {
-            if (remaining <= 0) break;
+            if (remaining <= 0L) break;
             if (stack.isEmpty() || stack.getItem() != planned.getItem()) continue;
-            int take = Math.min(remaining, stack.getCount());
+            int take = (int) Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
         }
@@ -2583,7 +2601,7 @@ public final class AsyncCraftChain {
             if (remaining <= 0) break;
             if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
             if (exactNbt && !MaterialMatcher.sameRuntimeFragment(selected, stack)) continue;
-            int take = Math.min(remaining, stack.getCount());
+            int take = (int) Math.min(remaining, stack.getCount());
             stack.shrink(take);
             remaining -= take;
         }
@@ -2625,7 +2643,7 @@ public final class AsyncCraftChain {
         return true;
     }
 
-    private static String describeOutputCheck(OutputDeclaration output, int matchedCount) {
+    private static String describeOutputCheck(OutputDeclaration output, long matchedCount) {
         return "{port=" + output.id() + ",kind=" + output.kind()
                 + ",material=" + describeMaterialForLogging(output.material())
                 + ",expected=" + output.quantity() + ",matched=" + matchedCount + "}";
@@ -2847,8 +2865,8 @@ public final class AsyncCraftChain {
                 .filter(output -> output.kind() == OutputKind.PRIMARY
                         || output.kind() == OutputKind.DYNAMIC)
                 .findFirst()
-                .map(output -> output.material().toStack(
-                        Math.max(1, output.quantity() / Math.max(1, node.executions()))))
+                .map(output -> output.material().toStack(SaturatingLongMath.clampToInt(
+                        Math.max(1L, output.quantity() / Math.max(1, node.executions())))))
                 .orElseGet(() -> node.syntheticOutput() == null
                         ? ItemStack.EMPTY : node.syntheticOutput().copy());
     }

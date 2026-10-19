@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import java.util.Objects;
 
-public record OutputDeclaration(OutputPortId id, MaterialKey material, int quantity, OutputKind kind) {
+public record OutputDeclaration(OutputPortId id, MaterialKey material, long quantity, OutputKind kind) {
     public OutputDeclaration {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(material, "material");

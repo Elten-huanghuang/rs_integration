@@ -52,15 +52,15 @@ final class SupplementalMaterialPlan {
 
     /** 与下游保护取并集，避免同一份产物被重复预留或被补做配方重新消耗。 */
     static void protectProduced(Map<StackKey, Integer> available, Map<StackKey, Integer> usable,
-                                ProductionTarget target, int produced) {
-        int protect = produced;
+                                ProductionTarget target, long produced) {
+        long protect = produced;
         for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            if (protect <= 0) break;
+            if (protect <= 0L) break;
             StackKey key = entry.getKey();
             ItemStack stack = new MaterialKey(key.item(), key.tag()).toStack(1);
             if (!MaterialMatcher.matchesOutputDeclaration(target.material(), stack)) continue;
             int count = Math.max(0, entry.getValue());
-            int take = Math.min(protect, count);
+            int take = (int) Math.min(protect, count);
             usable.computeIfPresent(key, (ignored, remaining) -> Math.min(remaining, count - take));
             protect -= take;
         }

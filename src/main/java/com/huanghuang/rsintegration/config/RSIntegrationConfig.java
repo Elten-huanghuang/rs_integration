@@ -128,6 +128,9 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH = 32;
     public static final int DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK = 16;
     public static final int DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK = 1;
+    public static final int DEFAULT_CRAFTING_MAX_GRAPH_NODES = 16_384;
+    public static final int MIN_CRAFTING_MAX_GRAPH_NODES = 256;
+    public static final int MAX_CRAFTING_MAX_GRAPH_NODES = 65_536;
     public static final int DEFAULT_CRAFTING_PREVIEW_RATE_LIMIT_MS =
             CraftingPreviewPolicy.DEFAULT_RATE_LIMIT_MS;
     public static final int DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS =
@@ -362,6 +365,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue GUI_OPEN_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_DEPTH;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
+    public static ForgeConfigSpec.IntValue CRAFTING_MAX_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_WORKERS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_QUEUE_CAPACITY;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_STATES;
@@ -1147,6 +1151,14 @@ public final class RSIntegrationConfig {
                 .comment("单次计划步骤上限",
                         "限制单个计划的总步骤，避免过大任务耗尽资源；上限与合成进度网络协议一致。")
                 .defineInRange("craftingMaxSteps", 4096, 256, 4096);
+        CRAFTING_MAX_GRAPH_NODES = s
+                .comment("单次计划配方图节点上限",
+                        "限制网络响应中的配方图节点数；大型压缩/递归整合包可提高，"
+                                + "但应低于分页载荷和客户端解码硬上限。")
+                .defineInRange("craftingMaxGraphNodes",
+                        DEFAULT_CRAFTING_MAX_GRAPH_NODES,
+                        MIN_CRAFTING_MAX_GRAPH_NODES,
+                        MAX_CRAFTING_MAX_GRAPH_NODES);
         CRAFTING_PLANNING_WORKERS = s
                 .comment("后台规划线程数",
                         "只执行不可变预览规划，世界、方块实体和 RS 修改仍在服务端线程；配置重载后生效。")

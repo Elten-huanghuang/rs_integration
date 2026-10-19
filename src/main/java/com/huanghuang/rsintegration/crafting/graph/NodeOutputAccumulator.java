@@ -16,14 +16,14 @@ import java.util.Objects;
 public final class NodeOutputAccumulator {
     private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
     private final List<OutputDeclaration> declarations;
-    private final Map<OutputPortId, Integer> published = new LinkedHashMap<>();
+    private final Map<OutputPortId, Long> published = new LinkedHashMap<>();
     private final List<ItemStack> pending = new ArrayList<>();
     private boolean mismatchLogged;
 
     public NodeOutputAccumulator(List<OutputDeclaration> declarations) {
         this.declarations = List.copyOf(declarations);
         for (OutputDeclaration declaration : this.declarations) {
-            published.put(declaration.id(), 0);
+            published.put(declaration.id(), 0L);
         }
     }
 
@@ -35,17 +35,17 @@ public final class NodeOutputAccumulator {
         List<Publication> publications = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
             if (declaration.kind() == OutputKind.DYNAMIC) continue;
-            int remaining = declaration.quantity() - published.get(declaration.id());
-            if (remaining <= 0) continue;
+            long remaining = declaration.quantity() - published.get(declaration.id());
+            if (remaining <= 0L) continue;
             for (ItemStack stack : pending) {
-                if (remaining <= 0) break;
+                if (remaining <= 0L) break;
                 if (stack.isEmpty()
                         || !MaterialMatcher.matchesOutputDeclaration(declaration.material(), stack)) continue;
-                int take = Math.min(remaining, stack.getCount());
+                int take = (int) Math.min(remaining, stack.getCount());
                 ItemStack fragment = stack.copyWithCount(take);
                 stack.shrink(take);
                 publications.add(new Publication(declaration.id(), declaration.material(), fragment));
-                published.merge(declaration.id(), take, Integer::sum);
+                published.merge(declaration.id(), (long) take, Long::sum);
                 remaining -= take;
             }
         }
@@ -81,7 +81,7 @@ public final class NodeOutputAccumulator {
         List<Shortage> shortages = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
             if (declaration.kind() == OutputKind.DYNAMIC) continue;
-            int actual = published.get(declaration.id());
+            long actual = published.get(declaration.id());
             if (actual < declaration.quantity()) {
                 shortages.add(new Shortage(declaration.id(), declaration.kind(),
                         declaration.material(), declaration.quantity(), actual));
@@ -109,7 +109,7 @@ public final class NodeOutputAccumulator {
     }
 
     public record Shortage(OutputPortId port, OutputKind kind, MaterialKey material,
-                           int expected, int published) {
+                           long expected, long published) {
         public Shortage {
             Objects.requireNonNull(port, "port");
             Objects.requireNonNull(kind, "kind");
@@ -119,7 +119,7 @@ public final class NodeOutputAccumulator {
             }
         }
 
-        public int missing() {
+        public long missing() {
             return expected - published;
         }
     }

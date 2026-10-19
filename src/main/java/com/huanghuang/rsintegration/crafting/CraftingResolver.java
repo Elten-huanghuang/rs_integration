@@ -820,6 +820,11 @@ public final class CraftingResolver {
             // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
             // NBT-differentiated items like TACZ attachments (all tacz:attachment).
             Set<StackKey> inKeys = getRecipeInputKeys(a.entry, ctx.level.registryAccess());
+            if (ctx.recipeCycles.containsAnyOutput(inKeys)) {
+                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                        + ": input consumes an ancestor output");
+                continue;
+            }
             boolean isPingPong = false;
             for (StackKey inKey : inKeys) {
                 if (edges.containsReverse(inKey, outKey)) {

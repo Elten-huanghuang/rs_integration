@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.storage.StorageCapability;
@@ -41,7 +42,7 @@ public final class PlanResponsePacket {
      * plan (deepest recipe trees are dozens of steps), but caps a malformed or
      * malicious packet's preallocation so a bogus count cannot OOM the client.
      */
-    private static final int MAX_DECODE_COUNT = 4096;
+    static final int MAX_DECODE_COUNT = RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES;
     private static final int MAX_RECIPE_ID_LENGTH = 256;
     private static final int MAX_TARGET_NAME_LENGTH = 256;
     private static final int MAX_MOD_TYPE_LENGTH = 128;

@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Bounds checks for corrupt plan and graph collection lengths. */
 class PlanResponsePacketBoundsTest extends BootstrapTest {
 
-    private static final int OVERSIZED_COUNT = 4097;
+    private static final int OVERSIZED_COUNT = PlanResponsePacket.MAX_DECODE_COUNT + 1;
 
     @Test
     void roundTripPreservesNetShortageSeparatelyFromGrossDemandAndNbt() {

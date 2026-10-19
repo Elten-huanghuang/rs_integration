@@ -131,6 +131,18 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertTrue(accumulator.canCompleteWith(List.of(new ItemStack(Items.DIAMOND, 2))));
         assertEquals(2, accumulator.shortages().get(0).missing());
     }
+
+    @Test
+    void reportsLongExpectedQuantitiesWithoutOverflow() {
+        long expected = (long) Integer.MAX_VALUE + 10L;
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(6), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), expected, OutputKind.PRIMARY);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        assertEquals(expected, accumulator.shortages().get(0).expected());
+        assertEquals(expected, accumulator.shortages().get(0).missing());
+    }
     private static ItemStack tagged(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

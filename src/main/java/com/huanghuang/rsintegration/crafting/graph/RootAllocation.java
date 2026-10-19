@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import java.util.Objects;
 
-public record RootAllocation(MaterialSource source, MaterialKey material, int quantity) {
+public record RootAllocation(MaterialSource source, MaterialKey material, long quantity) {
     public RootAllocation {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(material, "material");

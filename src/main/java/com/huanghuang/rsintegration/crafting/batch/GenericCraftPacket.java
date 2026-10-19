@@ -67,6 +67,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
@@ -1766,18 +1767,19 @@ public final class GenericCraftPacket {
                 .filter(retained::contains)
                 .toList();
 
-        Map<OutputPortId, Integer> internallyConsumed = new HashMap<>();
+        Map<OutputPortId, Long> internallyConsumed = new HashMap<>();
         for (var allocation : allocations) {
             if (allocation.source() instanceof MaterialSource.ProducerOutput producer) {
-                internallyConsumed.merge(producer.outputPort(), allocation.quantity(), Integer::sum);
+                internallyConsumed.merge(producer.outputPort(), allocation.quantity(),
+                        SaturatingLongMath::add);
             }
         }
         List<RootDemand> roots = new ArrayList<>();
         for (CraftNode node : nodes) {
             for (var output : node.outputs()) {
-                int deliverable = output.quantity()
-                        - internallyConsumed.getOrDefault(output.id(), 0);
-                if (deliverable <= 0) continue;
+                long deliverable = output.quantity()
+                        - internallyConsumed.getOrDefault(output.id(), 0L);
+                if (deliverable <= 0L) continue;
                 ItemStack display = output.material().toStack(1);
                 roots.add(new RootDemand(Ingredient.of(display), deliverable, 0, display,
                         List.of(new RootAllocation(
@@ -1795,17 +1797,20 @@ public final class GenericCraftPacket {
 
     @Nullable
     private static Component summarizePreparedOutputs(CraftPlanGraph graph) {
-        Map<OutputPortId, Integer> consumed = new HashMap<>();
+        Map<OutputPortId, Long> consumed = new HashMap<>();
         for (var allocation : graph.allocations()) {
             if (allocation.source() instanceof MaterialSource.ProducerOutput producer) {
-                consumed.merge(producer.outputPort(), allocation.quantity(), Integer::sum);
+                consumed.merge(producer.outputPort(), allocation.quantity(),
+                        SaturatingLongMath::add);
             }
         }
-        Map<MaterialKey, Integer> totals = new LinkedHashMap<>();
+        Map<MaterialKey, Long> totals = new LinkedHashMap<>();
         for (CraftNode node : graph.nodes()) {
             for (var output : node.outputs()) {
-                int returned = output.quantity() - consumed.getOrDefault(output.id(), 0);
-                if (returned > 0) totals.merge(output.material(), returned, Integer::sum);
+                long returned = output.quantity() - consumed.getOrDefault(output.id(), 0L);
+                if (returned > 0L) {
+                    totals.merge(output.material(), returned, SaturatingLongMath::add);
+                }
             }
         }
         return formatMaterialTotals(totals);
@@ -1813,30 +1818,33 @@ public final class GenericCraftPacket {
 
     @Nullable
     private static Component summarizeUnresolvedRoots(CraftPlanGraph graph) {
-        Map<MaterialKey, Integer> totals = new LinkedHashMap<>();
+        Map<MaterialKey, Long> totals = new LinkedHashMap<>();
         for (var root : graph.rootDemands()) {
             if (root.unresolvedQuantity() <= 0) continue;
             ItemStack display = root.displayHint();
             if (display.isEmpty()) continue;
-            totals.merge(MaterialKey.of(display), root.unresolvedQuantity(), Integer::sum);
+            totals.merge(MaterialKey.of(display), root.unresolvedQuantity(),
+                    SaturatingLongMath::add);
         }
         return formatMaterialTotals(totals);
     }
 
     @Nullable
     private static Component summarizePreparationMissing(CraftPlanGraph graph) {
-        Map<MaterialKey, Integer> totals = new LinkedHashMap<>();
+        Map<MaterialKey, Long> totals = new LinkedHashMap<>();
         for (var unresolved : graph.unresolvedDemands()) {
             ItemStack display = unresolved.displayHint();
             if (!display.isEmpty()) {
-                totals.merge(MaterialKey.of(display), unresolved.quantity(), Integer::sum);
+                totals.merge(MaterialKey.of(display), (long) unresolved.quantity(),
+                        SaturatingLongMath::add);
             }
         }
         for (var root : graph.rootDemands()) {
             if (root.unresolvedQuantity() <= 0) continue;
             ItemStack display = root.displayHint();
             if (!display.isEmpty()) {
-                totals.merge(MaterialKey.of(display), root.unresolvedQuantity(), Integer::sum);
+                totals.merge(MaterialKey.of(display), root.unresolvedQuantity(),
+                        SaturatingLongMath::add);
             }
         }
         return formatMaterialTotals(totals);
@@ -1844,24 +1852,26 @@ public final class GenericCraftPacket {
 
     @Nullable
     private static Component summarizeUnresolvedInputs(CraftPlanGraph graph) {
-        Map<MaterialKey, Integer> totals = new LinkedHashMap<>();
+        Map<MaterialKey, Long> totals = new LinkedHashMap<>();
         for (var unresolved : graph.unresolvedDemands()) {
             ItemStack display = unresolved.displayHint();
             if (display.isEmpty()) continue;
-            totals.merge(MaterialKey.of(display), unresolved.quantity(), Integer::sum);
+            totals.merge(MaterialKey.of(display), (long) unresolved.quantity(),
+                    SaturatingLongMath::add);
         }
         return formatMaterialTotals(totals);
     }
 
     @Nullable
-    private static Component formatMaterialTotals(Map<MaterialKey, Integer> totals) {
+    private static Component formatMaterialTotals(Map<MaterialKey, Long> totals) {
         if (totals.isEmpty()) return null;
         var summary = Component.empty();
         int index = 0;
-        for (Map.Entry<MaterialKey, Integer> entry : totals.entrySet()) {
+        for (Map.Entry<MaterialKey, Long> entry : totals.entrySet()) {
             if (index++ > 0) summary.append(Component.literal("、"));
-            summary.append(entry.getKey().toStack(entry.getValue()).getHoverName())
-                    .append(Component.literal(" x" + entry.getValue()));
+            summary.append(entry.getKey().toStack(1).getHoverName())
+                    .append(Component.literal(" x"
+                            + CompactQuantityFormat.format(entry.getValue())));
         }
         return summary;
     }

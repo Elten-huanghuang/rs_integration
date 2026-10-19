@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.List;
@@ -10,7 +11,7 @@ final class ProbabilisticProduction {
     private final ProductionTarget target;
     private final int maxAttempts;
     private int attempts;
-    private int produced;
+    private long produced;
 
     ProbabilisticProduction(ProductionTarget target, int maxAttempts) {
         this.target = Objects.requireNonNull(target, "target");
@@ -20,8 +21,8 @@ final class ProbabilisticProduction {
 
     ProductionTarget target() { return target; }
     int attempts() { return attempts; }
-    int produced() { return produced; }
-    int remaining() { return Math.max(0, target.quantity() - produced); }
+    long produced() { return produced; }
+    long remaining() { return Math.max(0L, target.quantity() - produced); }
     int maxAttempts() { return maxAttempts; }
     boolean complete() { return remaining() == 0; }
     boolean canAttempt() { return !complete() && attempts < maxAttempts; }
@@ -34,7 +35,7 @@ final class ProbabilisticProduction {
     void settle(List<ItemStack> outputs) {
         for (ItemStack output : outputs) {
             if (MaterialMatcher.matchesOutputDeclaration(target.material(), output)) {
-                produced = MaterialSources.saturatedAdd(produced, output.getCount());
+                produced = SaturatingLongMath.add(produced, output.getCount());
             }
         }
     }

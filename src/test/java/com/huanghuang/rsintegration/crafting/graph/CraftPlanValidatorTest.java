@@ -355,6 +355,27 @@ class CraftPlanValidatorTest extends BootstrapTest {
     }
 
     @Test
+    void validatesMaterialFlowAboveIntegerRange() {
+        NodeId nodeId = new NodeId(0);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        InputPortId input = new InputPortId(nodeId, 0);
+        long quantity = (long) Integer.MAX_VALUE + 123L;
+        CraftNode node = node(nodeId, "long_material",
+                List.of(new InputDemand(input, Ingredient.of(Items.IRON_INGOT), quantity,
+                        DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
+                List.of());
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node),
+                List.of(new MaterialAllocation(new AllocationId(0), input,
+                        new MaterialSource.InitialPool(iron), iron, quantity)),
+                List.of(new RootDemand(Ingredient.of(Items.IRON_INGOT), quantity, 0,
+                        new ItemStack(Items.IRON_INGOT), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(iron), iron, quantity)))),
+                List.of(), List.of(nodeId));
+
+        CraftPlanValidator.validate(graph);
+    }
+
+    @Test
     void acceptsSerializedSlashBladeMaterialForInputAndRootAllocations() {
         NodeId nodeId = new NodeId(0);
         InputPortId inputId = new InputPortId(nodeId, 0);

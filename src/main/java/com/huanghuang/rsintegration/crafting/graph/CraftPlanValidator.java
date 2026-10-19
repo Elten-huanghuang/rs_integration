@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,8 +50,8 @@ public final class CraftPlanValidator {
         }
 
         Set<AllocationId> allocationIds = new HashSet<>();
-        Map<InputPortId, Integer> suppliedByInput = new HashMap<>();
-        Map<OutputPortId, Integer> consumedByOutput = new HashMap<>();
+        Map<InputPortId, Long> suppliedByInput = new HashMap<>();
+        Map<OutputPortId, Long> consumedByOutput = new HashMap<>();
         for (MaterialAllocation allocation : graph.allocations()) {
             if (!allocationIds.add(allocation.id())) {
                 errors.add("duplicate allocation " + allocation.id());
@@ -63,7 +64,8 @@ public final class CraftPlanValidator {
             if (!IngredientMatcher.test(input.ingredient(), allocation.material())) {
                 errors.add("material does not satisfy input " + allocation.consumer());
             }
-            suppliedByInput.merge(allocation.consumer(), allocation.quantity(), Integer::sum);
+            suppliedByInput.merge(allocation.consumer(), allocation.quantity(),
+                    SaturatingLongMath::add);
 
             if (allocation.source() instanceof MaterialSource.InitialPool initial) {
                 if (!initial.key().equals(allocation.material())) {
@@ -78,23 +80,25 @@ public final class CraftPlanValidator {
                 if (!output.material().equals(allocation.material())) {
                     errors.add("producer material mismatch " + allocation.id());
                 }
-                consumedByOutput.merge(producer.outputPort(), allocation.quantity(), Integer::sum);
+                consumedByOutput.merge(producer.outputPort(), allocation.quantity(),
+                        SaturatingLongMath::add);
             }
         }
 
-        Map<InputPortId, Integer> unresolvedByInput = new HashMap<>();
+        Map<InputPortId, Long> unresolvedByInput = new HashMap<>();
         for (UnresolvedDemand unresolved : graph.unresolvedDemands()) {
             InputDemand input = inputs.get(unresolved.consumer());
             if (input == null) {
                 errors.add("unresolved demand has missing consumer " + unresolved.consumer());
                 continue;
             }
-            unresolvedByInput.merge(unresolved.consumer(), unresolved.quantity(), Integer::sum);
+            unresolvedByInput.merge(unresolved.consumer(), (long) unresolved.quantity(),
+                    SaturatingLongMath::add);
         }
 
         for (InputDemand input : inputs.values()) {
-            int supplied = suppliedByInput.getOrDefault(input.id(), 0);
-            int unresolved = unresolvedByInput.getOrDefault(input.id(), 0);
+            long supplied = suppliedByInput.getOrDefault(input.id(), 0L);
+            long unresolved = unresolvedByInput.getOrDefault(input.id(), 0L);
             if (supplied + unresolved != input.quantity()) {
                 errors.add("input quantity mismatch " + input.id() + " expected="
                         + input.quantity() + " actual=" + (supplied + unresolved));
@@ -115,10 +119,14 @@ public final class CraftPlanValidator {
                         continue;
                     }
                     if (!output.material().equals(allocation.material())) errors.add("root producer material mismatch");
-                    consumedByOutput.merge(producer.outputPort(), allocation.quantity(), Integer::sum);
+                    consumedByOutput.merge(producer.outputPort(), allocation.quantity(),
+                            SaturatingLongMath::add);
                 }
             }
-            int rootSupplied = root.allocations().stream().mapToInt(RootAllocation::quantity).sum();
+            long rootSupplied = 0L;
+            for (RootAllocation allocation : root.allocations()) {
+                rootSupplied = SaturatingLongMath.add(rootSupplied, allocation.quantity());
+            }
             if (rootSupplied + root.unresolvedQuantity() != root.quantity()) {
                 errors.add("root quantity mismatch expected=" + root.quantity() + " actual="
                         + (rootSupplied + root.unresolvedQuantity()));
@@ -126,7 +134,7 @@ public final class CraftPlanValidator {
         }
 
         for (OutputDeclaration output : outputs.values()) {
-            int consumed = consumedByOutput.getOrDefault(output.id(), 0);
+            long consumed = consumedByOutput.getOrDefault(output.id(), 0L);
             if (consumed > output.quantity()) {
                 errors.add("output overallocated " + output.id() + " capacity="
                         + output.quantity() + " allocated=" + consumed);

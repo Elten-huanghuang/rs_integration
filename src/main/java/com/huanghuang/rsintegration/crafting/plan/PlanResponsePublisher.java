@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -19,6 +20,16 @@ public final class PlanResponsePublisher {
 
     public static void send(ServerPlayer player, PlanResponse plan, long requestId) {
         if (player == null || player.hasDisconnected() || player.isRemoved()) return;
+        int graphNodes = plan.graph() == null ? 0 : plan.graph().nodes().size();
+        int maxGraphNodes = configuredMaxGraphNodes();
+        if (graphNodes > maxGraphNodes) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-plan] plan graph exceeds configured node limit request={} nodes={} limit={}",
+                    requestId, graphNodes, maxGraphNodes);
+            sendError(player, Component.translatable("rsi.plan.failure.graph_too_large",
+                    graphNodes, maxGraphNodes), requestId);
+            return;
+        }
         byte[] payload;
         try {
             payload = PlanResponsePacket.encodePayload(plan, requestId);
@@ -58,5 +69,13 @@ public final class PlanResponsePublisher {
     private static long nextSessionId() {
         return NEXT_SESSION_ID.updateAndGet(current ->
                 current <= 0L || current == Long.MAX_VALUE ? 1L : current + 1L);
+    }
+
+    static int configuredMaxGraphNodes() {
+        try {
+            return RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.get();
+        } catch (IllegalStateException | NullPointerException ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_MAX_GRAPH_NODES;
+        }
     }
 }

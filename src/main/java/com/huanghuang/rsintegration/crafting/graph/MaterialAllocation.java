@@ -7,7 +7,7 @@ public record MaterialAllocation(
         InputPortId consumer,
         MaterialSource source,
         MaterialKey material,
-        int quantity
+        long quantity
 ) {
     public MaterialAllocation {
         Objects.requireNonNull(id, "id");

@@ -7,6 +7,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,10 +25,16 @@ class RecipeCycleGuardTest extends BootstrapTest {
         assertTrue(guard.containsBranch(terminal, ingot));
         assertTrue(guard.containsOutput(ingot));
         assertFalse(guard.containsOutput(new ItemStack(Items.IRON_NUGGET)));
+        assertTrue(guard.containsAnyOutput(Set.of(
+                CraftingResolver.StackKey.of(ingot, false))));
+        assertFalse(guard.containsAnyOutput(Set.of(
+                CraftingResolver.StackKey.of(new ItemStack(Items.IRON_NUGGET), false))));
 
         guard.leave(terminal, ingot);
         assertFalse(guard.containsBranch(terminal, ingot));
         assertFalse(guard.containsOutput(ingot));
+        assertFalse(guard.containsAnyOutput(Set.of(
+                CraftingResolver.StackKey.of(ingot, false))));
     }
 
     @Test

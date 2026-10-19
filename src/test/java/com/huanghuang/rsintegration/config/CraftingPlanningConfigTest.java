@@ -15,6 +15,8 @@ class CraftingPlanningConfigTest {
                 RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.getDefault());
         assertEquals(RSIntegrationConfig.DEFAULT_CRAFTING_MAX_ENSURE_CALLS,
                 RSIntegrationConfig.CRAFTING_MAX_ENSURE_CALLS.getDefault());
+        assertEquals(RSIntegrationConfig.DEFAULT_CRAFTING_MAX_GRAPH_NODES,
+                RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.getDefault());
         assertEquals(CraftingPlanningConfig.defaults(), new CraftingPlanningConfig(
                 RSIntegrationConfig.CRAFTING_PLANNING_WORKERS.getDefault(),
                 RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.getDefault(),
@@ -23,6 +25,23 @@ class CraftingPlanningConfigTest {
                 RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.getDefault(),
                 RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.getDefault(),
                 RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.getDefault()));
+    }
+
+    @Test
+    void graphNodeLimitIsReadFromServerConfigAndClamped() {
+        CommentedConfig config = defaultConfig();
+        config.set(RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.getPath(),
+                RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES);
+        load(config);
+        assertEquals(RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES,
+                RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.get());
+
+        config.set(RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.getPath(),
+                RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES + 1);
+        assertTrue(RSIntegrationConfig.SERVER_SPEC.correct(config) != 0);
+        load(config);
+        assertEquals(RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES,
+                RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.get());
     }
 
     @Test

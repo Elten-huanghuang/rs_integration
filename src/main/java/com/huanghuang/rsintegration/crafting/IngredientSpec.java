@@ -10,6 +10,7 @@ import java.util.Objects;
  * Used for mod recipes that have {@code IngredientWithCount} (Malum, Lodestone, etc.)
  * where a single ingredient slot may require more than one item.
  */
+/** 单配方槽位数量；跨批次总量必须由图或计划层使用 long 聚合。 */
 public record IngredientSpec(Ingredient ingredient, int count, DemandRole role) {
 
     public static final IngredientSpec EMPTY = new IngredientSpec(Ingredient.EMPTY, 0);

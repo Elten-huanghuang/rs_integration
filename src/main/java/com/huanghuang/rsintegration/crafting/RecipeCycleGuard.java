@@ -19,6 +19,14 @@ final class RecipeCycleGuard {
         return outputs.contains(CraftingResolver.StackKey.of(output, output.hasTag()));
     }
 
+    boolean containsAnyOutput(Set<CraftingResolver.StackKey> candidates) {
+        if (candidates == null || candidates.isEmpty()) return false;
+        for (CraftingResolver.StackKey candidate : candidates) {
+            if (outputs.contains(candidate)) return true;
+        }
+        return false;
+    }
+
     void enter(ResourceLocation recipeId, ItemStack output) {
         branches.add(RecipeBranch.of(recipeId, output));
         outputs.add(CraftingResolver.StackKey.of(output, output.hasTag()));
