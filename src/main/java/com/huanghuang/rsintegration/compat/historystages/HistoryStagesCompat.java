@@ -49,7 +49,8 @@ public final class HistoryStagesCompat {
     private static Access bridge() {
         Access ready = access;
         if (ready != null || unavailable) return ready;
-        if (!ModList.get().isLoaded(ModIds.HISTORY_STAGES)) {
+        if (ModList.get() == null
+                || !ModList.get().isLoaded(ModIds.HISTORY_STAGES)) {
             unavailable = true;
             return null;
         }
