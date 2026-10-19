@@ -36,4 +36,5 @@ libs/
 .agents/
 
 # 本地文档，不提交到仓库
-/docs/
+/docs/*
+
