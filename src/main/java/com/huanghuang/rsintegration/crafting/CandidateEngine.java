@@ -92,6 +92,11 @@ final class CandidateEngine {
                 if (ctx.excludedRecipes.contains(rid)) continue;
                 CandidateKey candidateKey = CandidateKey.of(entry);
                 if (byId.containsKey(candidateKey)) continue;
+                if (ctx.genericCandidatesOnly && entry.modType() != ModType.GENERIC) {
+                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
+                            "非通用合成候选不能内联执行");
+                    continue;
+                }
                 if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {
                     if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
                             "History Stages recipe lock");

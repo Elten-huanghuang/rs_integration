@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
@@ -37,7 +38,7 @@ class CandidateEngineTest extends BootstrapTest {
         var demand = net.minecraftforge.common.crafting.PartialNBTIngredient.of(Items.IRON_SWORD,
                 net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
         var index = Map.of(Items.STONE_SWORD, List.of(new RecipeIndex.Entry(stoneRecipe,
-                com.huanghuang.rsintegration.ModType.GENERIC, new ResourceLocation("minecraft:smithing"))));
+                ModType.GENERIC, new ResourceLocation("minecraft:smithing"))));
         ItemStack inherited = CandidateEngine.findStockedSmithingOutput(ironRecipe,
                 stack -> IngredientMatcher.test(demand, stack),
                 Map.of(new CraftingResolver.StackKey(actual.getItem(), actual.getTag().toString()), 1),
@@ -111,6 +112,22 @@ class CandidateEngineTest extends BootstrapTest {
 
         assertEquals(1, CandidateEngine.craftingDemands(recipe).size());
         assertEquals(4, CandidateEngine.craftingDemands(recipe).values().iterator().next().required());
+    }
+
+    @Test
+    void genericOnlyResolutionSkipsVirtualMachineCandidates() {
+        ShapedRecipe recipe = new ShapedRecipe(
+                new ResourceLocation("test", "virtual_iron_block"), "", CraftingBookCategory.MISC,
+                1, 1, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)),
+                new ItemStack(Items.IRON_BLOCK));
+        RecipeIndex.Entry virtual = new RecipeIndex.Entry(
+                recipe, ModType.FLUID_CONTAINER,
+                new ResourceLocation("test", "virtual_machine"));
+        ResolutionContext context = new ResolutionContext(
+                null, Map.of(Items.IRON_BLOCK, List.of(virtual)), List.of(), null)
+                .genericCandidatesOnly();
+
+        assertTrue(CandidateEngine.findCandidates(Ingredient.of(Items.IRON_BLOCK), context).isEmpty());
     }
 
     @Test

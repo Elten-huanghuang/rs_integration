@@ -90,6 +90,7 @@ final class ResolutionContext {
     @Nullable final ServerPlayer player;
     @Nullable final CraftStorageEndpoint storageEndpoint;
     final boolean bestEffort;
+    boolean genericCandidatesOnly;
     boolean strictCandidatePass;
     boolean bestEffortFallbackPass;
     @Nullable final List<String> missingOut;
@@ -105,6 +106,11 @@ final class ResolutionContext {
                       List<ItemStack> available,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes) {
         this(level, index, available, preferredRecipes, null, null, null);
+    }
+
+    ResolutionContext genericCandidatesOnly() {
+        this.genericCandidatesOnly = true;
+        return this;
     }
 
     ResolutionContext(Level level,

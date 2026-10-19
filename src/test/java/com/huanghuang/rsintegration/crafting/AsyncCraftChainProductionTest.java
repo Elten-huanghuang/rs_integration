@@ -118,27 +118,6 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
-    void vanillaDependenciesCanExecuteInline() {
-        var vanilla = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
-                new ResourceLocation("minecraft", "crafting"));
-
-        assertFalse(CraftPacketUtils.requiresOuterDag(List.of(vanilla)));
-    }
-
-    @Test
-    void multiBlockDependencyMustBePlannedInOuterDag() {
-        var vanilla = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
-                new ResourceLocation("minecraft", "crafting"));
-        var multiBlock = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "multi_block"), ModType.CUSTOM_GUI,
-                new ResourceLocation("test", "machine"));
-
-        assertTrue(CraftPacketUtils.requiresOuterDag(List.of(vanilla, multiBlock)));
-    }
-
-    @Test
     void graphReservationScalesConsumablesButNotReusableWorkerMaterials() {
         List<IngredientSpec> scaled = AsyncCraftChain.scaleGraphSpecsForExecutions(
                 List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2),

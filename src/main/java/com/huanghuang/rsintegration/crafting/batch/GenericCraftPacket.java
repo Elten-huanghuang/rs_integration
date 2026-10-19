@@ -1164,104 +1164,12 @@ public final class GenericCraftPacket {
         ImmutableRecipeGraph recipeGraph = bindingGraph.graph();
         if (!recipeGraph.recipesById().containsKey(recipeId)) return false;
 
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
-        Map<StackKey, Long> preciseAvailable =
-                MaterialSources.listAllAvailableLong(player, storageEndpoint);
-        Set<ResourceLocation> reusableCatalystOutputIds =
-                RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
-                        ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
-        var routeInputs = new AsyncPurePlanningService.RouteInputs(
-                routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
-                reusableCatalystOutputIds, RecipeIndex.reusableCatalystRecipeIds(player.serverLevel()),
-                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()));
-        ResourceLocation effectiveDim = dim != null
-                ? dim : player.serverLevel().dimension().location();
-        BlockPos effectivePos = pos != null
-                ? pos : player.blockPosition();
-        StorageReference selectedReference = storageEndpoint.session().reference();
-        PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
-                player.getUUID(), 0L, recipeId, available, preciseAvailable,
-                Map.of(), recipeGraph,
-                PlanningStateValidator.networkFingerprint(selectedReference, available),
-                PlanningStateValidator.bindingFingerprint(player,
-                        ResourceKey.create(
-                                Registries.DIMENSION, effectiveDim),
-                        effectivePos), bindingGraph.blockedOutputIds(), false);
-
-        PLAN_REQUESTS.submitRouted(snapshot, routeInputs, repeatCount, player.getServer()::execute,
-                RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
-                    PureDemandTreeInspector.Result route = completed.inspection();
-                    if (!route.backgroundCompatible() || completed.plan() == null) {
-                        RSIntegrationMod.LOGGER.info(
-                                "[RSI-exec] immutable route unavailable recipe={} status={} unresolved={} catalystRoute={}",
-                                recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
-                        tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                inferMode, baseItem, targetOutput, outputDestination,
-                                machineSelectionMode, storageReference, Map.of());
-                        return;
-                    }
-                    PureRecipePlanner.Result result = completed.plan();
-                    if (!result.feasible()) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-exec] pure planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
-                                recipeId, result.status(), result.feasibility(), result.missing(),
-                                result.expandedStates(), result.backtracks(), result.memoHits());
-                        if (shouldRetryTypedPlanning(
-                                result, snapshot.bindingBlockedOutputIds())) {
-                            RSIntegrationMod.LOGGER.info(
-                                    "[RSI-exec] retrying typed execution after pure planner rejection recipe={}",
-                                    recipeId);
-                            tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                    inferMode, baseItem, targetOutput, outputDestination,
-                                    machineSelectionMode, storageReference, Map.of());
-                            return;
-                        }
-                        if (missingTouchesOutputSet(result.missing(),
-                                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
-                            RSIntegrationMod.debug(
-                                    "[RSI-exec] retrying typed execution for unprojected dependency recipe={}",
-                                    recipeId);
-                            tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos,
-                                    repeatCount, inferMode, baseItem, targetOutput, outputDestination,
-                                    machineSelectionMode, storageReference, Map.of());
-                            return;
-                        }
-                        sendPurePlanningFailure(player, result, snapshot.availableItems(),
-                                snapshot.bindingBlockedOutputIds());
-                        return;
-                    }
-                    if (!PlanningStateValidator.revalidateForExecution(player, snapshot,
-                            ResourceKey.create(
-                                    Registries.DIMENSION, effectiveDim),
-                            effectivePos, selectedReference)) {
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.plan.failure.missing_materials"));
-                        return;
-                    }
-                    List<ResolutionStep> steps = new ArrayList<>(PurePlanAdapter.toResolutionSteps(
-                            result, snapshot.recipeGraph()));
-                    steps.add(genericTerminalStep(recipeId, repeatCount));
-                    RSIntegrationMod.LOGGER.info(
-                            "[RSI-exec] async pure plan ready recipe={} steps={} states={}",
-                            recipeId, steps.size(), result.expandedStates());
-                    launchEndpointAsyncChain(player, steps,
-                            LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
-                            storageEndpoint, repeatCount, recipeId, forcedRecipes,
-                            dim, pos, inferMode, baseItem, targetOutput,
-                            outputDestination, machineSelectionMode, Map.of());
-                }, failure -> {
-                    if (!(failure instanceof CancellationException)) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-exec] async pure planning failed recipe={} directReservationAttempted=true failure={}",
-                                recipeId, failure.toString(), failure);
-                        String key = failure instanceof CraftingPlanningTimeoutException
-                                ? "rsi.plan.failure.complexity_limit"
-                                : "rsi.plan.failure.missing_materials";
-                        player.sendSystemMessage(Component.translatable(key));
-                    }
-                });
-        RSIntegrationMod.debug("[RSI-exec] queued async pure planning recipe={} repeat={}",
-                recipeId, repeatCount);
+        submitRoutedPureExecutionPlan(
+                player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
+                baseItem, targetOutput, outputDestination, machineSelectionMode,
+                storageEndpoint, storageReference, Map.of(), recipeGraph,
+                bindingGraph.blockedOutputIds(), false,
+                genericTerminalStep(recipeId, repeatCount), "pure");
         return true;
     }
 
@@ -1316,6 +1224,28 @@ public final class GenericCraftPacket {
         projected.computeIfAbsent(outputRef, ignored -> new ArrayList<>()).add(syntheticRoot);
         ImmutableRecipeGraph planningGraph = new ImmutableRecipeGraph(projected);
 
+        submitRoutedPureExecutionPlan(
+                player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
+                baseItem, targetOutput, outputDestination, machineSelectionMode,
+                storageEndpoint, storageReference, materialLocks, planningGraph,
+                bindingGraph.blockedOutputIds(), true,
+                backgroundPhysicalTerminalStep(recipeId, terminalType, inferMode, repeatCount),
+                "physical");
+        return true;
+    }
+
+    private static void submitRoutedPureExecutionPlan(
+            ServerPlayer player, ResourceLocation recipeId,
+            Map<String, String> forcedRecipes, @Nullable ResourceLocation dim,
+            @Nullable BlockPos pos, int repeatCount, boolean inferMode,
+            @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
+            OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
+            CraftStorageEndpoint storageEndpoint,
+            @Nullable StorageReference storageReference,
+            Map<String, ItemStack> materialLocks, ImmutableRecipeGraph planningGraph,
+            Set<ResourceLocation> blockedOutputIds, boolean excludePlannedRoot,
+            ResolutionStep terminalStep, String planKind) {
+        int plannedExecutions = Math.max(1, repeatCount);
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         Map<StackKey, Long> preciseAvailable =
                 MaterialSources.listAllAvailableLong(player, storageEndpoint);
@@ -1335,19 +1265,16 @@ public final class GenericCraftPacket {
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
                         ResourceKey.create(Registries.DIMENSION, effectiveDim), effectivePos),
-                bindingGraph.blockedOutputIds(), false);
+                blockedOutputIds, false);
 
-        // The synthetic root represents the physical terminal recipe. Plan every
-        // requested execution here so its recursively-produced inputs match the
-        // terminal step appended below; planning one root left later batches
-        // waiting on intermediates that were never scheduled.
-        PLAN_REQUESTS.submitRouted(snapshot, routeInputs, Math.max(1, repeatCount),
+        PLAN_REQUESTS.submitRouted(snapshot, routeInputs, plannedExecutions,
                 player.getServer()::execute, RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed -> {
                     PureDemandTreeInspector.Result route = completed.inspection();
                     if (!route.backgroundCompatible() || completed.plan() == null) {
                         RSIntegrationMod.LOGGER.info(
-                                "[RSI-exec] immutable physical route unavailable recipe={} status={} unresolved={} catalystRoute={}",
-                                recipeId, route.status(), route.unresolved(), route.catalystRouteAvailable());
+                                "[RSI-exec] immutable {} route unavailable recipe={} status={} unresolved={} catalystRoute={}",
+                                planKind, recipeId, route.status(), route.unresolved(),
+                                route.catalystRouteAvailable());
                         tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
                                 inferMode, baseItem, targetOutput, outputDestination,
                                 machineSelectionMode, storageReference, materialLocks);
@@ -1356,14 +1283,14 @@ public final class GenericCraftPacket {
                     PureRecipePlanner.Result result = completed.plan();
                     if (!result.feasible()) {
                         RSIntegrationMod.LOGGER.warn(
-                                "[RSI-exec] physical planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
-                                recipeId, result.status(), result.feasibility(), result.missing(),
+                                "[RSI-exec] {} planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
+                                planKind, recipeId, result.status(), result.feasibility(), result.missing(),
                                 result.expandedStates(), result.backtracks(), result.memoHits());
                         if (shouldRetryTypedPlanning(
                                 result, snapshot.bindingBlockedOutputIds())) {
                             RSIntegrationMod.LOGGER.info(
-                                    "[RSI-exec] retrying typed physical execution after pure planner rejection recipe={}",
-                                    recipeId);
+                                    "[RSI-exec] retrying typed {} execution after pure planner rejection recipe={}",
+                                    planKind, recipeId);
                             tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos, repeatCount,
                                     inferMode, baseItem, targetOutput, outputDestination,
                                     machineSelectionMode, storageReference, materialLocks);
@@ -1372,8 +1299,8 @@ public final class GenericCraftPacket {
                         if (missingTouchesOutputSet(result.missing(),
                                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
                             RSIntegrationMod.debug(
-                                    "[RSI-exec] retrying typed physical execution for unprojected dependency recipe={}",
-                                    recipeId);
+                                    "[RSI-exec] retrying typed {} execution for unprojected dependency recipe={}",
+                                    planKind, recipeId);
                             tryResolveTypedFallbackOnly(player, recipeId, forcedRecipes, dim, pos,
                                     repeatCount, inferMode, baseItem, targetOutput, outputDestination,
                                     machineSelectionMode, storageReference, materialLocks);
@@ -1391,13 +1318,14 @@ public final class GenericCraftPacket {
                         return;
                     }
                     List<ResolutionStep> steps = new ArrayList<>(
-                            PurePlanAdapter.toResolutionSteps(result, planningGraph).stream()
-                                    .filter(step -> !step.recipeId().equals(recipeId)).toList());
-                    steps.add(backgroundPhysicalTerminalStep(
-                            recipeId, terminalType, inferMode, repeatCount));
+                            PurePlanAdapter.toResolutionSteps(result, planningGraph));
+                    if (excludePlannedRoot) {
+                        steps.removeIf(step -> step.recipeId().equals(recipeId));
+                    }
+                    steps.add(terminalStep);
                     RSIntegrationMod.LOGGER.info(
-                            "[RSI-exec] async physical plan ready recipe={} steps={} states={}",
-                            recipeId, steps.size(), result.expandedStates());
+                            "[RSI-exec] async {} plan ready recipe={} steps={} states={}",
+                            planKind, recipeId, steps.size(), result.expandedStates());
                     launchEndpointAsyncChain(player, steps,
                             LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                             storageEndpoint, repeatCount, recipeId, forcedRecipes,
@@ -1406,17 +1334,16 @@ public final class GenericCraftPacket {
                 }, failure -> {
                     if (!(failure instanceof CancellationException)) {
                         RSIntegrationMod.LOGGER.warn(
-                                "[RSI-exec] async physical planning failed recipe={} directReservationAttempted=true failure={}",
-                                recipeId, failure.toString(), failure);
+                                "[RSI-exec] async {} planning failed recipe={} directReservationAttempted=true failure={}",
+                                planKind, recipeId, failure.toString(), failure);
                         String key = failure instanceof CraftingPlanningTimeoutException
                                 ? "rsi.plan.failure.complexity_limit"
                                 : "rsi.plan.failure.missing_materials";
                         player.sendSystemMessage(Component.translatable(key));
                     }
                 });
-        RSIntegrationMod.debug("[RSI-exec] queued async physical planning recipe={} repeat={}",
-                recipeId, repeatCount);
-        return true;
+        RSIntegrationMod.debug("[RSI-exec] queued async {} planning recipe={} repeat={}",
+                planKind, recipeId, repeatCount);
     }
 
     private static void tickExecutionRequests(MinecraftServer server) {

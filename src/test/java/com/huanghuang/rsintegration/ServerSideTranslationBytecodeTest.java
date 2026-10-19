@@ -56,7 +56,6 @@ class ServerSideTranslationBytecodeTest {
     private static final List<String> LOG_ONLY_ALLOWLIST = List.of(
             "com/huanghuang/rsintegration/crafting/AsyncCraftChain#finish",
             "com/huanghuang/rsintegration/crafting/batch/GenericCraftPacket#tryResolve",
-            "com/huanghuang/rsintegration/crafting/CraftPacketUtils#tryResolveAndRunChain",
             "com/huanghuang/rsintegration/mods/crabbersdelight/CrabTrapBatchDelegate#tryStartWithMaterials",
             "com/huanghuang/rsintegration/mods/crockpot/CrockPotBatchDelegate#tryStartWithMaterials",
             "com/huanghuang/rsintegration/mods/eidolon/EidolonBatchDelegate#tryStartRitualCraft",

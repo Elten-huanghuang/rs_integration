@@ -569,7 +569,7 @@ public final class CraftingResolver {
         ResolutionContext ctx = new ResolutionContext(level,
                 RecipeIndex.get(level),
                 availStacks,
-                buildPreferredRecipes(level));
+                buildPreferredRecipes(level)).genericCandidatesOnly();
 
         EdgeTracker edges = new EdgeTracker();
         List<IngredientSpec> rootsToResolve = new ArrayList<>(coalesceRootSpecs(needed));

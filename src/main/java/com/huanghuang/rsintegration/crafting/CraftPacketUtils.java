@@ -7,7 +7,6 @@ import java.util.function.Function;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.TagParser;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.crafting.ShapedRecipe;
@@ -1283,74 +1282,33 @@ public final class CraftPacketUtils {
     // ── multi-block chain helper ──────────────────────────────────
 
     /**
-     * Resolve and synchronously execute a crafting chain for the given ingredient+count.
-     * Preserves the original {@link Ingredient} (which may represent a Tag with
-     * many valid item options) instead of degrading it to a single ItemStack.
-     *
-     * <p>Multi-block dependencies must be part of the outer graph assembled by
-     * the request entry point. This synchronous material API cannot suspend its
-     * caller while another {@link AsyncCraftChain} runs, so it never submits a
-     * nested chain.</p>
-     *
-     * @return true if every resolved step completed inline and the items are
-     *         available now
+     * 同步补齐普通合成中间物。实体机器和虚拟工作流必须由外层 DAG 统一规划，
+     * 这里仅允许通用合成配方内联执行。
      */
-    private static boolean tryResolveAndRunChain(ServerPlayer player,
-                                                  @Nullable CraftStorageEndpoint endpoint,
-                                                  Ingredient ingredient, int count) {
+    private static boolean tryResolveGenericChainInline(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+            Ingredient ingredient, int count) {
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
         List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
-
-        // 1. Try typed resolver (includes multi-block candidates)
-        if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
-            List<String> missing = new ArrayList<>();
-            List<ResolutionStep> steps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                    specs, available, player.serverLevel(), player, endpoint, missing, null, false);
-            if (!missing.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI] tryResolveAndRunChain: typed resolver could not resolve: {}",
-                        missing);
-            }
-            if (!steps.isEmpty() && missing.isEmpty()) {
-                if (requiresOuterDag(steps)) {
-                    RSIntegrationMod.LOGGER.warn(
-                            "[RSI] Inline material resolution requires {} multi-block step(s); "
-                                    + "refusing nested chain submission because dependencies must be planned in the outer DAG",
-                            steps.stream().filter(s -> s.modType() != ModType.GENERIC).count());
-                    return false;
-                }
-                // All vanilla — execute inline
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.generic.info.auto_crafting", steps.size()));
-                return executeCraftingSteps(player, steps, endpoint);
-            }
-        }
-
-        // 2. Fallback: vanilla-only resolver
         List<String> missing = new ArrayList<>();
-        List<ResourceLocation> vanillaSteps = CraftingResolver.resolveStepsForSpecs(
+        List<ResourceLocation> genericSteps = CraftingResolver.resolveStepsForSpecs(
                 specs, available, player.serverLevel(), missing);
         if (!missing.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI] tryResolveAndRunChain: vanilla resolver could not resolve: {}",
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI] tryResolveGenericChainInline: generic resolver could not resolve: {}",
                     missing);
+            return false;
         }
-        if (!vanillaSteps.isEmpty() && missing.isEmpty()) {
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.info.auto_crafting", vanillaSteps.size()));
-            List<ResolutionStep> wrapped = new ArrayList<>();
-            for (ResourceLocation id : vanillaSteps) {
-                wrapped.add(new ResolutionStep(id, ModType.GENERIC,
-                        new ResourceLocation("minecraft:crafting")));
-            }
-            return executeCraftingSteps(player, wrapped, endpoint);
+        if (genericSteps.isEmpty()) return false;
+
+        player.sendSystemMessage(Component.translatable(
+                "rsi.generic.info.auto_crafting", genericSteps.size()));
+        List<ResolutionStep> wrapped = new ArrayList<>(genericSteps.size());
+        for (ResourceLocation id : genericSteps) {
+            wrapped.add(new ResolutionStep(id, ModType.GENERIC,
+                    new ResourceLocation("minecraft:crafting")));
         }
-
-        RSIntegrationMod.LOGGER.warn("[RSI] tryResolveAndRunChain: both typed and vanilla resolvers failed for {} x{}",
-                describeIngredient(ingredient).getString(), count);
-        return false;
-    }
-
-    static boolean requiresOuterDag(List<ResolutionStep> steps) {
-        return steps.stream().anyMatch(step -> step.modType() != ModType.GENERIC);
+        return executeCraftingSteps(player, wrapped, endpoint);
     }
 
     // ── shared material extraction with auto-crafting ────────────
@@ -1416,7 +1374,7 @@ public final class CraftPacketUtils {
             if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get() && !ingredient.isEmpty()
                     && !candidates.isEmpty()) {
                 for (CraftStorageEndpoint candidate : candidates) {
-                    if (!tryResolveAndRunChain(player, candidate, ingredient, count)) continue;
+                    if (!tryResolveGenericChainInline(player, candidate, ingredient, count)) continue;
                     // The first reserve cached the network before this inline
                     // craft inserted the requested intermediate stack.
                     ledger.invalidateNetworkSnapshot();
@@ -1452,7 +1410,7 @@ public final class CraftPacketUtils {
         if (ingredient.isEmpty()) return ItemStack.EMPTY;
         boolean crafted = false;
         for (CraftStorageEndpoint candidate : candidates) {
-            if (!tryResolveAndRunChain(player, candidate, ingredient, count)) continue;
+            if (!tryResolveGenericChainInline(player, candidate, ingredient, count)) continue;
             endpoint = candidate;
             crafted = true;
             break;
@@ -1485,7 +1443,7 @@ public final class CraftPacketUtils {
     }
 
     /** 机器绑定优先，当前终端/默认存储作为后备。 */
-    public static List<CraftStorageEndpoint> resolveEndpointCandidatesForCraft(
+    private static List<CraftStorageEndpoint> resolveEndpointCandidatesForCraft(
             ServerPlayer player, @Nullable ResourceKey<Level> altarDim,
             @Nullable BlockPos altarPos) {
         List<CraftStorageEndpoint> endpoints = new ArrayList<>(2);
@@ -1500,138 +1458,6 @@ public final class CraftPacketUtils {
             if (!duplicate) endpoints.add(candidate);
         });
         return List.copyOf(endpoints);
-    }
-
-    // ── keyed-counts helpers ──────────────────────────────────────
-
-    private static List<ItemStack> stacksFromKeyed(Map<StackKey, Integer> counts) {
-        List<ItemStack> list = new ArrayList<>();
-        for (var entry : counts.entrySet()) {
-            int count = entry.getValue();
-            if (count <= 0) continue;
-            StackKey key = entry.getKey();
-            ItemStack stack = new ItemStack(key.item(), count);
-            if (key.tag() != null) {
-                try {
-                    stack.setTag(TagParser.parseTag(key.tag()));
-                } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", key, ex); }
-            }
-            list.add(stack);
-        }
-        return list;
-    }
-
-    // ── shared recipe chain resolution ────────────────────────────
-
-    /**
-     * Resolve intermediate crafting steps for a CraftingRecipe, trying the
-     * typed resolver first (includes multi-block candidates) and falling back
-     * to vanilla-only resolution.
-     *
-     * <p>The returned list does NOT include the final recipe step — callers
-     * should append it themselves. Returns null if resolution fails
-     * completely.</p>
-     */
-    @Nullable
-    public static List<ResolutionStep> resolveIntermediateSteps(
-            ServerPlayer player, CraftStorageEndpoint endpoint, CraftingRecipe recipe) {
-        return resolveIntermediateSteps(player, endpoint, recipe, 1);
-    }
-
-    /**
-     * Resolve intermediates for the complete requested quantity. Batch counts
-     * are calculated from the scaled demand, so callers must not multiply the
-     * returned intermediate executions again.
-     */
-    public static List<ResolutionStep> resolveIntermediateSteps(
-            ServerPlayer player, CraftStorageEndpoint endpoint,
-            CraftingRecipe recipe, int repeatCount) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
-                player, endpoint);
-        int repeats = Math.max(1, repeatCount);
-
-        List<IngredientSpec> specs = extractIngredientSpecs(recipe);
-        if (specs == null) return null;
-        if (repeats > 1) {
-            List<IngredientSpec> scaled = new ArrayList<>(specs.size());
-            for (IngredientSpec spec : specs) {
-                int count = requiredCount(spec, repeats);
-                scaled.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
-            }
-            specs = scaled;
-        }
-
-        List<String> missingCheck = new ArrayList<>();
-        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                specs, available, player.serverLevel(), player,
-                endpoint, missingCheck, null, false);
-
-        if (!missingCheck.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI] resolveIntermediateSteps: typed resolver could not resolve: {}",
-                    missingCheck);
-            allSteps = null;
-        }
-
-        if (allSteps == null) {
-            missingCheck.clear();
-            List<ResourceLocation> vanillaIds = CraftingResolver.resolveStepsForSpecs(
-                    specs, available, player.serverLevel(), missingCheck);
-            if (!missingCheck.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI] resolveIntermediateSteps: vanilla resolver also could not resolve: {}",
-                        missingCheck);
-            }
-            if (!vanillaIds.isEmpty()) {
-                allSteps = new ArrayList<>();
-                for (ResourceLocation id : vanillaIds) {
-                    allSteps.add(new ResolutionStep(id, ModType.GENERIC,
-                            new ResourceLocation("minecraft:crafting")));
-                }
-            }
-        }
-
-        return (allSteps == null || allSteps.isEmpty()) ? null : allSteps;
-    }
-
-    // ── availability pre-resolve ──────────────────────────────────
-
-    /**
-     * Check whether intermediate items needed by a recipe can be auto-crafted.
-     * Does NOT execute any crafting — read-only preview for GUI availability checks.
-     */
-    public static boolean canResolveMissingIngredients(ServerPlayer player, Recipe<?> recipe,
-                                                  @Nullable ResourceKey<Level> altarDim,
-                                                  @Nullable BlockPos altarPos) {
-        if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return false;
-
-        List<IngredientSpec> specs = extractIngredientSpecs(recipe);
-        if (specs == null || specs.isEmpty()) return false;
-
-        List<IngredientSpec> needed = new ArrayList<>();
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            needed.add(spec);
-        }
-        if (needed.isEmpty()) return false;
-
-        CraftStorageEndpoint endpoint = resolveEndpointForCraft(
-                player, altarDim, altarPos).orElse(null);
-        if (endpoint == null) return false;
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(
-                player, endpoint);
-        List<String> missing = new ArrayList<>();
-        List<ResolutionStep> allSteps = CraftingResolver.resolveStepsForSpecsWithTypes(
-                needed, available, player.serverLevel(), player,
-                endpoint, missing, null, false);
-
-        // Only report as craftable when every intermediate is vanilla;
-        // multi-block steps require async chain execution, not a preview.
-        boolean craftable = !allSteps.isEmpty() && missing.isEmpty()
-                && allSteps.stream().allMatch(s -> s.modType() == ModType.GENERIC);
-        if (craftable) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Intermediate check for recipe {}: all {} steps can be auto-crafted",
-                    recipe.getId(), allSteps.size());
-        }
-        return craftable;
     }
 
     /**
