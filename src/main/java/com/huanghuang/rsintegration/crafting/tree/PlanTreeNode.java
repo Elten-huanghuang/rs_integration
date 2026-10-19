@@ -59,6 +59,8 @@ public final class PlanTreeNode {
     public boolean cycle;
     /** True when the node has more alternative recipes than the configured candidate cap (extras hidden). */
     public boolean limited;
+    /** True when child nodes are hidden by the client tree depth/node display limits. */
+    public boolean viewTruncated;
 
     /** Non-null for tag-input nodes — renders an Ingredient carousel. */
     @Nullable

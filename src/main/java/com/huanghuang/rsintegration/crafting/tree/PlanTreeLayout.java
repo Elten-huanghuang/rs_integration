@@ -42,6 +42,7 @@ public final class PlanTreeLayout {
 
     private final List<Box> boxes = new ArrayList<>();
     private final IdentityHashMap<PlanTreeNode, Integer> measureCache = new IdentityHashMap<>();
+    private final IdentityHashMap<PlanTreeNode, Box> boxByNode = new IdentityHashMap<>();
 
     private boolean dirty = true;
     private int totalWidth;
@@ -63,6 +64,7 @@ public final class PlanTreeLayout {
     public void rebuild(PlanTreeNode root) {
         boxes.clear();
         measureCache.clear();
+        boxByNode.clear();
         int rootWidth = measure(root);
         totalHeight = 0;
         layout(root, 0, 0, rootWidth);
@@ -94,10 +96,7 @@ public final class PlanTreeLayout {
     /** Placed box for a node identity, or null if not currently laid out (e.g. under a collapse). */
     @Nullable
     public Box boxFor(PlanTreeNode node) {
-        for (Box b : boxes) {
-            if (b.node == node) return b;
-        }
-        return null;
+        return boxByNode.get(node);
     }
 
     /** First placed box matching an ingredient key (pre-order). Used for cost-bar centering. */
@@ -157,7 +156,9 @@ public final class PlanTreeLayout {
         int nodeW = nodeWidth(node);
         int x = left + (subtreeWidth - nodeW) / 2;
         int itemCenterX = x + itemCenterOffset(node);
-        boxes.add(new Box(node, x, y, nodeW, NODE_HEIGHT, itemCenterX));
+        Box box = new Box(node, x, y, nodeW, NODE_HEIGHT, itemCenterX);
+        boxes.add(box);
+        boxByNode.put(node, box);
         totalHeight = Math.max(totalHeight, y + NODE_HEIGHT);
 
         List<PlanTreeNode> visible = visibleChildren(node);

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.farmingforblockheads;
 
+import com.huanghuang.rsintegration.crafting.batch.VirtualExchangeRecipe;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -11,10 +12,11 @@ import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 
+import java.util.List;
 import java.util.UUID;
 
 /** Virtual Recipe wrapper for FarmingForBlockheads market entries. */
-public final class MarketRecipeWrapper implements Recipe<Container> {
+public final class MarketRecipeWrapper implements Recipe<Container>, VirtualExchangeRecipe {
 
     private final ResourceLocation id;
     private final UUID entryId;
@@ -30,6 +32,16 @@ public final class MarketRecipeWrapper implements Recipe<Container> {
 
     public UUID entryId() { return entryId; }
     public ItemStack costItem() { return cost.copy(); }
+
+    @Override
+    public List<ItemStack> costItems() {
+        return List.of(cost.copy());
+    }
+
+    @Override
+    public List<ItemStack> resultItems(RegistryAccess access) {
+        return List.of(output.copy());
+    }
 
     @Override
     public boolean matches(Container container, Level level) { return false; }

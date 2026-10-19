@@ -452,6 +452,16 @@ class PlanTreeModelGraphTest extends BootstrapTest {
         assertEquals(2, gross.get(IngredientKey.of(new ItemStack(Items.DIAMOND))));
     }
 
+    @Test
+    void graphDepthLimitMarksTheLastVisibleProducer() {
+        PlanTreeModel tree = PlanTreeModel.from(sharedCatalystPlan(
+                new ItemStack(Items.DIAMOND), new ItemStack(Items.DIAMOND)), 1, 2);
+
+        assertTrue(tree.truncated());
+        assertEquals(1, tree.root.children.size());
+        assertTrue(tree.root.children.get(0).viewTruncated);
+    }
+
     private static PlanResponse sharedCatalystPlan(ItemStack firstCatalyst,
                                                    ItemStack secondCatalyst) {
         PlanGraphView.SourceView initial = new PlanGraphView.SourceView(true, -1, -1);

@@ -17,6 +17,8 @@ class CraftingPlanningConfigTest {
                 RSIntegrationConfig.CRAFTING_MAX_ENSURE_CALLS.getDefault());
         assertEquals(RSIntegrationConfig.DEFAULT_CRAFTING_MAX_GRAPH_NODES,
                 RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.getDefault());
+        assertEquals(RSIntegrationConfig.DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT,
+                RSIntegrationConfig.CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT.getDefault());
         assertEquals(CraftingPlanningConfig.defaults(), new CraftingPlanningConfig(
                 RSIntegrationConfig.CRAFTING_PLANNING_WORKERS.getDefault(),
                 RSIntegrationConfig.CRAFTING_PLANNING_QUEUE_CAPACITY.getDefault(),
@@ -42,6 +44,16 @@ class CraftingPlanningConfigTest {
         load(config);
         assertEquals(RSIntegrationConfig.MAX_CRAFTING_MAX_GRAPH_NODES,
                 RSIntegrationConfig.CRAFTING_MAX_GRAPH_NODES.get());
+    }
+
+    @Test
+    void virtualExchangeBatchLimitDefaultsToUnlimitedAndReadsFiniteValues() {
+        CommentedConfig config = defaultConfig();
+        assertEquals(0, RSIntegrationConfig.CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT.getDefault());
+
+        config.set(RSIntegrationConfig.CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT.getPath(), 256);
+        load(config);
+        assertEquals(256, RSIntegrationConfig.CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT.get());
     }
 
     @Test

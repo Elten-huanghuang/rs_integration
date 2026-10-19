@@ -33,9 +33,20 @@ import java.util.Set;
  */
 public final class PlanTreeModel {
     public final PlanTreeNode root;
+    private final boolean truncated;
 
     public PlanTreeModel(PlanTreeNode root) {
+        this(root, false);
+    }
+
+    private PlanTreeModel(PlanTreeNode root, boolean truncated) {
         this.root = root;
+        this.truncated = truncated;
+    }
+
+    /** True when the configured client display limits hid part of the execution tree. */
+    public boolean truncated() {
+        return truncated;
     }
 
     /**
@@ -47,11 +58,20 @@ public final class PlanTreeModel {
      * PlanResponse assigns reuse materials (e.g. iron ingot) an ambiguous depth.
      */
     public static PlanTreeModel from(PlanResponse plan) {
+        return from(plan, treeLimits());
+    }
+
+    static PlanTreeModel from(PlanResponse plan, int maxDepth, int maxNodes) {
+        return from(plan, new TreeLimits(maxDepth, maxNodes));
+    }
+
+    private static PlanTreeModel from(PlanResponse plan, TreeLimits limits) {
+        BuildBudget budget = new BuildBudget(limits);
         if (plan.graph() != null
                 && (!plan.graph().nodes().isEmpty() || !plan.graph().roots().isEmpty())) {
-            return fromGraph(plan);
+            return fromGraph(plan, budget);
         }
-        return fromLegacySteps(plan);
+        return fromLegacySteps(plan, budget);
     }
 
     private static int maxTreeCandidates() {
@@ -62,7 +82,44 @@ public final class PlanTreeModel {
         }
     }
 
-    private static PlanTreeModel fromLegacySteps(PlanResponse plan) {
+    private static TreeLimits treeLimits() {
+        try {
+            return new TreeLimits(
+                    RSIntegrationConfig.RECIPE_TREE_MAX_DEPTH.get(),
+                    RSIntegrationConfig.RECIPE_TREE_MAX_NODES.get());
+        } catch (IllegalStateException ignored) {
+            return new TreeLimits(16, 512);
+        }
+    }
+
+    private record TreeLimits(int maxDepth, int maxNodes) {}
+
+    private static final class BuildBudget {
+        private final int maxDepth;
+        private final int maxNodes;
+        private int createdNodes = 1;
+        private boolean truncated;
+
+        private BuildBudget(TreeLimits limits) {
+            this.maxDepth = Math.max(0, limits.maxDepth());
+            this.maxNodes = Math.max(1, limits.maxNodes());
+        }
+
+        private boolean tryClaimNode(int depth) {
+            if (depth > maxDepth || createdNodes >= maxNodes) {
+                truncated = true;
+                return false;
+            }
+            createdNodes++;
+            return true;
+        }
+
+        private boolean truncated() {
+            return truncated;
+        }
+    }
+
+    private static PlanTreeModel fromLegacySteps(PlanResponse plan, BuildBudget budget) {
         Map<IngredientKey, PlanStep> producerByOutput = new LinkedHashMap<>();
         for (PlanStep step : plan.steps()) {
             producerByOutput.putIfAbsent(IngredientKey.of(step.output()), step);
@@ -90,9 +147,9 @@ public final class PlanTreeModel {
         // without misflagging DAG reuse (iron ingot shared by two sibling components).
         Set<IngredientKey> pathStack = new LinkedHashSet<>();
         Set<PlanStep> expandedSteps = new HashSet<>();
-        buildChildren(root, producerByOutput, pathStack, expandedSteps, plan);
-        retainUnlinkedLegacySteps(root, plan, producerByOutput, expandedSteps);
-        return new PlanTreeModel(root);
+        buildChildren(root, producerByOutput, pathStack, expandedSteps, plan, budget);
+        retainUnlinkedLegacySteps(root, plan, producerByOutput, expandedSteps, budget);
+        return new PlanTreeModel(root, budget.truncated());
     }
 
     /**
@@ -105,7 +162,8 @@ public final class PlanTreeModel {
      */
     private static void retainUnlinkedLegacySteps(
             PlanTreeNode root, PlanResponse plan,
-            Map<IngredientKey, PlanStep> producers, Set<PlanStep> expandedSteps) {
+            Map<IngredientKey, PlanStep> producers, Set<PlanStep> expandedSteps,
+            BuildBudget budget) {
         Set<ResourceLocation> rendered = new HashSet<>();
         collectRenderedRecipeIds(root, rendered);
         ResourceLocation targetRecipe = plan.recipeId() == null
@@ -116,6 +174,10 @@ public final class PlanTreeModel {
                     || !reachableOutputs.contains(step.output().getItem())) continue;
             ItemStack output = step.output().copyWithCount(1);
             if (output.isEmpty()) continue;
+            if (!budget.tryClaimNode(1)) {
+                root.viewTruncated = true;
+                break;
+            }
             long amount = Math.max(1L, step.totalOutputCount());
             PlanTreeNode unlinked = new PlanTreeNode(IngredientKey.of(output), output,
                     amount, 1, step);
@@ -123,7 +185,7 @@ public final class PlanTreeModel {
             applyAvailability(unlinked, plan, output);
             Set<IngredientKey> path = new LinkedHashSet<>();
             path.add(unlinked.key);
-            buildChildren(unlinked, producers, path, expandedSteps, plan);
+            buildChildren(unlinked, producers, path, expandedSteps, plan, budget);
             root.children.add(unlinked);
             collectRenderedRecipeIds(unlinked, rendered);
         }
@@ -149,10 +211,9 @@ public final class PlanTreeModel {
         return reachable;
     }
 
-    private static PlanTreeModel fromGraph(PlanResponse plan) {
+    private static PlanTreeModel fromGraph(PlanResponse plan, BuildBudget budget) {
         PlanGraphView graph = plan.graph();
-        Map<Integer, PlanGraphView.NodeView> nodes = new HashMap<>();
-        for (PlanGraphView.NodeView node : graph.nodes()) nodes.put(node.nodeId(), node);
+        GraphViewIndex index = GraphViewIndex.from(graph);
 
         ItemStack target = plan.targetResult();
         PlanStep targetStep = null;
@@ -190,10 +251,19 @@ public final class PlanTreeModel {
             }
         }
         for (GraphReference edge : mergeRootEdges(rootEdges)) {
-            root.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                    edge.role(), 1, graph, nodes, path, expandedProducers, plan));
+            PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
+                    edge.role(), 1, index, path, expandedProducers, plan, budget);
+            if (child == null) {
+                root.viewTruncated = true;
+                break;
+            }
+            root.children.add(child);
         }
         for (UnresolvedReference missingRef : unresolvedRoots.values()) {
+            if (!budget.tryClaimNode(1)) {
+                root.viewTruncated = true;
+                break;
+            }
             PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
                     missingRef.display(), missingRef.quantity(), 1, null);
             missing.unresolved = missingRef.quantity();
@@ -207,11 +277,11 @@ public final class PlanTreeModel {
         Set<Integer> rootReachableNodes = new HashSet<>();
         for (PlanGraphView.RootView demand : graph.roots()) {
             for (PlanGraphView.RootEdgeView edge : demand.allocations()) {
-                collectReachableProducerNodes(edge.source(), graph, rootReachableNodes);
+                collectReachableProducerNodes(edge.source(), index, rootReachableNodes);
             }
         }
         for (Integer nodeId : graph.topologicalOrder()) {
-            PlanGraphView.NodeView graphNode = nodes.get(nodeId);
+            PlanGraphView.NodeView graphNode = index.node(nodeId);
             if (graphNode == null || !rootReachableNodes.contains(nodeId)
                     || renderedRecipes.contains(graphNode.recipeId())) continue;
             PlanStep step = graphNode.asPlanStep();
@@ -220,6 +290,10 @@ public final class PlanTreeModel {
                     ? output.display().copyWithCount(1)
                     : graphNode.primaryOutput().copyWithCount(1);
             if (display.isEmpty()) continue;
+            if (!budget.tryClaimNode(1)) {
+                root.viewTruncated = true;
+                break;
+            }
             long quantity = output != null ? output.quantity()
                     : Math.max(1, display.getCount() * graphNode.executions());
             PlanTreeNode omitted = new PlanTreeNode(IngredientKey.of(display), display,
@@ -227,16 +301,21 @@ public final class PlanTreeModel {
             omitted.limited = step.alternatives().size() > maxTreeCandidates();
             applyAvailability(omitted, plan, display);
             expandedProducers.add(nodeId);
-            for (GraphReference edge : mergeConsumerEdges(graph, nodeId)) {
-                omitted.children.add(buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                        edge.role(), 2, graph, nodes, new HashSet<>(Set.of(nodeId)),
-                        expandedProducers, plan));
+            for (GraphReference edge : mergeConsumerEdges(index, nodeId)) {
+                PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
+                        edge.role(), 2, index, new HashSet<>(Set.of(nodeId)),
+                        expandedProducers, plan, budget);
+                if (child == null) {
+                    omitted.viewTruncated = true;
+                    break;
+                }
+                omitted.children.add(child);
             }
             root.children.add(omitted);
             renderedRecipes.add(graphNode.recipeId());
         }
         mergeEquivalentProducedChildren(root);
-        return new PlanTreeModel(root);
+        return new PlanTreeModel(root, budget.truncated());
     }
 
     private static void collectRenderedRecipeIds(PlanTreeNode node, Set<ResourceLocation> ids) {
@@ -245,22 +324,23 @@ public final class PlanTreeModel {
     }
 
     private static void collectReachableProducerNodes(PlanGraphView.SourceView source,
-                                                       PlanGraphView graph,
+                                                       GraphViewIndex index,
                                                        Set<Integer> reachable) {
         if (source == null || source.initial() || !reachable.add(source.producerNodeId())) return;
-        for (GraphReference edge : mergeConsumerEdges(graph, source.producerNodeId())) {
-            collectReachableProducerNodes(edge.source(), graph, reachable);
+        for (GraphReference edge : mergeConsumerEdges(index, source.producerNodeId())) {
+            collectReachableProducerNodes(edge.source(), index, reachable);
         }
     }
 
     private static PlanTreeNode buildGraphReference(PlanGraphView.SourceView source,
                                                      ItemStack material, long quantity,
                                                      DemandRole role, int depth,
-                                                     PlanGraphView graph,
-                                                     Map<Integer, PlanGraphView.NodeView> nodes,
+                                                     GraphViewIndex index,
                                                      Set<Integer> path,
                                                      Set<Integer> expandedProducers,
-                                                     PlanResponse plan) {
+                                                     PlanResponse plan,
+                                                     BuildBudget budget) {
+        if (!budget.tryClaimNode(depth)) return null;
         if (source.initial()) {
             PlanTreeNode leaf = new PlanTreeNode(IngredientKey.of(material), material,
                     quantity, depth, null, role);
@@ -270,7 +350,7 @@ public final class PlanTreeModel {
             return leaf;
         }
 
-        PlanGraphView.NodeView producer = nodes.get(source.producerNodeId());
+        PlanGraphView.NodeView producer = index.node(source.producerNodeId());
         if (producer == null) {
             PlanTreeNode broken = new PlanTreeNode(IngredientKey.of(material), material,
                     quantity, depth, null, role).markCycle();
@@ -310,19 +390,22 @@ public final class PlanTreeModel {
             return node;
         }
 
-        for (GraphReference edge : mergeConsumerEdges(graph, producer.nodeId())) {
+        for (GraphReference edge : mergeConsumerEdges(index, producer.nodeId())) {
             PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                    edge.role(), depth + 1, graph, nodes, path, expandedProducers, plan);
+                    edge.role(), depth + 1, index, path, expandedProducers, plan, budget);
+            if (child == null) {
+                node.viewTruncated = true;
+                break;
+            }
             node.children.add(child);
         }
         // Unresolved demand is a separate portion of the input port. Keep it as
         // its own view reference even when the same port is partially supplied;
         // attaching it to an allocated child hides the conservation split.
         Map<DemandKey, UnresolvedReference> unresolved = new LinkedHashMap<>();
-        for (PlanGraphView.UnresolvedView view : graph.unresolved()) {
-            if (view.consumerNodeId() != producer.nodeId()) continue;
+        for (PlanGraphView.UnresolvedView view : index.unresolvedFor(producer.nodeId())) {
             IngredientKey key = IngredientKey.of(view.display());
-            DemandRole unresolvedRole = inputRole(graph, producer.nodeId(),
+            DemandRole unresolvedRole = index.inputRole(producer.nodeId(),
                     view.consumerPortIndex());
             DemandKey demandKey = new DemandKey(key, unresolvedRole);
             unresolved.compute(demandKey, (ignored, existing) -> existing == null
@@ -330,6 +413,10 @@ public final class PlanTreeModel {
                     : existing.add(view.quantity()));
         }
         for (UnresolvedReference missingRef : unresolved.values()) {
+            if (!budget.tryClaimNode(depth + 1)) {
+                node.viewTruncated = true;
+                break;
+            }
             PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
                     missingRef.display(), missingRef.quantity(), depth + 1, null,
                     missingRef.role());
@@ -401,24 +488,73 @@ public final class PlanTreeModel {
         return List.copyOf(merged.values());
     }
 
-    private static List<GraphReference> mergeConsumerEdges(PlanGraphView graph, int consumerNodeId) {
+    private static List<GraphReference> mergeConsumerEdges(GraphViewIndex index, int consumerNodeId) {
         Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();
-        for (PlanGraphView.EdgeView edge : graph.edges()) {
-            if (edge.consumerNodeId() != consumerNodeId) continue;
+        for (PlanGraphView.EdgeView edge : index.edgesFor(consumerNodeId)) {
             mergeGraphReference(merged, edge.source(), edge.material(), edge.quantity(),
-                    inputRole(graph, consumerNodeId, edge.consumerPortIndex()));
+                    index.inputRole(consumerNodeId, edge.consumerPortIndex()));
         }
         return List.copyOf(merged.values());
     }
 
-    private static DemandRole inputRole(PlanGraphView graph, int consumerNodeId,
-                                        int consumerPortIndex) {
-        PlanGraphView.NodeView consumer = graph.node(consumerNodeId);
-        if (consumer == null) return DemandRole.CONSUMED;
-        for (PlanGraphView.InputView input : consumer.inputs()) {
-            if (input.portIndex() == consumerPortIndex) return input.role();
+    private record ConsumerPortKey(int nodeId, int portIndex) {}
+
+    private static final class GraphViewIndex {
+        private final Map<Integer, PlanGraphView.NodeView> nodes;
+        private final Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer;
+        private final Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer;
+        private final Map<ConsumerPortKey, DemandRole> inputRoles;
+
+        private GraphViewIndex(Map<Integer, PlanGraphView.NodeView> nodes,
+                               Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer,
+                               Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer,
+                               Map<ConsumerPortKey, DemandRole> inputRoles) {
+            this.nodes = nodes;
+            this.edgesByConsumer = edgesByConsumer;
+            this.unresolvedByConsumer = unresolvedByConsumer;
+            this.inputRoles = inputRoles;
         }
-        return DemandRole.CONSUMED;
+
+        static GraphViewIndex from(PlanGraphView graph) {
+            Map<Integer, PlanGraphView.NodeView> nodes = new HashMap<>();
+            Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer = new HashMap<>();
+            Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer = new HashMap<>();
+            Map<ConsumerPortKey, DemandRole> inputRoles = new HashMap<>();
+            for (PlanGraphView.NodeView node : graph.nodes()) {
+                nodes.put(node.nodeId(), node);
+                for (PlanGraphView.InputView input : node.inputs()) {
+                    inputRoles.put(new ConsumerPortKey(node.nodeId(), input.portIndex()), input.role());
+                }
+            }
+            for (PlanGraphView.EdgeView edge : graph.edges()) {
+                edgesByConsumer.computeIfAbsent(edge.consumerNodeId(), ignored -> new ArrayList<>())
+                        .add(edge);
+            }
+            for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
+                unresolvedByConsumer.computeIfAbsent(unresolved.consumerNodeId(),
+                        ignored -> new ArrayList<>()).add(unresolved);
+            }
+            return new GraphViewIndex(nodes, edgesByConsumer, unresolvedByConsumer, inputRoles);
+        }
+
+        @Nullable
+        PlanGraphView.NodeView node(int nodeId) {
+            return nodes.get(nodeId);
+        }
+
+        List<PlanGraphView.EdgeView> edgesFor(int consumerNodeId) {
+            return edgesByConsumer.getOrDefault(consumerNodeId, List.of());
+        }
+
+        List<PlanGraphView.UnresolvedView> unresolvedFor(int consumerNodeId) {
+            return unresolvedByConsumer.getOrDefault(consumerNodeId, List.of());
+        }
+
+        DemandRole inputRole(int consumerNodeId, int consumerPortIndex) {
+            return inputRoles.getOrDefault(
+                    new ConsumerPortKey(consumerNodeId, consumerPortIndex),
+                    DemandRole.CONSUMED);
+        }
     }
 
     private static void mergeGraphReference(Map<GraphReferenceKey, GraphReference> merged,
@@ -515,7 +651,8 @@ public final class PlanTreeModel {
     private static void buildChildren(PlanTreeNode parent,
                                       Map<IngredientKey, PlanStep> producers,
                                       Set<IngredientKey> pathStack,
-                                      Set<PlanStep> expandedSteps, PlanResponse plan) {
+                                      Set<PlanStep> expandedSteps, PlanResponse plan,
+                                      BuildBudget budget) {
         PlanStep parentStep = parent.step != null ? parent.step : producers.get(parent.key);
         if (parentStep == null) return; // leaf — no producing step
 
@@ -547,6 +684,10 @@ public final class PlanTreeModel {
             PlanStep childStep = producers.get(inputKey);
 
             if (childStep != null) {
+                if (!budget.tryClaimNode(parent.depth + 1)) {
+                    parent.viewTruncated = true;
+                    break;
+                }
                 if (!pathStack.add(inputKey)) {
                     // Same key already on this ancestor chain → genuine cycle.
                     PlanTreeNode cycleNode = new PlanTreeNode(inputKey, input, amount,
@@ -563,9 +704,13 @@ public final class PlanTreeModel {
                 applyAvailability(child, plan, input);
                 parent.children.add(child);
 
-                buildChildren(child, producers, pathStack, expandedSteps, plan);
+                buildChildren(child, producers, pathStack, expandedSteps, plan, budget);
                 pathStack.remove(inputKey); // backtrack — sibling branches may reuse this material
             } else {
+                if (!budget.tryClaimNode(parent.depth + 1)) {
+                    parent.viewTruncated = true;
+                    break;
+                }
                 PlanTreeNode leaf = new PlanTreeNode(
                         inputKey, input, amount, parent.depth + 1, null, role);
                 applyAvailability(leaf, plan, input);

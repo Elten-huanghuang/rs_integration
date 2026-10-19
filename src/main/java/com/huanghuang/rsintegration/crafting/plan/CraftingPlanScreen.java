@@ -2019,10 +2019,15 @@ public final class CraftingPlanScreen extends Screen {
         costHits.clear();
         gfx.enableScissor(left, treeViewTop, left + contentW, areaBottom);
         try {
+            int logicalLeft = (int) Math.floor((treeViewLeft - treePanX) / treeZoom);
+            int logicalTop = (int) Math.floor((treeViewTop - treePanY) / treeZoom);
+            int logicalRight = (int) Math.ceil((treeViewRight - treePanX) / treeZoom);
+            int logicalBottom = (int) Math.ceil((treeViewBottom - treePanY) / treeZoom);
             gfx.pose().pushPose();
             gfx.pose().translate(treePanX, treePanY, 0);
             gfx.pose().scale((float) treeZoom, (float) treeZoom, 1f);
-            treeRenderer.render(gfx, treeLayout, selectedPath, hovered);
+            treeRenderer.render(gfx, treeLayout, selectedPath, hovered,
+                    logicalLeft, logicalTop, logicalRight, logicalBottom);
             // Total-demand + leftover strip, anchored above the root in logical space so it
             // pans/zooms with the tree. Data is server-authoritative plan.materials()/leftovers()
             // — same source as the card material panel, so the two never diverge (design doc §4).
@@ -2041,6 +2046,11 @@ public final class CraftingPlanScreen extends Screen {
         if (selectedPath.isDirty()) {
             gfx.drawString(font, I18n.get("rsi.plan.status_custom"),
                     left + 6, treeViewTop + 2, 0xFF4AE04A, false);
+        }
+        if (treeModel.truncated()) {
+            int statusY = treeViewTop + 2 + (selectedPath.isDirty() ? font.lineHeight + 1 : 0);
+            gfx.drawString(font, I18n.get("rsi.plan.tree_truncated"),
+                    left + 6, statusY, 0xFFE0A040, false);
         }
 
         // Top-right toolbar: a circled "i" help icon (hover for controls) + expand/collapse-all.

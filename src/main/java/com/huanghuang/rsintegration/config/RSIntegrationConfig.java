@@ -128,6 +128,8 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH = 32;
     public static final int DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK = 16;
     public static final int DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK = 1;
+    public static final int DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = 0;
+    public static final int MAX_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = 1_000_000;
     public static final int DEFAULT_CRAFTING_MAX_GRAPH_NODES = 16_384;
     public static final int MIN_CRAFTING_MAX_GRAPH_NODES = 256;
     public static final int MAX_CRAFTING_MAX_GRAPH_NODES = 65_536;
@@ -392,6 +394,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_OPERATIONS_PER_DISPATCH;
     public static ForgeConfigSpec.IntValue CRAFTING_SETTLEMENT_STACKS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_COMPLETION_CALLBACKS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
@@ -1298,6 +1301,12 @@ public final class RSIntegrationConfig {
                         "限制完成回调及其后续批次调度，维持服务端响应。")
                 .defineInRange("craftingCompletionCallbacksPerTick",
                         DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK, 1, 32);
+        CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = s
+                .comment("纯兑换单批操作上限",
+                        "0 表示不限，按当前步骤剩余次数一次倍增并分片投递；大于 0 时限制单次虚拟兑换的配方执行次数。")
+                .defineInRange("craftingVirtualExchangeBatchLimit",
+                        DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT,
+                        0, MAX_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT);
         CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
                 .comment("并行配方节点上限",
                         "只派发不存在材料、机器或捕获冲突的节点；1 表示串行，增大可利用多台机器。")

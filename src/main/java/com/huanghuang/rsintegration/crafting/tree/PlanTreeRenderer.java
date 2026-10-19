@@ -51,6 +51,7 @@ public final class PlanTreeRenderer {
     private static final int C_MOD_LABEL       = 0xFF889988;
     private static final int C_PATH_TINT       = 0x111A3E1A;
     private static final int C_LIMITED         = 0xFFF0A040;  // over-candidate-cap badge
+    private static final int C_TRUNCATED       = 0xFFE0A040;  // hidden by display depth/node limits
     private static final int C_CAROUSEL        = 0xFF66CCEE;  // tag-input carousel indicator
     private static final int C_PREREQ_WARNING  = 0xFFFFAA33;
     private static final int C_PREREQ_BLOCKED  = 0xFFFF4444;
@@ -84,12 +85,18 @@ public final class PlanTreeRenderer {
     // ── Public entry ───────────────────────────────────────────────
 
     public void render(GuiGraphics gfx, PlanTreeLayout layout, SelectedPath path,
-                       @Nullable PlanTreeNode hovered) {
+                       @Nullable PlanTreeNode hovered, int viewportLeft, int viewportTop,
+                       int viewportRight, int viewportBottom) {
         // Connectors behind nodes.
         for (PlanTreeLayout.Box box : layout.boxes()) {
-            drawConnectors(gfx, layout, box, path);
+            drawConnectors(gfx, layout, box, path,
+                    viewportLeft, viewportTop, viewportRight, viewportBottom);
         }
         for (PlanTreeLayout.Box box : layout.boxes()) {
+            if (!intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
+                    box.x() - 8, box.y() - 4, box.x() + box.w() + 4, box.y() + box.h() + 8)) {
+                continue;
+            }
             drawNode(gfx, box, path, box.node() == hovered);
         }
     }
@@ -97,19 +104,17 @@ public final class PlanTreeRenderer {
     // ── Connectors with batch labels ───────────────────────────────
 
     private void drawConnectors(GuiGraphics gfx, PlanTreeLayout layout,
-                                 PlanTreeLayout.Box parent, SelectedPath path) {
+                                 PlanTreeLayout.Box parent, SelectedPath path,
+                                 int viewportLeft, int viewportTop,
+                                 int viewportRight, int viewportBottom) {
         PlanTreeNode node = parent.node();
         if (!node.expanded || node.children.isEmpty()) return;
 
         int parentBottomY = parent.bottom();
         int busY = parentBottomY + PlanTreeLayout.LEVEL_GAP / 2;
-        int dirtyColor = path.isDirty() ? C_CONNECTOR_DIRTY : C_CONNECTOR;
-
-        // Vertical stub from parent bottom down to horizontal bus.
-        vLine(gfx, parent.itemCenterX(), parentBottomY, busY, dirtyColor);
-
         int minX = parent.itemCenterX();
         int maxX = parent.itemCenterX();
+        int maxY = busY;
         boolean anyChild = false;
         for (PlanTreeNode child : node.children) {
             PlanTreeLayout.Box cb = layout.boxFor(child);
@@ -117,9 +122,21 @@ public final class PlanTreeRenderer {
             anyChild = true;
             minX = Math.min(minX, cb.itemCenterX());
             maxX = Math.max(maxX, cb.itemCenterX());
+            maxY = Math.max(maxY, cb.y());
+        }
+        if (!anyChild || !intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
+                minX - LINE_THICKNESS, parentBottomY, maxX + LINE_THICKNESS + 1, maxY + 1)) {
+            return;
+        }
+
+        int dirtyColor = path.isDirty() ? C_CONNECTOR_DIRTY : C_CONNECTOR;
+        // Vertical stub from parent bottom down to horizontal bus.
+        vLine(gfx, parent.itemCenterX(), parentBottomY, busY, dirtyColor);
+        for (PlanTreeNode child : node.children) {
+            PlanTreeLayout.Box cb = layout.boxFor(child);
+            if (cb == null) continue;
             vLine(gfx, cb.itemCenterX(), busY, cb.y(), dirtyColor);
         }
-        if (!anyChild) return;
 
         // Horizontal bus.
         if (maxX > minX) {
@@ -138,6 +155,13 @@ public final class PlanTreeRenderer {
         if (x2 <= x1) return;
         int half = LINE_THICKNESS / 2;
         gfx.fill(x1, cy - half, x2, cy - half + LINE_THICKNESS, color);
+    }
+
+    static boolean intersectsViewport(int viewportLeft, int viewportTop,
+                                      int viewportRight, int viewportBottom,
+                                      int left, int top, int right, int bottom) {
+        return right > viewportLeft && left < viewportRight
+                && bottom > viewportTop && top < viewportBottom;
     }
 
     // ── Node drawing ───────────────────────────────────────────────
@@ -214,6 +238,9 @@ public final class PlanTreeRenderer {
         // 6b. Limited badge — node hides extra alternatives beyond the candidate cap.
         if (node.limited) {
             drawLimitedBadge(gfx, x + w - 6, y - 1);
+        }
+        if (node.viewTruncated) {
+            drawViewTruncatedBadge(gfx, x + w - 6, y + h - 1);
         }
         if (!node.warnings.isEmpty() || node.prerequisiteBlocked) {
             drawPrerequisiteBadge(gfx, x + w - PlanTreeLayout.ITEM_ICON_SIZE / 2,
@@ -339,6 +366,13 @@ public final class PlanTreeRenderer {
     private static void drawLimitedBadge(GuiGraphics gfx, int cornerX, int topY) {
         for (int i = 0; i < 5; i++) {
             gfx.fill(cornerX - i, topY + i, cornerX + 5 - i, topY + i + 1, C_LIMITED);
+        }
+    }
+
+    /** Orange corner triangle marking children hidden by the client tree display limits. */
+    private static void drawViewTruncatedBadge(GuiGraphics gfx, int cornerX, int bottomY) {
+        for (int i = 0; i < 5; i++) {
+            gfx.fill(cornerX - i, bottomY - i, cornerX + 5 - i, bottomY - i + 1, C_TRUNCATED);
         }
     }
 

@@ -41,6 +41,17 @@ RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursiv
 - Returns outputs, containers, and unused materials where supported. Unplaceable fluids become refund vouchers; `/rsi_fluid_refund` restores vouchers held after an inventory-full or offline event.
 - Shows progress with `P`; cancel from the progress screen or with `/rsi cancel`.
 
+### Workbench-style instant batching
+
+| Category | Current integrations | Execution boundary |
+|---|---|---|
+| Stable vanilla batches | Shaped/shapeless crafting and stonecutter recipes | Uses real `assemble/getRemainingItems`; one operation represents the remaining stable executions, with results split at `Integer.MAX_VALUE` |
+| Bounded instant machines | Apotheosis Fletching/Gem Cutting, Iron's Spellbooks Scroll Forge/Arcane Anvil, Apprentice Codex Spellcaster Workbench, ISS CSW Spell Forge, Eidolon Worktable, Biomancy Bio-Forge, eligible Avaritia compressed/extreme tables, and Malum Runic Workbench | No native processing tick; at most 64 executions per batch |
+| Multiplicative pure exchange | Farming for Blockheads Market | One operation can represent every remaining exchange; `craftingVirtualExchangeBatchLimit=0` adds no extra cap, while a positive value bounds each batch |
+| Logical recipe families | RSI fluid-container conversion, SlashBlade workbench recipes, Lychee item-inside recipes, Immortaler's Delight Hot Spring, and Malum Void Favor | No continuously running physical machine is required; multiplication depends on the matching delegate and recipe stability |
+
+Products beyond one `ItemStack.getCount()` are emitted as multiple real stacks instead of being silently saturated or discarded.
+
 ### Machine access
 
 - Bind machines with a Network Linker, `Alt` + right-click, or `;` to scan nearby machines; broken links are cleaned up automatically.

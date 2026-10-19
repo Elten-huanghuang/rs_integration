@@ -41,6 +41,17 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 - 支持时返还产物、容器和未用完材料；无法放入网络的流体会转为退款物品，背包满或离线后可用 `/rsi_fluid_refund` 领取。
 - 按 `P` 查看进度，可在进度界面或输入 `/rsi cancel` 取消合成链。
 
+### 工作台式即时批量
+
+| 类别 | 当前接入 | 执行边界 |
+|---|---|---|
+| 原版稳定批处理 | 工作台的有序/无序配方、切石机配方 | 真实执行 `assemble/getRemainingItems`；稳定配方一次代表剩余执行次数，结果按 `Integer.MAX_VALUE` 分片 |
+| 有界即时机器 | Apotheosis 制箭台/宝石切割台、Iron's Spellbooks 卷轴撰写台/奥术铁砧、Apprentice Codex 施法者工作台、ISS CSW 法术锻炉、Eidolon 工作台、Biomancy 生物锻炉、符合条件的 Avaritia 压缩/极限工作台、Malum 符文工作台 | 无原生加工 tick，单批最多 64 次，超过后继续下一批 |
+| 纯兑换倍增 | Farming for Blockheads 市场 | 一个操作可代表剩余兑换次数；`craftingVirtualExchangeBatchLimit=0` 时不额外限制，非零值才设置批上限 |
+| 纯逻辑配方 | RSI 流体容器转换、SlashBlade 工作台配方、Lychee 物品浸泡、Immortaler's Delight 温泉、Malum 虚空恩惠 | 不要求物理机器持续运行；是否倍增取决于对应委托与配方稳定性 |
+
+超过单个 `ItemStack.getCount()` 上限的产物会拆成多个真实堆叠，不会静默饱和或丢弃。
+
 ### 机器远程访问
 
 - 使用网络连接器、`Alt` + 右键或 `;` 附近扫描绑定机器；机器拆除后自动清理失效绑定。

@@ -657,6 +657,7 @@
   "rsi.plan.confirm_branches": "Apply & Start",
   "rsi.plan.status_default": "Default path — ready to execute",
   "rsi.plan.status_custom": "Custom branches — will execute selected path",
+  "rsi.plan.tree_truncated": "Tree view truncated at display limits",
   "rsi.plan.branches_pending": "%s branch(es) pending",
   "rsi.plan.expand_all": "Expand All",
   "rsi.plan.collapse_all": "Collapse All",

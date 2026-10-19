@@ -159,4 +159,40 @@ class PlanTreeModelLegacyTest extends BootstrapTest {
         assertTrue(treeRoot.children.stream().noneMatch(node -> node.step != null
                 && node.step.recipeId().equals(unrelatedId)));
     }
+
+    @Test
+    void configuredDepthLimitMarksTheLastExpandedNodeAsTruncated() {
+        PlanStep nugget = new PlanStep(new ResourceLocation("test", "nugget"),
+                new ItemStack(Items.IRON_NUGGET), 1, List.of(new ItemStack(Items.IRON_INGOT)));
+        PlanStep target = new PlanStep(new ResourceLocation("test", "target"),
+                new ItemStack(Items.DIAMOND), 1, List.of(new ItemStack(Items.IRON_NUGGET)));
+        PlanResponse plan = new PlanResponse(true, "Diamond", target.output(),
+                List.of(nugget, target), Map.of(), List.of(), target.recipeId().toString());
+
+        PlanTreeModel tree = PlanTreeModel.from(plan, 1, 16);
+
+        assertTrue(tree.truncated());
+        assertEquals(1, tree.root.children.size());
+        PlanTreeNode visibleChild = tree.root.children.get(0);
+        assertEquals(1, visibleChild.depth);
+        assertTrue(visibleChild.viewTruncated);
+        assertTrue(visibleChild.children.isEmpty());
+    }
+
+    @Test
+    void configuredNodeLimitStopsAtTheBudgetWithoutChangingThePlan() {
+        PlanStep nugget = new PlanStep(new ResourceLocation("test", "nugget"),
+                new ItemStack(Items.IRON_NUGGET), 1, List.of(new ItemStack(Items.IRON_INGOT)));
+        PlanStep target = new PlanStep(new ResourceLocation("test", "target"),
+                new ItemStack(Items.DIAMOND), 1, List.of(new ItemStack(Items.IRON_NUGGET)));
+        PlanResponse plan = new PlanResponse(true, "Diamond", target.output(),
+                List.of(nugget, target), Map.of(), List.of(), target.recipeId().toString());
+
+        PlanTreeModel tree = PlanTreeModel.from(plan, 8, 2);
+
+        assertTrue(tree.truncated());
+        assertEquals(1, tree.root.children.size());
+        assertTrue(tree.root.children.get(0).viewTruncated);
+        assertTrue(tree.root.children.get(0).children.isEmpty());
+    }
 }
