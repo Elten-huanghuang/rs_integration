@@ -519,7 +519,6 @@ public final class PlanTreeModel {
         // 共享步骤保留各分支的需求引用，但与图模式一样只展开一次生产成本。
         if (!expandedSteps.add(parentStep)) return;
         int parentBatches = Math.max(1, parentStep.batches());
-        parent.batches = parentBatches;
         // Merge same-item inputs (e.g. the nine gold-ingot slots of a 3×3 recipe) into one
         // entry, summing counts — the tree shows "gold ingot ×9", not nine "×1" nodes.
         // Empty grid slots carry no ingredient and are skipped.

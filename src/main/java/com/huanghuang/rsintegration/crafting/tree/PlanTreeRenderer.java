@@ -20,7 +20,7 @@ import javax.annotation.Nullable;
  *   <li>Emerald palette with depth-differentiated fill colors</li>
  *   <li>Selected (green glow) branch styling</li>
  *   <li>Mod-type color dot below each node</li>
- *   <li>Batch count label on parent→child connector lines</li>
+ *   <li>Single material quantity label under each node</li>
  *   <li>Leaf availability coloring (green/orange/red border)</li>
  * </ul>
  */
@@ -126,16 +126,6 @@ public final class PlanTreeRenderer {
             hLine(gfx, minX, maxX, busY, dirtyColor);
         }
 
-        // Batch label: "×{batches}" centered on vertical stub.
-        if (node.batches > 1) {
-            String label = "×" + node.batches;
-            int lw = font.width(label);
-            int lx = parent.itemCenterX() - lw / 2;
-            // 次数标记靠近横向连线，避开节点下方的数量和机器名称。
-            int ly = busY - font.lineHeight - 2;
-            gfx.fill(lx - 4, ly - 1, lx + lw + 4, ly + font.lineHeight + 1, C_COUNT_BACKDROP);
-            gfx.drawString(font, label, lx, ly, C_COUNT_TEXT, false);
-        }
     }
 
     private static void vLine(GuiGraphics gfx, int cx, int y1, int y2, int color) {

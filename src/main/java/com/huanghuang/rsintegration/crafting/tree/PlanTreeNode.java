@@ -44,7 +44,6 @@ public final class PlanTreeNode {
 
     // ---- interaction state (preserved across tree rebuilds) ----
     public boolean expanded = true;
-    public int batches = 1;
 
     // ---- availability (from PlanResponse.materials) ----
     public int available;
