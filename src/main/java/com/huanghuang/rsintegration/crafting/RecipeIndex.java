@@ -29,6 +29,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
+import javax.annotation.Nullable;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -323,6 +324,7 @@ public final class RecipeIndex {
                 session.captureNanos / 1_000_000L, result.finalizeNanos / 1_000_000L,
                 session.skippedUnknown, session.skippedEmptyResult, session.skippedIdentity,
                 session.timing.slowestRecipe, session.timing.slowestRecipeNanos / 1_000_000L);
+        RecipeIndexDiagnostics.summarize("catalog_ready");
         if (!session.unknownRecipeTypes.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RecipeCatalog] unsupported native recipe types: {}",
                     summarizeUnknownRecipeTypes(session.unknownRecipeTypes));
@@ -368,6 +370,8 @@ public final class RecipeIndex {
         long captureNanos;
         Iterator<Entry> scrollEntries = Collections.emptyIterator();
         Iterator<Item> outputItems = Collections.emptyIterator();
+        @Nullable
+        VanillaBrewingCatalog.IncrementalIndex brewingIndex;
         CompletableFuture<BuildResult> finalized;
 
         BuildSession(Level level, long epoch) {
@@ -408,7 +412,10 @@ public final class RecipeIndex {
                         unit = recipe.getId().toString();
                         IndexOutcome outcome = indexRecipe(level, index, seen, projected,
                                 catalystOutputs, catalystRecipes, catalystRoutes, timing, recipe);
-                        timing.recordRecipe(recipe, System.nanoTime() - unitStarted);
+                        long recipeElapsed = System.nanoTime() - unitStarted;
+                        timing.recordRecipe(recipe, recipeElapsed);
+                        RecipeIndexDiagnostics.record("recipe_index", recipeElapsed,
+                                recipe.getId(), recipe.getType(), recipe.getClass(), -1, -1);
                         if (outcome == IndexOutcome.UNKNOWN) {
                             skippedUnknown++;
                             recordUnknownRecipeType(unknownRecipeTypes, recipe);
@@ -416,24 +423,36 @@ public final class RecipeIndex {
                         else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
                     }
                     case SOURCES -> {
-                        unit = "source " + sourceStep;
-                        switch (sourceStep++) {
-                            case 0 -> indexFARituals(level, index, seen);
-                            case 1 -> indexMarketEntries(index, seen);
-                            case 2 -> indexGemCutting(level, index, seen);
-                            case 3 -> indexIronSpellBooks(level, index, seen);
-                            case 4 -> indexDistantWorldsFiron(index, seen);
-                            case 5 -> indexPmmoSalvage(index, seen);
-                            case 6 -> VanillaBrewingCatalog.index(level, index, seen, projected);
-                            case 7 -> FluidContainerCatalog.index(level, index, seen, projected);
-                            default -> {
-                                if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
-                                    Item scroll = ForgeRegistries.ITEMS.getValue(
-                                            new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
-                                    scrollEntries = index.getOrDefault(scroll, List.of()).iterator();
-                                }
-                                phase = BuildPhase.SPELL_SCROLLS;
+                        if (brewingIndex != null) {
+                            unit = "vanilla brewing";
+                            if (brewingIndex.advance(() -> nanoTime.getAsLong() >= deadline)) {
+                                VanillaBrewingCatalog.projectIndexedDefinitions(projected);
+                                brewingIndex = null;
+                                sourceStep++;
                             }
+                        } else if (sourceStep >= 8) {
+                            if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) {
+                                Item scroll = ForgeRegistries.ITEMS.getValue(
+                                        new ResourceLocation(ModIds.IRONS_SPELLBOOKS, "scroll"));
+                                scrollEntries = index.getOrDefault(scroll, List.of()).iterator();
+                            }
+                            phase = BuildPhase.SPELL_SCROLLS;
+                        } else {
+                            int activeSource = sourceStep;
+                            unit = "source " + activeSource;
+                            switch (activeSource) {
+                                case 0 -> indexFARituals(level, index, seen);
+                                case 1 -> indexMarketEntries(index, seen);
+                                case 2 -> indexGemCutting(level, index, seen);
+                                case 3 -> indexIronSpellBooks(level, index, seen);
+                                case 4 -> indexDistantWorldsFiron(index, seen);
+                                case 5 -> indexPmmoSalvage(index, seen);
+                                case 6 -> brewingIndex =
+                                        VanillaBrewingCatalog.incrementalIndex(level, index, seen);
+                                case 7 -> FluidContainerCatalog.index(level, index, seen, projected);
+                                default -> { }
+                            }
+                            if (activeSource != 6) sourceStep++;
                         }
                     }
                     case SPELL_SCROLLS -> {
@@ -737,6 +756,7 @@ public final class RecipeIndex {
         if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
                 || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
         Collection<IronSpellBooksRecipe> recipes;
+        long catalogStarted = System.nanoTime();
         try {
             recipes = IronSpellBooksRecipeCatalog.allRecipes(level);
         } catch (RuntimeException | LinkageError failure) {
@@ -744,8 +764,12 @@ public final class RecipeIndex {
                     "[RecipeCatalog] Iron spell dynamic source unavailable; retaining other recipe sources", failure);
             return 0;
         }
+        RecipeIndexDiagnostics.record("iron_spell_catalog",
+                System.nanoTime() - catalogStarted, "<catalog>", "all",
+                IronSpellBooksRecipeCatalog.class, 0, recipes.size());
         int count = 0;
         for (var recipe : recipes) {
+            long recipeStarted = System.nanoTime();
             if (!seen.add(recipe.getId())) continue;
             ItemStack output = recipe.getResultItem(level.registryAccess());
             if (output.isEmpty()) continue;
@@ -759,6 +783,9 @@ public final class RecipeIndex {
                     recipe, ModType.byId(typeId), new ResourceLocation("irons_spellbooks",
                     machinePath), true));
             count++;
+            RecipeIndexDiagnostics.record("iron_spell_recipe",
+                    System.nanoTime() - recipeStarted, recipe.getId(), recipe.machine(),
+                    recipe.getClass(), recipe.getIngredients().size(), idx.size());
         }
         return count;
     }
@@ -1099,6 +1126,8 @@ public final class RecipeIndex {
             IronSpellBooksRecipeCatalog.invalidate();
         }
         FluidContainerCatalog.invalidate();
+        VanillaBrewingCatalog.invalidate();
+        RecipeIndexDiagnostics.reset();
         ImmutableRecipeGraphProjector.clearCache();
         GenericCraftPacket.clearPlanCache();
     }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.RecipeIndexDiagnostics;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -57,7 +58,11 @@ public final class FluidContainerCatalog {
         for (List<RecipeIndex.Entry> entries : index.values()) {
             for (RecipeIndex.Entry entry : entries) recipes.add(entry.recipe());
         }
+        long scanStarted = System.nanoTime();
         List<FluidContainerRecipe> definitions = build(level, recipes);
+        RecipeIndexDiagnostics.record("fluid_container_scan",
+                System.nanoTime() - scanStarted, "<catalog>", "container",
+                FluidContainerCatalog.class, recipes.size(), definitions.size());
         CATALOGS.put(level.getRecipeManager(), definitions);
         publish(definitions, index, seen, projected);
     }

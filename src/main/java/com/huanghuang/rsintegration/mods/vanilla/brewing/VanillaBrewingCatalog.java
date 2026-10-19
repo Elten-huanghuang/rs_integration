@@ -57,7 +57,7 @@ public final class VanillaBrewingCatalog {
             Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
         IncrementalIndex build = incrementalIndex(level, index, seen);
         while (!build.advance(() -> false)) { }
-        if (projected != null) projectDefinitions(projected);
+        if (projected != null) projectIndexedDefinitions(projected);
         return build.indexedCount();
     }
 
@@ -65,6 +65,15 @@ public final class VanillaBrewingCatalog {
             Level level, Map<Item, List<RecipeIndex.Entry>> index,
             Set<ResourceLocation> seen) {
         return new IncrementalIndex(index, seen, inputCandidates(), itemCandidates());
+    }
+
+    public static synchronized void projectIndexedDefinitions(
+            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
+        projectDefinitions(projected);
+    }
+
+    public static synchronized void invalidate() {
+        BY_ID.clear();
     }
 
     /** Splits registry probing into resumable units while retaining main-thread access. */

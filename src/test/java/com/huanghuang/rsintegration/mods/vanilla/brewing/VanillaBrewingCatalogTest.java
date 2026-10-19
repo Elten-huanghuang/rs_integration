@@ -52,7 +52,8 @@ class VanillaBrewingCatalogTest extends BootstrapTest {
         VanillaBrewingCatalog.IncrementalIndex build = new VanillaBrewingCatalog.IncrementalIndex(
                 index, new HashSet<>(), List.of(input), List.of(reagent),
                 List.of(brokenInput, brokenIngredient, brokenOutput, valid));
-        while (!build.advance(() -> false)) { }
+        assertFalse(build.advance(() -> true));
+        while (!build.advance(() -> true)) { }
 
         assertTrue(index.containsKey(Items.SPLASH_POTION));
         assertFalse(index.getOrDefault(Items.SPLASH_POTION, List.of()).isEmpty());
