@@ -4,6 +4,7 @@ import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
@@ -70,7 +71,7 @@ public final class ModType {
 
         FLUID_CONTAINER = registerVirtual("fluid_container",
                 new String[]{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"},
-                GenericBatchDelegate::new);
+                HandlerVirtualExchangeBatchDelegate::new);
         FLUID_CONTAINER.confirmGraphExecution("液体容器转换仅消耗账本材料并返回确定产物");
         configureJei("fluid_container", new String[][]{{"rs_integration:fluid_container"}},
                 new String[][]{{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"}},

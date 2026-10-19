@@ -89,4 +89,15 @@ public record BatchConcurrencyCapabilities(
                 PreparationContract.RETRY_SAFE,
                 List.of());
     }
+
+    /** 无物理机器、无世界副作用的纯账本事务。 */
+    public static BatchConcurrencyCapabilities virtualTransaction() {
+        return new BatchConcurrencyCapabilities(
+                MaterialOwnership.CHAIN_RESERVED,
+                OutputOwnership.DELEGATE_RESULT,
+                CleanupContract.SEPARABLE_OFFLINE,
+                SideEffects.NONE,
+                PreparationContract.RETRY_SAFE,
+                List.of());
+    }
 }

@@ -5,8 +5,10 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -34,6 +36,11 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
     private boolean resultInserted;
     private int preparedExecutions = 1;
     private final List<ItemStack> pendingResults = new ArrayList<>();
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.virtualTransaction();
+    }
 
     /** 校验绑定方块或全局访问条件；通过后本次委托才允许兑换。 */
     protected abstract boolean validateExchangeAccess(
@@ -93,13 +100,14 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (exchangeRecipe == null) return null;
-        return requiredMaterials(exchangeRecipe.costItems(), 1);
+        return scaledIngredientSpecs(exchangeRecipe.costSpecs(), 1);
     }
 
     @Override
     public List<IngredientSpec> getFlatBatchRequiredMaterials(int executions) {
         if (exchangeRecipe == null) return null;
-        return requiredMaterials(exchangeRecipe.costItems(), Math.max(1, executions));
+        return scaledIngredientSpecs(
+                exchangeRecipe.costSpecs(), Math.max(1, executions));
     }
 
     @Override
@@ -111,18 +119,31 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         }
         if (!hasStorageAccess()) return false;
 
-        List<ItemStack> extractedCosts = new ArrayList<>();
-        for (ItemStack cost : scaledStacks(exchangeRecipe.costItems(), preparedExecutions)) {
-            ItemStack extracted = extractExactFromStorage(player, cost, cost.getCount(), false);
-            if (extracted.isEmpty() || extracted.getCount() != cost.getCount()) {
-                refundDirectExtractions(player, extractedCosts, extracted);
+        ExtractionLedger directLedger = new ExtractionLedger();
+        directLedger.setStorageEndpoint(storageEndpoint());
+        this.ledger = directLedger;
+        List<ItemStack> reusableInputs = new ArrayList<>();
+        for (IngredientSpec spec : exchangeRecipe.costSpecs()) {
+            if (spec.isEmpty()) continue;
+            int amount = CraftPacketUtils.requiredCount(spec, preparedExecutions);
+            ItemStack extracted = directLedger.reserve(
+                    spec.ingredient(), amount, storageEndpoint(), player, null, null);
+            if (extracted.isEmpty() || extracted.getCount() != amount) {
+                directLedger.rollback(player);
                 return false;
             }
-            extractedCosts.add(extracted);
+            if (spec.role() == DemandRole.CATALYST) {
+                reusableInputs.add(extracted.copy());
+            }
+        }
+        if (!directLedger.commitToEndpoint(storageEndpoint(), player)) {
+            directLedger.rollback(player);
+            return false;
         }
 
-        List<ItemStack> results = scaledStacks(
-                exchangeRecipe.resultItems(player.serverLevel().registryAccess()), preparedExecutions);
+        List<ItemStack> results = collectScaledResults(
+                player.serverLevel().registryAccess(), preparedExecutions);
+        results.addAll(reusableInputs);
         for (ItemStack result : results) {
             ItemStack remainder = insertIntoStorage(player, result, false);
             if (!remainder.isEmpty()) PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
@@ -138,7 +159,7 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         useSharedLedger(sharedLedger);
         if (!hasStorageAccess() || exchangeRecipe == null) return false;
         if (!sharedLedger.commitToEndpoint(storageEndpoint(), player)) return false;
-        preparePendingResults();
+        preparePendingResults(List.of());
         done = true;
         return true;
     }
@@ -150,25 +171,35 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         useSharedLedger(sharedLedger);
         if (!hasStorageAccess() || exchangeRecipe == null) return false;
         if (!sharedLedger.commitToEndpoint(storageEndpoint(), player)) return false;
-        preparePendingResults();
+        preparePendingResults(materials);
         done = true;
         return true;
     }
 
-    private void preparePendingResults() {
+    private void preparePendingResults(List<ItemStack> materials) {
         if (player == null || exchangeRecipe == null) return;
         pendingResults.clear();
-        pendingResults.addAll(scaledStacks(
-                exchangeRecipe.resultItems(player.serverLevel().registryAccess()), preparedExecutions));
+        pendingResults.addAll(collectScaledResults(
+                player.serverLevel().registryAccess(), preparedExecutions));
+        List<IngredientSpec> specs = scaledIngredientSpecs(
+                exchangeRecipe.costSpecs(), preparedExecutions);
+        for (int index = 0; index < specs.size() && index < materials.size(); index++) {
+            IngredientSpec spec = specs.get(index);
+            ItemStack material = materials.get(index);
+            if (spec.role() == DemandRole.CATALYST
+                    && material != null && !material.isEmpty()) {
+                pendingResults.add(material.copy());
+            }
+        }
     }
 
-    private void refundDirectExtractions(ServerPlayer player, List<ItemStack> extractedCosts,
-                                         ItemStack partial) {
-        if (partial != null && !partial.isEmpty()) extractedCosts.add(partial);
-        for (ItemStack cost : extractedCosts) {
-            ItemStack remainder = insertIntoStorage(player, cost, false);
-            if (!remainder.isEmpty()) PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
-        }
+    private List<ItemStack> collectScaledResults(RegistryAccess access, int executions) {
+        List<ItemStack> results = new ArrayList<>();
+        results.addAll(scaledStacks(
+                exchangeRecipe.resultItems(access), executions));
+        results.addAll(scaledStacks(
+                exchangeRecipe.secondaryItems(access), executions));
+        return results;
     }
 
     @Override
@@ -219,7 +250,12 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         if (exchangeRecipe == null) return bounded;
         List<ItemStack> results = player == null ? List.of()
                 : exchangeRecipe.resultItems(player.serverLevel().registryAccess());
-        return safeExecutions(bounded, exchangeRecipe.costItems(), results);
+        List<ItemStack> secondary = player == null ? List.of()
+                : exchangeRecipe.secondaryItems(player.serverLevel().registryAccess());
+        List<ItemStack> allResults = new ArrayList<>(results.size() + secondary.size());
+        allResults.addAll(results);
+        allResults.addAll(secondary);
+        return safeExecutionsForSpecs(bounded, exchangeRecipe.costSpecs(), allResults);
     }
 
     @Override
@@ -239,14 +275,30 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
     }
 
     static int safeExecutions(int requested, List<ItemStack> costs, List<ItemStack> results) {
+        List<IngredientSpec> specs = costs == null ? List.of()
+                : costs.stream()
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(stack -> new IngredientSpec(
+                        Ingredient.of(stack.copyWithCount(1)), stack.getCount()))
+                .toList();
+        return safeExecutionsForSpecs(requested, specs, results);
+    }
+
+    static int safeExecutionsForSpecs(int requested, List<IngredientSpec> costs,
+                                      List<ItemStack> results) {
         int safe = Math.max(1, requested);
-        for (ItemStack stack : costs) {
-            if (stack == null || stack.isEmpty()) continue;
-            safe = Math.min(safe, Math.max(1, Integer.MAX_VALUE / stack.getCount()));
+        if (costs != null) {
+            for (IngredientSpec spec : costs) {
+                if (spec == null || spec.isEmpty()
+                        || spec.role() == DemandRole.CATALYST) continue;
+                safe = Math.min(safe, Math.max(1, Integer.MAX_VALUE / spec.count()));
+            }
         }
-        for (ItemStack stack : results) {
-            if (stack == null || stack.isEmpty()) continue;
-            safe = Math.min(safe, Math.max(1, Integer.MAX_VALUE / stack.getCount()));
+        if (results != null) {
+            for (ItemStack stack : results) {
+                if (stack == null || stack.isEmpty()) continue;
+                safe = Math.min(safe, Math.max(1, Integer.MAX_VALUE / stack.getCount()));
+            }
         }
         return safe;
     }
@@ -261,13 +313,24 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
 
     static List<IngredientSpec> requiredMaterials(List<ItemStack> perOperation, int executions) {
         if (perOperation == null || perOperation.isEmpty() || executions <= 0) return List.of();
+        return scaledIngredientSpecs(perOperation.stream()
+                .filter(stack -> stack != null && !stack.isEmpty())
+                .map(stack -> new IngredientSpec(
+                        Ingredient.of(stack.copyWithCount(1)), stack.getCount()))
+                .toList(), executions);
+    }
+
+    static List<IngredientSpec> scaledIngredientSpecs(
+            List<IngredientSpec> perOperation, int executions) {
+        if (perOperation == null || perOperation.isEmpty() || executions <= 0) return List.of();
         List<IngredientSpec> result = new ArrayList<>();
-        for (ItemStack stack : perOperation) {
-            if (stack == null || stack.isEmpty()) continue;
-            long total = (long) stack.getCount() * executions;
+        for (IngredientSpec spec : perOperation) {
+            if (spec == null || spec.isEmpty()) continue;
+            long total = spec.role() == DemandRole.CATALYST
+                    ? spec.count() : (long) spec.count() * executions;
             while (total > 0L) {
                 int chunk = (int) Math.min(Integer.MAX_VALUE, total);
-                result.add(new IngredientSpec(Ingredient.of(stack.copyWithCount(1)), chunk));
+                result.add(new IngredientSpec(spec.ingredient(), chunk, spec.role()));
                 total -= chunk;
             }
         }

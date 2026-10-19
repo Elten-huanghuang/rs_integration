@@ -29,6 +29,11 @@ public final class MarketRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.ledgerTransactionPolicy();
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return ((MarketRecipeWrapper) recipe).getResultItem(access);
     }

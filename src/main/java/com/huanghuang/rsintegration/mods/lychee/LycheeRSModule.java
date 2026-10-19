@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.lychee;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -28,7 +28,7 @@ public final class LycheeRSModule implements IModIntegration {
     public void registerModType() {
         ModType.registerVirtual(TYPE_ID,
                 new String[]{"snownee.lychee.item_inside.ItemInsideRecipe"},
-                GenericBatchDelegate::new);
+                HandlerVirtualExchangeBatchDelegate::new);
         ModType.register(BLOCK_INTERACTING_TYPE_ID,
                 new String[]{"snownee.lychee.interaction.BlockInteractingRecipe"},
                 new String[]{"hydraulic_press"}, new String[0],

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
 import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilityService;
@@ -37,6 +38,11 @@ public final class MalumVoidFavorVirtualRecipeHandler implements ModRecipeHandle
     @Override
     public boolean cacheByRecipeClass() {
         return false;
+    }
+
+    @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.ledgerTransactionPolicy();
     }
 
     @Override

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmingforblockheads;
 
 import com.huanghuang.rsintegration.crafting.batch.VirtualExchangeRecipe;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -34,8 +35,8 @@ public final class MarketRecipeWrapper implements Recipe<Container>, VirtualExch
     public ItemStack costItem() { return cost.copy(); }
 
     @Override
-    public List<ItemStack> costItems() {
-        return List.of(cost.copy());
+    public List<IngredientSpec> costSpecs() {
+        return List.of(new IngredientSpec(Ingredient.of(cost.copy()), cost.getCount()));
     }
 
     @Override

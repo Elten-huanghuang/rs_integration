@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -61,6 +62,11 @@ public final class LycheeVirtualRecipeHandler implements ModRecipeHandler {
     @Override
     public boolean preferHandlerIngredients() {
         return true;
+    }
+
+    @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.ledgerTransactionPolicy();
     }
 
     @Override

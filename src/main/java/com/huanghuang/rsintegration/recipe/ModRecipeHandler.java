@@ -150,6 +150,17 @@ public interface ModRecipeHandler {
     }
 
     /**
+     * 显式声明即时配方的安全批量语义。
+     *
+     * <p>默认逐次执行。直接账本结算要求处理器已完整描述成本、产物、
+     * 副产物和材料角色；需要真实装配副作用的配方应使用有限模拟批。</p>
+     */
+    @Nonnull
+    default InstantRecipePolicy instantRecipePolicy(@Nonnull Recipe<?> recipe) {
+        return InstantRecipePolicy.none();
+    }
+
+    /**
      * Whether the JEI stack clicked by the player selects a concrete output
      * variant that cannot be recovered from the recipe's declared result alone.
      */

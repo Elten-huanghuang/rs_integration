@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -271,6 +272,49 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void prepareGraphBatch(int executions) {
         this.preparedGraphExecutions = Math.max(1, executions);
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (remainingOperations <= 0) {
+            preparedGraphExecutions = 1;
+            return 0;
+        }
+        InstantRecipePolicy policy = simulatedInstantPolicy();
+        preparedGraphExecutions = policy.enabled()
+                ? policy.limit(remainingOperations) : 1;
+        return preparedGraphExecutions;
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        InstantRecipePolicy policy = simulatedInstantPolicy();
+        if (!policy.enabled()) return Math.max(1, configuredLimit);
+        int policyLimit = policy.maxExecutions() == 0
+                ? Integer.MAX_VALUE : policy.maxExecutions();
+        return Math.max(Math.max(1, configuredLimit), policyLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return simulatedInstantPolicy().enabled();
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        InstantRecipePolicy policy = simulatedInstantPolicy();
+        if (!policy.enabled()) return 1;
+        return ParallelBatchSizing.boundedEvenShare(
+                Math.max(1, totalOperations), workerCount,
+                policy.limit(Math.max(1, totalOperations)));
+    }
+
+    private InstantRecipePolicy simulatedInstantPolicy() {
+        if (recipe == null) return InstantRecipePolicy.none();
+        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        if (handler == null) return InstantRecipePolicy.none();
+        InstantRecipePolicy policy = handler.instantRecipePolicy(recipe);
+        return policy.simulatedAssembly() ? policy : InstantRecipePolicy.none();
     }
 
     @Override

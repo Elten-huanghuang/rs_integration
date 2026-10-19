@@ -43,14 +43,17 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 ### 工作台式即时批量
 
-| 类别 | 当前接入 | 执行边界 |
+| 执行契约 | 当前接入 | 执行边界 |
 |---|---|---|
 | 原版稳定批处理 | 工作台的有序/无序配方、切石机配方 | 真实执行 `assemble/getRemainingItems`；稳定配方一次代表剩余执行次数，结果按 `Integer.MAX_VALUE` 分片 |
-| 有界即时机器 | Apotheosis 制箭台/宝石切割台、Iron's Spellbooks 卷轴撰写台/奥术铁砧、Apprentice Codex 施法者工作台、ISS CSW 法术锻炉、Eidolon 工作台、Biomancy 生物锻炉、符合条件的 Avaritia 压缩/极限工作台、Malum 符文工作台 | 无原生加工 tick，单批最多 64 次，超过后继续下一批 |
-| 纯兑换倍增 | Farming for Blockheads 市场 | 一个操作可代表剩余兑换次数；`craftingVirtualExchangeBatchLimit=0` 时不额外限制，非零值才设置批上限 |
-| 纯逻辑配方 | RSI 流体容器转换、SlashBlade 工作台配方、Lychee 物品浸泡、Immortaler's Delight 温泉、Malum 虚空恩惠 | 不要求物理机器持续运行；是否倍增取决于对应委托与配方稳定性 |
+| 有界真实装配 | SlashBlade 工作台配方、Apotheosis 制箭台/宝石切割台、Iron's Spellbooks 卷轴撰写台/奥术铁砧、Apprentice Codex 施法者工作台、ISS CSW 法术锻炉、Eidolon 工作台、Biomancy 生物锻炉、符合条件的 Avaritia 压缩/极限工作台、Malum 符文工作台 | 没有原生加工 tick，但仍需真实装配或机器状态；单批最多 64 次，超过后继续下一批 |
+| 直接账本结算 | RSI 流体容器转换、Lychee 确定性物品浸泡、Immortaler's Delight 温泉、Malum 虚空恩惠和 Farming for Blockheads 市场 | 处理器显式声明成本与产物确定；一个操作可代表剩余执行次数，`craftingVirtualExchangeBatchLimit=0` 时不额外限制，非零值才设置批上限 |
 
 超过单个 `ItemStack.getCount()` 上限的产物会拆成多个真实堆叠，不会静默饱和或丢弃。
+
+这些路径必须由 `InstantRecipePolicy` 显式选择；机器看起来是“秒出”并不会仅凭名称或 tick 速度被提升为直接倍增。无损催化剂和复用工具继续使用原有材料角色：每个 worker 或批次只预留一次，成功结算后原样返还。
+
+批量拆分、机器输入预载和多机器并行仍是三项独立能力。EAEP 式 `64 + 64 + 余数` 决定请求如何切片，`InputBufferContract` 决定一台实体机器能预装多少，`BatchConcurrencyCapabilities` 决定多个操作能否并发。
 
 ### 机器远程访问
 
@@ -245,6 +248,8 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `BdMagicApi` 内置 `MANA_KEY`、`SOURCE_KEY`、`SOUL_KEY`，并提供对应 `Session` 方法。
 - `BdMagicApi.registerAlias(alias, canonical)` 会把已登记的别名 Key 改写为规范 Key。
 - 别名 Key 本身仍须由所属模组注册到 BD 的 `StackKeyRegistry`；RSI 不会替别人创建 Key 类型。
+
+配方处理器通过 `InstantRecipePolicy` 描述即时执行方式：`NONE` 保持逐次执行，`LEDGER_TRANSACTION` 允许确定性的直接账本结算，`SIMULATED_ASSEMBLY` 开启有上限的真实装配批。复用输入必须继续声明为 `CATALYST` 材料角色，不能在另一套倍增逻辑里复制。
 
 ## 配置
 

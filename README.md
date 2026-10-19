@@ -43,14 +43,17 @@ RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursiv
 
 ### Workbench-style instant batching
 
-| Category | Current integrations | Execution boundary |
+| Execution contract | Current integrations | Execution boundary |
 |---|---|---|
 | Stable vanilla batches | Shaped/shapeless crafting and stonecutter recipes | Uses real `assemble/getRemainingItems`; one operation represents the remaining stable executions, with results split at `Integer.MAX_VALUE` |
-| Bounded instant machines | Apotheosis Fletching/Gem Cutting, Iron's Spellbooks Scroll Forge/Arcane Anvil, Apprentice Codex Spellcaster Workbench, ISS CSW Spell Forge, Eidolon Worktable, Biomancy Bio-Forge, eligible Avaritia compressed/extreme tables, and Malum Runic Workbench | No native processing tick; at most 64 executions per batch |
-| Multiplicative pure exchange | Farming for Blockheads Market | One operation can represent every remaining exchange; `craftingVirtualExchangeBatchLimit=0` adds no extra cap, while a positive value bounds each batch |
-| Logical recipe families | RSI fluid-container conversion, SlashBlade workbench recipes, Lychee item-inside recipes, Immortaler's Delight Hot Spring, and Malum Void Favor | No continuously running physical machine is required; multiplication depends on the matching delegate and recipe stability |
+| Bounded simulated assembly | SlashBlade workbench recipes, Apotheosis Fletching/Gem Cutting, Iron's Spellbooks Scroll Forge/Arcane Anvil, Apprentice Codex Spellcaster Workbench, ISS CSW Spell Forge, Eidolon Worktable, Biomancy Bio-Forge, eligible Avaritia compressed/extreme tables, and Malum Runic Workbench | No native processing tick, but real assembly or machine state still matters; at most 64 executions per batch |
+| Direct logical settlement | RSI fluid-container conversion, Lychee deterministic item-inside recipes, Immortaler's Delight Hot Spring, Malum Void Favor, and Farming for Blockheads Market | The handler explicitly declares deterministic costs and results. One operation can represent the remaining executions; `craftingVirtualExchangeBatchLimit=0` adds no extra cap, while a positive value bounds each batch |
 
 Products beyond one `ItemStack.getCount()` are emitted as multiple real stacks instead of being silently saturated or discarded.
+
+These contracts are selected explicitly by `InstantRecipePolicy`; an apparently instant machine is never promoted to direct multiplication by name or tick speed alone. Lossless catalysts and reusable tools use the normal material-role contract: they are reserved once per worker/batch and returned after successful settlement.
+
+Batch splitting, machine input buffering, and multi-machine parallelism remain separate capabilities. EAEP-style `64 + 64 + remainder` slicing decides how a request is divided, `InputBufferContract` decides what one physical machine can hold, and `BatchConcurrencyCapabilities` decides whether operations may run concurrently.
 
 ### Machine access
 
@@ -247,6 +250,8 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `BdMagicApi` provides `MANA_KEY`, `SOURCE_KEY`, `SOUL_KEY`, and matching `Session` methods.
 - `BdMagicApi.registerAlias(alias, canonical)` rewrites registered alias keys in BD insert/extract handlers.
 - An alias key must already be registered in BD's `StackKeyRegistry`; RSI does not create third-party key types.
+
+Recipe handlers describe instant execution through `InstantRecipePolicy`: `NONE` preserves one-at-a-time execution, `LEDGER_TRANSACTION` permits direct deterministic settlement, and `SIMULATED_ASSEMBLY` enables a bounded real-assembly batch. Reusable inputs must remain `CATALYST` material roles rather than being copied into a separate multiplication path.
 
 ## Configuration
 

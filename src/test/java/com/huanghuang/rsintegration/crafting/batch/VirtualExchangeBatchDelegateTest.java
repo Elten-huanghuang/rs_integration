@@ -1,9 +1,11 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -57,5 +59,45 @@ class VirtualExchangeBatchDelegateTest extends BootstrapTest {
         assertEquals(2, materials.size());
         assertEquals(Integer.MAX_VALUE, materials.get(0).count());
         assertEquals(Integer.MAX_VALUE, materials.get(1).count());
+    }
+
+    @Test
+    void reusableCatalystIsReservedOnceAndConsumedMaterialsAreScaled() {
+        List<IngredientSpec> scaled = VirtualExchangeBatchDelegate.scaledIngredientSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.DIAMOND), 2),
+                new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)
+        ), 64);
+
+        assertEquals(2, scaled.size());
+        assertEquals(128, scaled.get(0).count());
+        assertEquals(1, scaled.get(1).count());
+        assertEquals(DemandRole.CATALYST, scaled.get(1).role());
+    }
+
+    @Test
+    void longFragmentationKeepsReusableMaterialRole() {
+        List<IngredientSpec> scaled = VirtualExchangeBatchDelegate.scaledIngredientSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST),
+                new IngredientSpec(Ingredient.of(Items.DIAMOND), Integer.MAX_VALUE)
+        ), 2);
+
+        assertEquals(3, scaled.size());
+        assertEquals(1, scaled.get(0).count());
+        assertEquals(DemandRole.CATALYST, scaled.get(0).role());
+        assertEquals(Integer.MAX_VALUE, scaled.get(1).count());
+        assertEquals(Integer.MAX_VALUE, scaled.get(2).count());
+    }
+
+    @Test
+    void reusableCatalystDoesNotArtificiallyShrinkTheLogicalBatch() {
+        int safe = VirtualExchangeBatchDelegate.safeExecutionsForSpecs(
+                Integer.MAX_VALUE,
+                List.of(
+                        new IngredientSpec(Ingredient.of(Items.DIAMOND), 4),
+                        new IngredientSpec(Ingredient.of(Items.BUCKET), Integer.MAX_VALUE,
+                                DemandRole.CATALYST)),
+                List.of(new ItemStack(Items.EMERALD)));
+
+        assertEquals(Integer.MAX_VALUE / 4, safe);
     }
 }

@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
@@ -49,7 +49,7 @@ public final class ImmortalersDelightRSModule implements IModIntegration {
                 "gui.rs_integration.jei.immortalers_cooler_craft");
         ModType.registerVirtual(HOT_SPRING_TYPE_ID,
                 new String[]{ImmortalersDelightHotSpringRecipeHandler.RECIPE_CLASS},
-                GenericBatchDelegate::new);
+                HandlerVirtualExchangeBatchDelegate::new);
         ModType.configureJei(HOT_SPRING_TYPE_ID,
                 new String[][]{{"immortalers_delight:hot_spring", HOT_SPRING_TYPE_ID}},
                 new String[][]{{ImmortalersDelightHotSpringRecipeHandler.RECIPE_CLASS,

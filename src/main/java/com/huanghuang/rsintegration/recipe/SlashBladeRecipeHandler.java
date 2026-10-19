@@ -34,6 +34,11 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("slashblade"); }
 
     @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.simulatedAssembly(64);
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);

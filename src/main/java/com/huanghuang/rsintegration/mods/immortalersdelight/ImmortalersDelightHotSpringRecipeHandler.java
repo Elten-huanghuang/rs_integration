@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,6 +34,11 @@ public final class ImmortalersDelightHotSpringRecipeHandler extends AbstractReci
     @Override
     public boolean preferHandlerIngredients() {
         return true;
+    }
+
+    @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.ledgerTransactionPolicy();
     }
 
     @Override

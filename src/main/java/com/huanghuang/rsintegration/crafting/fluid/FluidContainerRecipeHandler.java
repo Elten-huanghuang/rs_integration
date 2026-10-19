@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.fluid;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.ServerPlayer;
@@ -16,6 +17,9 @@ public final class FluidContainerRecipeHandler implements ModRecipeHandler {
     @Override public boolean canHandle(Recipe<?> recipe) { return recipe instanceof FluidContainerRecipe; }
     @Override public boolean preferHandlerIngredients() { return true; }
     @Override public boolean supportsBackgroundPlanning(Recipe<?> recipe) { return canHandle(recipe); }
+    @Override public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return InstantRecipePolicy.ledgerTransactionPolicy();
+    }
     @Override public boolean isAvailableForPlanning(Recipe<?> recipe, @Nullable ServerPlayer player) {
         return player == null || FluidContainerCatalog.isValid((FluidContainerRecipe) recipe);
     }
