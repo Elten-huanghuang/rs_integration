@@ -38,7 +38,8 @@ public final class PureRecipePlanner {
 
     private PureRecipePlanner() {}
 
-    public static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    public static Result resolve(ImmutableRecipeGraph graph,
+                                 Map<MaterialRef, ? extends Number> available,
                                  List<IngredientRef> roots, int maxSteps) {
         int searchBudget = (int) Math.max(MIN_SEARCH_STATES, Math.min(MAX_SEARCH_STATES,
                 (long) Math.max(1, maxSteps) * 32L));
@@ -46,43 +47,59 @@ public final class PureRecipePlanner {
                 DEFAULT_MAX_MEMOIZED_FAILURES);
     }
 
-    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates) {
         return resolve(graph, available, roots, maxSteps, maxSearchStates,
                 DEFAULT_MAX_MEMOIZED_FAILURES);
     }
 
-    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
                            List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                            int maxMemoizedFailures) {
         return resolve(graph, available, roots, maxSteps, maxSearchStates,
                 maxMemoizedFailures, Long.MAX_VALUE);
     }
 
-    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos) {
         return resolve(graph, available, roots, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, System::nanoTime);
     }
 
-    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                           int maxMemoizedFailures, long deadlineNanos,
                           LongSupplier nanoTime) {
-        return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
-                maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime));
+        return resolve(graph, available, roots, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos, nanoTime, Set.of());
     }
 
-    private static Result resolveInScope(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                          int maxMemoizedFailures, long deadlineNanos,
+                          LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs) {
+        return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
+                maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime,
+                activeRootOutputs));
+    }
+
+    private static Result resolveInScope(ImmutableRecipeGraph graph,
+                                        Map<MaterialRef, ? extends Number> available,
                                         List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                                         int maxMemoizedFailures, long deadlineNanos,
-                                        LongSupplier nanoTime) {
+                                        LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
+        Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
-                graph, available, normalizedRoots);
-        Search search = new Search(graph, available, maxSteps, maxSearchStates,
-                maxMemoizedFailures, deadlineNanos, nanoTime);
+                graph, smithingAvailability(preciseAvailable), normalizedRoots);
+        Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs);
         List<Task> pending = normalizedRoots.stream()
                 .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
@@ -105,7 +122,7 @@ public final class PureRecipePlanner {
         };
         if ((status == Status.UNRESOLVABLE || status == Status.TIME_LIMIT) && !roots.isEmpty()) {
             PartialPlanBuilder partialBuilder = new PartialPlanBuilder(
-                    graph, available, maxSteps,
+                    graph, preciseAvailable, maxSteps, activeRootOutputs,
                     status == Status.UNRESOLVABLE
                             ? search::checkBudget
                             : new DiagnosticBudget(MAX_DIAGNOSTIC_OPERATIONS));
@@ -127,7 +144,8 @@ public final class PureRecipePlanner {
                 }
             }
         }
-        Map<MaterialRef, Integer> resultStock = status == Status.SUCCESS ? search.stock : search.initialStock;
+        Map<MaterialRef, Long> resultStock = status == Status.SUCCESS
+                ? search.stock : search.initialStock;
         return new Result(Feasibility.from(status), resultSteps, missing, resultStock,
                 aggregateMagicCosts(graph, resultSteps), status,
                 search.expandedStates, search.backtracks, search.memoHits);
@@ -149,25 +167,25 @@ public final class PureRecipePlanner {
         }
     }
 
-    public record PlannedStep(ResourceLocation recipeId, int batches, MaterialRef demandedOutput) {
-        public PlannedStep(ResourceLocation recipeId, int batches) {
+    public record PlannedStep(ResourceLocation recipeId, long batches, MaterialRef demandedOutput) {
+        public PlannedStep(ResourceLocation recipeId, long batches) {
             this(recipeId, batches, null);
         }
     }
 
     public record Result(Feasibility feasibility, List<PlannedStep> steps,
-                         List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
+                         List<IngredientRef> missing, Map<MaterialRef, Long> remaining,
                          List<MagicResourceCost> magicCosts,
                          Status status, int expandedStates, int backtracks, int memoHits) {
         public Result(boolean feasible, List<PlannedStep> steps,
-                      List<IngredientRef> missing, Map<MaterialRef, Integer> remaining) {
+                      List<IngredientRef> missing, Map<MaterialRef, Long> remaining) {
             this(feasible ? Feasibility.FEASIBLE : Feasibility.INFEASIBLE,
                     steps, missing, remaining, List.of(),
                     feasible ? Status.SUCCESS : Status.UNRESOLVABLE, 0, 0, 0);
         }
 
         public Result(Feasibility feasibility, List<PlannedStep> steps,
-                      List<IngredientRef> missing, Map<MaterialRef, Integer> remaining,
+                      List<IngredientRef> missing, Map<MaterialRef, Long> remaining,
                       Status status, int expandedStates, int backtracks, int memoHits) {
             this(feasibility, steps, missing, remaining, List.of(), status,
                     expandedStates, backtracks, memoHits);
@@ -196,7 +214,18 @@ public final class PureRecipePlanner {
             RecipeNode node = graph.recipesById().get(step.recipeId());
             if (node == null) continue;
             for (MagicResourceCost cost : node.magicCosts()) {
-                long total = cost.totalFor(Math.max(1, step.batches()));
+                long total = 0L;
+                long remaining = Math.max(1L, step.batches());
+                while (remaining > 0L) {
+                    int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
+                    long partial = cost.totalFor(chunk);
+                    if (partial > Integer.MAX_VALUE - total) {
+                        total = (long) Integer.MAX_VALUE + 1L;
+                        break;
+                    }
+                    total += partial;
+                    remaining -= chunk;
+                }
                 if (total <= 0L) continue;
                 if (total > Integer.MAX_VALUE) {
                     throw new ArithmeticException(
@@ -210,22 +239,76 @@ public final class PureRecipePlanner {
     }
 
     private static long scaledInputCount(IngredientRef input, long batches) {
-        return input.role() == DemandRole.CATALYST
-                ? input.count() : (long) input.count() * batches;
+        if (input.role() == DemandRole.CATALYST) return input.count();
+        if (batches <= 0L || input.count() <= 0L) return 0L;
+        return input.count() > Long.MAX_VALUE / batches
+                ? Long.MAX_VALUE : input.count() * batches;
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        if (right <= 0L) return left;
+        return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static Map<MaterialRef, Integer> smithingAvailability(
+            Map<MaterialRef, Long> available) {
+        Map<MaterialRef, Integer> compatible = new LinkedHashMap<>(available.size());
+        available.forEach((material, count) -> compatible.put(material,
+                (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count))));
+        return compatible;
+    }
+
+    private static Map<MaterialRef, Long> longAvailability(
+            Map<MaterialRef, ? extends Number> available) {
+        Map<MaterialRef, Long> precise = new LinkedHashMap<>(available.size());
+        available.forEach((material, count) -> {
+            long value = count == null ? 0L : Math.max(0L, count.longValue());
+            precise.put(material, value);
+        });
+        return precise;
+    }
+
+    private static CandidateCycleRelation cycleRelation(
+            RecipeNode candidate, Set<MaterialRef> ancestors) {
+        boolean consumesOnlyAncestor = false;
+        List<AncestorInput> touched = null;
+        for (IngredientRef input : candidate.inputs()) {
+            if (input.role() == DemandRole.CATALYST || input.alternatives().isEmpty()) continue;
+            boolean hasOutsideAlternative = false;
+            for (MaterialRef alternative : input.alternatives()) {
+                if (!ancestors.contains(alternative)) {
+                    hasOutsideAlternative = true;
+                } else {
+                    if (touched == null) touched = new ArrayList<>();
+                    touched.add(new AncestorInput(alternative, input.count()));
+                }
+            }
+            if (!hasOutsideAlternative) consumesOnlyAncestor = true;
+        }
+        return new CandidateCycleRelation(
+                consumesOnlyAncestor, touched == null ? List.of() : touched);
     }
 
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
     private record DemandTask(IngredientRef ingredient) implements Task {}
-    private record CompleteRecipeTask(MaterialRef output, int outputCount, int consumeCount,
-                                      ResourceLocation recipeId, int batches,
+    private record CompleteRecipeTask(MaterialRef output, int outputCount, long consumeCount,
+                                      ResourceLocation recipeId, long batches,
                                       MaterialRef resolvingMaterial) implements Task {}
-    private record FailureKey(List<Task> pending, Map<MaterialRef, Integer> stock,
+    private record CandidateLookup(MaterialRef material, NbtMatchMode mode) {}
+    private record AncestorInput(MaterialRef material, long count) {}
+    private record CandidateCycleRelation(boolean consumesOnlyAncestor,
+                                          List<AncestorInput> ancestorInputs) {
+        private CandidateCycleRelation {
+            ancestorInputs = List.copyOf(ancestorInputs);
+        }
+    }
+    private record FailureKey(List<Task> pending, Map<MaterialRef, Long> stock,
                               Set<MaterialRef> resolving, int stepCount) {}
 
     private static final class Search {
         private final ImmutableRecipeGraph graph;
-        private final Map<MaterialRef, Integer> initialStock;
-        private final Map<MaterialRef, Integer> stock = new HashMap<>();
+        private final Map<MaterialRef, Long> initialStock;
+        private final Map<MaterialRef, Long> stock = new HashMap<>();
         private final int maxSteps;
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
@@ -247,6 +330,7 @@ public final class PureRecipePlanner {
          */
         private final Map<MaterialRef, Integer> producerDepthCache = new HashMap<>();
         private final Set<MaterialRef> producerDepthVisiting = new HashSet<>();
+        private final Map<CandidateLookup, List<RecipeNode>> candidateCache = new HashMap<>();
         private static final long FAMILY_COST_UNKNOWN = Long.MAX_VALUE / 4L;
         private int expandedStates;
         private int backtracks;
@@ -258,9 +342,10 @@ public final class PureRecipePlanner {
         private boolean stepLimitReached;
         private int callDepth;
 
-        private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+        private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
-                       long deadlineNanos, LongSupplier nanoTime) {
+                       long deadlineNanos, LongSupplier nanoTime,
+                       Set<MaterialRef> activeRootOutputs) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) {
@@ -270,6 +355,7 @@ public final class PureRecipePlanner {
                 }
             });
             initialStock = Map.copyOf(stock);
+            resolving.addAll(activeRootOutputs);
             this.maxSteps = Math.max(1, maxSteps);
             this.maxSearchStates = Math.max(1, maxSearchStates);
             this.maxMemoizedFailures = Math.max(0, maxMemoizedFailures);
@@ -324,7 +410,7 @@ public final class PureRecipePlanner {
             } else {
                 if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT
                         || ingredient.alternatives().stream().anyMatch(material -> !material.nbt().isEmpty())) {
-                    Map<MaterialRef, Integer> consumedVariants =
+                    Map<MaterialRef, Long> consumedVariants =
                             consumeMatchingVariants(ingredient, rest);
                     if (consumedVariants != null) {
                         if (solve(rest)) return true;
@@ -333,7 +419,7 @@ public final class PureRecipePlanner {
                     }
                 }
                 for (MaterialRef alternative : stockAlternatives) {
-                    int have = stock.getOrDefault(alternative, 0);
+                    long have = stock.getOrDefault(alternative, 0L);
                     if (have < ingredient.count()) continue;
                     setStock(alternative, have - ingredient.count());
                     if (solve(rest)) return true;
@@ -342,7 +428,7 @@ public final class PureRecipePlanner {
                 }
             }
 
-            Map<MaterialRef, Integer> combinedConsumption = catalyst ? null
+            Map<MaterialRef, Long> combinedConsumption = catalyst ? null
                     : consumeAcrossAlternatives(ingredient, rest);
             if (combinedConsumption != null) {
                 if (solve(rest)) return true;
@@ -353,25 +439,27 @@ public final class PureRecipePlanner {
             for (MaterialRef wanted : productionFirst(ingredient.alternatives())) {
                 checkBudget();
                 if (resolving.contains(wanted)) continue;
-                int have = stock.getOrDefault(wanted, 0);
+                long have = stock.getOrDefault(wanted, 0L);
                 boolean broadFamily = ingredient.alternatives().size() > 1;
                 long present = catalyst ? stockAcross(ingredient)
                         : broadFamily || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
                         ? unreservedStockAcross(ingredient, rest)
                         : unreservedStock(rest, wanted);
-                int needed = (int) Math.max(0L, (long) ingredient.count() - present);
-                if (needed <= 0) continue;
-                for (RecipeNode candidate : inventoryFirstCandidates(
-                        wanted, !broadFamily, ingredient.nbtMatchMode())) {
+                long needed = Math.max(0L, ingredient.count() - present);
+                if (needed <= 0L) continue;
+                List<RecipeNode> candidates = preferNonCyclicCandidates(
+                        inventoryFirstCandidates(
+                                wanted, !broadFamily, ingredient.nbtMatchMode()));
+                for (RecipeNode candidate : candidates) {
                     if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
                         stepLimitReached = true;
                         continue;
                     }
                     int selfConsumed = selfConsumedPerBatch(candidate, wanted);
                     int netGain = candidate.outputCount() - selfConsumed;
-                    int batches = batchesFor(needed,
+                    long batches = batchesFor(needed,
                             selfConsumed > 0 ? netGain : candidate.outputCount());
-                    if (batches <= 0) continue;
+                    if (batches <= 0L) continue;
                     if (isNonProductiveBroadFamilyConversion(
                             candidate, ingredient.alternatives(), batches)) continue;
                     // Broad tags are pruned by family gain before reachability. In large
@@ -382,8 +470,8 @@ public final class PureRecipePlanner {
                             && isUnseededReverseConversion(candidate, wanted, batches)) {
                         continue;
                     }
-                    int scheduledBatches = batches;
-                    int consumeCount = catalyst ? 0 : ingredient.count();
+                    long scheduledBatches = batches;
+                    long consumeCount = catalyst ? 0L : ingredient.count();
                     List<Task> continuation = rest;
                     if (selfConsumed > 0) {
                         if (netGain <= 0) continue;
@@ -439,28 +527,30 @@ public final class PureRecipePlanner {
          * Keep singleton demands in the remaining task list reserved where possible so a
          * broad tag (for example wool or fuels) does not consume a later exact material.
          */
-        private Map<MaterialRef, Integer> consumeAcrossAlternatives(
+        private Map<MaterialRef, Long> consumeAcrossAlternatives(
                 IngredientRef ingredient, List<Task> rest) {
             List<MaterialRef> stocked = ingredient.alternatives().stream()
-                    .filter(material -> stock.getOrDefault(material, 0) > 0)
+                    .filter(material -> stock.getOrDefault(material, 0L) > 0L)
                     .sorted(Comparator
                             .comparingInt((MaterialRef material) ->
                                     variantPreferences.rank(material.itemId()))
                             .thenComparing(Comparator.comparingLong(
                                     (MaterialRef material) -> unreservedStock(rest, material))
                                     .reversed())
-                            .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
+                            .thenComparing(Comparator.comparingLong(
+                                    (MaterialRef material) ->
+                                            stock.getOrDefault(material, 0L)).reversed()))
                     .toList();
             if (stocked.size() < 2) return null;
 
             long total = 0L;
             for (MaterialRef material : stocked) {
-                total += stock.getOrDefault(material, 0);
+                total = saturatedAdd(total, stock.getOrDefault(material, 0L));
                 if (total >= ingredient.count()) break;
             }
             if (total < ingredient.count()) return null;
 
-            Map<MaterialRef, Integer> previous = consumeStocked(
+            Map<MaterialRef, Long> previous = consumeStocked(
                     stocked, ingredient.count(), rest);
             int contributors = previous.size();
             if (contributors > 1) return previous;
@@ -468,7 +558,7 @@ public final class PureRecipePlanner {
             return null;
         }
 
-        private Map<MaterialRef, Integer> consumeMatchingVariants(
+        private Map<MaterialRef, Long> consumeMatchingVariants(
                 IngredientRef ingredient, List<Task> rest) {
             List<MaterialRef> stocked = matchingStock(ingredient)
                     .sorted(Comparator
@@ -477,11 +567,13 @@ public final class PureRecipePlanner {
                             .thenComparing(Comparator.comparingLong(
                                     (MaterialRef material) -> unreservedStock(rest, material))
                                     .reversed())
-                            .thenComparingInt(material -> -stock.getOrDefault(material, 0)))
+                            .thenComparing(Comparator.comparingLong(
+                                    (MaterialRef material) ->
+                                            stock.getOrDefault(material, 0L)).reversed()))
                     .toList();
             long total = 0L;
             for (MaterialRef material : stocked) {
-                total += stock.getOrDefault(material, 0);
+                total = saturatedAdd(total, stock.getOrDefault(material, 0L));
                 if (total >= ingredient.count()) break;
             }
             if (total < ingredient.count()) return null;
@@ -489,19 +581,19 @@ public final class PureRecipePlanner {
             return consumeStocked(stocked, ingredient.count(), rest);
         }
 
-        private Map<MaterialRef, Integer> consumeStocked(
-                List<MaterialRef> stocked, int count, List<Task> rest) {
-            int remaining = count;
-            Map<MaterialRef, Integer> previous = new HashMap<>();
+        private Map<MaterialRef, Long> consumeStocked(
+                List<MaterialRef> stocked, long count, List<Task> rest) {
+            long remaining = count;
+            Map<MaterialRef, Long> previous = new HashMap<>();
             // Consume only stock above later exact demands first. This makes the soft
             // preference subordinate to plan feasibility instead of stealing a required item.
             for (int pass = 0; pass < 2 && remaining > 0; pass++) {
                 for (MaterialRef material : stocked) {
-                    int have = stock.getOrDefault(material, 0);
-                    int capacity = pass == 0
-                            ? (int) Math.min(Integer.MAX_VALUE, unreservedStock(rest, material))
+                    long have = stock.getOrDefault(material, 0L);
+                    long capacity = pass == 0
+                            ? unreservedStock(rest, material)
                             : have;
-                    int take = Math.min(capacity, remaining);
+                    long take = Math.min(capacity, remaining);
                     if (take <= 0) continue;
                     previous.putIfAbsent(material, have);
                     setStock(material, have - take);
@@ -513,7 +605,7 @@ public final class PureRecipePlanner {
         }
 
         private long unreservedStock(List<Task> rest, MaterialRef material) {
-            return Math.max(0L, (long) stock.getOrDefault(material, 0)
+            return Math.max(0L, stock.getOrDefault(material, 0L)
                     - singletonDemand(rest, material));
         }
 
@@ -522,8 +614,7 @@ public final class PureRecipePlanner {
             var matching = matchingStock(ingredient).iterator();
             while (matching.hasNext()) {
                 MaterialRef material = matching.next();
-                total = Math.min(Integer.MAX_VALUE,
-                        total + unreservedStock(rest, material));
+                total = saturatedAdd(total, unreservedStock(rest, material));
             }
             return total;
         }
@@ -534,21 +625,21 @@ public final class PureRecipePlanner {
                 if (!(task instanceof DemandTask needed)
                         || needed.ingredient().alternatives().size() != 1
                         || !needed.ingredient().alternatives().get(0).equals(material)) continue;
-                demand = Math.min(Integer.MAX_VALUE,
-                        demand + needed.ingredient().count());
+                demand = saturatedAdd(demand, needed.ingredient().count());
             }
             return demand;
         }
 
         private boolean completeRecipe(CompleteRecipeTask completed, List<Task> rest) {
-            int before = stock.getOrDefault(completed.output(), 0);
-            long afterProduction = (long) before
+            long before = stock.getOrDefault(completed.output(), 0L);
+            long afterProduction = before
                     + (long) completed.outputCount() * completed.batches();
-            if (afterProduction < completed.consumeCount() || afterProduction > Integer.MAX_VALUE) {
+            if (afterProduction < completed.consumeCount()
+                    || afterProduction < before) {
                 return false;
             }
             resolving.remove(completed.resolvingMaterial());
-            setStock(completed.output(), (int) afterProduction - completed.consumeCount());
+            setStock(completed.output(), afterProduction - completed.consumeCount());
             RecipeNode source = graph.recipesById().get(completed.recipeId());
             MaterialRef demanded = source != null && "smithing".equals(source.modTypeId())
                     && !completed.output().nbt().isEmpty() ? completed.output() : null;
@@ -561,14 +652,13 @@ public final class PureRecipePlanner {
             return false;
         }
 
-        private List<Task> recipeBranch(RecipeNode candidate, int batches, int consumeCount,
+        private List<Task> recipeBranch(RecipeNode candidate, long batches, long consumeCount,
                                         List<Task> rest, MaterialRef resolvingMaterial) {
             List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(candidate.inputs());
             List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
             for (IngredientRef input : inputs) {
                 long scaled = scaledInputCount(input, batches);
-                if (scaled > Integer.MAX_VALUE) return null;
-                branch.add(new DemandTask(input.withCount((int) scaled)));
+                branch.add(new DemandTask(input.withCount(scaled)));
             }
             branch.add(new CompleteRecipeTask(candidate.output(), candidate.outputCount(),
                     consumeCount, candidate.recipeId(), batches, resolvingMaterial));
@@ -592,7 +682,7 @@ public final class PureRecipePlanner {
         }
 
         private int stockAlternativeRank(MaterialRef material) {
-            if (stock.getOrDefault(material, 0) > 0) return 0;
+            if (stock.getOrDefault(material, 0L) > 0L) return 0;
             return 1;
         }
 
@@ -609,7 +699,7 @@ public final class PureRecipePlanner {
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
                                                            boolean pruneUnseeded,
                                                            NbtMatchMode mode) {
-            List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, wanted, mode);
+            List<RecipeNode> candidates = candidates(wanted, mode);
             // Tiny producer sets are cheaper to explore directly. Constructing
             // seeded reachability scans the complete scoped graph before the
             // first branch, which dominates equipment and upgrade chains.
@@ -691,8 +781,7 @@ public final class PureRecipePlanner {
             }
             int best = Integer.MAX_VALUE / 4;
             try {
-                for (RecipeNode producer : ImmutableRecipeGraphProjector.candidates(
-                        graph, material, NbtMatchMode.ANY)) {
+                for (RecipeNode producer : candidates(material, NbtMatchMode.ANY)) {
                     best = Math.min(best, dependencyDepth(producer, visiting));
                 }
             } finally {
@@ -718,9 +807,61 @@ public final class PureRecipePlanner {
             return candidate.inputs().stream().allMatch(input -> stockAcross(input) >= input.count());
         }
 
+        /**
+         * 先尝试不依赖当前祖先产物的正向配方，再尝试反向转换。
+         * 不直接禁用反向转换，因为它也可能是有净增益的合法放大链，
+         * 例如 1 shard -> 1 cluster -> 2 shard。
+         */
+        private List<RecipeNode> preferNonCyclicCandidates(List<RecipeNode> candidates) {
+            if (candidates.isEmpty()) return candidates;
+            List<RecipeNode> forward = new ArrayList<>(candidates.size());
+            List<RecipeNode> reverse = new ArrayList<>(0);
+            for (RecipeNode candidate : candidates) {
+                CandidateCycleRelation relation = cycleRelation(candidate, resolving);
+                if (isZeroGainResolvingCycle(candidate, relation.ancestorInputs())) continue;
+                (relation.consumesOnlyAncestor() ? reverse : forward).add(candidate);
+            }
+            forward.addAll(reverse);
+            return forward;
+        }
+
+        /**
+         * 拒绝一步闭合且没有净增益的反向环，例如
+         * 1 个 9x -> 9 个 8x -> 1 个 9x。
+         * 若反向转换会产生额外材料，则仍允许，以支持合法种子放大。
+         */
+        private boolean isZeroGainResolvingCycle(RecipeNode candidate,
+                                                 List<AncestorInput> ancestorInputs) {
+            if (ancestorInputs.isEmpty()) return false;
+            for (AncestorInput ancestorInput : ancestorInputs) {
+                for (RecipeNode back : candidates(ancestorInput.material(), NbtMatchMode.ANY)) {
+                    for (IngredientRef backInput : back.inputs()) {
+                        if (backInput.role() == DemandRole.CATALYST
+                                || backInput.count() <= 0
+                                || !backInput.alternatives().contains(candidate.output())) continue;
+                        if (candidate.outputCount() < backInput.count()
+                                || candidate.outputCount() % backInput.count() != 0L) {
+                            continue;
+                        }
+                        long returnedBatches = candidate.outputCount() / backInput.count();
+                        long returnedAncestor = returnedBatches * back.outputCount();
+                        if (returnedAncestor <= ancestorInput.count()) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private List<RecipeNode> candidates(MaterialRef wanted, NbtMatchMode mode) {
+            return candidateCache.computeIfAbsent(new CandidateLookup(wanted, mode),
+                    lookup -> ImmutableRecipeGraphProjector.candidates(
+                            graph, lookup.material(), lookup.mode()));
+        }
+
         private boolean hasAnyInputInStock(RecipeNode candidate) {
             return candidate.inputs().stream().anyMatch(input ->
-                    input.alternatives().stream().anyMatch(material -> stock.getOrDefault(material, 0) > 0));
+                    input.alternatives().stream().anyMatch(material ->
+                            stock.getOrDefault(material, 0L) > 0L));
         }
 
         /**
@@ -781,8 +922,8 @@ public final class PureRecipePlanner {
          * compression loops while preserving conversions backed by inventory.
          */
         private boolean isUnseededReverseConversion(RecipeNode candidate, MaterialRef wanted,
-                                                    int batches) {
-            if (stock.getOrDefault(wanted, 0) > 0) return false;
+                                                    long batches) {
+            if (stock.getOrDefault(wanted, 0L) > 0L) return false;
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long required = scaledInputCount(input, batches);
@@ -812,8 +953,7 @@ public final class PureRecipePlanner {
         private long stockAcross(IngredientRef ingredient) {
             long total = 0L;
             for (MaterialRef material : matchingStock(ingredient).toList()) {
-                total += stock.getOrDefault(material, 0);
-                if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+                total = saturatedAdd(total, stock.getOrDefault(material, 0L));
             }
             return total;
         }
@@ -824,7 +964,7 @@ public final class PureRecipePlanner {
                     .map(MaterialRef::itemId)
                     .distinct()
                     .flatMap(itemId -> stockByItem.getOrDefault(itemId, List.of()).stream())
-                    .filter(material -> stock.getOrDefault(material, 0) > 0)
+                    .filter(material -> stock.getOrDefault(material, 0L) > 0L)
                     .filter(material -> {
                         checkBudget();
                         return matchesIngredient(material, ingredient);
@@ -843,7 +983,7 @@ public final class PureRecipePlanner {
          * the normal planner can still report them as missing instead of this guard hiding them.
          */
         private boolean isNonProductiveBroadFamilyConversion(
-                RecipeNode candidate, List<MaterialRef> familyAlternatives, int batches) {
+                RecipeNode candidate, List<MaterialRef> familyAlternatives, long batches) {
             if (familyAlternatives.size() < 2
                     || !familyAlternatives.contains(candidate.output())) return false;
             long produced = (long) candidate.outputCount() * batches;
@@ -943,10 +1083,10 @@ public final class PureRecipePlanner {
             }
         }
 
-        private static int batchesFor(int needed, int outputCount) {
-            if (outputCount <= 0) return -1;
-            long batches = ((long) needed + outputCount - 1L) / outputCount;
-            return batches > Integer.MAX_VALUE ? -1 : (int) Math.max(1L, batches);
+        private static long batchesFor(long needed, int outputCount) {
+            if (outputCount <= 0 || needed <= 0L) return -1L;
+            return Math.max(1L, saturatedAdd(needed, outputCount - 1L)
+                    / outputCount);
         }
 
         private static int selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
@@ -969,8 +1109,8 @@ public final class PureRecipePlanner {
             return count;
         }
 
-        private void setStock(MaterialRef material, int count) {
-            if (count <= 0) {
+        private void setStock(MaterialRef material, long count) {
+            if (count <= 0L) {
                 stock.remove(material);
             } else {
                 stock.put(material, count);
@@ -986,23 +1126,25 @@ public final class PureRecipePlanner {
         private static final long COST_UNKNOWN = Long.MAX_VALUE / 4L;
 
         private final ImmutableRecipeGraph graph;
-        private final Map<MaterialRef, Integer> stock = new HashMap<>();
+        private final Map<MaterialRef, Long> stock = new HashMap<>();
         private final int maxSteps;
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
+        private final Map<CandidateLookup, List<RecipeNode>> candidateCache = new HashMap<>();
         private final Runnable budgetCheck;
         private final Map<MissingKey, IngredientRef> missing = new LinkedHashMap<>();
 
         private PartialPlanBuilder(ImmutableRecipeGraph graph,
-                                   Map<MaterialRef, Integer> available,
-                                   int maxSteps,
+                                   Map<MaterialRef, Long> available,
+                                   int maxSteps, Set<MaterialRef> activeRootOutputs,
                                    Runnable budgetCheck) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (material != null && count != null && count > 0) stock.put(material, count);
             });
             this.maxSteps = Math.max(1, maxSteps);
+            visiting.addAll(activeRootOutputs);
             this.budgetCheck = Objects.requireNonNull(budgetCheck, "budgetCheck");
         }
 
@@ -1020,8 +1162,8 @@ public final class PureRecipePlanner {
 
         private boolean expand(IngredientRef ingredient) {
             budgetCheck.run();
-            int remaining = consumeAvailable(ingredient);
-            if (remaining == 0) return true;
+            long remaining = consumeAvailable(ingredient);
+            if (remaining == 0L) return true;
             if (steps.size() >= maxSteps || visiting.size() >= MAX_SEARCH_CALL_DEPTH) {
                 noteMissing(ingredient, remaining);
                 return false;
@@ -1031,8 +1173,8 @@ public final class PureRecipePlanner {
             for (PartialChoice choice : choices) {
                 if (visiting.contains(choice.output())) continue;
                 RecipeNode recipe = choice.recipe();
-                int batches = Search.batchesFor(remaining, recipe.outputCount());
-                if (batches <= 0) continue;
+                long batches = Search.batchesFor(remaining, recipe.outputCount());
+                if (batches <= 0L) continue;
                 if (ingredient.alternatives().size() > 1
                         && isNonProductiveFamilyRecipe(
                         recipe, ingredient.alternatives(), batches)) continue;
@@ -1041,11 +1183,11 @@ public final class PureRecipePlanner {
                 boolean valid = true;
                 for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
                     long scaled = scaledInputCount(input, batches);
-                    if (scaled <= 0L || scaled > Integer.MAX_VALUE) {
+                    if (scaled <= 0L) {
                         valid = false;
                         break;
                     }
-                    scaledInputs.add(input.withCount((int) scaled));
+                    scaledInputs.add(input.withCount(scaled));
                 }
                 if (!valid) continue;
 
@@ -1061,12 +1203,11 @@ public final class PureRecipePlanner {
                 steps.add(new PlannedStep(recipe.recipeId(), batches,
                         "smithing".equals(recipe.modTypeId()) && !recipe.output().nbt().isEmpty()
                                 ? recipe.output() : null));
-                long surplus = (long) recipe.outputCount() * batches
+                long surplus = recipe.outputCount() * batches
                         - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
                 if (surplus > 0L) {
-                    stock.merge(recipe.output(), (int) Math.min(Integer.MAX_VALUE, surplus),
-                            (left, right) -> (int) Math.min(
-                                    Integer.MAX_VALUE, (long) left + right));
+                    stock.merge(recipe.output(), surplus,
+                            PureRecipePlanner::saturatedAdd);
                 }
                 return covered;
             }
@@ -1075,35 +1216,38 @@ public final class PureRecipePlanner {
             return false;
         }
 
-        private int consumeAvailable(IngredientRef ingredient) {
-            int remaining = ingredient.count();
+        private long consumeAvailable(IngredientRef ingredient) {
+            long remaining = ingredient.count();
             List<MaterialRef> ordered = stock.keySet().stream()
                     .filter(material -> ImmutableRecipeGraphProjector.matchesIngredient(material, ingredient))
                     .collect(Collectors.toCollection(ArrayList::new));
             ordered.sort(Comparator
-                    .comparingInt((MaterialRef material) -> stock.getOrDefault(material, 0))
+                    .comparingLong((MaterialRef material) -> stock.getOrDefault(material, 0L))
                     .reversed());
             for (MaterialRef material : ordered) {
-                int have = stock.getOrDefault(material, 0);
-                if (have <= 0) continue;
-                int take = Math.min(have, remaining);
+                long have = stock.getOrDefault(material, 0L);
+                if (have <= 0L) continue;
+                long take = Math.min(have, remaining);
                 if (ingredient.role() != DemandRole.CATALYST) {
                     if (take == have) stock.remove(material);
                     else stock.put(material, have - take);
                 }
                 remaining -= take;
-                if (remaining == 0) break;
+                if (remaining == 0L) break;
             }
             return remaining;
         }
 
         private List<PartialChoice> choicesFor(IngredientRef ingredient) {
             List<PartialChoice> choices = new ArrayList<>();
+            Map<RecipeNode, Boolean> zeroGainCycles = new HashMap<>();
             for (MaterialRef alternative : ingredient.alternatives()) {
                 budgetCheck.run();
                 for (RecipeNode recipe : partialCandidates(alternative,
                         ingredient.nbtMatchMode())) {
                     budgetCheck.run();
+                    if (zeroGainCycles.computeIfAbsent(recipe,
+                            this::isZeroGainVisitingCycle)) continue;
                     choices.add(new PartialChoice(alternative, recipe));
                 }
             }
@@ -1114,8 +1258,33 @@ public final class PureRecipePlanner {
             return choices;
         }
 
+        private boolean isZeroGainVisitingCycle(RecipeNode candidate) {
+            CandidateCycleRelation relation = cycleRelation(candidate, visiting);
+            if (relation.ancestorInputs().isEmpty()) return false;
+            for (AncestorInput ancestorInput : relation.ancestorInputs()) {
+                for (RecipeNode back : partialCandidates(
+                        ancestorInput.material(), NbtMatchMode.ANY)) {
+                    for (IngredientRef backInput : back.inputs()) {
+                        if (backInput.role() == DemandRole.CATALYST
+                                || backInput.count() <= 0
+                                || !backInput.alternatives().contains(candidate.output())) continue;
+                        if (candidate.outputCount() < backInput.count()
+                                || candidate.outputCount() % backInput.count() != 0L) {
+                            continue;
+                        }
+                        long returnedBatches = candidate.outputCount() / backInput.count();
+                        long returnedAncestor = returnedBatches * back.outputCount();
+                        if (returnedAncestor <= ancestorInput.count()) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         private List<RecipeNode> partialCandidates(MaterialRef wanted, NbtMatchMode matchMode) {
-            return ImmutableRecipeGraphProjector.candidates(graph, wanted, matchMode);
+            return candidateCache.computeIfAbsent(new CandidateLookup(wanted, matchMode),
+                    lookup -> ImmutableRecipeGraphProjector.candidates(
+                            graph, lookup.material(), lookup.mode()));
         }
 
         private double inputStockCoverage(RecipeNode recipe) {
@@ -1126,7 +1295,8 @@ public final class PureRecipePlanner {
                 required += input.count();
                 long matching = 0L;
                 for (MaterialRef alternative : input.alternatives()) {
-                    matching += stock.getOrDefault(alternative, 0);
+                    matching = saturatedAdd(matching,
+                            stock.getOrDefault(alternative, 0L));
                 }
                 available += Math.min(input.count(), matching);
             }
@@ -1135,7 +1305,7 @@ public final class PureRecipePlanner {
 
         private boolean isNonProductiveFamilyRecipe(RecipeNode recipe,
                                                      List<MaterialRef> family,
-                                                     int batches) {
+                                                     long batches) {
             if (!family.contains(recipe.output())) return false;
             long produced = (long) recipe.outputCount() * batches;
             PartialFamilyCost analysis = familyCosts.computeIfAbsent(
@@ -1152,15 +1322,15 @@ public final class PureRecipePlanner {
             return consumed >= produced;
         }
 
-        private void noteMissing(IngredientRef ingredient, int count) {
+        private void noteMissing(IngredientRef ingredient, long count) {
             MissingKey key = new MissingKey(Set.copyOf(ingredient.alternatives()),
                     ingredient.nbtMatchMode(), ingredient.role());
             IngredientRef previous = missing.get(key);
             if (previous != null) {
                 long combined = ingredient.role() == DemandRole.CATALYST
                         ? Math.max(previous.count(), count)
-                        : (long) previous.count() + count;
-                missing.put(key, previous.withCount((int) Math.min(Integer.MAX_VALUE, combined)));
+                        : saturatedAdd(previous.count(), count);
+                missing.put(key, previous.withCount(combined));
             } else if (missing.size() < MAX_REPORTED_MISSING) {
                 missing.put(key, ingredient.withCount(count));
             }
@@ -1266,12 +1436,12 @@ public final class PureRecipePlanner {
         private final Map<RecipeNode, Integer> recipeDepth;
 
         private SeededReachability(ImmutableRecipeGraph graph,
-                                   Map<MaterialRef, Integer> available,
+                                   Map<MaterialRef, Long> available,
                                    Runnable budgetCheck) {
             this.graph = graph;
             Set<MaterialRef> present = new HashSet<>();
-            for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
-                if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            for (Map.Entry<MaterialRef, Long> entry : available.entrySet()) {
+                if (entry.getValue() == null || entry.getValue() <= 0L) continue;
                 present.add(entry.getKey());
             }
             this.seeds = Set.copyOf(present);

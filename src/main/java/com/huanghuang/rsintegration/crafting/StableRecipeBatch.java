@@ -180,7 +180,10 @@ final class StableRecipeBatch {
             output = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
         }
         if (output.isEmpty()) return null;
+        // 递归链的前置步骤会产出低阶物品，不能拿最终点击的 9x 产物拒绝它们。
+        // 目标只用于约束同一种物品之间的 NBT 变体选择。
         if (targetOutput != null && !targetOutput.isEmpty()
+                && ItemStack.isSameItem(output, targetOutput)
                 && !ItemStack.isSameItemSameTags(
                 output.copyWithCount(1), targetOutput.copyWithCount(1))) {
             return null;

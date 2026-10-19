@@ -7,6 +7,8 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 
+import java.util.Locale;
+
 /** 配方树与材料清单使用流体贴图和颜色。 */
 public final class InkFluidRenderer {
     private InkFluidRenderer() {}
@@ -26,5 +28,25 @@ public final class InkFluidRenderer {
     }
     public static String quantity(ItemStack stack, int amount) {
         return InkFluidSupport.isToken(stack) ? amount + " mB" : "×" + amount;
+    }
+
+    /** Keeps tree count labels bounded; exact values remain available in material details. */
+    public static String compactQuantity(ItemStack stack, int amount) {
+        return InkFluidSupport.isToken(stack)
+                ? compactAmount(amount) + " mB" : "×" + compactAmount(amount);
+    }
+
+    static String compactAmount(int amount) {
+        long absolute = Math.abs((long) amount);
+        if (absolute < 10_000L) return Integer.toString(amount);
+        if (absolute < 1_000_000L) return decimal(amount, 1_000L, "K");
+        if (absolute < 1_000_000_000L) return decimal(amount, 1_000_000L, "M");
+        return decimal(amount, 1_000_000_000L, "B");
+    }
+
+    private static String decimal(int amount, long divisor, String suffix) {
+        double value = (double) amount / divisor;
+        String pattern = Math.abs(value) >= 100.0D ? "%.0f%s" : "%.1f%s";
+        return String.format(Locale.ROOT, pattern, value, suffix);
     }
 }

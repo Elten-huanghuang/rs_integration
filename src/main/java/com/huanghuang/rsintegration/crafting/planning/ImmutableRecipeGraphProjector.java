@@ -319,6 +319,24 @@ public final class ImmutableRecipeGraphProjector {
         return Map.copyOf(projected);
     }
 
+    public static Map<MaterialRef, Long> projectAvailabilityLong(
+            Map<StackKey, Long> available) {
+        Map<MaterialRef, Long> projected = new HashMap<>();
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
+            long count = entry.getValue() == null ? 0L : entry.getValue();
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
+            if (itemId == null || count <= 0L) continue;
+            String nbt = entry.getKey().tag() == null ? "" : entry.getKey().tag();
+            MaterialRef material = new MaterialRef(itemId, nbt);
+            projected.merge(material, count, ImmutableRecipeGraphProjector::saturatedAdd);
+        }
+        return Map.copyOf(projected);
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
+    }
+
     /**
      * Bind value-only ingredient predicates to the concrete inventory variants in this snapshot.
      * Stock is kept one-to-one with physical item/NBT identities, so a tagged stack cannot be

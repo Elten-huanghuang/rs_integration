@@ -19,6 +19,7 @@ import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
@@ -68,12 +69,16 @@ public final class RecipeCandidatePanel {
             options.putIfAbsent(node.step.alternatives().get(i), mod);
         }
         List<Candidate> candidates = new ArrayList<>();
-        options.forEach((id, mod) -> {
+        for (Map.Entry<ResourceLocation, String> option : options.entrySet()) {
+            ResourceLocation id = option.getKey();
+            String mod = option.getValue();
             var details = preview.candidateDetails(id, node.displayStack);
-            String machine = preview.categoryTitle(id).map(Component::getString)
-                    .orElseGet(() -> PlanRenderEngine.formatModTypeLabel(mod));
+            Component title = preview.categoryTitle(id).orElse(null);
+            String machine = title != null
+                    ? title.getString()
+                    : PlanRenderEngine.formatModTypeLabel(mod);
             candidates.add(new Candidate(id, mod, details.name(), machine, details.searchText()));
-        });
+        }
         model = new RecipeCandidatePickerModel(candidates, node.step.recipeId());
         search.setValue("");
         search.visible = search.active = true;

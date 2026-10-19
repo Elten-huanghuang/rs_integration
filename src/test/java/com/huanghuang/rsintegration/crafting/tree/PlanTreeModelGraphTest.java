@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.tree;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
@@ -19,6 +20,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class PlanTreeModelGraphTest extends BootstrapTest {
+
+    @Test
+    void cycleNodesCannotExposeOrSwitchRecipeAlternatives() {
+        ResourceLocation alternate = new ResourceLocation("test", "alternate");
+        PlanStep step = new PlanStep(new ResourceLocation("test", "cycle"),
+                new ItemStack(Items.ACACIA_LOG), 1, List.of(new ItemStack(Items.ACACIA_LOG)),
+                List.of(alternate), null, 1, true);
+        PlanTreeNode cycle = new PlanTreeNode(IngredientKey.of(new ItemStack(Items.ACACIA_LOG)),
+                new ItemStack(Items.ACACIA_LOG), 1, 2, step).markCycle();
+        PlanTreeNode parent = new PlanTreeNode(IngredientKey.of(new ItemStack(Items.OAK_LOG)),
+                new ItemStack(Items.OAK_LOG), 1, 1, step);
+        parent.children.add(cycle);
+
+        assertFalse(cycle.hasAlternatives());
+        assertFalse(parent.hasAlternatives());
+    }
 
     @Test
     void separateNodesOfSameRecipeFoldIntoOneVisualBranch() {

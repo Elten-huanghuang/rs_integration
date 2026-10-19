@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -35,7 +36,7 @@ class PureRecipePlannerTest {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph, Map.of(LOG, 2),
                 List.of(ingredient(STICK, 8)), 20);
 
-        assertTrue(result.feasible());
+        assertTrue(result.feasible(), result.toString());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("planks"), 1),
                 new PureRecipePlanner.PlannedStep(id("sticks"), 2)), result.steps());
     }
@@ -92,7 +93,7 @@ class PureRecipePlannerTest {
                 graph, Map.of(enchanted, 1), List.of(ingredient(target, 1)), 20);
 
         assertTrue(result.feasible());
-        assertEquals(0, result.remaining().getOrDefault(enchanted, 0));
+        assertEquals(0L, result.remaining().getOrDefault(enchanted, 0L));
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(
                 id("consume_tagged_input"), 1)), result.steps());
     }
@@ -164,7 +165,7 @@ class PureRecipePlannerTest {
         assertTrue(result.feasible());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(id("hammering"), 10)),
                 result.steps());
-        assertEquals(1, result.remaining().get(hammer));
+        assertEquals(1L, result.remaining().get(hammer));
     }
 
     @Test
@@ -190,7 +191,7 @@ class PureRecipePlannerTest {
                 List.of(ingredient(resultMaterial, 1)), 20);
 
         assertTrue(result.feasible());
-        assertEquals(1, result.remaining().get(hammer));
+        assertEquals(1L, result.remaining().get(hammer));
     }
 
     @Test
@@ -211,7 +212,7 @@ class PureRecipePlannerTest {
         assertTrue(result.feasible());
         assertEquals(1L, result.steps().stream()
                 .filter(step -> step.recipeId().equals(id("make_hammer"))).count());
-        assertEquals(1, result.remaining().get(hammer));
+        assertEquals(1L, result.remaining().get(hammer));
     }
 
     @Test
@@ -246,8 +247,8 @@ class PureRecipePlannerTest {
                 List.of(ingredient(output, 1)), 20);
 
         assertTrue(result.feasible());
-        assertEquals(1, result.remaining().get(ironTool));
-        assertEquals(1, result.remaining().get(goldTool));
+        assertEquals(1L, result.remaining().get(ironTool));
+        assertEquals(1L, result.remaining().get(goldTool));
     }
 
     @Test
@@ -285,7 +286,7 @@ class PureRecipePlannerTest {
 
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
-        assertEquals(Map.of(stone, 49), result.remaining());
+        assertEquals(Map.of(stone, 49L), result.remaining());
     }
 
     @Test
@@ -324,6 +325,142 @@ class PureRecipePlannerTest {
         assertFalse(result.feasible());
         assertEquals(1, result.missing().size());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+    }
+
+    @Test
+    void reverseConversionCannotConsumeAnAncestorWhenForwardChainExists() {
+        MaterialRef nineX = material("acacia_log_9x");
+        MaterialRef eightX = material("acacia_log_8x");
+        MaterialRef sevenX = material("acacia_log_7x");
+        RecipeNode nineFromEight = recipe("compress_9x", nineX, 1, ingredient(eightX, 9));
+        RecipeNode eightFromNine = recipe("decompress_9x", eightX, 9, ingredient(nineX, 1));
+        RecipeNode eightFromSeven = recipe("compress_8x", eightX, 1, ingredient(sevenX, 9));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                nineX, List.of(nineFromEight),
+                eightX, List.of(eightFromNine, eightFromSeven)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(sevenX, 81), List.of(ingredient(nineX, 1)), 20);
+
+        assertTrue(result.feasible());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("compress_8x"), 9),
+                new PureRecipePlanner.PlannedStep(id("compress_9x"), 1)), result.steps());
+    }
+
+    @Test
+    void fullCompressionChainNeverReturnsToAnAncestorTier() {
+        List<MaterialRef> tiers = new ArrayList<>();
+        for (int tier = 1; tier <= 9; tier++) {
+            tiers.add(material("full_chain_log_" + tier + "x"));
+        }
+
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int tier = 1; tier < tiers.size(); tier++) {
+            MaterialRef lower = tiers.get(tier - 1);
+            MaterialRef higher = tiers.get(tier);
+            recipes.computeIfAbsent(higher, ignored -> new ArrayList<>()).add(
+                    recipe("full_chain_compress_" + (tier + 1) + "x",
+                            higher, 1, ingredient(lower, 9)));
+            recipes.computeIfAbsent(lower, ignored -> new ArrayList<>()).add(
+                    recipe("full_chain_decompress_" + (tier + 1) + "x",
+                            lower, 9, ingredient(higher, 1)));
+        }
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes),
+                Map.of(tiers.get(6), 81),
+                List.of(ingredient(tiers.get(7), 9)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime,
+                Set.of(tiers.get(8)));
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("full_chain_compress_8x"), 9)),
+                result.steps());
+    }
+
+    @Test
+    void plansRawDemandAboveIntegerMaxWithoutTruncatingStock() {
+        MaterialRef raw = material("large_chain_raw");
+        List<MaterialRef> tiers = new ArrayList<>();
+        tiers.add(raw);
+        for (int tier = 1; tier <= 9; tier++) {
+            tiers.add(material("large_chain_log_" + tier + "x"));
+        }
+
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        for (int tier = 1; tier < tiers.size(); tier++) {
+            MaterialRef lower = tiers.get(tier - 1);
+            MaterialRef higher = tiers.get(tier);
+            recipes.computeIfAbsent(higher, ignored -> new ArrayList<>()).add(
+                    recipe("large_chain_compress_" + tier + "x",
+                            higher, 1, ingredient(lower, 9)));
+            recipes.computeIfAbsent(lower, ignored -> new ArrayList<>()).add(
+                    recipe("large_chain_decompress_" + tier + "x",
+                            lower, 9, ingredient(higher, 1)));
+        }
+
+        long requested = 6L;
+        long targetInput = requested * 9L;
+        long rawDemand = requested * 387_420_489L;
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(recipes),
+                Map.of(raw, 3_000_000_000L),
+                List.of(ingredient(tiers.get(8), targetInput)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime,
+                Set.of(tiers.get(9)));
+
+        assertTrue(result.feasible(), result.toString());
+        assertTrue(rawDemand > Integer.MAX_VALUE);
+        assertEquals(rawDemand,
+                result.steps().stream()
+                        .filter(step -> step.recipeId().equals(id("large_chain_compress_1x")))
+                        .mapToLong(step -> step.batches() * 9L)
+                        .sum());
+        assertEquals(3_000_000_000L - rawDemand, result.remaining().getOrDefault(raw, 0L));
+    }
+
+    @Test
+    void targetOutputIsAncestorDuringRecursiveResolution() {
+        MaterialRef nineX = material("active_root_log_9x");
+        MaterialRef eightX = material("active_root_log_8x");
+        MaterialRef sevenX = material("active_root_log_7x");
+        RecipeNode nineFromEight = recipe("active_root_compress_9x", nineX, 1,
+                ingredient(eightX, 9));
+        RecipeNode eightFromNine = recipe("active_root_decompress_9x", eightX, 9,
+                ingredient(nineX, 1));
+        RecipeNode eightFromSeven = recipe("active_root_compress_8x", eightX, 1,
+                ingredient(sevenX, 9));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                nineX, List.of(nineFromEight),
+                eightX, List.of(eightFromNine, eightFromSeven)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(), List.of(ingredient(eightX, 9)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime, Set.of(nineX));
+
+        assertFalse(result.feasible());
+        assertTrue(result.steps().stream().noneMatch(step ->
+                step.recipeId().equals(id("active_root_decompress_9x"))), result.steps().toString());
+    }
+
+    @Test
+    void partialStockCannotBootstrapAZeroGainReverseCycle() {
+        MaterialRef nineX = material("partial_acacia_log_9x");
+        MaterialRef eightX = material("partial_acacia_log_8x");
+        RecipeNode nineFromEight = recipe("partial_compress_9x", nineX, 1, ingredient(eightX, 9));
+        RecipeNode eightFromNine = recipe("partial_decompress_9x", eightX, 9, ingredient(nineX, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                nineX, List.of(nineFromEight),
+                eightX, List.of(eightFromNine)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(nineX, 1), List.of(ingredient(nineX, 2)), 20);
+
+        assertFalse(result.feasible());
+        assertTrue(result.steps().stream().noneMatch(step ->
+                step.recipeId().equals(id("partial_decompress_9x"))), result.steps().toString());
     }
 
     @Test
@@ -452,7 +589,7 @@ class PureRecipePlannerTest {
 
         assertTrue(result.feasible(), result.toString());
         assertTrue(result.steps().isEmpty());
-        assertEquals(1, result.remaining().get(string));
+        assertEquals(1L, result.remaining().get(string));
     }
 
     @Test
@@ -475,7 +612,7 @@ class PureRecipePlannerTest {
         assertTrue(result.feasible(), result.toString());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(
                 id("make_white_wool"), 1)), result.steps());
-        assertEquals(1, result.remaining().get(dye));
+        assertEquals(1L, result.remaining().get(dye));
     }
 
     @Test
@@ -945,7 +1082,7 @@ class PureRecipePlannerTest {
         assertEquals(PureRecipePlanner.Status.SEARCH_LIMIT, result.status());
         assertTrue(result.expandedStates() > 1);
         assertTrue(result.steps().isEmpty());
-        assertEquals(Map.of(LOG, 1, PLANK, 1), result.remaining());
+        assertEquals(Map.of(LOG, 1L, PLANK, 1L), result.remaining());
     }
 
     @Test
@@ -962,7 +1099,7 @@ class PureRecipePlannerTest {
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.STEP_LIMIT, result.status());
         assertTrue(result.steps().isEmpty());
-        assertEquals(Map.of(LOG, 1), result.remaining());
+        assertEquals(Map.of(LOG, 1L), result.remaining());
     }
 
     @Test
@@ -1098,7 +1235,7 @@ class PureRecipePlannerTest {
         return new RecipeNode(id(id), output, count, List.of(inputs));
     }
 
-    private static IngredientRef ingredient(MaterialRef material, int count) {
+    private static IngredientRef ingredient(MaterialRef material, long count) {
         return new IngredientRef(List.of(material), count);
     }
 

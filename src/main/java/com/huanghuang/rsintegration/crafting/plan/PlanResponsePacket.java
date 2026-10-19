@@ -601,9 +601,17 @@ public final class PlanResponsePacket {
                 packet.plan.recipeId(), packet.plan.success(), packet.plan.steps().size(),
                 packet.plan.graph() != null ? packet.plan.graph().nodes().size() : 0);
         NetworkEvent.Context ctx = ctxSupplier.get();
-        ctx.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> PlanResponseClientPacketHandler.handle(
-                        packet.plan, packet.requestId)));
+        ctx.enqueueWork(() -> {
+            try {
+                DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                        () -> () -> PlanResponseClientPacketHandler.handle(
+                                packet.plan, packet.requestId));
+            } catch (Throwable failure) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-PlanPkt] Client plan response handling failed recipe={} request={}",
+                        packet.plan.recipeId(), packet.requestId, failure);
+            }
+        });
         ctx.setPacketHandled(true);
     }
 }

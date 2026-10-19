@@ -28,7 +28,7 @@ public final class SelfAmplifyingRecipePolicy {
                         .filter(material -> !material.equals(target.output()))
                         .toList();
             }
-            int count = input.role() == DemandRole.CATALYST
+            long count = input.role() == DemandRole.CATALYST
                     || amplification && input.alternatives().contains(target.output())
                     ? input.count() : saturatingMultiply(input.count(), multiplier);
             scaled.add(new IngredientRef(alternatives, count, input.nbtMatchMode(), input.role()));
@@ -77,7 +77,7 @@ public final class SelfAmplifyingRecipePolicy {
     }
 
     public static boolean isSelfAmplifying(RecipeNode recipe) {
-        int selfConsumed = selfConsumed(recipe.inputs(), recipe.output());
+        long selfConsumed = selfConsumed(recipe.inputs(), recipe.output());
         return selfConsumed > 0 && recipe.outputCount() > selfConsumed;
     }
 
@@ -95,17 +95,21 @@ public final class SelfAmplifyingRecipePolicy {
                 && IngredientMatcher.test(spec.ingredient(), output);
     }
 
-    private static int selfConsumed(List<IngredientRef> inputs, MaterialRef output) {
+    private static long selfConsumed(List<IngredientRef> inputs, MaterialRef output) {
         long consumed = 0L;
         for (IngredientRef input : inputs) {
             if (input.role() != DemandRole.CATALYST
-                    && input.alternatives().contains(output)) consumed += input.count();
+                    && input.alternatives().contains(output)) {
+                consumed = Long.MAX_VALUE - consumed < input.count()
+                        ? Long.MAX_VALUE : consumed + input.count();
+            }
         }
-        return consumed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) consumed;
+        return consumed;
     }
 
-    private static int saturatingMultiply(int count, int multiplier) {
-        long scaled = (long) count * multiplier;
-        return scaled > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) scaled;
+    private static long saturatingMultiply(long count, int multiplier) {
+        if (count <= 0L || multiplier <= 0) return 0L;
+        return count > Long.MAX_VALUE / multiplier
+                ? Long.MAX_VALUE : count * multiplier;
     }
 }

@@ -50,13 +50,13 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
         PARTIAL
     }
 
-    public record IngredientRef(List<MaterialRef> alternatives, int count,
+    public record IngredientRef(List<MaterialRef> alternatives, long count,
                                 NbtMatchMode nbtMatchMode, DemandRole role) {
-        public IngredientRef(List<MaterialRef> alternatives, int count) {
+        public IngredientRef(List<MaterialRef> alternatives, long count) {
             this(alternatives, count, NbtMatchMode.EXACT, DemandRole.CONSUMED);
         }
 
-        public IngredientRef(List<MaterialRef> alternatives, int count,
+        public IngredientRef(List<MaterialRef> alternatives, long count,
                              NbtMatchMode nbtMatchMode) {
             this(alternatives, count, nbtMatchMode, DemandRole.CONSUMED);
         }
@@ -68,7 +68,7 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
             if (alternatives.isEmpty() || count <= 0) throw new IllegalArgumentException("empty ingredient");
         }
 
-        public IngredientRef withCount(int newCount) {
+        public IngredientRef withCount(long newCount) {
             return new IngredientRef(alternatives, newCount, nbtMatchMode, role);
         }
     }

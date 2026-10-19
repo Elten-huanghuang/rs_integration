@@ -42,7 +42,16 @@ public final class SelectedPath {
      */
     public void bindTree(PlanTreeModel model) {
         this.tree = model;
+        Set<IngredientKey> currentKeys = new LinkedHashSet<>();
+        collectTreeKeys(model.root, currentKeys);
+        branchSelections.keySet().retainAll(currentKeys);
+        explicitSelections.retainAll(currentKeys);
         recalculatePending();
+    }
+
+    private void collectTreeKeys(PlanTreeNode node, Set<IngredientKey> keys) {
+        keys.add(node.key);
+        for (PlanTreeNode child : node.children) collectTreeKeys(child, keys);
     }
 
     /**

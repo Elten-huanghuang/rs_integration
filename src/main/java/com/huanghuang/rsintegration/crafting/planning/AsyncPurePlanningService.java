@@ -56,7 +56,8 @@ public final class AsyncPurePlanningService {
             return;
         }
         PlanningKey key = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
-                snapshot.recipeId(), snapshot.availableItems(), snapshot.forcedRecipes(),
+                snapshot.recipeId(), snapshot.availableItems(),
+                snapshot.preciseAvailableItems(), snapshot.forcedRecipes(),
                 snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
@@ -82,7 +83,8 @@ public final class AsyncPurePlanningService {
                              int maxMemoizedFailures, int timeoutMs,
                              Consumer<RoutedPlan> commit, Consumer<Throwable> rollback) {
         PlanningKey planning = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
-                snapshot.recipeId(), snapshot.availableItems(), snapshot.forcedRecipes(),
+                snapshot.recipeId(), snapshot.availableItems(),
+                snapshot.preciseAvailableItems(), snapshot.forcedRecipes(),
                 snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
@@ -94,7 +96,8 @@ public final class AsyncPurePlanningService {
                         maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> current.recipeRevision() == snapshot.recipeRevision(),
                 (current, result) -> commit.accept(new RoutedPlan(current, routing,
-                        result.inspection(), result.plan())), rollback);
+                        result.inspection(), result.plan(), result.forcedRecipesProjected())),
+                rollback);
     }
 
     static RoutedPlan computeRouted(PlanningSnapshot snapshot, RouteInputs routing, int repeatCount,
@@ -107,10 +110,15 @@ public final class AsyncPurePlanningService {
             setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
             ImmutableRecipeGraph scopedGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
                     snapshot.recipeGraph(), snapshot.recipeId());
+            ImmutableRecipeGraph forcedGraph = ForcedRecipeGraphProjector.apply(
+                    scopedGraph, snapshot.forcedRecipes());
+            boolean forcedRecipesProjected =
+                    snapshot.forcedRecipes().isEmpty() || forcedGraph != null;
+            ImmutableRecipeGraph routingGraph = forcedGraph != null ? forcedGraph : scopedGraph;
             PureDemandTreeInspector.Result inspection;
             try {
                 setPhase(session, snapshot, PlanningSession.Phase.DEMAND_TREE);
-                inspection = PureDemandTreeInspector.inspectWithDeadline(scopedGraph,
+                inspection = PureDemandTreeInspector.inspectWithDeadline(routingGraph,
                         routing.available(), snapshot.recipeId(), repeatCount, routing.maxNodes(),
                         routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
                         session.deadlineNanos());
@@ -119,11 +127,12 @@ public final class AsyncPurePlanningService {
                         System.nanoTime() - started);
             }
             PlanningThreadContext.throwIfCancelled();
-            PureRecipePlanner.Result plan = inspection.backgroundCompatible()
-                    && !snapshot.mainThreadOnly() && snapshot.forcedRecipes().isEmpty()
+            PureRecipePlanner.Result plan = forcedRecipesProjected
+                    && inspection.backgroundCompatible()
+                    && !snapshot.mainThreadOnly()
                     ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
-                            maxMemoizedFailures, session, scopedGraph) : null;
-            return new RoutedPlan(snapshot, routing, inspection, plan);
+                            maxMemoizedFailures, session, routingGraph) : null;
+            return new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected);
         });
     }
 
@@ -142,8 +151,9 @@ public final class AsyncPurePlanningService {
                                                             ImmutableRecipeGraph routedGraph) {
         PlanningThreadContext.throwIfCancelled();
         setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
-        Map<ImmutableRecipeGraph.MaterialRef, Integer> stock =
-                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems());
+        Map<ImmutableRecipeGraph.MaterialRef, Long> stock =
+                ImmutableRecipeGraphProjector.projectAvailabilityLong(
+                        snapshot.preciseAvailableItems());
         setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
         ImmutableRecipeGraph scopedGraph = routedGraph != null ? routedGraph
                 : ImmutableRecipeGraphProjector.restrictToDependencies(
@@ -151,7 +161,11 @@ public final class AsyncPurePlanningService {
         // Inventory matching is performed lazily against the request-local stock buckets.
         // Only smithing needs a derived graph because its output inherits the base NBT;
         // PureRecipePlanner creates that single specialization layer.
-        ImmutableRecipeGraph planningGraph = scopedGraph;
+        ImmutableRecipeGraph planningGraph = ForcedRecipeGraphProjector.apply(
+                scopedGraph, snapshot.forcedRecipes());
+        if (planningGraph == null) {
+            return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
+        }
         RecipeNode target = planningGraph.recipesById().get(snapshot.recipeId());
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
@@ -163,7 +177,8 @@ public final class AsyncPurePlanningService {
         long deadlineNanos = session.deadlineNanos();
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 planningGraph, stock, roots, maxSteps,
-                maxSearchStates, maxMemoizedFailures, deadlineNanos);
+                maxSearchStates, maxMemoizedFailures, deadlineNanos, System::nanoTime,
+                Set.of(target.output()));
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
@@ -224,7 +239,8 @@ public final class AsyncPurePlanningService {
 
     public record RoutedPlan(PlanningSnapshot snapshot, RouteInputs routing,
                              PureDemandTreeInspector.Result inspection,
-                             @Nullable PureRecipePlanner.Result plan) {}
+                             @Nullable PureRecipePlanner.Result plan,
+                             boolean forcedRecipesProjected) {}
 
     private record RoutedKey(PlanningKey planning, RouteInputs routing,
                               List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Integer>> availabilityOrder) {}
@@ -232,6 +248,7 @@ public final class AsyncPurePlanningService {
     private record PlanningKey(UUID playerId, long recipeRevision,
                                ResourceLocation recipeId,
                                Map<StackKey, Integer> availableItems,
+                               Map<StackKey, Long> preciseAvailableItems,
                                Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                ImmutableRecipeGraph recipeGraph, String networkFingerprint,
                                String bindingFingerprint,

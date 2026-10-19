@@ -48,9 +48,9 @@ final class PureDemandNormalizer {
         private final List<MaterialRef> alternatives;
         private final ImmutableRecipeGraph.NbtMatchMode nbtMatchMode;
         private final DemandRole role;
-        private int count;
+        private long count;
 
-        private AccumulatedDemand(List<MaterialRef> alternatives, int count,
+        private AccumulatedDemand(List<MaterialRef> alternatives, long count,
                                   ImmutableRecipeGraph.NbtMatchMode nbtMatchMode,
                                   DemandRole role) {
             this.alternatives = alternatives;
@@ -59,9 +59,8 @@ final class PureDemandNormalizer {
             this.role = role;
         }
 
-        private void add(int additional) {
-            long total = (long) count + additional;
-            count = total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+        private void add(long additional) {
+            count = Long.MAX_VALUE - count < additional ? Long.MAX_VALUE : count + additional;
         }
     }
 }

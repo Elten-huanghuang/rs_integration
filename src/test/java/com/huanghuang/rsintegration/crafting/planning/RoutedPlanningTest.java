@@ -94,10 +94,12 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
-    void mainThreadOnlyAndForcedRoutesNeverRunPureSearch() {
-        for (var snapshot : List.of(snapshot(1, true, false), snapshot(1, false, true))) {
-            assertNull(compute(snapshot, routing(snapshot, Set.of(), 512), 1).plan());
-        }
+    void mainThreadOnlySkipsPureSearchAndOutOfScopeForcedSelectionsAreIgnored() {
+        var mainThreadOnly = snapshot(1, true, false);
+        assertNull(compute(mainThreadOnly, routing(mainThreadOnly, Set.of(), 512), 1).plan());
+
+        var staleForced = snapshot(1, false, true);
+        assertNotNull(compute(staleForced, routing(staleForced, Set.of(), 512), 1).plan());
     }
 
     @Test

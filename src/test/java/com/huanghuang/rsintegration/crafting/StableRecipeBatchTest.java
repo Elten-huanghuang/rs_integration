@@ -101,6 +101,43 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void finalTargetDoesNotDisableStableBatchingForUpstreamTiers() {
+        ResourceLocation tier1 = new ResourceLocation("test", "target_chain_1");
+        ResourceLocation tier2 = new ResourceLocation("test", "target_chain_2");
+        ShapedRecipe first = compressionRecipe(tier1, Items.COBBLESTONE, Items.STONE);
+        ShapedRecipe second = compressionRecipe(tier2, Items.STONE, Items.DEEPSLATE);
+        Fixture fixture = fixture(Map.of(tier1, first, tier2, second));
+        CraftingResolver.ResolutionStep firstStep = new CraftingResolver.ResolutionStep(
+                tier1, ModType.GENERIC, new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, 81);
+        CraftingResolver.ResolutionStep secondStep = new CraftingResolver.ResolutionStep(
+                tier2, ModType.GENERIC, new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, 9);
+        ItemStack target = new ItemStack(Items.DEEPSLATE);
+        FlatCraftExecutor.Host host = mock(FlatCraftExecutor.Host.class);
+        FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
+                fixture.level(), CraftLogContext.create(UUID.randomUUID(), tier2),
+                List.of(firstStep, secondStep), target, host, Map.of());
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.COBBLESTONE, 729)));
+
+        assertTrue(StableRecipeBatch.isEligible(
+                fixture.level(), firstStep, target, Map.of()));
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    StableRecipeBatch.tryExecute(fixture.level(), firstStep,
+                            fixture.player(), inventory, ledger, context));
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    StableRecipeBatch.tryExecute(fixture.level(), secondStep,
+                            fixture.player(), inventory, ledger, context));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.DEEPSLATE));
+        assertEquals(9, inventory.get(0).getCount());
+    }
+
+    @Test
     void rejectsCraftingRecipeSubclassesUsedByDynamicRecipeSystems() {
         ResourceLocation recipeId = new ResourceLocation("test", "dynamic_recipe");
         ShapelessRecipe dynamicRecipe = new ShapelessRecipe(

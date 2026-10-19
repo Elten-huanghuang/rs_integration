@@ -51,6 +51,24 @@ class PurePlanAdapterTest extends com.huanghuang.rsintegration.testutil.Bootstra
         assertEquals(3, steps.get(0).executions());
     }
 
+    @Test
+    void splitsLongPlannedBatchesIntoWireSizedExecutionSegments() {
+        MaterialRef output = material("large_batch_output");
+        ResourceLocation recipeId = id("large_batch_recipe");
+        RecipeNode recipe = new RecipeNode(recipeId, output, 1, List.of());
+        long batches = (long) Integer.MAX_VALUE + 5L;
+        PureRecipePlanner.Result plan = new PureRecipePlanner.Result(
+                true, List.of(new PureRecipePlanner.PlannedStep(recipeId, batches)),
+                List.of(), Map.of());
+
+        var steps = PurePlanAdapter.toResolutionSteps(plan,
+                new ImmutableRecipeGraph(Map.of(output, List.of(recipe))));
+
+        assertEquals(2, steps.size());
+        assertEquals(Integer.MAX_VALUE, steps.get(0).executions());
+        assertEquals(5, steps.get(1).executions());
+    }
+
     private static MaterialRef material(String path) {
         return new MaterialRef(id(path), "");
     }

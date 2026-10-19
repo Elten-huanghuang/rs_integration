@@ -29,9 +29,11 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.util.ModIds;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
@@ -40,6 +42,8 @@ import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import org.mockito.MockedStatic;
+import net.minecraftforge.fml.ModList;
 
 import java.util.List;
 import java.util.Map;
@@ -54,6 +58,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GenericCraftPacketTest extends BootstrapTest {
@@ -705,14 +712,26 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
-        assertTrue(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(true, false, false, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, true, false, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, true));
+        assertTrue(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(true, false, true, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, true, true, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, false));
+        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, true));
         assertTrue(GenericCraftPacket.shouldUseAsyncPurePreview(true, false));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(true, true));
         assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(false, false));
+    }
+
+    @Test
+    void absentBiomancyNeverLoadsItsOptionalRecipeResolver() {
+        try (MockedStatic<ModList> modList = mockStatic(ModList.class)) {
+            ModList loadedMods = mock(ModList.class);
+            modList.when(ModList::get).thenReturn(loadedMods);
+            when(loadedMods.isLoaded(ModIds.BIOMANCY)).thenReturn(false);
+
+            assertNull(GenericCraftPacket.resolveBiomancyDigestingRecipe(
+                    mock(ServerLevel.class), new ResourceLocation("test", "display_recipe")));
+        }
     }
 
     @Test

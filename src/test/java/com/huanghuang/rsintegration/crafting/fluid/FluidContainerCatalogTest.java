@@ -266,8 +266,9 @@ class FluidContainerCatalogTest extends BootstrapTest {
                 List.of(demand(new ItemStack(Items.WATER_BUCKET), 1)), 20);
         assertTrue(result.feasible(), result.toString());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(fill.getId(), 1)), result.steps());
-        assertEquals(0, result.remaining().getOrDefault(material(new ItemStack(Items.BUCKET)), 0));
-        assertEquals(0, result.remaining().getOrDefault(material(token(new FluidStack(Fluids.WATER, 1))), 0));
+        assertEquals(0L, result.remaining().getOrDefault(material(new ItemStack(Items.BUCKET)), 0L));
+        assertEquals(0L, result.remaining().getOrDefault(
+                material(token(new FluidStack(Fluids.WATER, 1))), 0L));
         assertTrue(ModType.FLUID_CONTAINER.isVirtual());
         assertEquals(ModType.GraphExecutionAudit.GRAPH_SAFE, ModType.FLUID_CONTAINER.graphExecutionAudit());
     }

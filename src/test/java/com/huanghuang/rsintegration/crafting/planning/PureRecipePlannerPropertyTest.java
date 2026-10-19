@@ -138,7 +138,7 @@ class PureRecipePlannerPropertyTest {
                 int availableWithoutStealing = unreservedStock(
                         state.stock(), need.ingredient(), rest);
                 for (MaterialRef wanted : need.ingredient().alternatives()) {
-                    int missing = need.ingredient().count() - availableWithoutStealing;
+                    int missing = (int) need.ingredient().count() - availableWithoutStealing;
                     if (missing <= 0) continue;
                     for (RecipeNode recipe : generated.graph().recipesByOutput()
                             .getOrDefault(wanted, List.of())) {
@@ -147,11 +147,11 @@ class PureRecipePlannerPropertyTest {
                         List<ReferenceTask> pending = new ArrayList<>();
                         for (IngredientRef input : recipe.inputs()) {
                             pending.add(new ReferenceNeed(new IngredientRef(input.alternatives(),
-                                    input.count() * batches)));
+                                    (int) input.count() * batches)));
                         }
                         boolean aggregateDemand = need.ingredient().alternatives().size() > 1;
                         pending.add(new ReferenceProduce(recipe.output(), recipe.outputCount(),
-                                aggregateDemand ? 0 : need.ingredient().count(), batches));
+                                aggregateDemand ? 0 : (int) need.ingredient().count(), batches));
                         if (aggregateDemand) pending.add(new ReferenceNeed(need.ingredient()));
                         pending.addAll(rest);
                         queue.addLast(new ReferenceState(state.stock(), List.copyOf(pending), state.steps()));
@@ -196,18 +196,25 @@ class PureRecipePlannerPropertyTest {
             if (recipe == null) return false;
             for (IngredientRef input : recipe.inputs()) {
                 states = consume(states, new IngredientRef(input.alternatives(),
-                        input.count() * step.batches()));
+                        (int) input.count() * (int) step.batches()));
             }
             Set<Map<MaterialRef, Integer>> produced = new HashSet<>();
             for (Map<MaterialRef, Integer> state : states) {
                 int count = state.getOrDefault(recipe.output(), 0)
-                        + recipe.outputCount() * step.batches();
+                        + recipe.outputCount() * (int) step.batches();
                 produced.add(withCount(state, recipe.output(), count));
             }
             states = produced;
         }
         for (IngredientRef root : generated.roots()) states = consume(states, root);
-        return states.contains(result.remaining());
+        return states.contains(intRemaining(result.remaining()));
+    }
+
+    private static Map<MaterialRef, Integer> intRemaining(
+            Map<MaterialRef, Long> remaining) {
+        Map<MaterialRef, Integer> compatible = new HashMap<>();
+        remaining.forEach((material, count) -> compatible.put(material, count.intValue()));
+        return compatible;
     }
 
     private static Set<Map<MaterialRef, Integer>> consume(Set<Map<MaterialRef, Integer>> states,
@@ -215,7 +222,7 @@ class PureRecipePlannerPropertyTest {
         Set<Map<MaterialRef, Integer>> consumed = new HashSet<>();
         for (Map<MaterialRef, Integer> state : states) {
             consumeCombinations(state, ingredient.alternatives(), 0,
-                    ingredient.count(), consumed);
+                    (int) ingredient.count(), consumed);
         }
         return consumed;
     }
@@ -226,7 +233,7 @@ class PureRecipePlannerPropertyTest {
                                              List<ReferenceTask> rest, int steps) {
         Set<Map<MaterialRef, Integer>> consumed = new HashSet<>();
         consumeCombinations(stock, ingredient.alternatives(), 0,
-                ingredient.count(), consumed);
+                (int) ingredient.count(), consumed);
         for (Map<MaterialRef, Integer> result : consumed) {
             queue.addLast(new ReferenceState(result, List.copyOf(rest), steps));
         }

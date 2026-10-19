@@ -105,7 +105,18 @@ public final class PlanTreeNode {
 
     /** True when this node is produced by a step that has selectable alternative recipes. */
     public boolean hasAlternatives() {
-        return step != null && step.hasOrSiblings();
+        // 循环引用只用于揭示计划中的回边，不允许继续从这里改写分支，
+        // 否则 9x -> 8x -> 9x 一类路径会被再次提交给服务端。
+        return step != null && !containsCycle() && step.hasOrSiblings();
+    }
+
+    /** 当前节点或其子树是否包含循环回边。 */
+    public boolean containsCycle() {
+        if (cycle) return true;
+        for (PlanTreeNode child : children) {
+            if (child.containsCycle()) return true;
+        }
+        return false;
     }
 
     public PlanTreeNode markCycle() {

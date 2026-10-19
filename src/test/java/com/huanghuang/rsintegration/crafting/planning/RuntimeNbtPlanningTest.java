@@ -53,7 +53,7 @@ class RuntimeNbtPlanningTest extends BootstrapTest {
         var result = PureRecipePlanner.resolve(prepared, stock, List.of(any(EMBLEM, 17)), 20);
         assertTrue(result.feasible(), result.toString());
         assertEquals(2, result.steps().stream().filter(s -> s.recipeId().equals(INFUSION))
-                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
+                .mapToLong(PureRecipePlanner.PlannedStep::batches).sum());
         assertEquals(3, result.remaining().get(UNKNOWN));
         assertFalse(result.remaining().containsKey(REMNANT));
         assertEquals(PureDemandTreeInspector.Status.COMPLETE,
@@ -109,7 +109,7 @@ class RuntimeNbtPlanningTest extends BootstrapTest {
                 List.of(any(REMNANT, 4), any(CONTAINED, 4)), 20);
         assertTrue(result.feasible(), result.toString());
         assertEquals(2, result.steps().stream().filter(s -> s.recipeId().equals(INFUSION))
-                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
+                .mapToLong(PureRecipePlanner.PlannedStep::batches).sum());
     }
 
     @Test

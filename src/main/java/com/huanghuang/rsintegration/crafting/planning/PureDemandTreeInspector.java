@@ -216,7 +216,8 @@ public final class PureDemandTreeInspector {
                     >= LARGE_ALTERNATIVE_THRESHOLD;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
-                int remaining = consumeMatching(alternative, ingredient.count(), ingredient.nbtMatchMode());
+                int remaining = consumeMatching(alternative, routingCount(ingredient.count()),
+                        ingredient.nbtMatchMode());
                 Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
                 if (coverage == Coverage.COVERED) return coverage;
                 if (coverage == Coverage.NODE_LIMIT) {
@@ -244,7 +245,8 @@ public final class PureDemandTreeInspector {
 
         private Coverage coverCatalyst(IngredientRef ingredient) {
             int mark = ledger.mark();
-            int remaining = ingredient.count() - ledger.countAcrossAlternatives(ingredient);
+            int remaining = Math.max(0, routingCount(ingredient.count())
+                    - ledger.countAcrossAlternatives(ingredient));
             if (remaining <= 0) return Coverage.COVERED;
 
             Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
@@ -275,7 +277,7 @@ public final class PureDemandTreeInspector {
 
         private int consumeAcrossAlternatives(IngredientRef ingredient) {
             int mark = ledger.mark();
-            int remaining = ingredient.count();
+            int remaining = routingCount(ingredient.count());
             for (MaterialRef stocked : ledger.matching(ingredient)) {
                 int available = ledger.count(stocked);
                 if (available <= 0) continue;
@@ -495,14 +497,14 @@ public final class PureDemandTreeInspector {
             }
 
             private int countAcrossAlternatives(IngredientRef ingredient) {
-                int remaining = ingredient.count();
+                int remaining = routingCount(ingredient.count());
                 for (MaterialRef stocked : matching(ingredient)) {
                     int available = count(stocked);
                     if (available <= 0) continue;
                     remaining -= Math.min(available, remaining);
                     if (remaining == 0) break;
                 }
-                return ingredient.count() - remaining;
+                return routingCount(ingredient.count()) - remaining;
             }
 
             private Iterable<MaterialRef> matching(IngredientRef ingredient) {
@@ -561,5 +563,9 @@ public final class PureDemandTreeInspector {
     private static long scaledInputCount(IngredientRef input, long batches) {
         return input.role() == DemandRole.CATALYST
                 ? input.count() : (long) input.count() * batches;
+    }
+
+    private static int routingCount(long count) {
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count));
     }
 }

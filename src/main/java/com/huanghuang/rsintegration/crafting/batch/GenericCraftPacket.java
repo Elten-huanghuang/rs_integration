@@ -119,6 +119,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.crafting.planning.ForcedRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector.RecipeGraphUnavailableException;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
@@ -1164,6 +1165,8 @@ public final class GenericCraftPacket {
         if (!recipeGraph.recipesById().containsKey(recipeId)) return false;
 
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
+        Map<StackKey, Long> preciseAvailable =
+                MaterialSources.listAllAvailableLong(player, storageEndpoint);
         Set<ResourceLocation> reusableCatalystOutputIds =
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
                         ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of();
@@ -1177,7 +1180,8 @@ public final class GenericCraftPacket {
                 ? pos : player.blockPosition();
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
-                player.getUUID(), 0L, recipeId, available, Map.of(), recipeGraph,
+                player.getUUID(), 0L, recipeId, available, preciseAvailable,
+                Map.of(), recipeGraph,
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
                         ResourceKey.create(
@@ -1313,6 +1317,8 @@ public final class GenericCraftPacket {
         ImmutableRecipeGraph planningGraph = new ImmutableRecipeGraph(projected);
 
         Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
+        Map<StackKey, Long> preciseAvailable =
+                MaterialSources.listAllAvailableLong(player, storageEndpoint);
         var routeInputs = new AsyncPurePlanningService.RouteInputs(
                 routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
@@ -1324,7 +1330,8 @@ public final class GenericCraftPacket {
         BlockPos effectivePos = pos != null ? pos : player.blockPosition();
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
-                player.getUUID(), 0L, recipeId, available, Map.of(), planningGraph,
+                player.getUUID(), 0L, recipeId, available, preciseAvailable,
+                Map.of(), planningGraph,
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
                         ResourceKey.create(Registries.DIMENSION, effectiveDim), effectivePos),
@@ -1580,7 +1587,7 @@ public final class GenericCraftPacket {
         recipe = FluidContainerCatalog.resolve(level, recipeId);
         if (recipe != null) return recipe;
 
-        recipe = BiomancyDigestingRecipeResolver.resolve(level, recipeId);
+        recipe = resolveBiomancyDigestingRecipe(level, recipeId);
         if (recipe != null) return recipe;
 
         recipe = BirdcageEggCatalog.resolve(level, recipeId);
@@ -1645,6 +1652,21 @@ public final class GenericCraftPacket {
 
         RSIntegrationMod.LOGGER.warn("[RSI-resolveRecipe] All lookups failed for {}", recipeId);
         return null;
+    }
+
+    @Nullable
+    static Recipe<?> resolveBiomancyDigestingRecipe(
+            ServerLevel level, ResourceLocation recipeId) {
+        ModList loadedMods = ModList.get();
+        if (loadedMods == null || !loadedMods.isLoaded(ModIds.BIOMANCY)) return null;
+        try {
+            return BiomancyDigestingRecipeResolver.resolve(level, recipeId);
+        } catch (LinkageError | RuntimeException unavailable) {
+            RSIntegrationMod.debug(
+                    "[RSI-resolveRecipe] Biomancy digesting compatibility unavailable: {}",
+                    unavailable.toString());
+            return null;
+        }
     }
 
     private static Recipe<?> resolveFARitual(ServerLevel level, ResourceLocation recipeId) {
@@ -4041,6 +4063,8 @@ public final class GenericCraftPacket {
             long snapshotStarted = System.nanoTime();
             try {
                 available = MaterialSources.listAllAvailable(player, planningEndpoint);
+                Map<StackKey, Long> preciseAvailable =
+                        MaterialSources.listAllAvailableLong(player, planningEndpoint);
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 BindingAwareGraph bindingGraph = recipe instanceof CraftingRecipe
                         || backgroundProjectable
@@ -4049,6 +4073,7 @@ public final class GenericCraftPacket {
                         : new BindingAwareGraph(new ImmutableRecipeGraph(Map.of()), Set.of());
                 planningSnapshot = PlanningSnapshotFactory.capture(
                         player.getUUID(), previewGeneration, recipeId, available,
+                        preciseAvailable,
                         effectiveOverrides,
                         bindingGraph.graph(),
                         PlanningStateValidator.networkFingerprint(
@@ -4137,7 +4162,10 @@ public final class GenericCraftPacket {
                 : RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
         int demandMaxNodes = RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get();
         if (!asyncAttempted && shouldSubmitRoutedPreview(directTerminalPlan,
-                planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(), !materialLocks.isEmpty())) {
+                planningSnapshot.mainThreadOnly(),
+                effectiveOverrides.isEmpty() || ForcedRecipeGraphProjector.apply(
+                        planningSnapshot.recipeGraph(), effectiveOverrides) != null,
+                !materialLocks.isEmpty())) {
             var routing = new AsyncPurePlanningService.RouteInputs(
                     routingAvailability(planningSnapshot.availableItems()), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
@@ -4205,8 +4233,12 @@ public final class GenericCraftPacket {
         // NODE_LIMIT is only a conservative routing-probe cutoff. Keep those
         // requests on the immutable background planner instead of falling back
         // to the 500ms typed resolver on the server thread.
+        boolean projectedOverrides = effectiveOverrides.isEmpty()
+                || routedPlan != null
+                && routedPlan.snapshot().equals(planningSnapshot)
+                && routedPlan.forcedRecipesProjected();
         boolean pureRoute = demandTree.backgroundCompatible()
-                && effectiveOverrides.isEmpty()
+                && projectedOverrides
                 && materialLocks.isEmpty()
                 && !planningSnapshot.mainThreadOnly();
         // 规划只需要可用的存储端点，不能再用 RS 原生网络做可用性判断。
@@ -4250,7 +4282,7 @@ public final class GenericCraftPacket {
                 precomputedPlan, reusableCatalystOutputIds);
         boolean requiresTypedIncompleteRoute = shouldRetryTypedPlanning(
                 precomputedPlan, planningSnapshot.bindingBlockedOutputIds());
-        boolean selectedPureResolver = terminalPureResult && effectiveOverrides.isEmpty()
+        boolean selectedPureResolver = terminalPureResult && projectedOverrides
                 && !requiresTypedCatalystRoute
                 && !requiresTypedIncompleteRoute;
         if (requiresTypedIncompleteRoute) {
@@ -5426,8 +5458,8 @@ public final class GenericCraftPacket {
     }
 
     static boolean shouldSubmitRoutedPreview(boolean directTerminalPlan, boolean mainThreadOnly,
-                                              boolean hasOverrides, boolean hasMaterialLocks) {
-        return shouldUseAsyncPurePreview(!mainThreadOnly && !hasOverrides && !hasMaterialLocks,
+                                              boolean overridesProjectable, boolean hasMaterialLocks) {
+        return shouldUseAsyncPurePreview(!mainThreadOnly && overridesProjectable && !hasMaterialLocks,
                 directTerminalPlan);
     }
 
@@ -5456,8 +5488,16 @@ public final class GenericCraftPacket {
             PreviewStep previous = merged.get(key);
             int batches = step.executions();
             if (previous != null) {
-                batches = (int) Math.min(Integer.MAX_VALUE, (long) previous.batches() + batches);
-                step = previous.step();
+                long combined = (long) previous.batches() + batches;
+                if (combined > Integer.MAX_VALUE) {
+                    // Wire and PlanStep counts are int-sized. Keep a follow-up segment
+                    // distinct instead of silently truncating a long batch.
+                    key += "|batch-segment:" + i;
+                    previous = null;
+                } else {
+                    batches = (int) combined;
+                }
+                if (previous != null) step = previous.step();
             }
             merged.put(key, new PreviewStep(step, batches));
         }

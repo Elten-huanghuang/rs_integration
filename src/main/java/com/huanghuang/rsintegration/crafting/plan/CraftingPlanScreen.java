@@ -2225,7 +2225,7 @@ public final class CraftingPlanScreen extends Screen {
      */
     private void selectTreeBranch(PlanTreeNode node, ResourceLocation recipeId) {
         closeRecipeCandidates();
-        if (node.step == null) return;
+        if (node.step == null || node.containsCycle()) return;
 
         int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
         selectedPath.selectBranch(node.key, idx, recipeId);

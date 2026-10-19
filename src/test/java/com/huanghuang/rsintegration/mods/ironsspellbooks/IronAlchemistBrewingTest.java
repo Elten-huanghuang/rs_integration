@@ -109,10 +109,11 @@ class IronAlchemistBrewingTest extends BootstrapTest {
 
         assertTrue(plan.feasible(), plan.toString());
         assertEquals(batches, plan.steps().stream().filter(step -> step.recipeId().equals(brew.getId()))
-                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
+                .mapToLong(PureRecipePlanner.PlannedStep::batches).sum());
         assertEquals(bottles, plan.steps().stream().filter(step -> step.recipeId().equals(bottle.getId()))
-                .mapToInt(PureRecipePlanner.PlannedStep::batches).sum());
-        assertEquals((batches * 4 - bottles) * 250, plan.remaining().getOrDefault(brewNode.output(), 0));
+                .mapToLong(PureRecipePlanner.PlannedStep::batches).sum());
+        assertEquals((batches * 4L - bottles) * 250L,
+                plan.remaining().getOrDefault(brewNode.output(), 0L));
         assertEquals(250, handler.getIngredients(bottle).get(0).count());
         assertEquals(1, handler.getIngredients(bottle).get(1).count());
     }

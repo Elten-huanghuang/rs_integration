@@ -20,20 +20,25 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class MaterialSources {
 
-    private static final Map<String, Map<StackKey, Integer>> cache = new ConcurrentHashMap<>();
-    private static final Map<String, Map<StackKey, Integer>> networkCache = new ConcurrentHashMap<>();
+    private static final Map<String, Map<StackKey, Long>> cache = new ConcurrentHashMap<>();
+    private static final Map<String, Map<StackKey, Long>> networkCache = new ConcurrentHashMap<>();
     private static final Object cacheLock = new Object();
     private static volatile int lastTick = -1;
     private static final LogSampler OVERFLOW_LOGS = new LogSampler(60_000L);
 
     private MaterialSources() {}
 
+    static long saturatedAdd(long left, long right) {
+        if (right <= 0) return left;
+        return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
     static int saturatedAdd(int left, int right) {
         if (right <= 0) return left;
         return left > Integer.MAX_VALUE - right ? Integer.MAX_VALUE : left + right;
     }
 
-    private static void mergeAvailable(Map<StackKey, Integer> counts, StackKey key, long amount,
+    private static void mergeAvailable(Map<StackKey, Long> counts, StackKey key, long amount,
                                        String source) {
         if (amount <= 0) {
             if (amount < 0 && OVERFLOW_LOGS.allow("negative:" + key.item())) {
@@ -43,16 +48,15 @@ public final class MaterialSources {
             }
             return;
         }
-        int before = counts.getOrDefault(key, 0);
-        int added = (int) Math.min(Integer.MAX_VALUE, amount);
-        int after = saturatedAdd(before, added);
+        long before = counts.getOrDefault(key, 0L);
+        long after = saturatedAdd(before, amount);
         counts.put(key, after);
-        if ((amount > Integer.MAX_VALUE || after == Integer.MAX_VALUE)
+        if (after == Long.MAX_VALUE
                 && OVERFLOW_LOGS.allow("saturated:" + key.item())) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Materials] quantity saturated for planning: source={} item={} amount={} existing={} planningCount={} limit={}",
                     source, ForgeRegistries.ITEMS.getKey(key.item()), amount, before, after,
-                    Integer.MAX_VALUE);
+                    Long.MAX_VALUE);
         }
     }
 
@@ -62,7 +66,11 @@ public final class MaterialSources {
      * Only counts the main inventory (36 slots) — not armor or offhand,
      */
     public static Map<StackKey, Integer> countInventory(Player player) {
-        Map<StackKey, Integer> map = new HashMap<>();
+        return intCounts(countInventoryLong(player));
+    }
+
+    public static Map<StackKey, Long> countInventoryLong(Player player) {
+        Map<StackKey, Long> map = new HashMap<>();
         Inventory inv = player.getInventory();
         for (ItemStack stack : inv.items) {
             if (!stack.isEmpty()) {
@@ -99,15 +107,20 @@ public final class MaterialSources {
     /** Backend-neutral availability view used by migrated planning callers. */
     public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
                                                            @Nullable CraftStorageEndpoint endpoint) {
+        return intCounts(listAllAvailableLong(player, endpoint));
+    }
+
+    public static Map<StackKey, Long> listAllAvailableLong(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         int currentTick = currentTick(player);
         String cacheKey = cacheKey(player, endpoint);
         rotateCache(currentTick);
-        Map<StackKey, Integer> cached = cache.get(cacheKey);
+        Map<StackKey, Long> cached = cache.get(cacheKey);
         if (cached != null) return cached;
 
-        Map<StackKey, Integer> available = countInventory(player);
+        Map<StackKey, Long> available = countInventoryLong(player);
         if (endpoint == null) {
-            Map<StackKey, Integer> snapshot = Map.copyOf(available);
+            Map<StackKey, Long> snapshot = Map.copyOf(available);
             cache.putIfAbsent(cacheKey, snapshot);
             return snapshot;
         }
@@ -117,9 +130,9 @@ public final class MaterialSources {
         // StackListEntry directly and is authoritative for RS item identity.
         if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
             String networkKey = networkCacheKey(legacy);
-            Map<StackKey, Integer> networkItems = networkCache.get(networkKey);
+            Map<StackKey, Long> networkItems = networkCache.get(networkKey);
             if (networkItems == null) {
-                Map<StackKey, Integer> scanned = new HashMap<>();
+                Map<StackKey, Long> scanned = new HashMap<>();
                 for (ItemStack stack : legacy.cachedStackVariants()) {
                     if (!stack.isEmpty()) {
                         mergeAvailable(scanned, StackKey.of(stack, true), stack.getCount(),
@@ -127,11 +140,11 @@ public final class MaterialSources {
                     }
                 }
                 networkItems = Map.copyOf(scanned);
-                Map<StackKey, Integer> existing = networkCache.putIfAbsent(networkKey, networkItems);
+                Map<StackKey, Long> existing = networkCache.putIfAbsent(networkKey, networkItems);
                 if (existing != null) networkItems = existing;
             }
             networkItems.forEach((key, count) -> mergeAvailable(available, key, count, "refined_storage_cache"));
-            Map<StackKey, Integer> snapshot = Map.copyOf(available);
+            Map<StackKey, Long> snapshot = Map.copyOf(available);
             cache.putIfAbsent(cacheKey, snapshot);
             return snapshot;
         }
@@ -151,12 +164,12 @@ public final class MaterialSources {
             }
         }
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            int exact = 0;
+            long exact = 0L;
             for (var entry : available.entrySet()) {
                 var id = ForgeRegistries.ITEMS.getKey(entry.getKey().item());
                 if (id != null && (id.toString().equals("confluence:demon_heart")
                         || id.toString().equals("terra_curio:demon_heart"))) {
-                    exact += entry.getValue();
+                    exact = saturatedAdd(exact, entry.getValue());
                 }
             }
             RSIntegrationMod.LOGGER.debug(
@@ -168,9 +181,16 @@ public final class MaterialSources {
         // A failed backend snapshot must not be cached as an inventory-only
         // result: a transient backend failure can recover within this tick.
         if (!snapshotResult.successful()) return available;
-        Map<StackKey, Integer> snapshot = Map.copyOf(available);
+        Map<StackKey, Long> snapshot = Map.copyOf(available);
         cache.putIfAbsent(cacheKey, snapshot);
         return snapshot;
+    }
+
+    private static Map<StackKey, Integer> intCounts(Map<StackKey, Long> precise) {
+        Map<StackKey, Integer> compatible = new HashMap<>(precise.size());
+        precise.forEach((key, count) -> compatible.put(key,
+                (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count))));
+        return Map.copyOf(compatible);
     }
 
     /**
@@ -181,8 +201,14 @@ public final class MaterialSources {
     public static Map<StackKey, Integer> listAvailableForTypes(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
             Set<Item> itemTypes) {
+        return intCounts(listAvailableForTypesLong(player, endpoint, itemTypes));
+    }
+
+    public static Map<StackKey, Long> listAvailableForTypesLong(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+            Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
-        Map<StackKey, Integer> available = countInventory(player);
+        Map<StackKey, Long> available = countInventoryLong(player);
         available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
         if (endpoint == null) return Map.copyOf(available);
 
