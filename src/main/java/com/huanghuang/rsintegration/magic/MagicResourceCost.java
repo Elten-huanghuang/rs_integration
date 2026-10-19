@@ -30,8 +30,11 @@ public record MagicResourceCost(MagicResourceKind kind, int amountPerOperation) 
         List<MagicResourceCost> result = new ArrayList<>(totals.size());
         for (MagicResourceKind kind : MagicResourceKind.values()) {
             long total = totals.getOrDefault(kind, 0L);
-            if (total > 0L) result.add(new MagicResourceCost(
-                    kind, (int) Math.min(Integer.MAX_VALUE, total)));
+            if (total > Integer.MAX_VALUE) {
+                throw new ArithmeticException(
+                        "aggregated magic cost exceeds int for " + kind + ": " + total);
+            }
+            if (total > 0L) result.add(new MagicResourceCost(kind, (int) total));
         }
         return List.copyOf(result);
     }

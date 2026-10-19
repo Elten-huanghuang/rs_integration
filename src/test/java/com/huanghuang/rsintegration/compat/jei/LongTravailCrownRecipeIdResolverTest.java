@@ -56,6 +56,29 @@ class LongTravailCrownRecipeIdResolverTest extends BootstrapTest {
     }
 
     @Test
+    void resolvesTheRenamedSpringCornerRecipes() {
+        CraftingRecipe display = mock(CraftingRecipe.class);
+        when(display.getId()).thenReturn(new ResourceLocation(
+                "the_long_travail", "jei/spring_corner/33554431"));
+        when(display.getIngredients()).thenReturn(NonNullList.of(Ingredient.EMPTY,
+                Ingredient.of(Items.WHEAT), Ingredient.of(Items.WHEAT),
+                Ingredient.of(Items.WHEAT), Ingredient.of(Items.STRING),
+                Ingredient.of(Items.POPPY, Items.DANDELION),
+                Ingredient.of(Items.STRING), Ingredient.of(Items.WHEAT),
+                Ingredient.EMPTY, Ingredient.of(Items.WHEAT)));
+
+        IRecipeLayoutDrawable<?> layout = mock(IRecipeLayoutDrawable.class);
+        IRecipeSlotsView slots = mock(IRecipeSlotsView.class);
+        IRecipeSlotView flowerSlot = mock(IRecipeSlotView.class);
+        when(layout.getRecipeSlotsView()).thenReturn(slots);
+        when(slots.getSlotViews(RecipeIngredientRole.INPUT)).thenReturn(List.of(flowerSlot));
+        when(flowerSlot.getDisplayedItemStack()).thenReturn(Optional.of(new ItemStack(Items.DANDELION)));
+
+        assertEquals(new ResourceLocation("the_long_travail", "spring_corner/dandelion"),
+                LongTravailCrownRecipeIdResolver.resolve(display, layout));
+    }
+
+    @Test
     void treeSwitchUsesTheNewCrownVariantNbt() {
         ItemStack previous = new ItemStack(Items.DIAMOND);
         previous.getOrCreateTag().putString("flower", "poppy");

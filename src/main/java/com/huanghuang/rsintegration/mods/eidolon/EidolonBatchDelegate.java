@@ -79,6 +79,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private Object brazier;              // BrazierTileEntity (null except ritual mode)
     private ItemStack pendingResult;      // Stored result for collectResult()
     private boolean craftCompleted;       // Flag set after instant craft
+    private final List<ItemStack> pendingRemainders = new ArrayList<>();
     private final List<RitualInputSlot> installedRitualInputs = new ArrayList<>();
 
     // ── IBatchDelegate impl ───────────────────────────────────────
@@ -155,6 +156,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             this.crucible = null;
             this.pendingResult = ItemStack.EMPTY;
             this.craftCompleted = false;
+            this.pendingRemainders.clear();
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK (worktable): recipe={}", recipeId);
             return true;
         }
@@ -189,6 +191,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             this.crucible = null;
             this.pendingResult = ItemStack.EMPTY;
             this.craftCompleted = false;
+            this.pendingRemainders.clear();
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK (ritual): recipe={}", recipeId);
             return true;
         }
@@ -249,6 +252,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         this.pendingResult = ItemStack.EMPTY;
         this.craftCompleted = false;
+        this.pendingRemainders.clear();
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] validateAndInit OK: recipe={}", recipeId);
         return true;
@@ -937,16 +941,14 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Worktable mode: materials (core + extras) were pre-extracted by chain.
-        // Apply crafting remainders: items with hasCraftingRemainingItem() leave
-        // getCraftingRemainingItem() behind; everything else is consumed.
+        // Hold crafting remainders until result collection so an aborted shared
+        // ledger can still refund inputs without duplicating their containers.
         if (isWorktable) {
+            pendingRemainders.clear();
             for (ItemStack mat : materials) {
                 if (mat.hasCraftingRemainingItem()) {
                     ItemStack remainder = mat.getCraftingRemainingItem();
-                    if (!remainder.isEmpty()) {
-                        ItemStack leftover = insertIntoStorage(player, remainder, false);
-                        if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, network);
-                    }
+                    if (!remainder.isEmpty()) pendingRemainders.add(remainder.copy());
                 }
             }
             try {
@@ -1100,7 +1102,31 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = pendingResult.copy();
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
+        returnPendingRemainders(player);
         return result;
+    }
+
+    @Override
+    public List<ItemStack> collectAllResults(ServerPlayer player) {
+        if (isRitual) {
+            ItemStack result = collectRitualResult(player);
+            return result.isEmpty() ? List.of() : List.of(result);
+        }
+        List<ItemStack> results = new ArrayList<>(pendingRemainders.size() + 1);
+        if (pendingResult != null && !pendingResult.isEmpty()) results.add(pendingResult.copy());
+        results.addAll(pendingRemainders.stream().map(ItemStack::copy).toList());
+        pendingResult = ItemStack.EMPTY;
+        pendingRemainders.clear();
+        craftCompleted = false;
+        return List.copyOf(results);
+    }
+
+    private void returnPendingRemainders(ServerPlayer player) {
+        for (ItemStack remainder : pendingRemainders) {
+            ItemStack leftover = insertIntoStorage(player, remainder.copy(), false);
+            if (!leftover.isEmpty()) PlayerUtils.safeGiveToPlayer(player, leftover, network);
+        }
+        pendingRemainders.clear();
     }
 
     private ItemStack collectRitualResult(ServerPlayer player) {
@@ -1148,8 +1174,17 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
             }
         }
         pendingResult = ItemStack.EMPTY;
+        pendingRemainders.clear();
         craftCompleted = false;
         resetState();
+    }
+
+    @Override
+    protected void clearVirtualState(ServerPlayer player) {
+        if (!isWorktable) return;
+        pendingResult = ItemStack.EMPTY;
+        pendingRemainders.clear();
+        craftCompleted = false;
     }
 
     @Override
@@ -1159,6 +1194,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         // bookkeeping without touching any provider that a player may have reused.
         installedRitualInputs.clear();
         pendingResult = ItemStack.EMPTY;
+        pendingRemainders.clear();
         craftCompleted = false;
         resetState();
     }

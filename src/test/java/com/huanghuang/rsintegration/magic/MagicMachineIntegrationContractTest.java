@@ -14,14 +14,15 @@ class MagicMachineIntegrationContractTest {
             "crafting", "plan", "MagicResourceCostCatalog.java");
 
     @Test
-    void onlySoulEntersRsiRecursiveEnergyCatalog() throws Exception {
+    void manaAndSoulEnterRsiRecursiveEnergyCatalogButSourceDoesNot() throws Exception {
         assertTrue(MagicResourceKind.SOUL.supportsRsiRecursiveCrafting());
         assertTrue(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
         assertFalse(MagicResourceKind.SOURCE.supportsRsiRecursiveCrafting());
 
         String catalog = Files.readString(CATALOG);
         assertTrue(catalog.contains("MagicResourceKind.SOUL"));
+        assertTrue(catalog.contains("PlanWarnings.botaniaManaCost"));
+        assertTrue(catalog.contains("PlanWarnings.goetyRitualSoulCost"));
         assertFalse(catalog.contains("PlanWarnings.arsSourceCost"));
-        assertFalse(catalog.contains("PlanWarnings.botaniaManaCost"));
     }
 }

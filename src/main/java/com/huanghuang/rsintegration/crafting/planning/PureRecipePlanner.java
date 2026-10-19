@@ -198,8 +198,12 @@ public final class PureRecipePlanner {
             for (MagicResourceCost cost : node.magicCosts()) {
                 long total = cost.totalFor(Math.max(1, step.batches()));
                 if (total <= 0L) continue;
+                if (total > Integer.MAX_VALUE) {
+                    throw new ArithmeticException(
+                            "aggregated magic cost exceeds int for " + cost.kind() + ": " + total);
+                }
                 costs.add(new MagicResourceCost(
-                        cost.kind(), (int) Math.min(Integer.MAX_VALUE, total)));
+                        cost.kind(), (int) total));
             }
         }
         return MagicResourceCost.merge(costs);
@@ -649,8 +653,10 @@ public final class PureRecipePlanner {
                     ? coverage.thenComparingInt(reachability()::depth)
                             .thenComparing(dependencyCost)
                             .thenComparing(structuralCost)
+                            .thenComparing(candidate -> candidate.recipeId().toString())
                     : coverage.thenComparing(dependencyCost)
-                            .thenComparing(structuralCost));
+                            .thenComparing(structuralCost)
+                            .thenComparing(candidate -> candidate.recipeId().toString()));
             return ordered;
         }
 

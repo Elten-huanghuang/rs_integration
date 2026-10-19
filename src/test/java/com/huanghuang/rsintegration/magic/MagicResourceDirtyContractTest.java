@@ -57,10 +57,13 @@ class MagicResourceDirtyContractTest extends BootstrapTest {
     }
 
     @Test
-    void capacityIsSummedAcrossMountedDisks() {
+    void capacitySaturatesAtIntLimitAcrossMountedDisks() {
         UnifiedDiskCore first = disk();
         UnifiedDiskCore second = disk();
-        assertEquals(2_000_000_000, MagicDiskStore.capacity(
+        assertEquals(0, MagicDiskStore.capacity(List.of(), MagicResourceKind.MANA));
+        assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
+                List.of(first), MagicResourceKind.MANA));
+        assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
                 List.of(first, second), MagicResourceKind.MANA));
         assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
                 List.of(first, second, disk()), MagicResourceKind.MANA));

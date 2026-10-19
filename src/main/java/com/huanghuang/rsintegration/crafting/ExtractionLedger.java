@@ -241,10 +241,8 @@ public final class ExtractionLedger implements AutoCloseable {
 
         if (state == State.IDLE) transition(State.RESERVING);
 
-        // The endpoint is the chain's authoritative storage selection. Legacy
-        // delegates still call this overload with a nullable INetwork, so do
-        // not let a BD/RS endpoint silently fall through to inventory or a
-        // stale native network.
+        // Prefer the selected endpoint, then allow inventory to supplement it.
+        // Never fall through to a stale native network when an endpoint is set.
         if (storageEndpoint != null) {
             ItemStack stored = reserveFromEndpoint(ingredient, count, storageEndpoint, player);
             if (!stored.isEmpty()) return stored;

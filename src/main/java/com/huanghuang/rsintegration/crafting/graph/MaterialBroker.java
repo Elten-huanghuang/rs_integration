@@ -291,7 +291,9 @@ public final class MaterialBroker {
         requireOwnerThread();
         int total = 0;
         for (AssetLot lot : lots.values()) {
-            if (lot.source.equals(source) && lot.material.equals(material)) total += lot.available;
+            if (lot.source.equals(source) && lot.material.equals(material)) {
+                total = saturatingAdd(total, lot.available);
+            }
         }
         return total;
     }
@@ -303,7 +305,9 @@ public final class MaterialBroker {
             if (!reservation.owner.equals(owner)) continue;
             if (reservation.state == ReservationState.RESERVED
                     || reservation.state == ReservationState.COMMITTED) {
-                for (Claim claim : reservation.claims) total += claim.quantity;
+                for (Claim claim : reservation.claims) {
+                    total = saturatingAdd(total, claim.quantity);
+                }
             }
         }
         return total;
@@ -377,7 +381,16 @@ public final class MaterialBroker {
 
     public int totalAvailable() {
         requireOwnerThread();
-        return lots.values().stream().mapToInt(lot -> lot.available).sum();
+        int total = 0;
+        for (AssetLot lot : lots.values()) {
+            total = saturatingAdd(total, lot.available);
+        }
+        return total;
+    }
+
+    private static int saturatingAdd(int left, int right) {
+        if (right <= 0) return left;
+        return right > Integer.MAX_VALUE - left ? Integer.MAX_VALUE : left + right;
     }
 
     private void requireOwnerThread() {

@@ -40,7 +40,7 @@ public final class LongTravailCrownRecipeIdResolver {
             ItemStack shown = slot.getDisplayedItemStack().orElse(ItemStack.EMPTY);
             if (shown.isEmpty() || !flowers.test(shown)) continue;
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(shown.getItem());
-            ResourceLocation recipeId = LongTravailCrownRecipes.forFlowerItem(itemId);
+            ResourceLocation recipeId = LongTravailCrownRecipes.forFlowerItem(itemId, display.getId());
             if (recipeId != null) return recipeId;
         }
         return null;

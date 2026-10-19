@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -62,6 +63,22 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(1, ledger.reserveFromEndpoint(bucket, 1, endpoint, player).getCount());
         assertTrue(ledger.reserveFromEndpoint(bucket, 1, endpoint, player).isEmpty());
         verify(session, never()).extractContainerFluid(any(), any(), any(), anyLong(), anyBoolean());
+    }
+
+    @Test
+    void selectedEndpointMayFallBackToPlayerInventory() {
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 2));
+        when(player.getInventory()).thenReturn(inventory);
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of())));
+
+        ItemStack reserved = ledger.reserve(
+                Ingredient.of(Items.IRON_INGOT), 2, endpoint, player, null, null);
+
+        assertEquals(2, reserved.getCount());
+        assertTrue(ledger.describeEntries().get(0).contains("source=inventory"));
+        assertEquals(ExtractionLedger.State.RESERVING, ledger.state());
     }
 
     @Test

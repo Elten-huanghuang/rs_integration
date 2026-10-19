@@ -37,6 +37,28 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void aggregateQuantitiesSaturateInsteadOfWrapping() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        broker.publish(source, diamond, Integer.MAX_VALUE);
+        broker.publish(source, diamond, Integer.MAX_VALUE);
+
+        assertEquals(Integer.MAX_VALUE, broker.available(source, diamond));
+        assertEquals(Integer.MAX_VALUE, broker.totalAvailable());
+
+        MaterialBroker.ReservationToken first = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, Integer.MAX_VALUE)));
+        MaterialBroker.ReservationToken second = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, Integer.MAX_VALUE)));
+
+        assertNotNull(first);
+        assertNotNull(second);
+        assertEquals(0, broker.available(source, diamond));
+        assertEquals(Integer.MAX_VALUE, broker.heldBy(new NodeId(0)));
+    }
+
+    @Test
     void competingNodesCannotReserveTheSameUnits() {
         MaterialBroker broker = new MaterialBroker();
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));

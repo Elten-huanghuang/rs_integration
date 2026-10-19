@@ -113,10 +113,8 @@ public final class MagicResourceTaskLedger extends SavedData {
 
     public void recordTask(UUID taskId, List<MagicResourceCost> costs) {
         Map<MagicResourceKind, Integer> amounts = new LinkedHashMap<>();
-        for (MagicResourceCost cost : costs) {
-            amounts.merge(cost.kind(), cost.amountPerOperation(),
-                    (left, right) -> (int) Math.min(Integer.MAX_VALUE,
-                            (long) left + right));
+        for (MagicResourceCost cost : MagicResourceCost.merge(costs)) {
+            amounts.put(cost.kind(), cost.amountPerOperation());
         }
         if (amounts.isEmpty()) {
             tasks.remove(taskId);

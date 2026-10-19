@@ -4708,8 +4708,12 @@ public final class AsyncCraftChain {
             for (MagicResourceCost cost : MagicResourceCostCatalog.costsFor(recipe)) {
                 long total = cost.totalFor(step.executions());
                 if (total <= 0L) continue;
+                if (total > Integer.MAX_VALUE) {
+                    throw new ArithmeticException(
+                            "aggregated magic cost exceeds int for " + cost.kind() + ": " + total);
+                }
                 costs.add(new MagicResourceCost(
-                        cost.kind(), (int) Math.min(Integer.MAX_VALUE, total)));
+                        cost.kind(), (int) total));
             }
         }
         return MagicResourceCost.merge(costs);

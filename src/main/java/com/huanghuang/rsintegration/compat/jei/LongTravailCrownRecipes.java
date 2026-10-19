@@ -8,25 +8,38 @@ import javax.annotation.Nullable;
 /** 春之冠的真实配方 ID 与 JEI 合并展示 ID。 */
 public final class LongTravailCrownRecipes {
     private static final String MOD_ID = "the_long_travail";
-    private static final String DISPLAY_PREFIX = "jei/spring_game/";
-    private static final String RECIPE_PREFIX = "spring_game/";
+    private static final String LEGACY_DISPLAY_PREFIX = "jei/spring_game/";
+    private static final String LEGACY_RECIPE_PREFIX = "spring_game/";
+    private static final String DISPLAY_PREFIX = "jei/spring_corner/";
+    private static final String RECIPE_PREFIX = "spring_corner/";
 
     private LongTravailCrownRecipes() {}
 
     public static boolean isDisplayId(@Nullable ResourceLocation id) {
         return id != null && MOD_ID.equals(id.getNamespace())
-                && id.getPath().startsWith(DISPLAY_PREFIX);
+                && (id.getPath().startsWith(DISPLAY_PREFIX)
+                || id.getPath().startsWith(LEGACY_DISPLAY_PREFIX));
     }
 
     public static boolean isRecipeId(@Nullable ResourceLocation id) {
         return id != null && MOD_ID.equals(id.getNamespace())
-                && id.getPath().startsWith(RECIPE_PREFIX);
+                && (id.getPath().startsWith(RECIPE_PREFIX)
+                || id.getPath().startsWith(LEGACY_RECIPE_PREFIX));
     }
 
     @Nullable
     public static ResourceLocation forFlowerItem(@Nullable ResourceLocation itemId) {
+        return forFlowerItem(itemId, null);
+    }
+
+    @Nullable
+    public static ResourceLocation forFlowerItem(@Nullable ResourceLocation itemId,
+                                                 @Nullable ResourceLocation displayId) {
         if (itemId == null || !"minecraft".equals(itemId.getNamespace())) return null;
-        return new ResourceLocation(MOD_ID, RECIPE_PREFIX + itemId.getPath());
+        String recipePrefix = displayId != null
+                && displayId.getPath().startsWith(DISPLAY_PREFIX)
+                ? RECIPE_PREFIX : LEGACY_RECIPE_PREFIX;
+        return new ResourceLocation(MOD_ID, recipePrefix + itemId.getPath());
     }
 
     /** 仅花冠根配方允许把另一朵花的 NBT 产物列为切换候选。 */

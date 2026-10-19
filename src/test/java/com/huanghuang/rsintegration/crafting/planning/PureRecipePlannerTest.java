@@ -403,6 +403,26 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void equalScoredCandidatesUseRecipeIdAsStableFinalTieBreaker() {
+        MaterialRef target = material("stable_tie_target");
+        MaterialRef input = material("stable_tie_input");
+        RecipeNode laterId = recipe("tie_b", target, 1, ingredient(input, 1));
+        RecipeNode earlierId = recipe("tie_a", target, 1, ingredient(input, 1));
+
+        PureRecipePlanner.Result first = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(laterId, earlierId))),
+                Map.of(input, 1), List.of(ingredient(target, 1)), 20);
+        PureRecipePlanner.Result reversed = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(earlierId, laterId))),
+                Map.of(input, 1), List.of(ingredient(target, 1)), 20);
+
+        List<PureRecipePlanner.PlannedStep> expected =
+                List.of(new PureRecipePlanner.PlannedStep(id("tie_a"), 1));
+        assertEquals(expected, first.steps());
+        assertEquals(expected, reversed.steps());
+    }
+
+    @Test
     void backtracksAcrossStockedIngredientAlternatives() {
         MaterialRef copper = material("copper");
         MaterialRef tin = material("tin");

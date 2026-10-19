@@ -14,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MagicResourceCostPlanningTest extends BootstrapTest {
     @Test
@@ -37,7 +38,7 @@ class MagicResourceCostPlanningTest extends BootstrapTest {
     }
 
     @Test
-    void costMergeSaturatesAndKeepsEnumOrder() {
+    void costMergeAddsWithinRangeAndKeepsEnumOrder() {
         List<MagicResourceCost> merged = MagicResourceCost.merge(List.of(
                 new MagicResourceCost(MagicResourceKind.SOURCE, 40),
                 new MagicResourceCost(MagicResourceKind.MANA, 10),
@@ -49,8 +50,31 @@ class MagicResourceCostPlanningTest extends BootstrapTest {
     }
 
     @Test
-    void manaAndSourceStayOutOfRsiRecursiveCosts() {
-        assertEquals(List.of(),
+    void costMergeRejectsTotalsThatCannotBeRepresented() {
+        assertThrows(ArithmeticException.class, () -> MagicResourceCost.merge(List.of(
+                new MagicResourceCost(MagicResourceKind.MANA, 1_500_000_000),
+                new MagicResourceCost(MagicResourceKind.MANA, 800_000_000))));
+    }
+
+    @Test
+    void purePlannerRejectsPerRecipeCostsAboveIntRange() {
+        ResourceLocation recipeId = new ResourceLocation("test", "large_mana_recipe");
+        ResourceLocation itemId = new ResourceLocation("minecraft", "stone");
+        ImmutableRecipeGraph.MaterialRef output =
+                new ImmutableRecipeGraph.MaterialRef(itemId, "");
+        ImmutableRecipeGraph.RecipeNode node = new ImmutableRecipeGraph.RecipeNode(
+                recipeId, output, 1, List.of(), "test", recipeId,
+                List.of(new MagicResourceCost(MagicResourceKind.MANA, 1_000_000_000)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(node)));
+
+        assertThrows(ArithmeticException.class, () -> PureRecipePlanner.resolve(
+                graph, Map.of(),
+                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 3)), 8));
+    }
+
+    @Test
+    void manaIsTrackedAndSourceRemainsOutsideRsiRecursiveCosts() {
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 321)),
                 MagicResourceCostCatalog.costsFor(new InfuserRecipe(321)));
         assertTrue(MagicResourceKind.MANA.supportsRsiRecursiveCrafting());
         assertFalse(MagicResourceKind.SOURCE.supportsRsiRecursiveCrafting());

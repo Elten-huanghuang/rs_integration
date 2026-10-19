@@ -123,100 +123,111 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
         this.pendingSecondary.clear();
 
-        List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Generic] No ingredients for recipe: {}", recipe.getId());
-            return false;
-        }
-
-        // Phase 1: compute result first (zero side effects).  If we cannot
-        // determine the result there is no point extracting materials.
-        this.pendingResult = computeResult(player);
-        if (this.pendingResult.isEmpty()) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Cannot determine result for recipe {}", recipe.getId());
-            return false;
-        }
-
-        // Non-crafting secondaries do not depend on a crafting grid. Crafting
-        // remainders are captured after the actual NBT-bearing inputs exist.
-        if (!(recipe instanceof CraftingRecipe)) {
-            this.pendingSecondary.addAll(
-                    ModRecipeHandlers.tryGetSecondaryOutputs(
-                            recipe, player.serverLevel().registryAccess()));
-        }
-
-        // Phase 2: reserve all ingredients via ledger
-        List<ItemStack> templates = new ArrayList<>();
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) {
-                templates.add(ItemStack.EMPTY);
-                continue;
-            }
-            ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos,
-                    spec.ingredient(), spec.count(), ledger);
-            if (stack.isEmpty()) {
-                this.pendingResult = ItemStack.EMPTY;
-                return false; // ledger not committed — nothing lost
-            }
-            templates.add(stack);
-        }
-
-        if (recipe instanceof FluidContainerRecipe conversion && !conversion.acceptsMaterials(templates, 1)) {
-            this.pendingResult = ItemStack.EMPTY;
-            this.pendingSecondary.clear();
-            return false;
-        }
-
-        // Phase 3: commit all extractions atomically
-        if (!validateExecutionContext(player) || !ledger.commit(network, player)) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
-            this.pendingResult = ItemStack.EMPTY;
-            return false; // ledger not committed — nothing lost
-        }
-
-        // Recompute result via assemble() now that we have the actual consumed
-        // items.  getResultItem() (used in the Phase-1 pre-check above) returns
-        // a bare template — any NBT from inputs (backpack contents, blade stats,
-        // enchantments) would be silently discarded.
-        if (recipe instanceof SmithingTransformRecipe smithing) {
-            // SmithingTransformRecipe is not a CraftingRecipe, but its output
-            // carries the base tool's NBT (durability, enchantments, custom
-            // data).  The indexed result is only a bare template, so assemble
-            // from the actual extracted stacks before discarding them.
-            ItemStack assembled = SmithingRecipeHandler.assembleTransform(
-                    smithing, templates, player.serverLevel().registryAccess());
-            if (assembled.isEmpty()) {
+        try {
+            // 先做零副作用的结果预检。结果不可解析时无需创建材料预留。
+            this.pendingResult = computeResult(player);
+            if (this.pendingResult.isEmpty()) {
                 RSIntegrationMod.LOGGER.error(
-                        "[RSI-Batch-Generic] Smithing assembly failed for recipe {}", recipe.getId());
-                this.pendingResult = ItemStack.EMPTY;
+                        "[RSI-Batch-Generic] Cannot determine result for recipe {}", recipe.getId());
+                clearSingleCraftState(player);
                 return false;
             }
-            this.pendingResult = assembled;
-        } else if (recipe instanceof SmithingRecipe smithing) {
-            // Re-Avaritia's ExtremeSmithingRecipe is a SmithingRecipe, not a
-            // SmithingTransformRecipe. Its five-slot contract is template,
-            // base, and three additions; assemble from the extracted stacks
-            // so the base item's NBT is preserved by the mod recipe.
-            ItemStack assembled = assembleSmithingRecipe(
-                    smithing, templates, player.serverLevel().registryAccess());
-            if (assembled.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI-Batch-Generic] Smithing assembly failed for recipe {}", recipe.getId());
-                this.pendingResult = ItemStack.EMPTY;
+
+            List<IngredientSpec> specs = getRequiredMaterials();
+            if (specs == null || specs.isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Batch-Generic] No ingredients for recipe: {}", recipe.getId());
+                clearSingleCraftState(player);
                 return false;
             }
-            this.pendingResult = assembled;
-        } else if (recipe instanceof CraftingRecipe cr) {
-            captureActualCraftingOutputs(cr, templates, player);
+
+            // Reserve first so NBT-dependent output assembly can use actual inputs.
+            List<ItemStack> templates = new ArrayList<>();
+            for (IngredientSpec spec : specs) {
+                if (spec.isEmpty()) {
+                    templates.add(ItemStack.EMPTY);
+                    continue;
+                }
+                ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos,
+                        spec.ingredient(), spec.count(), ledger);
+                if (stack.isEmpty()) {
+                    clearSingleCraftState(player);
+                    return false;
+                }
+                templates.add(stack);
+            }
+
+            if (recipe instanceof FluidContainerRecipe conversion
+                    && !conversion.acceptsMaterials(templates, 1)) {
+                clearSingleCraftState(player);
+                return false;
+            }
+
+            if (recipe instanceof SmithingTransformRecipe smithing) {
+                ItemStack assembled = SmithingRecipeHandler.assembleTransform(
+                        smithing, templates, player.serverLevel().registryAccess());
+                if (assembled.isEmpty()) {
+                    clearSingleCraftState(player);
+                    return false;
+                }
+                this.pendingResult = assembled;
+            } else if (recipe instanceof SmithingRecipe smithing) {
+                ItemStack assembled = assembleSmithingRecipe(
+                        smithing, templates, player.serverLevel().registryAccess());
+                if (assembled.isEmpty()) {
+                    clearSingleCraftState(player);
+                    return false;
+                }
+                this.pendingResult = assembled;
+            } else if (recipe instanceof CraftingRecipe craftingRecipe
+                    && !captureActualCraftingOutputs(craftingRecipe, templates, player)) {
+                clearSingleCraftState(player);
+                return false;
+            }
+
+            if (!(recipe instanceof CraftingRecipe)) {
+                this.pendingSecondary.addAll(ModRecipeHandlers.tryGetSecondaryOutputs(
+                        recipe, player.serverLevel().registryAccess()));
+            }
+
+            // Do not physically consume inputs until all output preparation succeeds.
+            if (!validateExecutionContext(player) || !ledger.commit(network, player)) {
+                RSIntegrationMod.LOGGER.error("[RSI-Batch-Generic] Ledger commit failed");
+                clearSingleCraftState(player);
+                return false;
+            }
+
+            templates.clear();
+            this.craftDone = true;
+            return true;
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-Batch-Generic] Single-craft preparation failed for recipe {}",
+                    recipe != null ? recipe.getId() : "unknown", failure);
+            clearSingleCraftState(player);
+            return false;
         }
+    }
 
-        // Extracted items have been consumed — discard templates
-        templates.clear();
-
-        // Result is collected by BatchCraftTask.tick() via collectResult() →
-        // insertIntoRS(). Do NOT insert here to avoid double-inserting.
-        this.craftDone = true;
-        return true;
+    private void clearSingleCraftState(@Nullable ServerPlayer player) {
+        if (ledger != null) {
+            try {
+                ExtractionLedger.State state = ledger.state();
+                if (state == ExtractionLedger.State.COMMITTED) {
+                    ledger.refundCommitted(network, player);
+                } else if (state != ExtractionLedger.State.IDLE
+                        && state != ExtractionLedger.State.ROLLED_BACK) {
+                    ledger.rollback(player);
+                }
+            } catch (RuntimeException cleanupFailure) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI-Batch-Generic] Failed to discard single-craft reservations",
+                        cleanupFailure);
+            }
+        }
+        pendingResult = ItemStack.EMPTY;
+        pendingSecondary.clear();
+        craftDone = false;
     }
 
     private ItemStack computeResult(ServerPlayer player) {

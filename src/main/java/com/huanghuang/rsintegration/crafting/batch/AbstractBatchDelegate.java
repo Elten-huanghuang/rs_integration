@@ -230,9 +230,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         try {
             releasePreparationResources();
             BlockPos pos = getMachinePos();
-            // Virtual delegates (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
-            // have no physical machine - nothing to clean up.
-            if (pos == null) return;
+            // Virtual delegates may still own transient output or preparation state.
+            // Their hook must not claim ownership of the outer transaction ledger.
+            if (pos == null) {
+                clearVirtualState(player);
+                return;
+            }
             ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
             if (level == null) return;
             if (!level.hasChunkAt(pos)) {
@@ -391,6 +394,10 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Release delegate-owned state when the prepared block entity no longer exists. */
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+    }
+
+    /** Clear delegate-local transient state when there is no physical machine to clean. */
+    protected void clearVirtualState(@Nullable ServerPlayer player) {
     }
 
     // ── Shared state lifecycle ─────────────────────────────────────
