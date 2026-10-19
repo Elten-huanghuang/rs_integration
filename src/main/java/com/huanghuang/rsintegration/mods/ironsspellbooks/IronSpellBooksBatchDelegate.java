@@ -3,9 +3,8 @@ package com.huanghuang.rsintegration.mods.ironsspellbooks;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -35,8 +34,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /** Executes one dynamic Iron's Spell Books recipe through the actual server menu. */
-public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
-    private static final int MAX_INSTANT_BATCH = 64;
+public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
     private static final String ARCANE_ANVIL_MENU_CLASS =
             "io.redspace.ironsspellbooks.gui.arcane_anvil.ArcaneAnvilMenu";
 
@@ -47,7 +45,6 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     private final List<ItemStack> results = new ArrayList<>();
     private ItemStack expected = ItemStack.EMPTY;
     private boolean done;
-    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -62,7 +59,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         this.results.clear();
         this.done = false;
         this.menu = null;
-        this.preparedExecutions = 1;
+        resetInstantBatch();
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -87,20 +84,6 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return BatchConcurrencyCapabilities.delegateResult(); }
-
-    @Override public int prepareFlatBatch(int remainingOperations) {
-        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
-        return preparedExecutions;
-    }
-
-    @Override public void prepareGraphBatch(int executions) {
-        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
-    }
-
-    @Override public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH);
-    }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
@@ -139,10 +122,10 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         if (materials.size() != specs.size()) {
             return fail("material count does not match recipe specification", ItemStack.EMPTY, materials);
         }
-        int executions = Math.max(1, preparedExecutions);
+        int executions = preparedExecutions();
         for (int i = 0; i < specs.size(); i++) {
             ItemStack stack = materials.get(i);
-            if (stack.isEmpty() || stack.getCount() < ParallelBatchSizing.multipliedCount(
+            if (stack.isEmpty() || stack.getCount() < scaledCount(
                     specs.get(i).count(), executions)
                     || !specs.get(i).ingredient().test(stack)) {
                 return fail("material " + i + " does not satisfy the runtime recipe",
@@ -247,9 +230,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             return fail("validated Scroll Forge output rejected: " + rejection,
                     ItemStack.EMPTY, materials);
         }
-        ItemStack scaled = expected.copy();
-        scaled.setCount(ParallelBatchSizing.multipliedCount(
-                expected.getCount(), executions));
+        ItemStack scaled = scaledCopy(expected, executions);
         results.clear();
         results.add(scaled);
         done = !scaled.isEmpty();
@@ -329,19 +310,18 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         return output;
     }
     @Override public ExpectedProduction getExpectedProduction() {
         return expected.isEmpty() ? null : new ExpectedProduction(
-                expected, ParallelBatchSizing.multipliedCount(
-                expected.getCount(), preparedExecutions));
+                expected, scaledCount(expected.getCount(), preparedExecutions()));
     }
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+        clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override public void onBatchFinished(@Nullable ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+        clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }
 

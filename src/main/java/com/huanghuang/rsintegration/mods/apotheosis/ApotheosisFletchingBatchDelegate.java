@@ -4,9 +4,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import dev.shadowsoffire.apotheosis.village.fletching.FletchingContainer;
@@ -32,8 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Instant, ordered 1x3 crafting delegate for Apotheosis' fletching table. */
-public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegate {
-    private static final int MAX_INSTANT_BATCH = 64;
+public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate {
     static final String RECIPE_CLASS =
             "dev.shadowsoffire.apotheosis.village.fletching.FletchingRecipe";
     static final String BLOCK_CLASS =
@@ -53,7 +51,6 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     private ItemStack expectedOutput = ItemStack.EMPTY;
     private final List<ItemStack> cachedResults = new ArrayList<>();
     private boolean craftDone;
-    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -88,7 +85,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         this.cachedResults.clear();
         this.craftDone = false;
         this.menu = null;
-        this.preparedExecutions = 1;
+        resetInstantBatch();
         markCraftStarted();
         return !expectedOutput.isEmpty();
     }
@@ -109,23 +106,6 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
-    }
-
-    @Override
-    public int prepareFlatBatch(int remainingOperations) {
-        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
-        return preparedExecutions;
-    }
-
-    @Override
-    public void prepareGraphBatch(int executions) {
-        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
-    }
-
-    @Override
-    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override
@@ -198,7 +178,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
             remaining[i] = material.getCount();
         }
 
-        for (int execution = 0; execution < preparedExecutions; execution++) {
+        for (int execution = 0; execution < preparedExecutions(); execution++) {
             for (int i = 0; i < INPUT_COUNT; i++) {
                 IngredientSpec spec = specs.get(i);
                 if (remaining[i] < spec.count()) {
@@ -287,7 +267,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         List<ItemStack> results = cachedResults.stream().map(ItemStack::copy).toList();
         cachedResults.clear();
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         if (ledger != null && !usingSharedLedger && ledger.isCommitted()) {
             ledger.settleAllCommitted();
         }
@@ -304,8 +284,8 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     public ExpectedProduction getExpectedProduction() {
         return expectedOutput.isEmpty()
                 ? null
-                : new ExpectedProduction(expectedOutput, ParallelBatchSizing.multipliedCount(
-                expectedOutput.getCount(), preparedExecutions));
+                : new ExpectedProduction(expectedOutput, scaledCount(
+                expectedOutput.getCount(), preparedExecutions()));
     }
 
     @Override
@@ -313,7 +293,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         clearMenu();
         cachedResults.clear();
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         resetState();
     }
 
@@ -322,7 +302,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         clearMenu();
         cachedResults.clear();
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         expectedOutput = ItemStack.EMPTY;
         resetState();
     }

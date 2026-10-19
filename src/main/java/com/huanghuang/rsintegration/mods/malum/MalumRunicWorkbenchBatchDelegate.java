@@ -2,8 +2,7 @@ package com.huanghuang.rsintegration.mods.malum;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -34,8 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for Malum Runic Workbench (RuneWorking recipe). */
-public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegate {
-    private static final int MAX_INSTANT_BATCH = 64;
+public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -45,7 +43,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
     private IItemHandler itemHandler;
     private ItemStack expectedOutput = ItemStack.EMPTY;
     private boolean craftDone;
-    private int preparedExecutions = 1;
 
     // ── IBatchDelegate ──────────────────────────────────────────────
 
@@ -75,7 +72,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         this.recipe = found;
         this.craftDone = false;
         this.expectedOutput = ItemStack.EMPTY;
-        this.preparedExecutions = 1;
+        resetInstantBatch();
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !MalumReflection.runicWorkbenchBEClass.isInstance(be)) {
@@ -110,23 +107,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
             return handler.getIngredients(recipe);
         }
         return CraftPacketUtils.extractIngredientSpecs(recipe);
-    }
-
-    @Override
-    public int prepareFlatBatch(int remainingOperations) {
-        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
-        return preparedExecutions;
-    }
-
-    @Override
-    public void prepareGraphBatch(int executions) {
-        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
-    }
-
-    @Override
-    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override
@@ -219,7 +199,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
         if (!itemHandler.getStackInSlot(0).isEmpty()) return false;
 
-        this.expectedOutput = scaleCopy(computeResult(), Math.max(1, preparedExecutions));
+        this.expectedOutput = scaledCopy(computeResult(), preparedExecutions());
         if (expectedOutput.isEmpty()) return false;
 
         List<IngredientSpec> specs = getRequiredMaterials();
@@ -229,9 +209,9 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         if (materials.size() < 2) return false;
         IngredientSpec primary = specs.get(0);
         IngredientSpec secondary = specs.get(1);
-        int executions = Math.max(1, preparedExecutions);
-        int requiredPrimary = ParallelBatchSizing.multipliedCount(primary.count(), executions);
-        int requiredSecondary = ParallelBatchSizing.multipliedCount(secondary.count(), executions);
+        int executions = preparedExecutions();
+        int requiredPrimary = scaledCount(primary.count(), executions);
+        int requiredSecondary = scaledCount(secondary.count(), executions);
         if (materials.get(0).getCount() < requiredPrimary
                 || materials.get(1).getCount() < requiredSecondary) return false;
         ItemStack primaryStack = materials.get(0).copy();
@@ -292,7 +272,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
         }
         craftDone = false;
         expectedOutput = ItemStack.EMPTY;
-        preparedExecutions = 1;
+        resetInstantBatch();
         return result;
     }
 
@@ -318,7 +298,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
             }
             be.setChanged();
         }
-        preparedExecutions = 1;
+        resetInstantBatch();
         reset();
     }
 
@@ -333,7 +313,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
                 be.setChanged();
             }
         }
-        preparedExecutions = 1;
+        resetInstantBatch();
         reset();
     }
 
@@ -383,14 +363,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends AbstractBatchDelegat
 
     private ItemStack computeResult() {
         return RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess()).copy();
-    }
-
-    private static ItemStack scaleCopy(ItemStack source, int executions) {
-        if (source == null || source.isEmpty()) return ItemStack.EMPTY;
-        ItemStack scaled = source.copy();
-        scaled.setCount(ParallelBatchSizing.multipliedCount(
-                source.getCount(), Math.max(1, executions)));
-        return scaled;
     }
 
     private void returnStrayItem(ItemStack stack) {

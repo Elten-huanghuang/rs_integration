@@ -5,9 +5,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -28,9 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Executes an instant external crafting recipe through the machine's real server menu. */
-public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate {
-    static final int MAX_INSTANT_BATCH = 64;
-
+public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
     private final String recipeClass;
     private final String menuClass;
     private final String blockId;
@@ -46,7 +43,6 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
     protected ItemStack expected = ItemStack.EMPTY;
     protected final List<ItemStack> results = new ArrayList<>();
     protected boolean done;
-    private int preparedExecutions = 1;
 
     protected ReflectiveMenuBatchDelegate(String recipeClass, String menuClass, String blockId,
                                           int inputCount, int resultSlotIndex, boolean strictResultNbt) {
@@ -73,7 +69,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         this.menu = null;
         this.results.clear();
         this.done = false;
-        this.preparedExecutions = 1;
+        resetInstantBatch();
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -91,19 +87,6 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
 
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
-    }
-
-    @Override public int prepareFlatBatch(int remainingOperations) {
-        preparedExecutions = boundedExecutions(remainingOperations);
-        return remainingOperations <= 0 ? 0 : preparedExecutions;
-    }
-
-    @Override public void prepareGraphBatch(int executions) {
-        preparedExecutions = boundedExecutions(executions);
-    }
-
-    @Override public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
@@ -166,7 +149,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
             remaining[i] = material.getCount();
         }
 
-        for (int execution = 0; execution < preparedExecutions; execution++) {
+        for (int execution = 0; execution < preparedExecutions(); execution++) {
             if (!machineSlotsEmpty()) {
                 results.clear();
                 clearMenu();
@@ -274,29 +257,25 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         if (ledger != null && !usingSharedLedger && ledger.isCommitted()) ledger.settleAllCommitted();
         return output;
     }
     @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
     @Override public ExpectedProduction getExpectedProduction() {
         return expected.isEmpty() ? null : new ExpectedProduction(
-                expected, ParallelBatchSizing.multipliedCount(expected.getCount(), preparedExecutions));
+                expected, scaledCount(expected.getCount(), preparedExecutions()));
     }
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+        clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override protected void clearMissingMachineState(@Nullable ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+        clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        clearMenu(); results.clear(); done = false; preparedExecutions = 1;
+        clearMenu(); results.clear(); done = false; resetInstantBatch();
         expected = ItemStack.EMPTY; resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }
-
-    private static int boundedExecutions(int requested) {
-        return Math.max(1, Math.min(MAX_INSTANT_BATCH, Math.max(0, requested)));
-    }
 }

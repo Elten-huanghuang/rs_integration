@@ -5,8 +5,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -34,8 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-final class BiomancyBatchDelegate extends AbstractBatchDelegate {
-    private static final int MAX_INSTANT_BATCH = 64;
+final class BiomancyBatchDelegate extends InstantBatchDelegate {
 
     private ServerPlayer player;
     private ServerLevel level;
@@ -48,7 +46,6 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
     private final List<ItemStack> injectedFuel = new ArrayList<>();
     private List<ItemStack> bioForgeRecoveredInputs = List.of();
     private boolean bioForgeStarted;
-    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -69,7 +66,7 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
         this.machineServer = player.server;
         this.bioForgeStarted = false;
         this.bioForgeRecoveredInputs = List.of();
-        this.preparedExecutions = 1;
+        resetInstantBatch();
         this.unplacedInputs.clear();
         this.placedInputs.clear();
         this.injectedFuel.clear();
@@ -84,24 +81,8 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public int prepareFlatBatch(int remainingOperations) {
-        if (!isBioForge()) return remainingOperations > 0 ? 1 : 0;
-        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
-        return preparedExecutions;
-    }
-
-    @Override
-    public void prepareGraphBatch(int executions) {
-        preparedExecutions = isBioForge()
-                ? Math.max(1, Math.min(MAX_INSTANT_BATCH, executions)) : 1;
-    }
-
-    @Override
-    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return isBioForge()
-                ? ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH)
-                : 1;
+    protected boolean supportsInstantBatch() {
+        return isBioForge();
     }
 
     @Override
@@ -170,7 +151,7 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
             try {
-                for (int execution = 0; execution < preparedExecutions; execution++) {
+                for (int execution = 0; execution < preparedExecutions(); execution++) {
                     AbstractContainerMenu menu = createBioForgeMenu(forge, player);
                     if (menu == null) {
                         results.clear();
@@ -376,7 +357,7 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
             List<ItemStack> output = List.copyOf(results);
             results.clear();
             bioForgeRecoveredInputs = List.of();
-            preparedExecutions = 1;
+            resetInstantBatch();
             return output;
         }
         if (level == null || !level.hasChunkAt(pos)) return List.of();
@@ -408,7 +389,7 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
             recoverInjectedFuel(machine, player);
             bioForgeStarted = false;
             results.clear();
-            preparedExecutions = 1;
+            resetInstantBatch();
             machine.setChanged();
             resetState();
             return;
@@ -441,7 +422,7 @@ final class BiomancyBatchDelegate extends AbstractBatchDelegate {
         results.clear();
         bioForgeRecoveredInputs = List.of();
         bioForgeStarted = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
         resetState();
     }
 

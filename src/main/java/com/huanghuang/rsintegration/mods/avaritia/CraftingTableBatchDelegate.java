@@ -4,9 +4,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
+import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -38,8 +37,7 @@ import java.util.List;
  * inventory grid via IItemHandler, calls recipe.matches() and
  * recipe.assemble() to produce the result (instant craft).
  */
-public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
-    private static final int MAX_INSTANT_BATCH = 64;
+public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
 
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
@@ -50,7 +48,6 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     private int gridSlots;
     private int machineTier;
     private int recipeTier;
-    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -71,7 +68,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         }
         recipe = found;
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
 
         ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos).getBlock());
         machineTier = machineTier(blockId);
@@ -122,24 +119,8 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public int prepareFlatBatch(int remainingOperations) {
-        if (!supportsStableBatch(recipe)) return remainingOperations > 0 ? 1 : 0;
-        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
-        return preparedExecutions;
-    }
-
-    @Override
-    public void prepareGraphBatch(int executions) {
-        preparedExecutions = supportsStableBatch(recipe)
-                ? Math.max(1, Math.min(MAX_INSTANT_BATCH, executions)) : 1;
-    }
-
-    @Override
-    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
-        return supportsStableBatch(recipe)
-                ? ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH)
-                : 1;
+    protected boolean supportsInstantBatch() {
+        return supportsStableBatch(recipe);
     }
 
     @Override
@@ -194,7 +175,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         }
 
         forceChunkLoad(true);
-        int executions = supportsStableBatch(recipe) ? Math.max(1, preparedExecutions) : 1;
+        int executions = supportsInstantBatch() ? preparedExecutions() : 1;
 
         // Clear existing grid contents — refund to RS to prevent item loss
         refundGrid(handler, player);
@@ -226,7 +207,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
             }
 
             Method assembleMethod = recipe.getClass().getMethod("assemble", IItemHandler.class);
-            cachedResult = scaleCopy(
+            cachedResult = scaledCopy(
                     (ItemStack) assembleMethod.invoke(recipe, handler), executions);
 
             // Handle remaining items (e.g. buckets from milk recipes)
@@ -242,7 +223,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
                         for (ItemStack rem : remains) {
                             if (!rem.isEmpty()) {
                                 ItemStack leftover = insertIntoStorage(
-                                        player, scaleCopy(rem, executions), false);
+                                        player, scaledCopy(rem, executions), false);
                                 if (!leftover.isEmpty() && player != null
                                         && !player.hasDisconnected()) {
                                     ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -283,7 +264,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         cachedResult = ItemStack.EMPTY;
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
     }
 
     @Override
@@ -291,7 +272,7 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(false);
         cachedResult = ItemStack.EMPTY;
         craftDone = false;
-        preparedExecutions = 1;
+        resetInstantBatch();
     }
 
     @Override
@@ -424,11 +405,4 @@ public final class CraftingTableBatchDelegate extends AbstractBatchDelegate {
                 || isReAvaritiaExtremeRecipeClass(className);
     }
 
-    private static ItemStack scaleCopy(ItemStack source, int executions) {
-        if (source == null || source.isEmpty()) return ItemStack.EMPTY;
-        ItemStack scaled = source.copy();
-        scaled.setCount(ParallelBatchSizing.multipliedCount(
-                source.getCount(), Math.max(1, executions)));
-        return scaled;
-    }
 }
