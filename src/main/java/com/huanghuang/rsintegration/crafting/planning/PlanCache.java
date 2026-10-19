@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import net.minecraft.resources.ResourceLocation;
@@ -19,28 +20,36 @@ public final class PlanCache {
     static final int DEFAULT_MAX_ENTRIES = CraftingPreviewPolicy.DEFAULT_CACHE_MAX_ENTRIES;
     private final LongSupplier ttlNanos;
     private final IntSupplier maxEntries;
+    private final IntSupplier maxNodes;
     private final ConcurrentHashMap<Key, Entry> entries = new ConcurrentHashMap<>();
     /** Latest plan actually shown to each player, retained until confirmation or replacement. */
     private final ConcurrentHashMap<UUID, ExecutionLease> executionLeases =
             new ConcurrentHashMap<>();
 
     public PlanCache() {
-        this(PlanCache::configuredTtlNanos, PlanCache::configuredMaxEntries);
+        this(PlanCache::configuredTtlNanos, PlanCache::configuredMaxEntries,
+                PlanCache::configuredMaxNodes);
     }
 
     public PlanCache(long ttlNanos) {
-        this(ttlNanos, DEFAULT_MAX_ENTRIES);
+        this(ttlNanos, DEFAULT_MAX_ENTRIES, Integer.MAX_VALUE);
     }
 
     PlanCache(long ttlNanos, int maxEntries) {
-        this(() -> ttlNanos, () -> maxEntries);
+        this(ttlNanos, maxEntries, Integer.MAX_VALUE);
     }
 
-    private PlanCache(LongSupplier ttlNanos, IntSupplier maxEntries) {
+    PlanCache(long ttlNanos, int maxEntries, int maxNodes) {
+        this(() -> ttlNanos, () -> maxEntries, () -> maxNodes);
+    }
+
+    private PlanCache(LongSupplier ttlNanos, IntSupplier maxEntries, IntSupplier maxNodes) {
         if (ttlNanos.getAsLong() <= 0) throw new IllegalArgumentException("ttlNanos");
         if (maxEntries.getAsInt() <= 0) throw new IllegalArgumentException("maxEntries");
+        if (maxNodes.getAsInt() <= 0) throw new IllegalArgumentException("maxNodes");
         this.ttlNanos = ttlNanos;
         this.maxEntries = maxEntries;
+        this.maxNodes = maxNodes;
     }
 
     public Entry get(Key key, long now) {
@@ -105,13 +114,25 @@ public final class PlanCache {
         long cutoff = now - ttlNanos.getAsLong();
         entries.entrySet().removeIf(entry -> entry.getValue().createdNanos() < cutoff);
         int maximum = maxEntries.getAsInt();
-        if (entries.size() <= maximum) return;
-        entries.entrySet().stream()
+        long nodeBudget = maxNodes.getAsInt();
+        long totalNodes = entries.values().stream().mapToLong(PlanCache::entryWeight).sum();
+        if (entries.size() <= maximum && totalNodes <= nodeBudget) return;
+        for (Map.Entry<Key, Entry> oldest : entries.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue(Comparator.comparingLong(Entry::createdNanos)))
-                .limit(entries.size() - maximum)
-                .map(Map.Entry::getKey)
-                .toList()
-                .forEach(entries::remove);
+                .toList()) {
+            if (entries.size() <= maximum && totalNodes <= nodeBudget) break;
+            Entry removed = entries.remove(oldest.getKey());
+            if (removed != null) totalNodes -= entryWeight(removed);
+        }
+    }
+
+    static long entryWeight(Entry entry) {
+        if (entry == null) return 0L;
+        long planNodes = entry.plan().graph() == null
+                ? 0L : entry.plan().graph().nodes().size();
+        long resolvedNodes = entry.resolvedGraph() == null
+                ? 0L : entry.resolvedGraph().nodes().size();
+        return Math.max(1L, planNodes + resolvedNodes);
     }
 
     private static long configuredTtlNanos() {
@@ -127,6 +148,14 @@ public final class PlanCache {
             return CraftingPreviewPolicy.load().cacheMaxEntries();
         } catch (Exception ignored) {
             return DEFAULT_MAX_ENTRIES;
+        }
+    }
+
+    private static int configuredMaxNodes() {
+        try {
+            return RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_NODES.get();
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_PLAN_CACHE_MAX_NODES;
         }
     }
 

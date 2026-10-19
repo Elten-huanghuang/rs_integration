@@ -2,12 +2,16 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -48,6 +52,20 @@ class PlanCacheTest extends BootstrapTest {
 
         assertEquals(2, cache.size());
         assertNull(cache.get(first, 3));
+    }
+
+    @Test
+    void evictsByGraphNodeBudgetBeforeEntryCapacity() {
+        PlanCache cache = new PlanCache(1_000, 10, 3);
+        PlanCache.Key first = key("weighted_first");
+        PlanCache.Key second = key("weighted_second");
+
+        cache.put(first, planWithGraph(2), snapshot(first), 1);
+        cache.put(second, planWithGraph(2), snapshot(second), 2);
+
+        assertEquals(1, cache.size());
+        assertNull(cache.get(first, 3));
+        assertNotNull(cache.get(second, 3));
     }
 
     @Test
@@ -126,6 +144,25 @@ class PlanCacheTest extends BootstrapTest {
     private static PlanResponse plan() {
         return new PlanResponse(true, "", ItemStack.EMPTY, java.util.List.of(),
                 Map.of(), java.util.List.of(), "test:plan");
+    }
+
+    private static PlanResponse planWithGraph(int nodeCount) {
+        List<PlanGraphView.NodeView> nodes = new ArrayList<>(nodeCount);
+        List<Integer> order = new ArrayList<>(nodeCount);
+        for (int nodeId = 0; nodeId < nodeCount; nodeId++) {
+            nodes.add(new PlanGraphView.NodeView(nodeId,
+                    new ResourceLocation("test", "node_" + nodeId),
+                    "generic", 1, ItemStack.EMPTY, List.of(), List.of()));
+            order.add(nodeId);
+        }
+        PlanGraphView graph = new PlanGraphView(CraftPlanGraph.CURRENT_VERSION, nodes,
+                List.of(), List.of(), List.of(), order);
+        return new PlanResponse(true, "", ItemStack.EMPTY, List.of(),
+                Map.of(), List.of(), "test:weighted",
+                null, null, 0, 0, 0, List.of(), 1,
+                null, null, null, 0L, false, false, false, null,
+                Set.of(), Map.of(), null, graph, false,
+                List.of(), Map.of());
     }
 
     private static PlanningSnapshot snapshot(PlanCache.Key key) {

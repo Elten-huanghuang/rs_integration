@@ -137,6 +137,9 @@ public final class RSIntegrationConfig {
             CraftingPreviewPolicy.DEFAULT_CACHE_TTL_MS;
     public static final int DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES =
             CraftingPreviewPolicy.DEFAULT_CACHE_MAX_ENTRIES;
+    public static final int DEFAULT_CRAFTING_PLAN_CACHE_MAX_NODES = 131_072;
+    public static final int MIN_CRAFTING_PLAN_CACHE_MAX_NODES = 4_096;
+    public static final int MAX_CRAFTING_PLAN_CACHE_MAX_NODES = 1_048_576;
     public static final int DEFAULT_GUI_OPEN_RATE_LIMIT_MS =
             GuiTimingConfig.DEFAULT_OPEN_RATE_LIMIT_MS;
     public static final int DEFAULT_SIDE_PANEL_NAVIGATION_TIMEOUT_MS =
@@ -380,6 +383,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_RATE_LIMIT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_TTL_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_ENTRIES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLAN_CACHE_MAX_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
@@ -1247,6 +1251,13 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MIN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MAX_CACHE_MAX_ENTRIES);
+        CRAFTING_PLAN_CACHE_MAX_NODES = s
+                .comment("合成预览缓存节点预算",
+                        "按计划图节点数限制缓存内存；小计划可保留更多条目，大计划会优先淘汰旧条目。")
+                .defineInRange("craftingPlanCacheMaxNodes",
+                        DEFAULT_CRAFTING_PLAN_CACHE_MAX_NODES,
+                        MIN_CRAFTING_PLAN_CACHE_MAX_NODES,
+                        MAX_CRAFTING_PLAN_CACHE_MAX_NODES);
         CRAFTING_RESOLVE_TIMEOUT_MS = s
                 .comment("递归解析预算（毫秒）",
                         "单次计划解析的最长实际时间。深层或互相依赖配方可提高，但解析在服务端线程进行，过大会造成短暂卡顿。")

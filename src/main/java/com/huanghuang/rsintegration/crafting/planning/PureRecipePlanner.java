@@ -331,6 +331,8 @@ public final class PureRecipePlanner {
         private final Map<MaterialRef, Integer> producerDepthCache = new HashMap<>();
         private final Set<MaterialRef> producerDepthVisiting = new HashSet<>();
         private final Map<CandidateLookup, List<RecipeNode>> candidateCache = new HashMap<>();
+        private final Map<RecipeNode, List<IngredientRef>> normalizedInputCache =
+                new IdentityHashMap<>();
         private static final long FAMILY_COST_UNKNOWN = Long.MAX_VALUE / 4L;
         private int expandedStates;
         private int backtracks;
@@ -654,7 +656,7 @@ public final class PureRecipePlanner {
 
         private List<Task> recipeBranch(RecipeNode candidate, long batches, long consumeCount,
                                         List<Task> rest, MaterialRef resolvingMaterial) {
-            List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(candidate.inputs());
+            List<IngredientRef> inputs = normalizedInputs(candidate);
             List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
             for (IngredientRef input : inputs) {
                 long scaled = scaledInputCount(input, batches);
@@ -758,7 +760,7 @@ public final class PureRecipePlanner {
          */
         private int dependencyDepth(RecipeNode candidate, Set<MaterialRef> visiting) {
             int best = Integer.MAX_VALUE / 4;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+            for (IngredientRef input : normalizedInputs(candidate)) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 int inputDepth = Integer.MAX_VALUE / 4;
                 for (MaterialRef alternative : input.alternatives()) {
@@ -794,11 +796,11 @@ public final class PureRecipePlanner {
         }
 
         private int distinctInputGroups(RecipeNode candidate) {
-            return PureDemandNormalizer.mergeEquivalent(candidate.inputs()).size();
+            return normalizedInputs(candidate).size();
         }
 
         private int inputAlternativeCount(RecipeNode candidate) {
-            return PureDemandNormalizer.mergeEquivalent(candidate.inputs()).stream()
+            return normalizedInputs(candidate).stream()
                     .mapToInt(input -> input.alternatives().size())
                     .sum();
         }
@@ -858,6 +860,11 @@ public final class PureRecipePlanner {
                             graph, lookup.material(), lookup.mode()));
         }
 
+        private List<IngredientRef> normalizedInputs(RecipeNode recipe) {
+            return normalizedInputCache.computeIfAbsent(recipe,
+                    node -> PureDemandNormalizer.mergeEquivalent(node.inputs()));
+        }
+
         private boolean hasAnyInputInStock(RecipeNode candidate) {
             return candidate.inputs().stream().anyMatch(input ->
                     input.alternatives().stream().anyMatch(material ->
@@ -871,7 +878,7 @@ public final class PureRecipePlanner {
          */
         private boolean hasLocalSeedPath(RecipeNode candidate, Set<MaterialRef> visiting,
                                          int[] remainingNodes) {
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+            for (IngredientRef input : normalizedInputs(candidate)) {
                 boolean satisfied = input.alternatives().stream().anyMatch(material ->
                         hasLocalSeed(material, input.nbtMatchMode(), visiting, remainingNodes));
                 if (!satisfied) return false;
@@ -909,7 +916,7 @@ public final class PureRecipePlanner {
         private double inputStockCoverage(RecipeNode candidate) {
             long required = 0L;
             long covered = 0L;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+            for (IngredientRef input : normalizedInputs(candidate)) {
                 required += input.count();
                 covered += Math.min(input.count(), stockAcross(input));
             }
@@ -924,7 +931,7 @@ public final class PureRecipePlanner {
         private boolean isUnseededReverseConversion(RecipeNode candidate, MaterialRef wanted,
                                                     long batches) {
             if (stock.getOrDefault(wanted, 0L) > 0L) return false;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+            for (IngredientRef input : normalizedInputs(candidate)) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long required = scaledInputCount(input, batches);
                 if (required <= stockAcross(input)) continue;
@@ -993,7 +1000,7 @@ public final class PureRecipePlanner {
             BroadFamilyAnalysis analysis = broadFamilyAnalyses.computeIfAbsent(
                     familyKey, BroadFamilyAnalysis::new);
             long consumed = 0L;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
+            for (IngredientRef input : normalizedInputs(candidate)) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long required = scaledInputCount(input, batches);
                 if (required <= 0L) continue;
@@ -1052,8 +1059,7 @@ public final class PureRecipePlanner {
                                 / producer.outputCount();
                         if (producerBatches <= 0L || producerBatches > Integer.MAX_VALUE) continue;
                         long cost = 0L;
-                        for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
-                                producer.inputs())) {
+                        for (IngredientRef input : normalizedInputs(producer)) {
                             if (input.role() == DemandRole.CATALYST) continue;
                             long scaled = scaledInputCount(input, producerBatches);
                             if (scaled <= 0L || scaled >= FAMILY_COST_UNKNOWN) {
@@ -1132,6 +1138,8 @@ public final class PureRecipePlanner {
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
         private final Map<CandidateLookup, List<RecipeNode>> candidateCache = new HashMap<>();
+        private final Map<RecipeNode, List<IngredientRef>> normalizedInputCache =
+                new IdentityHashMap<>();
         private final Runnable budgetCheck;
         private final Map<MissingKey, IngredientRef> missing = new LinkedHashMap<>();
 
@@ -1181,7 +1189,7 @@ public final class PureRecipePlanner {
 
                 List<IngredientRef> scaledInputs = new ArrayList<>();
                 boolean valid = true;
-                for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+                for (IngredientRef input : normalizedInputs(recipe)) {
                     long scaled = scaledInputCount(input, batches);
                     if (scaled <= 0L) {
                         valid = false;
@@ -1287,11 +1295,16 @@ public final class PureRecipePlanner {
                             graph, lookup.material(), lookup.mode()));
         }
 
+        private List<IngredientRef> normalizedInputs(RecipeNode recipe) {
+            return normalizedInputCache.computeIfAbsent(recipe,
+                    node -> PureDemandNormalizer.mergeEquivalent(node.inputs()));
+        }
+
         private double inputStockCoverage(RecipeNode recipe) {
             budgetCheck.run();
             long required = 0L;
             long available = 0L;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+            for (IngredientRef input : normalizedInputs(recipe)) {
                 required += input.count();
                 long matching = 0L;
                 for (MaterialRef alternative : input.alternatives()) {
@@ -1311,7 +1324,7 @@ public final class PureRecipePlanner {
             PartialFamilyCost analysis = familyCosts.computeIfAbsent(
                     List.copyOf(family), PartialFamilyCost::new);
             long consumed = 0L;
-            for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(recipe.inputs())) {
+            for (IngredientRef input : normalizedInputs(recipe)) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long scaled = scaledInputCount(input, batches);
                 long cost = analysis.ingredientCost(input, scaled, new HashSet<>());
@@ -1376,8 +1389,7 @@ public final class PureRecipePlanner {
                     for (RecipeNode producer : producers) {
                         budgetCheck.run();
                         long cost = 0L;
-                        for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
-                                producer.inputs())) {
+                        for (IngredientRef input : normalizedInputs(producer)) {
                             if (input.role() == DemandRole.CATALYST) continue;
                             long inputCost = ingredientCost(input, input.count(), path);
                             if (inputCost >= COST_UNKNOWN) {
