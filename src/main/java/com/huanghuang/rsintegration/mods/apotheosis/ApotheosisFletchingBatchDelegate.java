@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import dev.shadowsoffire.apotheosis.village.fletching.FletchingContainer;
@@ -32,6 +33,7 @@ import java.util.List;
 
 /** Instant, ordered 1x3 crafting delegate for Apotheosis' fletching table. */
 public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegate {
+    private static final int MAX_INSTANT_BATCH = 64;
     static final String RECIPE_CLASS =
             "dev.shadowsoffire.apotheosis.village.fletching.FletchingRecipe";
     static final String BLOCK_CLASS =
@@ -51,6 +53,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     private ItemStack expectedOutput = ItemStack.EMPTY;
     private final List<ItemStack> cachedResults = new ArrayList<>();
     private boolean craftDone;
+    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -85,6 +88,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         this.cachedResults.clear();
         this.craftDone = false;
         this.menu = null;
+        this.preparedExecutions = 1;
         markCraftStarted();
         return !expectedOutput.isEmpty();
     }
@@ -105,6 +109,23 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
+        return preparedExecutions;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override
@@ -165,6 +186,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
             clearMenu();
             return false;
         }
+        int[] remaining = new int[INPUT_COUNT];
         for (int i = 0; i < INPUT_COUNT; i++) {
             ItemStack material = materials.get(i);
             IngredientSpec spec = specs.get(i);
@@ -173,35 +195,51 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
                 clearMenu();
                 return false;
             }
-            fletching.getSlot(ApotheosisFletchingLogic.menuSlotForIngredient(i))
-                    .set(material.copyWithCount(spec.count()));
-        }
-        fletching.slotsChanged(fletching.getSlot(FIRST_INPUT_SLOT).container);
-
-        Slot outputSlot = fletching.getSlot(RESULT_SLOT);
-        ItemStack displayed = outputSlot.getItem().copy();
-        if (!sameExactStack(displayed, expectedOutput)) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Apotheosis] Fletching output mismatch at {}: expected={} x{}, actual={} x{}",
-                    pos, expectedOutput.getDisplayName().getString(), expectedOutput.getCount(),
-                    displayed.isEmpty() ? "empty" : displayed.getDisplayName().getString(),
-                    displayed.getCount());
-            clearMenu();
-            return false;
+            remaining[i] = material.getCount();
         }
 
-        ItemStack taken = outputSlot.remove(displayed.getCount());
-        if (!sameExactStack(taken, expectedOutput)) {
-            clearMenu();
-            return false;
-        }
-        outputSlot.onTake(player, taken);
-        cachedResults.add(taken.copy());
+        for (int execution = 0; execution < preparedExecutions; execution++) {
+            for (int i = 0; i < INPUT_COUNT; i++) {
+                IngredientSpec spec = specs.get(i);
+                if (remaining[i] < spec.count()) {
+                    cachedResults.clear();
+                    clearMenu();
+                    return false;
+                }
+                fletching.getSlot(ApotheosisFletchingLogic.menuSlotForIngredient(i))
+                        .set(materials.get(i).copyWithCount(spec.count()));
+                remaining[i] -= spec.count();
+            }
+            fletching.slotsChanged(fletching.getSlot(FIRST_INPUT_SLOT).container);
 
-        // Preserve any native crafting remainders produced by FletchingResultSlot.
-        for (int i = 0; i < INPUT_COUNT; i++) {
-            Slot input = fletching.getSlot(FIRST_INPUT_SLOT + i);
-            if (input.hasItem()) cachedResults.add(input.remove(input.getItem().getCount()));
+            Slot outputSlot = fletching.getSlot(RESULT_SLOT);
+            ItemStack displayed = outputSlot.getItem().copy();
+            if (!sameExactStack(displayed, expectedOutput)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Apotheosis] Fletching output mismatch at {}: expected={} x{}, actual={} x{}",
+                        pos, expectedOutput.getDisplayName().getString(), expectedOutput.getCount(),
+                        displayed.isEmpty() ? "empty" : displayed.getDisplayName().getString(),
+                        displayed.getCount());
+                cachedResults.clear();
+                clearMenu();
+                return false;
+            }
+
+            ItemStack taken = outputSlot.remove(displayed.getCount());
+            if (!sameExactStack(taken, expectedOutput)) {
+                cachedResults.clear();
+                clearMenu();
+                return false;
+            }
+            outputSlot.onTake(player, taken);
+            cachedResults.add(taken.copy());
+
+            // Preserve any native crafting remainders produced by FletchingResultSlot.
+            for (int i = 0; i < INPUT_COUNT; i++) {
+                Slot input = fletching.getSlot(FIRST_INPUT_SLOT + i);
+                if (input.hasItem()) cachedResults.add(input.remove(input.getItem().getCount()));
+            }
+            clearCraftingSlots();
         }
         clearMenu();
         craftDone = true;
@@ -249,6 +287,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         List<ItemStack> results = cachedResults.stream().map(ItemStack::copy).toList();
         cachedResults.clear();
         craftDone = false;
+        preparedExecutions = 1;
         if (ledger != null && !usingSharedLedger && ledger.isCommitted()) {
             ledger.settleAllCommitted();
         }
@@ -265,7 +304,8 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
     public ExpectedProduction getExpectedProduction() {
         return expectedOutput.isEmpty()
                 ? null
-                : new ExpectedProduction(expectedOutput, expectedOutput.getCount());
+                : new ExpectedProduction(expectedOutput, ParallelBatchSizing.multipliedCount(
+                expectedOutput.getCount(), preparedExecutions));
     }
 
     @Override
@@ -273,6 +313,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         clearMenu();
         cachedResults.clear();
         craftDone = false;
+        preparedExecutions = 1;
         resetState();
     }
 
@@ -281,6 +322,7 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
         clearMenu();
         cachedResults.clear();
         craftDone = false;
+        preparedExecutions = 1;
         expectedOutput = ItemStack.EMPTY;
         resetState();
     }
@@ -292,13 +334,18 @@ public final class ApotheosisFletchingBatchDelegate extends AbstractBatchDelegat
 
     private void clearMenu() {
         if (menu == null) return;
+        clearCraftingSlots();
+        menu = null;
+    }
+
+    private void clearCraftingSlots() {
+        if (menu == null) return;
         for (int i = 0; i < INPUT_COUNT; i++) {
             Slot slot = menu.getSlot(FIRST_INPUT_SLOT + i);
             if (slot.hasItem()) slot.remove(slot.getItem().getCount());
         }
         Slot result = menu.getSlot(RESULT_SLOT);
         if (result.hasItem()) result.remove(result.getItem().getCount());
-        menu = null;
     }
 
     private static boolean matrixIsEmpty(FletchingContainer menu) {

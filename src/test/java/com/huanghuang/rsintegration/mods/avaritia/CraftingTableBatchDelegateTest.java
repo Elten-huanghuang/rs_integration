@@ -51,4 +51,18 @@ class CraftingTableBatchDelegateTest {
         assertEquals(true, CraftingTableBatchDelegate.isCraftingTableBlockEntity(
                 "committee.nova.mods.avaritia.common.tile.ExtremeCraftingTile"));
     }
+
+    @Test
+    void onlyDeterministicConsumableTableRecipesOptIntoBatchExecution() {
+        assertEquals(true, CraftingTableBatchDelegate.supportsStableBatchClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapedTableCraftingRecipe"));
+        assertEquals(true, CraftingTableBatchDelegate.supportsStableBatchClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapelessTableCraftingRecipe"));
+        assertEquals(true, CraftingTableBatchDelegate.supportsStableBatchClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapedExtremeCraftingRecipe"));
+        assertEquals(false, CraftingTableBatchDelegate.supportsStableBatchClass(
+                "committee.nova.mods.avaritia.common.crafting.recipe.NoConsumeCatalystShapedRecipe"));
+        assertEquals(false, CraftingTableBatchDelegate.supportsStableBatchClass(
+                "example.CustomTableRecipe"));
+    }
 }

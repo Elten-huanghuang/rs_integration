@@ -4,6 +4,7 @@ import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import java.util.Arrays;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
@@ -46,6 +47,7 @@ import java.util.Set;
 
 /** Batch delegate for Eidolon Worktable and Crucible. */
 public final class EidolonBatchDelegate extends AbstractBatchDelegate {
+    private static final int MAX_INSTANT_BATCH = 64;
 
     // ── Shared class refs (resolved from probe) ─────────────────
     private static volatile Field boilingField;
@@ -81,6 +83,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     private boolean craftCompleted;       // Flag set after instant craft
     private final List<ItemStack> pendingRemainders = new ArrayList<>();
     private final List<RitualInputSlot> installedRitualInputs = new ArrayList<>();
+    private int preparedWorktableExecutions = 1;
 
     // ── IBatchDelegate impl ───────────────────────────────────────
 
@@ -405,6 +408,28 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
 
         this.craftCompleted = true;
         return true;
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!isWorktable) return remainingOperations > 0 ? 1 : 0;
+        preparedWorktableExecutions = Math.min(
+                MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
+        return preparedWorktableExecutions;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        preparedWorktableExecutions = isWorktable
+                ? Math.max(1, Math.min(MAX_INSTANT_BATCH, executions)) : 1;
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return isWorktable
+                ? ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_INSTANT_BATCH)
+                : 1;
     }
 
     // ── Worktable crafting ───────────────────────────────────────
@@ -945,14 +970,18 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         // ledger can still refund inputs without duplicating their containers.
         if (isWorktable) {
             pendingRemainders.clear();
+            int executions = Math.max(1, preparedWorktableExecutions);
             for (ItemStack mat : materials) {
                 if (mat.hasCraftingRemainingItem()) {
                     ItemStack remainder = mat.getCraftingRemainingItem();
-                    if (!remainder.isEmpty()) pendingRemainders.add(remainder.copy());
+                    if (!remainder.isEmpty()) {
+                        pendingRemainders.add(scaleCopy(remainder, executions));
+                    }
                 }
             }
             try {
-                this.pendingResult = recipe.getResultItem(player.serverLevel().registryAccess()).copy();
+                this.pendingResult = scaleCopy(
+                        recipe.getResultItem(player.serverLevel().registryAccess()), executions);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-Eidolon] Failed to get worktable result:", e);
                 return false;
@@ -1176,6 +1205,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         pendingResult = ItemStack.EMPTY;
         pendingRemainders.clear();
         craftCompleted = false;
+        preparedWorktableExecutions = 1;
         resetState();
     }
 
@@ -1196,6 +1226,7 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
         pendingResult = ItemStack.EMPTY;
         pendingRemainders.clear();
         craftCompleted = false;
+        preparedWorktableExecutions = 1;
         resetState();
     }
 
@@ -1234,6 +1265,14 @@ public final class EidolonBatchDelegate extends AbstractBatchDelegate {
     public ItemStack getExpectedOutput() {
         return isRitual && pendingResult != null && !pendingResult.isEmpty()
                 ? pendingResult : null;
+    }
+
+    private static ItemStack scaleCopy(ItemStack source, int executions) {
+        if (source == null || source.isEmpty()) return ItemStack.EMPTY;
+        ItemStack scaled = source.copy();
+        scaled.setCount(ParallelBatchSizing.multipliedCount(
+                source.getCount(), Math.max(1, executions)));
+        return scaled;
     }
 
     @Override

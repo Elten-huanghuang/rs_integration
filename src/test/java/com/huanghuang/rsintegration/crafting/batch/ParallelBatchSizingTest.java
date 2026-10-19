@@ -25,4 +25,12 @@ class ParallelBatchSizingTest {
         assertEquals(Integer.MAX_VALUE,
                 ParallelBatchSizing.boundedEvenShare(Integer.MAX_VALUE, 1, Integer.MAX_VALUE));
     }
+
+    @Test
+    void multipliedCountsSaturateInsteadOfOverflowing() {
+        assertEquals(24, ParallelBatchSizing.multipliedCount(8, 3));
+        assertEquals(0, ParallelBatchSizing.multipliedCount(8, 0));
+        assertEquals(Integer.MAX_VALUE,
+                ParallelBatchSizing.multipliedCount(Integer.MAX_VALUE, 2));
+    }
 }

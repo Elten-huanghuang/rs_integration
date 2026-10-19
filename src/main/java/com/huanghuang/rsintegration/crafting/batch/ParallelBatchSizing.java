@@ -14,4 +14,10 @@ public final class ParallelBatchSizing {
         int evenShare = (int) (((long) totalOperations + workerCount - 1L) / workerCount);
         return Math.max(1, Math.min(capacity, evenShare));
     }
+
+    public static int multipliedCount(int count, int executions) {
+        if (count <= 0 || executions <= 0) return 0;
+        long multiplied = (long) count * executions;
+        return (int) Math.min(Integer.MAX_VALUE, multiplied);
+    }
 }

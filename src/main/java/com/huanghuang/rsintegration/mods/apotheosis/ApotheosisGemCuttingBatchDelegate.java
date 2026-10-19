@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.GemInstance;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.cutting.GemCuttingMenu;
 import net.minecraft.core.BlockPos;
@@ -28,6 +29,7 @@ import java.util.List;
 
 /** Executes one dynamic Apotheosis gem rarity upgrade through the real menu. */
 public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelegate {
+    private static final int MAX_INSTANT_BATCH = 64;
     private static final String BLOCK_ID = "apotheosis:gem_cutting_table";
 
     private ServerLevel level;
@@ -36,8 +38,9 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
     private ApotheosisGemCuttingRecipe recipe;
     private GemCuttingMenu menu;
     private ItemStack expected = ItemStack.EMPTY;
-    private ItemStack result = ItemStack.EMPTY;
+    private final List<ItemStack> results = new ArrayList<>();
     private boolean done;
+    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -51,9 +54,10 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
         this.pos = pos.immutable();
         this.recipe = found;
         this.expected = found.getResultItem(resolved.registryAccess());
-        this.result = ItemStack.EMPTY;
+        this.results.clear();
         this.done = false;
         this.menu = null;
+        this.preparedExecutions = 1;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -73,6 +77,23 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
+        return preparedExecutions;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
+    }
+
+    @Override
+    public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override
@@ -122,27 +143,42 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
         ItemStack gems = materials.get(0);
         ItemStack dust = materials.get(1);
         ItemStack rarityMaterial = materials.get(2);
-        if (gems.getCount() < 2 || dust.getCount() < recipe.dustCost()
-                || rarityMaterial.getCount() < recipe.material().getCount()) return failStart();
+        int[] remaining = {
+                gems.getCount(), dust.getCount(), rarityMaterial.getCount()
+        };
+        results.clear();
+        for (int execution = 0; execution < preparedExecutions; execution++) {
+            if (gems.isEmpty() || dust.isEmpty() || rarityMaterial.isEmpty()
+                    || remaining[0] < 2 || remaining[1] < recipe.dustCost()
+                    || remaining[2] < recipe.material().getCount()) {
+                return failStart();
+            }
 
-        cutting.getSlot(0).set(gems.copyWithCount(1));
-        cutting.getSlot(1).set(dust.copyWithCount(recipe.dustCost()));
-        cutting.getSlot(2).set(gems.copyWithCount(1));
-        cutting.getSlot(3).set(rarityMaterial.copyWithCount(recipe.material().getCount()));
+            cutting.getSlot(0).set(gems.copyWithCount(1));
+            cutting.getSlot(1).set(dust.copyWithCount(recipe.dustCost()));
+            cutting.getSlot(2).set(gems.copyWithCount(1));
+            cutting.getSlot(3).set(rarityMaterial.copyWithCount(recipe.material().getCount()));
 
-        if (!cutting.clickMenuButton(player, 0)) return failStart();
-        ItemStack produced = cutting.getSlot(0).getItem().copy();
-        if (!matchesTarget(produced, expected)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Apotheosis] Gem cutting output mismatch at {}", pos);
-            return failStart();
+            if (!cutting.clickMenuButton(player, 0)) return failStart();
+            ItemStack produced = cutting.getSlot(0).getItem().copy();
+            if (!matchesTarget(produced, expected)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Apotheosis] Gem cutting output mismatch at {}", pos);
+                return failStart();
+            }
+            results.add(cutting.getSlot(0).remove(produced.getCount()));
+            remaining[0] -= 2;
+            remaining[1] -= recipe.dustCost();
+            remaining[2] -= recipe.material().getCount();
+            clearCraftingSlots();
         }
-        result = cutting.getSlot(0).remove(produced.getCount());
         clearMenu();
         done = true;
         return true;
     }
 
     private boolean failStart() {
+        results.clear();
         clearMenu();
         return false;
     }
@@ -157,24 +193,42 @@ public final class ApotheosisGemCuttingBatchDelegate extends AbstractBatchDelega
         return done ? doneObservation() : workingObservation();
     }
     @Override public @Nonnull ItemStack collectResult(@Nonnull ServerPlayer player) {
-        ItemStack collected = result.copy();
-        result = ItemStack.EMPTY;
-        done = false;
+        if (results.isEmpty()) return ItemStack.EMPTY;
+        ItemStack collected = results.remove(0).copy();
+        done = results.isEmpty();
         return collected;
     }
-    @Override public ExpectedProduction getExpectedProduction() {
-        return expected.isEmpty() ? null : new ExpectedProduction(expected, 1);
+    @Override public @Nonnull List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+        List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
+        results.clear();
+        done = false;
+        preparedExecutions = 1;
+        return output;
     }
-    @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) { clearMenu(); resetState(); }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) { clearMenu(); result = ItemStack.EMPTY; done = false; resetState(); }
+    @Override public ExpectedProduction getExpectedProduction() {
+        return expected.isEmpty() ? null : new ExpectedProduction(
+                expected, ParallelBatchSizing.multipliedCount(
+                expected.getCount(), preparedExecutions));
+    }
+    @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+    }
+    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+    }
     @Override public @Nonnull BlockPos getMachinePos() { return pos; }
 
     private void clearMenu() {
         if (menu == null) return;
+        clearCraftingSlots();
+        menu = null;
+    }
+
+    private void clearCraftingSlots() {
+        if (menu == null) return;
         for (int i = 0; i < 4; i++) {
             if (menu.getSlot(i).hasItem()) menu.getSlot(i).remove(menu.getSlot(i).getItem().getCount());
         }
-        menu = null;
     }
 
     private static boolean matchesTarget(ItemStack actual, ItemStack target) {

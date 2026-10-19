@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -12,8 +13,6 @@ import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.item.InkItem;
-import io.redspace.ironsspellbooks.gui.arcane_anvil.ArcaneAnvilMenu;
-import io.redspace.ironsspellbooks.gui.scroll_forge.ScrollForgeMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -37,13 +36,18 @@ import java.util.function.Consumer;
 
 /** Executes one dynamic Iron's Spell Books recipe through the actual server menu. */
 public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
+    private static final int MAX_INSTANT_BATCH = 64;
+    private static final String ARCANE_ANVIL_MENU_CLASS =
+            "io.redspace.ironsspellbooks.gui.arcane_anvil.ArcaneAnvilMenu";
+
     private ServerLevel level;
     private BlockPos pos;
     private IronSpellBooksRecipe recipe;
     private AbstractContainerMenu menu;
-    private ItemStack result = ItemStack.EMPTY;
+    private final List<ItemStack> results = new ArrayList<>();
     private ItemStack expected = ItemStack.EMPTY;
     private boolean done;
+    private int preparedExecutions = 1;
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -55,9 +59,10 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         this.pos = pos.immutable();
         this.recipe = found;
         this.expected = found.getResultItem(resolved.registryAccess());
-        this.result = ItemStack.EMPTY;
+        this.results.clear();
         this.done = false;
         this.menu = null;
+        this.preparedExecutions = 1;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -82,6 +87,20 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return BatchConcurrencyCapabilities.delegateResult(); }
+
+    @Override public int prepareFlatBatch(int remainingOperations) {
+        preparedExecutions = Math.min(MAX_INSTANT_BATCH, Math.max(0, remainingOperations));
+        return preparedExecutions;
+    }
+
+    @Override public void prepareGraphBatch(int executions) {
+        preparedExecutions = Math.max(1, Math.min(MAX_INSTANT_BATCH, executions));
+    }
+
+    @Override public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, MAX_INSTANT_BATCH);
+    }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
@@ -120,9 +139,11 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         if (materials.size() != specs.size()) {
             return fail("material count does not match recipe specification", ItemStack.EMPTY, materials);
         }
+        int executions = Math.max(1, preparedExecutions);
         for (int i = 0; i < specs.size(); i++) {
             ItemStack stack = materials.get(i);
-            if (stack.isEmpty() || stack.getCount() < specs.get(i).count()
+            if (stack.isEmpty() || stack.getCount() < ParallelBatchSizing.multipliedCount(
+                    specs.get(i).count(), executions)
                     || !specs.get(i).ingredient().test(stack)) {
                 return fail("material " + i + " does not satisfy the runtime recipe",
                         ItemStack.EMPTY, materials);
@@ -133,31 +154,48 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             if (!evacuateScrollForge(player)) {
                 return fail("Scroll Forge inventory could not be cleared", ItemStack.EMPTY, materials);
             }
-            return startDeterministicScrollForge(materials);
+            return startDeterministicScrollForge(materials, executions);
         }
 
         MenuProvider provider = level.getBlockState(pos).getMenuProvider(level, pos);
         if (provider == null) return fail("machine has no menu provider", ItemStack.EMPTY, materials);
         AbstractContainerMenu created = provider.createMenu(-1, player.getInventory(), player);
-        if (!(created instanceof ArcaneAnvilMenu anvil)) {
+        if (created == null || !ARCANE_ANVIL_MENU_CLASS.equals(created.getClass().getName())) {
             return fail("machine created an unexpected menu type", ItemStack.EMPTY, materials);
         }
         this.menu = created;
         if (!machineSlotsEmpty(created)) {
             return fail("machine inventory is occupied", ItemStack.EMPTY, materials);
         }
-        anvil.getSlot(0).set(materials.get(0).copyWithCount(1));
-        anvil.getSlot(1).set(materials.get(1).copyWithCount(1));
-        anvil.slotsChanged(anvil.getSlot(0).container);
-        ItemStack displayed = anvil.getSlot(2).getItem().copy();
-        if (!sameExpectedOutput(displayed)) {
-            return fail("Arcane Anvil output mismatch", displayed, materials);
+        results.clear();
+        int[] remaining = {materials.get(0).getCount(), materials.get(1).getCount()};
+        for (int execution = 0; execution < executions; execution++) {
+            if (!machineSlotsEmpty(created)) {
+                return fail("Arcane Anvil inventory did not reset between operations",
+                        ItemStack.EMPTY, materials);
+            }
+            for (int i = 0; i < 2; i++) {
+                int required = specs.get(i).count();
+                if (remaining[i] < required) {
+                    return fail("Arcane Anvil batch exhausted materials",
+                            ItemStack.EMPTY, materials);
+                }
+                created.getSlot(i).set(materials.get(i).copyWithCount(required));
+                remaining[i] -= required;
+            }
+            created.slotsChanged(created.getSlot(0).container);
+            ItemStack displayed = created.getSlot(2).getItem().copy();
+            if (!sameExpectedOutput(displayed)) {
+                return fail("Arcane Anvil output mismatch", displayed, materials);
+            }
+            Slot resultSlot = created.getSlot(2);
+            ItemStack taken = resultSlot.remove(displayed.getCount());
+            resultSlot.onTake(player, taken);
+            results.add(taken.copy());
+            clearCraftingSlots(created);
         }
-        Slot resultSlot = anvil.getSlot(2);
-        result = resultSlot.remove(displayed.getCount());
-        resultSlot.onTake(player, result);
         clearMenu();
-        done = !result.isEmpty();
+        done = !results.isEmpty();
         return done;
     }
 
@@ -199,7 +237,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
         if (!remainder.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, remainder);
     }
 
-    private boolean startDeterministicScrollForge(List<ItemStack> materials) {
+    private boolean startDeterministicScrollForge(List<ItemStack> materials, int executions) {
         var spell = SpellRegistry.getSpell(new ResourceLocation(recipe.spellId()));
         if (spell == null || spell == SpellRegistry.none()) {
             return fail("spell is not registered", ItemStack.EMPTY, materials);
@@ -209,11 +247,15 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
             return fail("validated Scroll Forge output rejected: " + rejection,
                     ItemStack.EMPTY, materials);
         }
-        result = expected.copy();
-        done = !result.isEmpty();
+        ItemStack scaled = expected.copy();
+        scaled.setCount(ParallelBatchSizing.multipliedCount(
+                expected.getCount(), executions));
+        results.clear();
+        results.add(scaled);
+        done = !scaled.isEmpty();
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-IronSpells] Created validated deterministic Scroll Forge output {} for {}",
-                result, recipe.getId());
+                scaled, recipe.getId());
         return done;
     }
 
@@ -268,6 +310,7 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
                 "[RSI-IronSpells] {} for {} at {}: expected={}, displayed={}, materials={}",
                 reason, recipe == null ? "unknown" : recipe.getId(), pos, expected, displayed,
                 materials);
+        results.clear();
         clearMenu();
         return false;
     }
@@ -276,40 +319,48 @@ public final class IronSpellBooksBatchDelegate extends AbstractBatchDelegate {
     @Override protected CraftObservation observeMissingMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
         return done ? doneObservation() : workingObservation();
     }
-    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) { ItemStack out = result.copy(); result = ItemStack.EMPTY; done = false; return out; }
-    @Override public ExpectedProduction getExpectedProduction() { return expected.isEmpty() ? null : new ExpectedProduction(expected, expected.getCount()); }
-    @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) { clearMenu(); result = ItemStack.EMPTY; done = false; resetState(); }
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) { clearMenu(); result = ItemStack.EMPTY; done = false; resetState(); }
+    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
+        if (results.isEmpty()) return ItemStack.EMPTY;
+        ItemStack out = results.remove(0).copy();
+        done = results.isEmpty();
+        return out;
+    }
+    @Override public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+        List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
+        results.clear();
+        done = false;
+        preparedExecutions = 1;
+        return output;
+    }
+    @Override public ExpectedProduction getExpectedProduction() {
+        return expected.isEmpty() ? null : new ExpectedProduction(
+                expected, ParallelBatchSizing.multipliedCount(
+                expected.getCount(), preparedExecutions));
+    }
+    @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+    }
+    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
+    }
     @Override public BlockPos getMachinePos() { return pos; }
 
     private void clearMenu() {
         if (menu == null) return;
-        if (menu instanceof ScrollForgeMenu forge) {
-            clearSlot(forge.getInkSlot());
-            clearSlot(forge.getBlankScrollSlot());
-            clearSlot(forge.getFocusSlot());
-            clearSlot(forge.getResultSlot());
-        } else if (menu instanceof ArcaneAnvilMenu anvil) {
-            clearSlot(anvil.getSlot(0));
-            clearSlot(anvil.getSlot(1));
-            clearSlot(anvil.getSlot(2));
-        }
+        clearCraftingSlots(menu);
         menu = null;
     }
 
+    private static void clearCraftingSlots(AbstractContainerMenu container) {
+        clearSlot(container.getSlot(0));
+        clearSlot(container.getSlot(1));
+        clearSlot(container.getSlot(2));
+    }
+
     private static boolean machineSlotsEmpty(AbstractContainerMenu menu) {
-        if (menu instanceof ScrollForgeMenu forge) {
-            return !forge.getInkSlot().hasItem()
-                    && !forge.getBlankScrollSlot().hasItem()
-                    && !forge.getFocusSlot().hasItem()
-                    && !forge.getResultSlot().hasItem();
-        }
-        if (menu instanceof ArcaneAnvilMenu anvil) {
-            return !anvil.getSlot(0).hasItem()
-                    && !anvil.getSlot(1).hasItem()
-                    && !anvil.getSlot(2).hasItem();
-        }
-        return false;
+        return !menu.getSlot(0).hasItem()
+                && !menu.getSlot(1).hasItem()
+                && !menu.getSlot(2).hasItem();
     }
 
     private static void clearSlot(Slot slot) {

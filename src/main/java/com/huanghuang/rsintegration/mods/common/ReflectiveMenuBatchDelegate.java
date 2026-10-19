@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -28,6 +29,8 @@ import java.util.List;
 
 /** Executes an instant external crafting recipe through the machine's real server menu. */
 public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate {
+    static final int MAX_INSTANT_BATCH = 64;
+
     private final String recipeClass;
     private final String menuClass;
     private final String blockId;
@@ -43,6 +46,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
     protected ItemStack expected = ItemStack.EMPTY;
     protected final List<ItemStack> results = new ArrayList<>();
     protected boolean done;
+    private int preparedExecutions = 1;
 
     protected ReflectiveMenuBatchDelegate(String recipeClass, String menuClass, String blockId,
                                           int inputCount, int resultSlotIndex, boolean strictResultNbt) {
@@ -69,6 +73,7 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         this.menu = null;
         this.results.clear();
         this.done = false;
+        this.preparedExecutions = 1;
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
@@ -86,6 +91,19 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
 
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
+    }
+
+    @Override public int prepareFlatBatch(int remainingOperations) {
+        preparedExecutions = boundedExecutions(remainingOperations);
+        return remainingOperations <= 0 ? 0 : preparedExecutions;
+    }
+
+    @Override public void prepareGraphBatch(int executions) {
+        preparedExecutions = boundedExecutions(executions);
+    }
+
+    @Override public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        return ParallelBatchSizing.boundedEvenShare(totalOperations, workerCount, MAX_INSTANT_BATCH);
     }
 
     @Override public boolean tryStartSingleCraft(@Nonnull ServerPlayer player) {
@@ -137,30 +155,58 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         }
         if (created == null || !created.getClass().getName().equals(menuClass)) return false;
         this.menu = created;
-        if (!machineSlotsEmpty()) { clearMenu(); return false; }
-        for (int i = 0; i < specs.size(); i++) {
-            IngredientSpec spec = specs.get(i);
+        int[] remaining = new int[materials.size()];
+        for (int i = 0; i < materials.size(); i++) {
             ItemStack material = materials.get(i);
-            if (material == null || material.isEmpty() || material.getCount() < spec.count()
-                    || !IngredientMatcher.test(spec.ingredient(), material)) { clearMenu(); return false; }
-            menu.getSlot(menuInputSlotIndex(i)).set(material.copyWithCount(spec.count()));
+            if (material == null || material.isEmpty() || material.getCount() < specs.get(i).count()
+                    || !IngredientMatcher.test(specs.get(i).ingredient(), material)) {
+                clearMenu();
+                return false;
+            }
+            remaining[i] = material.getCount();
         }
-        menu.slotsChanged(menu.getSlot(0).container);
-        Slot resultSlot = menu.getSlot(resultSlotIndex);
-        ItemStack displayed = resultSlot.getItem().copy();
-        if (!matchesExpected(displayed)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-MenuCraft] Output mismatch for {} at {}: expected={}, actual={}",
-                    recipe.getId(), pos, expected, displayed);
-            clearMenu();
-            return false;
+
+        for (int execution = 0; execution < preparedExecutions; execution++) {
+            if (!machineSlotsEmpty()) {
+                results.clear();
+                clearMenu();
+                return false;
+            }
+            for (int i = 0; i < specs.size(); i++) {
+                IngredientSpec spec = specs.get(i);
+                if (remaining[i] < spec.count()) {
+                    results.clear();
+                    clearMenu();
+                    return false;
+                }
+                menu.getSlot(menuInputSlotIndex(i)).set(
+                        materials.get(i).copyWithCount(spec.count()));
+                remaining[i] -= spec.count();
+            }
+            menu.slotsChanged(menu.getSlot(0).container);
+            Slot resultSlot = menu.getSlot(resultSlotIndex);
+            ItemStack displayed = resultSlot.getItem().copy();
+            if (!matchesExpected(displayed)) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-MenuCraft] Output mismatch for {} at {}: expected={}, actual={}",
+                        recipe.getId(), pos, expected, displayed);
+                results.clear();
+                clearMenu();
+                return false;
+            }
+            ItemStack taken = resultSlot.remove(displayed.getCount());
+            if (!matchesExpected(taken)) {
+                results.clear();
+                clearMenu();
+                return false;
+            }
+            InventoryDeltaCapture inventory = InventoryDeltaCapture.snapshot(player);
+            resultSlot.onTake(player, taken);
+            results.add(taken.copy());
+            results.addAll(inventory.removeAdded(player));
+            collectRemainingInputs();
+            clearCraftingSlots();
         }
-        ItemStack taken = resultSlot.remove(displayed.getCount());
-        if (!matchesExpected(taken)) { clearMenu(); return false; }
-        InventoryDeltaCapture inventory = InventoryDeltaCapture.snapshot(player);
-        resultSlot.onTake(player, taken);
-        results.add(taken.copy());
-        results.addAll(inventory.removeAdded(player));
-        collectRemainingInputs();
         clearMenu();
         done = true;
         return true;
@@ -186,10 +232,15 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         }
     }
 
-    protected void clearMenu() {
+    private void clearCraftingSlots() {
         if (menu == null) return;
         for (int i = 0; i < inputCount; i++) clearSlot(menu.getSlot(menuInputSlotIndex(i)));
         clearSlot(menu.getSlot(resultSlotIndex));
+    }
+
+    protected void clearMenu() {
+        if (menu == null) return;
+        clearCraftingSlots();
         menu = null;
     }
 
@@ -223,22 +274,29 @@ public abstract class ReflectiveMenuBatchDelegate extends AbstractBatchDelegate 
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
+        preparedExecutions = 1;
         if (ledger != null && !usingSharedLedger && ledger.isCommitted()) ledger.settleAllCommitted();
         return output;
     }
     @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
     @Override public ExpectedProduction getExpectedProduction() {
-        return expected.isEmpty() ? null : new ExpectedProduction(expected, expected.getCount());
+        return expected.isEmpty() ? null : new ExpectedProduction(
+                expected, ParallelBatchSizing.multipliedCount(expected.getCount(), preparedExecutions));
     }
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; resetState();
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
     }
     @Override protected void clearMissingMachineState(@Nullable ServerPlayer player) {
-        clearMenu(); results.clear(); done = false; resetState();
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1; resetState();
     }
     @Override public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        clearMenu(); results.clear(); done = false; expected = ItemStack.EMPTY; resetState();
+        clearMenu(); results.clear(); done = false; preparedExecutions = 1;
+        expected = ItemStack.EMPTY; resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }
+
+    private static int boundedExecutions(int requested) {
+        return Math.max(1, Math.min(MAX_INSTANT_BATCH, Math.max(0, requested)));
+    }
 }

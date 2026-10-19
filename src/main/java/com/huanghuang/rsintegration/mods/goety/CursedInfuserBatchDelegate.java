@@ -113,13 +113,33 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void prepareGraphBatch(int executions) {
-        requestedBatch = Math.max(1, executions);
+        requestedBatch = supportsInputBuffer()
+                ? Math.max(1, Math.min(executions, flatBatchCapacity()))
+                : 1;
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        if (!supportsInputBuffer()) return remainingOperations > 0 ? 1 : 0;
+        return Math.min(Math.max(0, remainingOperations), flatBatchCapacity());
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return supportsInputBuffer()
+                ? Math.max(Math.max(1, configuredLimit), flatBatchCapacity())
+                : Math.max(1, configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return supportsInputBuffer();
     }
 
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         return GoetyInfuserMachineSupport.parallelBatchSize(
-                totalOperations, workerCount, preparedCapacity);
+                totalOperations, workerCount, flatBatchCapacity());
     }
 
     @Override
@@ -412,6 +432,10 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
                 BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
                 BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 List.of(BlockPos.ZERO.below()));
+    }
+
+    private int flatBatchCapacity() {
+        return Math.max(1, Math.min(preparedCapacity, goetyInputBufferLimit()));
     }
 
     private static boolean goetyInputBufferEnabled() {
