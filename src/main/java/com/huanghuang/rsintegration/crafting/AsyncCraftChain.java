@@ -1565,9 +1565,10 @@ public final class AsyncCraftChain {
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
         }
-        // Only the exact generic delegate is logical/positionless. Physical adapters may
-        // reuse its material transaction logic while still requiring a bound machine.
-        if (delegate.getClass() == GenericBatchDelegate.class) {
+        // Generic and virtual delegates are positionless. Physical adapters may
+        // reuse the generic material transaction logic while still requiring a
+        // bound machine, so the virtual ModType check must stay explicit.
+        if (delegate.getClass() == GenericBatchDelegate.class || step.modType().isVirtual()) {
             if (!validatePreparedDelegate(
                     delegate, online, step.recipeId(), null, BlockPos.ZERO)) {
                 return PreparationResult.fatal("Virtual recipe validation failed for " + step.recipeId());
@@ -3738,7 +3739,23 @@ public final class AsyncCraftChain {
                                             CraftingResolver.ResolutionStep step,
                                             ServerPlayer online) {
         try {
-            List<IngredientSpec> specs = delegate.getRequiredMaterials();
+            int configuredLimit = configuredOperationsPerDispatch();
+            int allowedBatch = genericBatchLimit(delegate, stepRemaining, configuredLimit);
+            int preparedBatch = delegate.prepareFlatBatch(allowedBatch);
+            if (preparedBatch <= 0 || preparedBatch > allowedBatch) {
+                RSIntegrationMod.LOGGER.warn(ctx.format(
+                        "Generic delegate selected invalid flat batch size {} for {} permitted operation(s)"),
+                        preparedBatch, allowedBatch);
+                return null;
+            }
+            machineCount = preparedBatch;
+            List<IngredientSpec> exactBatchSpecs =
+                    delegate.getFlatBatchRequiredMaterials(preparedBatch);
+            List<IngredientSpec> specs = exactBatchSpecs != null
+                    ? exactBatchSpecs
+                    : scaleGraphSpecsForExecutions(
+                            delegate.getRequiredMaterials(),
+                            delegate.getMaterialReservationScopes(), preparedBatch);
             OperationStartContext startContext;
             if (specs != null && !specs.isEmpty()) {
                 List<ItemStack> materials = preReserveStepMaterials(specs, online);
@@ -3804,6 +3821,13 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.debug(ctx.format("Generic step started OK: recipe={}"),
                 step.recipeId());
         return delegate;
+    }
+
+    static int genericBatchLimit(IBatchDelegate delegate, int remainingOperations,
+                                 int configuredLimit) {
+        int delegateLimit = Math.max(1,
+                delegate.flatBatchOperationLimit(Math.max(1, configuredLimit)));
+        return Math.min(Math.max(1, remainingOperations), delegateLimit);
     }
 
     /** 失败提示优先显示产物本地化名称，无法解析时才回退到配方 ID。 */
