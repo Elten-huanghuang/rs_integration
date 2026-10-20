@@ -33,6 +33,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
@@ -42,6 +43,9 @@ import net.minecraftforge.items.IItemHandlerModifiable;
 /** Batch delegate for Embers Alchemy Tablet (deterministic mode). */
 public final class EreAlchemyBatchDelegate
 extends AbstractBatchDelegate {
+    private static final ResourceLocation ALCHEMY_TABLET_BLOCK_ID =
+            new ResourceLocation("embers", "alchemy_tablet");
+
     private ServerLevel level;
     private BlockPos machinePos;
     private Object recipe;
@@ -70,14 +74,19 @@ extends AbstractBatchDelegate {
         this.level = lvl;
         this.machinePos = pos;
         this.player = player;
-        if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+        if (!lvl.hasChunkAt(pos)) {
             player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
             return false;
         }
-        BlockEntity be = lvl.getBlockEntity(pos);
-        if (be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers] No AlchemyTabletBlockEntity at {}", (Object)pos);
+        if (!isAlchemyTabletBlock(lvl, pos)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers] No Alchemy Tablet block at {}", pos);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.not_tablet"));
+            return false;
+        }
+        BlockEntity be = lvl.getBlockEntity(pos);
+        if (!isAlchemyTabletBlockEntity(be)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers] Alchemy Tablet block found at {}, but its block entity is unavailable", pos);
+            player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_data_unavailable"));
             return false;
         }
         this.tablet = be;
@@ -106,7 +115,8 @@ extends AbstractBatchDelegate {
         this.pedestals = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
         if (this.pedestals.size() < this.code.size()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Embers] Pedestal count mismatch: {} available, {} needed", (Object)this.pedestals.size(), (Object)this.code.size());
-            player.sendSystemMessage(Component.translatable("rsi.embers.error.pedestals_insufficient", this.code.size(), this.pedestals.size()));
+            player.sendSystemMessage(pedestalScanFailure(
+                    lvl, pos, this.code.size(), this.pedestals.size()));
             return false;
         }
         if (storageEndpoint() == null) {
@@ -423,6 +433,30 @@ extends AbstractBatchDelegate {
         return this.machinePos != null ? this.machinePos : BlockPos.ZERO;
     }
 
+    static boolean isAlchemyTabletBlockId(@Nullable ResourceLocation blockId) {
+        return ALCHEMY_TABLET_BLOCK_ID.equals(blockId);
+    }
+
+    static boolean isAlchemyTabletBlock(Level level, BlockPos pos) {
+        if (level == null || pos == null || !level.isLoaded(pos)) return false;
+        return isAlchemyTabletBlockId(
+                ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos).getBlock()));
+    }
+
+    static boolean isAlchemyTabletBlockEntity(@Nullable BlockEntity blockEntity) {
+        return blockEntity != null
+                && EmbersReflection.alchemyTabletBEClass != null
+                && EmbersReflection.alchemyTabletBEClass.isInstance(blockEntity);
+    }
+
+    private static Component pedestalScanFailure(ServerLevel level, BlockPos pos,
+                                                 int needed, int found) {
+        if (!ChunkUtils.isAreaLoaded(level, pos, 3)) {
+            return Component.translatable("rsi.embers.error.scan_area_unloaded");
+        }
+        return Component.translatable("rsi.embers.error.pedestals_insufficient", needed, found);
+    }
+
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe, @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
         ArrayList<Component> warnings = new ArrayList<Component>();
         if (dim == null || pos == null) {
@@ -431,13 +465,15 @@ extends AbstractBatchDelegate {
         }
         ServerLevel lvl = CraftPacketUtils.resolveLevel((MinecraftServer)player.server, (ResourceLocation)dim, (ServerPlayer)player);
         if (lvl != null) {
-            if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+            if (!lvl.hasChunkAt(pos)) {
                 warnings.add(Component.translatable("rsi.error.chunk_unloaded"));
                 return warnings;
             }
             BlockEntity be = lvl.getBlockEntity(pos);
-            if (EmbersReflection.alchemyTabletBEClass == null || be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
+            if (!isAlchemyTabletBlock(lvl, pos)) {
                 warnings.add(Component.translatable("rsi.embers.warn.tablet_missing"));
+            } else if (!isAlchemyTabletBlockEntity(be)) {
+                warnings.add(Component.translatable("rsi.embers.warn.tablet_data_unavailable"));
             } else if (EmbersReflection.alchemyRecipeClass != null && EmbersReflection.alchemyRecipeClass.isInstance(recipe)) {
                 long seed = lvl.getSeed();
                 @SuppressWarnings("unchecked")
@@ -445,7 +481,9 @@ extends AbstractBatchDelegate {
                 int needed = code.size();
                 List<PedestalInfo> nearby = EreAlchemyBatchDelegate.scanPedestals((Level)lvl, pos);
                 if (nearby.size() < needed) {
-                    warnings.add(Component.translatable("rsi.embers.warn.pedestals_insufficient", needed, nearby.size()));
+                    warnings.add(!ChunkUtils.isAreaLoaded(lvl, pos, 3)
+                            ? Component.translatable("rsi.embers.warn.scan_area_unloaded")
+                            : Component.translatable("rsi.embers.warn.pedestals_insufficient", needed, nearby.size()));
                 }
                 for (PedestalInfo p : nearby) {
                     BlockEntity bottomBE = lvl.getBlockEntity(p.pos().below());
@@ -472,6 +510,7 @@ extends AbstractBatchDelegate {
         for (int dx = -3; dx <= 3; ++dx) {
             for (int dz = -3; dz <= 3; ++dz) {
                 mpos.set(tabletPos.getX() + dx, tabletPos.getY() + 1, tabletPos.getZ() + dz);
+                if (!level.isLoaded(mpos)) continue;
                 BlockEntity be = level.getBlockEntity((BlockPos)mpos);
                 if (be == null || EmbersReflection.alchemyPedestalTopBEClass == null || !EmbersReflection.alchemyPedestalTopBEClass.isInstance(be)) continue;
                 result.add(new PedestalInfo(mpos.immutable(), be));

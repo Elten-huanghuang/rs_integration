@@ -644,26 +644,81 @@ public final class FaRitualHelper {
 
     static StarterResult findRitualStarterItem(ServerPlayer player,
                                                 @Nullable CraftStorageEndpoint endpoint) {
-        if (endpoint == null || FAReflection.ritualStarterItemClass == null) return StarterResult.EMPTY;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
-        if (snapshot == null) return StarterResult.EMPTY;
-        for (var entry : snapshot.items()) {
-            ItemStack candidate = entry.stack();
-            if (candidate.isEmpty() || !FAReflection.ritualStarterItemClass.isInstance(candidate.getItem())
-                    || !canStartRitual(candidate)) continue;
-            ItemStack extracted = endpoint.extractExact(player, candidate.copyWithCount(1), 1, false)
-                    .extractedStacks().stream().findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
-            if (!extracted.isEmpty()) return new StarterResult(extracted, endpoint);
+        if (FAReflection.ritualStarterItemClass == null) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-FA] RitualStarterItem class is unavailable; cannot validate forge ritual starters");
+            return StarterResult.EMPTY;
         }
+
+        if (endpoint != null) {
+            var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+            if (snapshot != null) {
+                for (var entry : snapshot.items()) {
+                    ItemStack candidate = entry.stack();
+                    if (!isUsableRitualStarter(candidate, "storage")) continue;
+                    // canStartRitual() may call ItemStack#getOrCreateTag().
+                    // Preserve the exact identity returned by RS for extraction.
+                    ItemStack extractionTemplate = candidate.copyWithCount(1);
+                    ItemStack extracted = endpoint.extractExact(
+                                    player, extractionTemplate, 1, false)
+                            .extractedStacks().stream()
+                            .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
+                    if (!extracted.isEmpty()) return new StarterResult(extracted, endpoint);
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-FA] RitualStarterItem {} exists in storage but extraction failed",
+                            itemKey(candidate));
+                }
+            }
+        }
+
+        StarterResult inventory = findInInventory(player.getInventory().items);
+        if (!inventory.isEmpty()) return inventory;
+        inventory = findInInventory(player.getInventory().offhand);
+        if (!inventory.isEmpty()) return inventory;
+        inventory = findInInventory(player.getInventory().armor);
+        if (!inventory.isEmpty()) return inventory;
         return StarterResult.EMPTY;
     }
 
     static boolean canStartRitual(ItemStack stack) {
         try {
-            return (boolean) Reflect.getMethodOrThrow(FAReflection.ritualStarterItemClass, "canStartRitual", "canStartRitual", ItemStack.class).invoke(stack.getItem(), stack);
+            ItemStack probe = stack.copy();
+            return (boolean) Reflect.getMethodOrThrow(
+                    FAReflection.ritualStarterItemClass,
+                    "canStartRitual", "canStartRitual", ItemStack.class)
+                    .invoke(probe.getItem(), probe);
         } catch (Exception e) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-FA] Failed to evaluate RitualStarterItem {}: {}",
+                    itemKey(stack), e.toString());
             return false;
         }
+    }
+
+    private static StarterResult findInInventory(List<ItemStack> stacks) {
+        for (ItemStack candidate : stacks) {
+            if (isUsableRitualStarter(candidate, "inventory")) {
+                return new StarterResult(candidate, null);
+            }
+        }
+        return StarterResult.EMPTY;
+    }
+
+    private static boolean isUsableRitualStarter(ItemStack stack, String source) {
+        if (stack == null || stack.isEmpty()
+                || !FAReflection.ritualStarterItemClass.isInstance(stack.getItem())) {
+            return false;
+        }
+        if (canStartRitual(stack)) return true;
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-FA] Ignoring unusable RitualStarterItem {} from {} "
+                        + "(remaining uses or reflection check failed)",
+                itemKey(stack), source);
+        return false;
+    }
+
+    private static ResourceLocation itemKey(ItemStack stack) {
+        return ForgeRegistries.ITEMS.getKey(stack.getItem());
     }
 
     /**

@@ -15,7 +15,6 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -118,14 +117,19 @@ extends AbstractBatchDelegate {
         }
         this.level = lvl;
         this.machinePos = pos;
-        if (!ChunkUtils.isAreaLoaded(lvl, pos, 3)) {
+        if (!lvl.hasChunkAt(pos)) {
             player.sendSystemMessage(Component.translatable("rsi.error.chunk_unloaded"));
             return false;
         }
-        BlockEntity be = lvl.getBlockEntity(pos);
-        if (be == null || !EmbersReflection.alchemyTabletBEClass.isInstance(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No AlchemyTabletBlockEntity at {}", (Object)pos);
+        if (!EreAlchemyBatchDelegate.isAlchemyTabletBlock(lvl, pos)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] No Alchemy Tablet block at {}", pos);
             player.sendSystemMessage(Component.translatable("rsi.embers.error.not_tablet"));
+            return false;
+        }
+        BlockEntity be = lvl.getBlockEntity(pos);
+        if (!EreAlchemyBatchDelegate.isAlchemyTabletBlockEntity(be)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Alchemy Tablet block found at {}, but its block entity is unavailable", pos);
+            player.sendSystemMessage(Component.translatable("rsi.embers.error.tablet_data_unavailable"));
             return false;
         }
         this.tablet = be;

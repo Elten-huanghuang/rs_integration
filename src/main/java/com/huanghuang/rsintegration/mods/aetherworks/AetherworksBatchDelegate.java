@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
@@ -379,6 +380,17 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     @Override
     public BlockPos getMachinePos() {
         return machinePos != null ? machinePos : BlockPos.ZERO;
+    }
+
+    @Override
+    public BlockPos getOperationMachinePos(@NotNull BlockPos boundPos) {
+        // 锻座可以并行，但同一熔炉的热量与结构状态必须保持单操作独占。
+        return forgePos != null ? forgePos : boundPos.immutable();
+    }
+
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlot();
     }
 
     // ── Plan warnings ──────────────────────────────────────────

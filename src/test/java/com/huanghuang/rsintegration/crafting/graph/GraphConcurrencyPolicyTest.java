@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.MonsterPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.vanilla.CookingMachineBatchDelegate;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.BrewingStandBatchDelegate;
@@ -114,6 +115,18 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
                 decision.capabilities().outputOwnership());
+    }
+
+    @Test
+    void aetherworksAnvilCanUseIndependentMachineSlotsConcurrently() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                ModIds.ID_AETHERWORKS_ANVIL, new AetherworksBatchDelegate(), List.of(), List.of());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
+                decision.capabilities().sideEffects());
     }
 
     @Test

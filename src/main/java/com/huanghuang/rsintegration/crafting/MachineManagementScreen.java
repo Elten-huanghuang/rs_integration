@@ -41,7 +41,7 @@ public final class MachineManagementScreen extends Screen {
     private static final int SELECTION_BORDER = 0xFF79A9EA;
     private static final int GRID_GAP = 8;
     private static final int TILE_WIDTH = 108;
-    private static final int TILE_HEIGHT = 82;
+    private static final int TILE_HEIGHT = 68;
     private static final double DRAG_THRESHOLD = 3.0;
 
     private final List<BindingInfo> machines = new ArrayList<>();
@@ -220,6 +220,7 @@ public final class MachineManagementScreen extends Screen {
         int start = Math.min(scrollRow * columns, Math.max(0, filtered.size() - 1));
         int end = Math.min(filtered.size(), start + columns * rows);
         int selectedCount = 0;
+        int selectedBlockedCount = 0;
         for (int index = start; index < end; index++) {
             int slot = index - start;
             int column = slot % columns;
@@ -230,10 +231,16 @@ public final class MachineManagementScreen extends Screen {
             boolean selected = selectingBlacklist
                     && selectionDragged()
                     && tileIntersectsSelection(x, y);
-            if (selected) selectedCount++;
+            if (selected) {
+                selectedCount++;
+                if (MachinePreferenceClient.isBlocked(info)) selectedBlockedCount++;
+            }
             renderTile(graphics, info, x, y, mouseX, mouseY, selected);
         }
-        if (selectingBlacklist && selectionDragged()) renderSelection(graphics, selectedCount);
+        if (selectingBlacklist && selectionDragged()) {
+            boolean willBlock = selectedCount > 0 && selectedBlockedCount < selectedCount;
+            renderSelection(graphics, selectedCount, willBlock);
+        }
         if (filtered.size() > columns * rows) {
             renderScrollbar(graphics, panelX + panelWidth - 7, gridY, gridHeight,
                     columns, rows);
@@ -243,7 +250,6 @@ public final class MachineManagementScreen extends Screen {
     private void renderTile(GuiGraphics graphics, BindingInfo info,
                             int x, int y, int mouseX, int mouseY, boolean selected) {
         boolean blocked = MachinePreferenceClient.isBlocked(info);
-        boolean supportsGui = BindingEventHandler.supportsGuiByInfo(info);
         boolean hovered = !selectingBlacklist
                 && inside(mouseX, mouseY, x, y, TILE_WIDTH, TILE_HEIGHT);
         UIRenderer.rounded(graphics, x, y, TILE_WIDTH, TILE_HEIGHT, 6f,
@@ -289,14 +295,6 @@ public final class MachineManagementScreen extends Screen {
             String mark = Component.translatable("rsi.control_center.flag.blocked_short").getString();
             graphics.drawString(font, mark, x + 6, y + TILE_HEIGHT - 15,
                     0xFFFF8B8B, false);
-        } else {
-            String status = Component.translatable(
-                    supportsGui
-                            ? "rsi.control_center.status.gui"
-                            : "rsi.control_center.status.automation").getString();
-            graphics.drawString(font, status, x + 6, y + TILE_HEIGHT - 15,
-                    supportsGui
-                            ? 0xFF79B88D : MUTED, false);
         }
     }
 
@@ -405,7 +403,10 @@ public final class MachineManagementScreen extends Screen {
             } else {
                 List<BindingInfo> selected = machinesInSelection();
                 if (!selected.isEmpty()) {
-                    MachinePreferenceClient.requestAutomationBlocked(selected, true);
+                    boolean allBlocked = selected.stream()
+                            .allMatch(MachinePreferenceClient::isBlocked);
+                    MachinePreferenceClient.requestAutomationBlocked(
+                            selected, !allBlocked);
                     refreshMachines();
                 }
             }
@@ -486,7 +487,8 @@ public final class MachineManagementScreen extends Screen {
         return selected;
     }
 
-    private void renderSelection(GuiGraphics graphics, int selectedCount) {
+    private void renderSelection(GuiGraphics graphics, int selectedCount,
+                                 boolean willBlock) {
         int x = (int) Math.floor(Math.min(selectionStartX, selectionCurrentX));
         int y = (int) Math.floor(Math.min(selectionStartY, selectionCurrentY));
         int right = (int) Math.ceil(Math.max(selectionStartX, selectionCurrentX));
@@ -497,7 +499,10 @@ public final class MachineManagementScreen extends Screen {
         graphics.renderOutline(x, y, width, height, SELECTION_BORDER);
         if (selectedCount > 0) {
             String count = Component.translatable(
-                    "rsi.control_center.selection_count", selectedCount).getString();
+                    willBlock
+                            ? "rsi.control_center.selection.block"
+                            : "rsi.control_center.selection.allow",
+                    selectedCount).getString();
             int badgeWidth = font.width(count) + 10;
             int badgeX = Math.min(right + 4, panelX + panelWidth - badgeWidth - 8);
             int badgeY = Math.max(gridY + 2, y - 15);

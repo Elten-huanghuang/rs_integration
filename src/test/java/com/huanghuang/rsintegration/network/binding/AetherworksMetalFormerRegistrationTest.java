@@ -24,6 +24,12 @@ class AetherworksMetalFormerRegistrationTest {
     }
 
     @Test
+    void forgeAnvilBlockMapsToTheAnvilDelegate() {
+        assertSame(ModType.byId(ModIds.ID_AETHERWORKS_ANVIL),
+                ModType.fromBlockKey("block.aetherworks.forge_anvil"));
+    }
+
+    @Test
     void nativeAndExplicitBindingsAllowAllRecipeFolders() {
         ModType type = ModType.byId(ModIds.ID_AETHERWORKS_METAL_FORMER);
         assertSame(type, ModType.fromBlockKey("block.aetherworks.forge_metal_former"));

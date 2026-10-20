@@ -918,9 +918,9 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        if (starterFromEndpoint != null && storageEndpoint() != null) {
-            FaRitualHelper.consumeRitualStarterUse(starterStack, player, storageEndpoint());
-        }
+        FaRitualHelper.consumeRitualStarterUse(
+                starterStack, player,
+                starterFromEndpoint != null ? storageEndpoint() : null);
         starterFromEndpoint = null;
     }
 
