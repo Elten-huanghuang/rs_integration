@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -25,7 +26,8 @@ public final class ResonantMagicHud {
                 || !(mc.hitResult instanceof BlockHitResult hit)) return;
         BlockEntity raw = mc.level.getBlockEntity(hit.getBlockPos());
         if (!(raw instanceof ResonantMagicStorage entity) || !entity.isBound()) return;
-        String amount = entity.currentAmount() + " / " + entity.resourceCapacity();
+        String amount = CompactQuantityFormat.format(entity.currentAmount())
+                + " / " + CompactQuantityFormat.format(entity.resourceCapacity());
         Component text = Component.translatable(entity.resourceKind().translationKey())
                 .append("  ").append(amount);
         Font font = mc.font;

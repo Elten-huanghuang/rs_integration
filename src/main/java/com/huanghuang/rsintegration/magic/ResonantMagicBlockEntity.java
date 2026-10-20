@@ -13,19 +13,19 @@ public class ResonantMagicBlockEntity extends BlockEntity implements ResonantMag
     private final ResonantMagicStorageData storage;
 
     public ResonantMagicBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state,
-                                    MagicResourceKind kind, int capacity) {
+                                    MagicResourceKind kind, long capacity) {
         super(type, pos, state);
         storage = new ResonantMagicStorageData(this, kind, capacity);
     }
 
     @Override public MagicResourceKind resourceKind() { return storage.kind(); }
-    @Override public int resourceCapacity() { return storage.resourceCapacity(); }
+    @Override public long resourceCapacity() { return storage.resourceCapacity(); }
     @Override public boolean isBound() { return storage.isBound(); }
     @Override public CompoundTag binding() { return storage.binding(); }
     @Override public void setBinding(CompoundTag next) { storage.setBinding(next); }
     @Override public void clearBinding() { storage.clearBinding(); }
     @Override public boolean isBoundTo(CompoundTag next) { return storage.isBoundTo(next); }
-    @Override public int currentAmount() { return storage.currentAmount(); }
+    @Override public long currentAmount() { return storage.currentAmount(); }
     @Override public boolean reachable() { return storage.reachable(); }
     @Override public int insert(int amount) { return storage.insert(amount); }
     @Override public int extract(int amount) { return storage.extract(amount); }

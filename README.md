@@ -75,6 +75,7 @@ Batch splitting, machine input buffering, and multi-machine parallelism remain s
 - One disk stores items, fluids, and magic resources in the native RS disk drive. Item and fluid entry limits, per-entry payload size, and total payload size are configurable.
 - `MANA`, `SOURCE`, and `SOUL` remain separate resource rows. `MANA` and `SOUL` can feed RSI recursive crafting; `SOURCE` remains on the native Ars transfer path.
 - Magic-resource files now store each resource as a `long`. Existing 12-byte `int` records are detected and read without migration loss.
+- Mixed-terminal magic quantities, recipe-tree labels, ink counts, and resonant-container HUDs share compact `K/M/G/T/P/E` suffixes so values through `Long.MAX_VALUE` remain inside their cells; exact magic values remain available in the tooltip.
 - NBT-sensitive variants retain identity. The disk participates in storage caches, automation devices, the mixed terminal, JEI/EMI lookup, and recursive item/fluid extraction.
 - Existing disks expand automatically when entry limits are raised. Save verification, crash-safe dirty handling, drop protection, void recovery, and UUID-based administrator recovery reduce data-loss risk.
 - Missing items or fluids from uninstalled mods are quarantined without blocking normal stock; their original data remains preserved and counts toward capacity.

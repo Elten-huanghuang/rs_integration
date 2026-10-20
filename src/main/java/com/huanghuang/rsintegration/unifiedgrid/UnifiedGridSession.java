@@ -489,6 +489,7 @@ public final class UnifiedGridSession {
         private long lastCapacity = -1;
         private boolean sentInitial;
         private int serial;
+        private int sequence;
 
         private MagicChannel(GridResourceKind gridKind) {
             this.gridKind = gridKind;
@@ -496,11 +497,12 @@ public final class UnifiedGridSession {
         }
 
         private void prepare() {
-            if (!resetRequested) return;
+            if (!resetRequested && sequence < Integer.MAX_VALUE - 16) return;
             resetRequested = false;
             sentInitial = false;
             lastAmount = -1;
             lastCapacity = -1;
+            sequence = 0;
             lastPoll = player.tickCount; // 立即查询
             seenVersion = -1;            // 重置后无条件重推一次
             epoch++;
@@ -519,6 +521,7 @@ public final class UnifiedGridSession {
         private void forceRefresh() {
             lastPoll = player.tickCount - FALLBACK_POLL_INTERVAL;
             seenVersion = -1;
+            refreshSnapshot();
         }
 
         private void pump() {
@@ -538,9 +541,12 @@ public final class UnifiedGridSession {
             boolean changed = version != seenVersion;
             boolean fallback = player.tickCount - lastPoll >= FALLBACK_POLL_INTERVAL && sentInitial;
             if (!changed && !fallback) return;
-            seenVersion = version;
-            lastPoll = player.tickCount;
+            refreshSnapshot();
+        }
 
+        private void refreshSnapshot() {
+            seenVersion = MagicResourceDirty.version();
+            lastPoll = player.tickCount;
             long total = MagicResourceEndpoint.available(network, resource);
             long capacity = MagicResourceEndpoint.capacity(network, resource);
             // 数量和网络容量都变化时更新终端，容量来源与绑定方块完全一致。
@@ -564,7 +570,7 @@ public final class UnifiedGridSession {
 
         private void send(boolean begin, boolean end, byte[] payload) {
             transport.accept(new UnifiedGridUpdatePacket(menu.containerId, id, gridKind,
-                    epoch, 0, begin, end, network != null, canCraft, payload));
+                    epoch, sequence++, begin, end, network != null, canCraft, payload));
         }
     }
 }

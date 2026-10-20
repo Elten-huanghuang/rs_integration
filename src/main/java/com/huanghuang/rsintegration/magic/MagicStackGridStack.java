@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.refinedmods.refinedstorage.api.storage.tracker.StorageTrackerEntry;
-import com.refinedmods.refinedstorage.apiimpl.API;
 import com.refinedmods.refinedstorage.render.RenderSettings;
 import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
@@ -141,9 +141,7 @@ public final class MagicStackGridStack implements IGridStack {
         MagicResourceTexture.render(graphics, kind, x, y);
         String text = craftable
                 ? I18n.get("gui.refinedstorage.grid.craft")
-                : amount > Integer.MAX_VALUE
-                        ? getFormattedFullQuantity()
-                        : API.instance().getQuantityFormatter().formatWithUnits(getQuantity());
+                : CompactQuantityFormat.format(amount);
         screen.renderQuantity(graphics, x, y, text, RenderSettings.INSTANCE.getSecondaryColor());
     }
 

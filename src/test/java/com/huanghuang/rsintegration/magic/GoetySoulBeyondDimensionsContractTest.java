@@ -52,7 +52,7 @@ class GoetySoulBeyondDimensionsContractTest {
         // 客户端侧把翻译键交给 LanguageMap 解析；传的是键而不是已渲染文本，
         // RS 与 BD 仍然共享同一个翻译键。
         assertTrue(rsGridStackSource.contains("I18n.get(kind.translationKey())"));
-        assertTrue(rsGridStackSource.contains("formatWithUnits(getQuantity())"));
+        assertTrue(rsGridStackSource.contains("CompactQuantityFormat.format(amount)"));
         assertFalse(rsGridStackSource.contains("formatInBucketFormWithOnlyTrailingDigitsIfZero(amount)"));
         assertTrue(sharedTextureSource.contains(
                 "new ResourceLocation(\"rs_integration\", \"block/liquid_soul_energy\")"));

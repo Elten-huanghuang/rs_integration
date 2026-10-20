@@ -15,17 +15,17 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     public ArsResonantSourceTankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(castType(type), pos, state);
         storage = new ResonantMagicStorageData(this, MagicResourceKind.SOURCE,
-                SaturatingLongMath.clampToInt(MagicResourceKind.SOURCE.capacity()));
+                MagicResourceKind.SOURCE.capacity());
     }
 
     @Override public MagicResourceKind resourceKind() { return storage.kind(); }
-    @Override public int resourceCapacity() { return storage.resourceCapacity(); }
+    @Override public long resourceCapacity() { return storage.resourceCapacity(); }
     @Override public boolean isBound() { return storage.isBound(); }
     @Override public CompoundTag binding() { return storage.binding(); }
     @Override public void setBinding(CompoundTag next) { storage.setBinding(next); }
     @Override public void clearBinding() { storage.clearBinding(); }
     @Override public boolean isBoundTo(CompoundTag next) { return storage.isBoundTo(next); }
-    @Override public int currentAmount() { return storage.currentAmount(); }
+    @Override public long currentAmount() { return storage.currentAmount(); }
     @Override public boolean reachable() { return storage.reachable(); }
     @Override public int insert(int amount) { return storage.insert(amount); }
     @Override public int extract(int amount) { return storage.extract(amount); }
@@ -37,8 +37,12 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     @Override public boolean canAcceptSource() {
         return isBound() && reachable() && getSource() < getMaxSource();
     }
-    @Override public int getSource() { return currentAmount(); }
-    @Override public int getMaxSource() { return resourceCapacity(); }
+    @Override public int getSource() {
+        return SaturatingLongMath.clampToInt(currentAmount());
+    }
+    @Override public int getMaxSource() {
+        return SaturatingLongMath.clampToInt(resourceCapacity());
+    }
     @Override public void setMaxSource(int ignored) {}
     @Override public int setSource(int amount) {
         int current = getSource();

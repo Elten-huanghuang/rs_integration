@@ -32,7 +32,7 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
         super(pos, state);
         setRegisteredType(this, type);
         storage = new ResonantMagicStorageData(this, MagicResourceKind.MANA,
-                SaturatingLongMath.clampToInt(MagicResourceKind.MANA.capacity()));
+                MagicResourceKind.MANA.capacity());
     }
 
     private static void setRegisteredType(ManaPoolBlockEntity entity, BlockEntityType<?> type) {
@@ -42,13 +42,13 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
     }
 
     @Override public MagicResourceKind resourceKind() { return storage.kind(); }
-    @Override public int resourceCapacity() { return storage.resourceCapacity(); }
+    @Override public long resourceCapacity() { return storage.resourceCapacity(); }
     @Override public boolean isBound() { return storage.isBound(); }
     @Override public CompoundTag binding() { return storage.binding(); }
     @Override public void setBinding(CompoundTag next) { storage.setBinding(next); }
     @Override public void clearBinding() { storage.clearBinding(); }
     @Override public boolean isBoundTo(CompoundTag next) { return storage.isBoundTo(next); }
-    @Override public int currentAmount() { return storage.currentAmount(); }
+    @Override public long currentAmount() { return storage.currentAmount(); }
     @Override public boolean reachable() { return storage.reachable(); }
     @Override public int insert(int amount) { return storage.insert(amount); }
     @Override public int extract(int amount) { return storage.extract(amount); }
@@ -78,11 +78,13 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
         wandable = LazyOptional.of(() -> this);
     }
 
-    @Override public int getCurrentMana() { return storage.currentAmount(); }
-    @Override public boolean isFull() { return getCurrentMana() >= resourceCapacity(); }
+    @Override public int getCurrentMana() {
+        return SaturatingLongMath.clampToInt(currentAmount());
+    }
+    @Override public boolean isFull() { return currentAmount() >= resourceCapacity(); }
     @Override public void receiveMana(int mana) {
         if (mana > 0) insert(ManaPoolManaMath.insertRequest(
-                mana, getCurrentMana(), resourceCapacity()));
+                mana, getCurrentMana(), getMaxMana()));
         if (mana < 0) extract(ManaPoolManaMath.extractRequest(mana, getCurrentMana()));
     }
 
@@ -90,10 +92,13 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
         return isBound() && reachable() && !isFull();
     }
     @Override public boolean isOutputtingPower() { return outputting; }
-    @Override public int getMaxMana() { return resourceCapacity(); }
+    @Override public int getMaxMana() {
+        return SaturatingLongMath.clampToInt(resourceCapacity());
+    }
     @Override public int getAvailableSpaceForMana() {
-        return isBound() && reachable()
-                ? Math.max(0, resourceCapacity() - getCurrentMana()) : 0;
+        if (!isBound() || !reachable()) return 0;
+        long space = Math.max(0, resourceCapacity() - currentAmount());
+        return SaturatingLongMath.clampToInt(space);
     }
     @Override public boolean areIncomingTranfersDone() { return false; }
 
