@@ -4604,7 +4604,8 @@ public final class GenericCraftPacket {
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
-                        consumeIngredientCount(spec.ingredient(), Math.max(0, cnt - 1), displayAvailable);
+                        consumeIngredientCountInPlace(
+                                spec.ingredient(), Math.max(0, cnt - 1), displayAvailable);
                         inputs.add(display);
                         inputRoles.add(spec.role());
                     }
@@ -4807,7 +4808,7 @@ public final class GenericCraftPacket {
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
-                        consumeIngredientCount(spec.ingredient(), Math.max(0, cnt - 1),
+                        consumeIngredientCountInPlace(spec.ingredient(), Math.max(0, cnt - 1),
                                 displayAvailable, plannedOutputs);
                         targetInputs.add(display);
                         targetInputRoles.add(spec.role());
@@ -4936,7 +4937,7 @@ public final class GenericCraftPacket {
         Map<Item, Ingredient> itemSource = new HashMap<>();
         for (IngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
-            Map<Item, Long> consumed = consumeIngredientCount(
+            Map<Item, Long> consumed = consumeIngredientCountInPlace(
                     spec.ingredient(), spec.count(), matAvailable);
             for (Map.Entry<Item, Long> entry : consumed.entrySet()) {
                 neededCounts.merge(entry.getKey(), entry.getValue().longValue(),
@@ -5129,7 +5130,8 @@ public final class GenericCraftPacket {
                                 if (opt.isEmpty()) continue;
                                 IngredientKey key = IngredientKey.of(opt);
                                 materials.merge(key,
-                                        new PlanResponse.Availability(1, itemAvailable.getOrDefault(key.item(), 0)),
+                                        new PlanResponse.Availability(1,
+                                                itemAvailable.getOrDefault(key.item(), 0L)),
                                         (old, neu) -> new PlanResponse.Availability(
                                                 old.needed(), Math.max(old.available(), neu.available()),
                                                 Math.max(old.missingCount(), neu.missingCount())));
@@ -5468,14 +5470,14 @@ public final class GenericCraftPacket {
     }
 
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
-                                  Map<Item, Long> itemAvailable) {
+                                  Map<Item, ? extends Number> itemAvailable) {
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
             PlanResponse.Availability availability = entry.getValue();
             ItemStack display = entry.getKey().stack(1);
             // 流体种类保存在凭据 NBT 中，其他流体的库存不是同种物品的数据变体。
             if (availability.missingCount() == 0 || !display.hasTag()
                     || InkFluidSupport.isToken(display)) continue;
-            if ((long) itemAvailable.getOrDefault(entry.getKey().item(), 0)
+            if (itemCount(itemAvailable, entry.getKey().item())
                     >= (long) availability.available() + availability.missingCount()) {
                 return true;
             }
@@ -5484,7 +5486,7 @@ public final class GenericCraftPacket {
     }
 
     static String purePlanningFailureKey(PureRecipePlanner.Result result,
-                                         Map<StackKey, Long> availableItems) {
+                                         Map<StackKey, ? extends Number> availableItems) {
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT
                 || result.status() == PureRecipePlanner.Status.SEARCH_LIMIT
                 || result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
@@ -5498,7 +5500,7 @@ public final class GenericCraftPacket {
     /** Sends a planner failure without discarding the exact shortage and quantity. */
     private static void sendPurePlanningFailure(
             ServerPlayer player, PureRecipePlanner.Result result,
-            Map<StackKey, Long> availableItems,
+            Map<StackKey, ? extends Number> availableItems,
             Set<ResourceLocation> blockedOutputIds) {
         String key = allMissingRequireBlockedOutput(result.missing(), blockedOutputIds)
                 ? "rsi.plan.failure.no_bound_machine"
@@ -5656,7 +5658,7 @@ public final class GenericCraftPacket {
 
     static boolean hasPureNbtMismatch(
             List<ImmutableRecipeGraph.IngredientRef> missing,
-            Map<StackKey, Long> availableItems) {
+            Map<StackKey, ? extends Number> availableItems) {
         if (missing == null || missing.isEmpty() || availableItems == null
                 || availableItems.isEmpty()) return false;
 
@@ -5680,13 +5682,14 @@ public final class GenericCraftPacket {
 
     static MarketTradeAvailability marketTradeAvailability(
             MarketRecipeWrapper recipe,
-            Map<StackKey, Long> available, int repeatCount) {
+            Map<StackKey, ? extends Number> available, int repeatCount) {
         ItemStack cost = recipe.costItem();
         Ingredient costIngredient = Ingredient.of(cost);
         long matching = 0L;
-        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
-            if (entry.getValue() > 0 && IngredientMatcher.test(costIngredient, entry.getKey().toStack())) {
-                matching = SaturatingLongMath.add(matching, entry.getValue());
+        for (Map.Entry<StackKey, ? extends Number> entry : available.entrySet()) {
+            long count = entry.getValue() == null ? 0L : entry.getValue().longValue();
+            if (count > 0L && IngredientMatcher.test(costIngredient, entry.getKey().toStack())) {
+                matching = SaturatingLongMath.add(matching, count);
             }
         }
         long required = (long) Math.max(1, cost.getCount()) * Math.max(1, repeatCount);
@@ -5784,6 +5787,11 @@ public final class GenericCraftPacket {
         return matchBestAvailable(ingredient, itemAvailable, Collections.emptySet());
     }
 
+    private static long itemCount(Map<Item, ? extends Number> counts, Item item) {
+        Number count = counts.get(item);
+        return count == null ? 0L : count.longValue();
+    }
+
     /**
      * Collapse a (possibly tag) ingredient to a single representative for display.
      * Prefers configured stocked variants, then stock quantity. When NO member is in stock, a
@@ -5879,14 +5887,26 @@ public final class GenericCraftPacket {
      * work proportional to the number of tag members.
      */
     static Map<Item, Long> consumeIngredientCount(Ingredient ingredient, int amount,
-                                                  Map<Item, Long> available) {
-        return consumeIngredientCount(ingredient, amount, available,
+                                                  Map<Item, ? extends Number> supplied) {
+        Map<Item, Long> available = new LinkedHashMap<>();
+        supplied.forEach((item, count) -> {
+            if (item != null && count != null) {
+                available.put(item, Math.max(0L, count.longValue()));
+            }
+        });
+        return consumeIngredientCountInPlace(ingredient, amount, available,
                 Collections.emptySet());
     }
 
-    private static Map<Item, Long> consumeIngredientCount(Ingredient ingredient, int amount,
-                                                          Map<Item, Long> available,
-                                                               Set<Item> preferred) {
+    static Map<Item, Long> consumeIngredientCountInPlace(
+            Ingredient ingredient, int amount, Map<Item, Long> available) {
+        return consumeIngredientCountInPlace(
+                ingredient, amount, available, Collections.emptySet());
+    }
+
+    private static Map<Item, Long> consumeIngredientCountInPlace(
+            Ingredient ingredient, int amount, Map<Item, Long> available,
+            Set<Item> preferred) {
         if (ingredient == null || ingredient.isEmpty() || amount <= 0) return Map.of();
 
         List<Item> candidates = new ArrayList<>();
@@ -5894,8 +5914,8 @@ public final class GenericCraftPacket {
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty() && seen.add(stack.getItem())) candidates.add(stack.getItem());
         }
-        candidates.sort((left, right) -> Integer.compare(
-                available.getOrDefault(right, 0), available.getOrDefault(left, 0)));
+        candidates.sort((left, right) -> Long.compare(
+                available.getOrDefault(right, 0L), available.getOrDefault(left, 0L)));
 
         Map<Item, Long> consumed = new LinkedHashMap<>();
         int remaining = amount;
@@ -5904,7 +5924,7 @@ public final class GenericCraftPacket {
             if (stocked <= 0) continue;
             int take = (int) Math.min(remaining, stocked);
             available.put(item, stocked - take);
-            consumed.put(item, take);
+            consumed.put(item, (long) take);
             remaining -= take;
             if (remaining == 0) break;
         }

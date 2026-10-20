@@ -837,14 +837,14 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void bulkIngredientConsumptionScalesWithVariantsNotRepeatCount() {
-        Map<net.minecraft.world.item.Item, Integer> available = new HashMap<>();
-        available.put(Items.DIAMOND, 1024);
+        Map<net.minecraft.world.item.Item, Long> available = new HashMap<>();
+        available.put(Items.DIAMOND, 1024L);
 
-        Map<net.minecraft.world.item.Item, Integer> consumed =
-                GenericCraftPacket.consumeIngredientCount(
+        Map<net.minecraft.world.item.Item, Long> consumed =
+                GenericCraftPacket.consumeIngredientCountInPlace(
                         Ingredient.of(Items.DIAMOND), 1024, available);
 
-        assertEquals(Map.of(Items.DIAMOND, 1024), consumed);
+        assertEquals(Map.of(Items.DIAMOND, 1024L), consumed);
         assertEquals(0, available.get(Items.DIAMOND));
     }
 

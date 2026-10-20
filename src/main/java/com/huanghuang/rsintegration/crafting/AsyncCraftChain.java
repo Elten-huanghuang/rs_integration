@@ -1768,8 +1768,14 @@ public final class AsyncCraftChain {
 
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
                                       List<IBatchDelegate.MaterialReservationScope> scopes,
-                                      Map<CraftingResolver.StackKey, Long> available) {
+                                      Map<CraftingResolver.StackKey, ? extends Number> supplied) {
         if (specs == null || specs.isEmpty()) return 1;
+        Map<CraftingResolver.StackKey, Long> available = new LinkedHashMap<>();
+        supplied.forEach((key, count) -> {
+            if (key != null && count != null && count.longValue() > 0L) {
+                available.put(key, count.longValue());
+            }
+        });
         int capacity = Integer.MAX_VALUE;
         boolean found = false;
         for (int i = 0; i < specs.size() && i < scopes.size(); i++) {

@@ -21,11 +21,11 @@ class PlanningStateValidatorTest extends BootstrapTest {
     @Test
     void cachedGraphIgnoresUnrelatedInventoryChurn() {
         PlanningSnapshot cached = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 1,
-                new StackKey(Items.DIAMOND, null), 64), "network:old");
+                new StackKey(Items.COAL, null), 1L,
+                new StackKey(Items.DIAMOND, null), 64L), "network:old");
         PlanningSnapshot current = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 1,
-                new StackKey(Items.EMERALD, null), 12), "network:new");
+                new StackKey(Items.COAL, null), 1L,
+                new StackKey(Items.EMERALD, null), 12L), "network:new");
 
         assertTrue(PlanningStateValidator.sameRelevantState(cached, current,
                 planRequiring(new ItemStack(Items.COAL), 1)));
@@ -34,9 +34,9 @@ class PlanningStateValidatorTest extends BootstrapTest {
     @Test
     void cachedGraphRejectsMissingPlannedSupply() {
         PlanningSnapshot cached = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 1), "network:old");
+                new StackKey(Items.COAL, null), 1L), "network:old");
         PlanningSnapshot current = snapshot(Map.of(
-                new StackKey(Items.DIAMOND, null), 64), "network:new");
+                new StackKey(Items.DIAMOND, null), 64L), "network:new");
 
         assertFalse(PlanningStateValidator.sameRelevantState(cached, current,
                 planRequiring(new ItemStack(Items.COAL), 1)));
@@ -45,9 +45,9 @@ class PlanningStateValidatorTest extends BootstrapTest {
     @Test
     void cachedGraphRejectsDifferentNetworkIdentity() {
         PlanningSnapshot cached = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 1), "first:inventory");
+                new StackKey(Items.COAL, null), 1L), "first:inventory");
         PlanningSnapshot current = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 1), "second:inventory");
+                new StackKey(Items.COAL, null), 1L), "second:inventory");
 
         assertFalse(PlanningStateValidator.sameRelevantState(cached, current,
                 planRequiring(new ItemStack(Items.COAL), 1)));
@@ -56,24 +56,24 @@ class PlanningStateValidatorTest extends BootstrapTest {
     @Test
     void completeStateRejectsChangedInventoryQuantity() {
         PlanningSnapshot cached = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 8), "network:inventory");
+                new StackKey(Items.COAL, null), 8L), "network:inventory");
         PlanningSnapshot current = snapshot(Map.of(
-                new StackKey(Items.COAL, null), 3), "network:inventory");
+                new StackKey(Items.COAL, null), 3L), "network:inventory");
 
         assertFalse(PlanningStateValidator.sameState(cached, current));
     }
 
     @Test
     void failedPreviewStateIgnoresOnlyUnrelatedItemTypes() {
-        Map<StackKey, Integer> previous = Map.of(
-                new StackKey(Items.COAL, null), 2,
-                new StackKey(Items.DIAMOND, null), 64);
-        Map<StackKey, Integer> unrelatedChange = Map.of(
-                new StackKey(Items.COAL, null), 2,
-                new StackKey(Items.EMERALD, null), 12);
-        Map<StackKey, Integer> relevantChange = Map.of(
-                new StackKey(Items.COAL, null), 1,
-                new StackKey(Items.DIAMOND, null), 64);
+        Map<StackKey, Long> previous = Map.of(
+                new StackKey(Items.COAL, null), 2L,
+                new StackKey(Items.DIAMOND, null), 64L);
+        Map<StackKey, Long> unrelatedChange = Map.of(
+                new StackKey(Items.COAL, null), 2L,
+                new StackKey(Items.EMERALD, null), 12L);
+        Map<StackKey, Long> relevantChange = Map.of(
+                new StackKey(Items.COAL, null), 1L,
+                new StackKey(Items.DIAMOND, null), 64L);
 
         assertTrue(PlanningStateValidator.sameRelevantInventory(
                 previous, unrelatedChange, Set.of(Items.COAL)));
@@ -81,7 +81,7 @@ class PlanningStateValidatorTest extends BootstrapTest {
                 previous, relevantChange, Set.of(Items.COAL)));
     }
 
-    private static PlanningSnapshot snapshot(Map<StackKey, Integer> available,
+    private static PlanningSnapshot snapshot(Map<StackKey, Long> available,
                                              String networkFingerprint) {
         return new PlanningSnapshot(UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 1L, 7L, new ResourceLocation("test", "target"), available, Map.of(),

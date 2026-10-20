@@ -734,7 +734,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     // ── plan helpers ──
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
-                                       Map<Item, Integer> itemAvailable,
+                                       Map<Item, Long> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
                                        Map<Item, Long> neededCounts,
                                        int repeatCount) {

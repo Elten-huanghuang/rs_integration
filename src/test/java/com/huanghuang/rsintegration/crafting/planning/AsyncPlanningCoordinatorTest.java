@@ -131,7 +131,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
 
     @Test
     void snapshotCopiesMutableInputsAndCapturesRevision() {
-        Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Integer> items =
+        Map<com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey, Long> items =
                 new java.util.HashMap<>();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(UUID.randomUUID(), 1,
                 new ResourceLocation("test", "recipe"), items, new java.util.HashMap<>(),
@@ -139,7 +139,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
         items.clear();
         assertTrue(snapshot.availableItems().isEmpty());
         assertThrows(UnsupportedOperationException.class,
-                () -> snapshot.availableItems().put(null, 1));
+                () -> snapshot.availableItems().put(null, 1L));
     }
 
     @Test

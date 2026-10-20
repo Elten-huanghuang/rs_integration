@@ -29,7 +29,7 @@ class DirectMaterialAllocatorTest extends BootstrapTest {
 
         assertTrue(result.feasible());
         assertEquals(2, result.allocations().stream()
-                .mapToInt(DirectMaterialAllocator.Allocation::count).sum());
+                .mapToLong(DirectMaterialAllocator.Allocation::count).sum());
         assertTrue(result.allocations().stream().anyMatch(allocation ->
                 allocation.ingredientIndex() == 1
                         && allocation.material().item() == Items.IRON_INGOT));

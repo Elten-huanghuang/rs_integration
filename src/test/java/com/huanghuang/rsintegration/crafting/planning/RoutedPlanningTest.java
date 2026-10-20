@@ -113,13 +113,13 @@ class RoutedPlanningTest extends BootstrapTest {
 
     @Test
     void routingPolicyCopiesMutableInputsAndDetectsChanges() {
-        var stock = new java.util.LinkedHashMap<MaterialRef, Integer>();
-        stock.put(IRON, 1);
+        var stock = new java.util.LinkedHashMap<MaterialRef, Long>();
+        stock.put(IRON, 1L);
         var catalysts = new java.util.HashSet<ResourceLocation>();
         var routing = new AsyncPurePlanningService.RouteInputs(stock, 512, catalysts, Set.of(), Set.of());
         stock.clear();
         catalysts.add(TARGET);
-        assertEquals(Map.of(IRON, 1), routing.available());
+        assertEquals(Map.of(IRON, 1L), routing.available());
         assertTrue(routing.catalystOutputs().isEmpty());
         assertTrue(routing.matchesPolicy(512, Set.of(), Set.of(), Set.of()));
         assertFalse(routing.matchesPolicy(513, Set.of(), Set.of(), Set.of()));
@@ -153,7 +153,7 @@ class RoutedPlanningTest extends BootstrapTest {
         var block = new RecipeNode(new ResourceLocation("test:block"), intermediate, 1,
                 List.of(new IngredientRef(List.of(missing), 1)));
         var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1, TARGET,
-                Map.of(new StackKey(Items.IRON_INGOT, null), 1),
+                Map.of(new StackKey(Items.IRON_INGOT, null), 1L),
                 Map.of(), new ImmutableRecipeGraph(Map.of(RESULT, List.of(target),
                         missing, List.of(gold), intermediate, List.of(block))), "network", "binding", false);
         var combined = compute(snapshot, routing(snapshot, Set.of(), 1), 1);
@@ -251,7 +251,7 @@ class RoutedPlanningTest extends BootstrapTest {
     private static PlanningSnapshot snapshot(int count, boolean mainThreadOnly, boolean forced) {
         var target = new RecipeNode(TARGET, RESULT, 1, List.of(new IngredientRef(List.of(IRON), 1)));
         return new PlanningSnapshot(UUID.randomUUID(), 1, 1, TARGET,
-                count > 0 ? Map.of(new StackKey(Items.IRON_INGOT, null), count) : Map.of(),
+                count > 0 ? Map.of(new StackKey(Items.IRON_INGOT, null), (long) count) : Map.of(),
                 forced ? Map.of(IRON.itemId(), TARGET) : Map.of(),
                 new ImmutableRecipeGraph(Map.of(RESULT, List.of(target))), "network", "binding", mainThreadOnly);
     }

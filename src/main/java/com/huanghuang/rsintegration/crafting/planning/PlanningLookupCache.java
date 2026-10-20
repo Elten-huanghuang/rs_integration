@@ -95,23 +95,23 @@ final class PlanningLookupCache {
 
     static ImmutableRecipeGraph reusePreparation(PreparationStage stage,
                                                  ImmutableRecipeGraph graph,
-                                                 Map<MaterialRef, Long> available,
+                                                 Map<MaterialRef, ? extends Number> supplied,
                                                  Supplier<ImmutableRecipeGraph> work) {
-        return reusePreparation(stage, graph, available, null, work);
+        return reusePreparation(stage, graph, supplied, null, work);
     }
 
     static ImmutableRecipeGraph reusePreparation(PreparationStage stage,
                                                  ImmutableRecipeGraph graph,
-                                                 Map<MaterialRef, Long> available,
+                                                 Map<MaterialRef, ? extends Number> supplied,
                                                  Object discriminator,
                                                  Supplier<ImmutableRecipeGraph> work) {
         PlanningLookupCache cache = CURRENT.get();
         return cache == null ? work.get()
-                : cache.prepare(stage, graph, available, discriminator, work);
+                : cache.prepare(stage, graph, supplied, discriminator, work);
     }
 
     private ImmutableRecipeGraph prepare(PreparationStage stage, ImmutableRecipeGraph graph,
-                                          Map<MaterialRef, Long> available,
+                                          Map<MaterialRef, ? extends Number> available,
                                           Object discriminator,
                                           Supplier<ImmutableRecipeGraph> work) {
         PlanningThreadContext.throwIfCancelled();
@@ -119,10 +119,11 @@ final class PlanningLookupCache {
                 stage, ignored -> new PreparationCounters());
         long started = System.nanoTime();
         try {
+            List<AvailableEntry> current = snapshotAvailability(available);
             for (PreparedGraph prepared : preparedGraphs) {
                 if (prepared.stage() == stage && prepared.source() == graph
                         && Objects.equals(prepared.discriminator(), discriminator)
-                        && matchesAvailability(prepared.available(), available)) {
+                        && prepared.available().equals(current)) {
                     counters.hits++;
                     return prepared.result();
                 }
@@ -130,15 +131,14 @@ final class PlanningLookupCache {
             counters.builds++;
             List<AvailableEntry> captured = null;
             if (preparedGraphs.size() < limits.maxGraphs()
-                    && available.size() <= limits.maxOutputVariants() - retainedPreparationUnits) {
-                captured = available.entrySet().stream()
-                        .map(entry -> new AvailableEntry(entry.getKey(), entry.getValue())).toList();
+                    && current.size() <= limits.maxOutputVariants() - retainedPreparationUnits) {
+                captured = current;
             }
             ImmutableRecipeGraph result = work.get();
-            long retainedUnits = (long) available.size() + result.recipesByOutput().size();
+            long retainedUnits = (long) current.size() + result.recipesByOutput().size();
             if (captured != null && preparedGraphs.size() < limits.maxGraphs()
                     && retainedUnits <= limits.maxOutputVariants() - retainedPreparationUnits
-                    && matchesAvailability(captured, available)) {
+                    && captured.equals(snapshotAvailability(available))) {
                 preparedGraphs.add(new PreparedGraph(
                         stage, graph, captured, discriminator, result));
                 retainedPreparationUnits += (int) retainedUnits;
@@ -151,17 +151,13 @@ final class PlanningLookupCache {
         }
     }
 
-    private static boolean matchesAvailability(List<AvailableEntry> captured,
-                                                Map<MaterialRef, Long> available) {
-        if (captured.size() != available.size()) return false;
-        var entries = available.entrySet().iterator();
-        for (AvailableEntry previous : captured) {
-            if (!entries.hasNext()) return false;
-            var current = entries.next();
-            if (!Objects.equals(previous.material(), current.getKey())
-                    || !Objects.equals(previous.count(), current.getValue())) return false;
-        }
-        return !entries.hasNext();
+    private static List<AvailableEntry> snapshotAvailability(
+            Map<MaterialRef, ? extends Number> available) {
+        return available.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getValue() != null
+                        && entry.getValue().longValue() > 0L)
+                .map(entry -> new AvailableEntry(entry.getKey(), entry.getValue().longValue()))
+                .toList();
     }
 
     static boolean matchesNbt(String expectedSnbt, String actualSnbt, boolean partial) {

@@ -211,9 +211,10 @@ class PureRecipePlannerPropertyTest {
     }
 
     private static Map<MaterialRef, Integer> intRemaining(
-            Map<MaterialRef, Long> remaining) {
+            Map<MaterialRef, ? extends Number> remaining) {
         Map<MaterialRef, Integer> compatible = new HashMap<>();
-        remaining.forEach((material, count) -> compatible.put(material, count.intValue()));
+        remaining.forEach((material, count) -> compatible.put(material,
+                (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count.longValue()))));
         return compatible;
     }
 

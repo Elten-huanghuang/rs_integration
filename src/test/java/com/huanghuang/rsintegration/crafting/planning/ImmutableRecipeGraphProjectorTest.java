@@ -257,11 +257,11 @@ class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
                 new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(
                         Items.DIAMOND_SWORD, "{level:1}");
 
-        java.util.Map<MaterialRef, Integer> projected =
-                ImmutableRecipeGraphProjector.projectAvailability(java.util.Map.of(tagged, 1));
+        java.util.Map<MaterialRef, Long> projected =
+                ImmutableRecipeGraphProjector.projectAvailability(java.util.Map.of(tagged, 1L));
 
         assertEquals(1, projected.size());
-        assertEquals(1, projected.get(material("{level:1}")));
+        assertEquals(1L, projected.get(material("{level:1}")));
     }
 
     @Test

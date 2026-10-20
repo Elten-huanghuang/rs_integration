@@ -61,9 +61,9 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private final List<Entry> entries = new ArrayList<>();
     private final Map<Integer, Entry> entriesById = new HashMap<>();
-    private final Map<CraftingResolver.StackKey, Integer> pendingNet = new HashMap<>();
-    private final Map<CraftingResolver.StackKey, Integer> pendingInv = new HashMap<>();
-    private final Map<ResonanceReservationKey, Integer> pendingResonance = new HashMap<>();
+    private final Map<CraftingResolver.StackKey, Long> pendingNet = new HashMap<>();
+    private final Map<CraftingResolver.StackKey, Long> pendingInv = new HashMap<>();
+    private final Map<ResonanceReservationKey, Long> pendingResonance = new HashMap<>();
     private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
     private State state = State.IDLE;
     @Nullable private UUID refundOwner;
@@ -138,7 +138,7 @@ public final class ExtractionLedger implements AutoCloseable {
             if (snapshot != null) {
                 long stored = snapshot.countExact(storageEndpoint.session().itemKey(template));
                 long pending = pendingNet.getOrDefault(
-                        CraftingResolver.StackKey.of(template, true), 0);
+                        CraftingResolver.StackKey.of(template, true), 0L);
                 available = saturatedAdd(available, Math.max(0L, stored - pending));
             }
         }
@@ -353,7 +353,7 @@ public final class ExtractionLedger implements AutoCloseable {
         long total = 0L;
         for (Map.Entry<CraftingResolver.StackKey, Long> entry : available.entrySet()) {
             long unreserved = Math.max(0L,
-                    entry.getValue() - pendingNet.getOrDefault(entry.getKey(), 0));
+                    entry.getValue() - pendingNet.getOrDefault(entry.getKey(), 0L));
             total = saturatedAdd(total, unreserved);
             if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
         }
@@ -410,13 +410,13 @@ public final class ExtractionLedger implements AutoCloseable {
         CraftingResolver.StackKey pendingKey = CraftingResolver.StackKey.of(template, true);
         long available = snapshot == null ? 0L
                 : snapshot.countExact(endpoint.session().itemKey(template));
-        available -= pendingNet.getOrDefault(pendingKey, 0);
+        available -= pendingNet.getOrDefault(pendingKey, 0L);
         if (available < count) {
             return ItemStack.EMPTY;
         }
         Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
         ItemStack reserved = template.copyWithCount(count);
-        pendingNet.merge(pendingKey, count, Integer::sum);
+        pendingNet.merge(pendingKey, (long) count, ExtractionLedger::saturatedAdd);
         recordEntry(new Entry(Source.NETWORK, ingredient, reserved, null,
                 null, null, endpoint, true));
         return reserved;
@@ -475,10 +475,10 @@ public final class ExtractionLedger implements AutoCloseable {
 
     static EndpointReservation reserveEndpointMatches(
             List<StoredItem> matches, int count,
-            Map<CraftingResolver.StackKey, Integer> pending) {
+            Map<CraftingResolver.StackKey, Long> pending) {
         if (count <= 0) return EndpointReservation.EMPTY;
         ItemStack template = ItemStack.EMPTY;
-        Map<CraftingResolver.StackKey, Integer> allocations = new LinkedHashMap<>();
+        Map<CraftingResolver.StackKey, Long> allocations = new LinkedHashMap<>();
         Map<CraftingResolver.StackKey, Long> seenAmounts = new HashMap<>();
         int remaining = count;
         for (var stored : matches) {
@@ -489,22 +489,24 @@ public final class ExtractionLedger implements AutoCloseable {
             // reservations once against their cumulative physical quantity.
             long available = seenAmounts.merge(key, stored.amount(), ExtractionLedger::saturatedAdd);
             long unreserved = Math.max(0L,
-                    available - pending.getOrDefault(key, 0) - allocations.getOrDefault(key, 0));
+                    available - pending.getOrDefault(key, 0L)
+                            - allocations.getOrDefault(key, 0L));
             int contribution = (int) Math.min(remaining, unreserved);
             if (contribution <= 0) continue;
             if (template.isEmpty()) template = stack;
-            allocations.merge(key, contribution, Integer::sum);
+            allocations.merge(key, (long) contribution, ExtractionLedger::saturatedAdd);
             remaining -= contribution;
             if (remaining == 0) break;
         }
         // Failed reservations must not publish provisional allocations.
         if (remaining > 0) return EndpointReservation.EMPTY;
-        allocations.forEach((key, amount) -> pending.merge(key, amount, Integer::sum));
+        allocations.forEach((key, amount) ->
+                pending.merge(key, amount, ExtractionLedger::saturatedAdd));
         return new EndpointReservation(template.copyWithCount(count), Map.copyOf(allocations));
     }
 
     record EndpointReservation(ItemStack template,
-                               Map<CraftingResolver.StackKey, Integer> allocations) {
+                               Map<CraftingResolver.StackKey, Long> allocations) {
         private static final EndpointReservation EMPTY =
                 new EndpointReservation(ItemStack.EMPTY, Map.of());
     }
@@ -522,10 +524,10 @@ public final class ExtractionLedger implements AutoCloseable {
                         && !MaterialMatcher.sameRuntimeFragment(exactTemplate, stack)) continue;
                 ResonanceReservationKey key = new ResonanceReservationKey(
                         view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
-                int available = stack.getCount() - pendingResonance.getOrDefault(key, 0);
+                long available = stack.getCount() - pendingResonance.getOrDefault(key, 0L);
                 if (available < count) continue;
                 ItemStack reserved = stack.copyWithCount(count);
-                pendingResonance.merge(key, count, Integer::sum);
+                pendingResonance.merge(key, (long) count, ExtractionLedger::saturatedAdd);
                 recordEntry(Entry.resonance(requested, reserved, view, stored.slot(), key));
                 return reserved;
             }
@@ -552,12 +554,12 @@ public final class ExtractionLedger implements AutoCloseable {
         if (limit <= 0 || ingredient.isEmpty()) return 0;
 
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> inventoryTemplates = new LinkedHashMap<>();
-        LinkedHashMap<CraftingResolver.StackKey, Integer> inventoryCounts = new LinkedHashMap<>();
+        LinkedHashMap<CraftingResolver.StackKey, Long> inventoryCounts = new LinkedHashMap<>();
         collectMatchingAvailability(player.getInventory().items, ingredient, pendingInv,
                 inventoryTemplates, inventoryCounts);
 
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> networkTemplates = new LinkedHashMap<>();
-        LinkedHashMap<CraftingResolver.StackKey, Integer> networkCounts = new LinkedHashMap<>();
+        LinkedHashMap<CraftingResolver.StackKey, Long> networkCounts = new LinkedHashMap<>();
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) {
             List<ItemStack> stored = endpointEntries(selected, player);
@@ -592,41 +594,46 @@ public final class ExtractionLedger implements AutoCloseable {
         return new int[]{inventory, network};
     }
 
-    private static int saturatedSum(Collection<Integer> first, Collection<Integer> second) {
+    private static int saturatedSum(Collection<? extends Number> first,
+                                    Collection<? extends Number> second) {
         long total = 0L;
-        for (int value : first) total = Math.min(Integer.MAX_VALUE, total + Math.max(0, value));
-        for (int value : second) total = Math.min(Integer.MAX_VALUE, total + Math.max(0, value));
+        for (Number value : first) {
+            total = Math.min(Integer.MAX_VALUE, total + Math.max(0L, value.longValue()));
+        }
+        for (Number value : second) {
+            total = Math.min(Integer.MAX_VALUE, total + Math.max(0L, value.longValue()));
+        }
         return (int) total;
     }
 
     private static void collectMatchingAvailability(
             Collection<ItemStack> stacks, Ingredient ingredient,
-            Map<CraftingResolver.StackKey, Integer> pending,
+            Map<CraftingResolver.StackKey, Long> pending,
             LinkedHashMap<CraftingResolver.StackKey, ItemStack> templates,
-            LinkedHashMap<CraftingResolver.StackKey, Integer> counts) {
+            LinkedHashMap<CraftingResolver.StackKey, Long> counts) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
             templates.putIfAbsent(key, stack.copyWithCount(1));
-            counts.merge(key, stack.getCount(), (left, right) ->
-                    (int) Math.min(Integer.MAX_VALUE, (long) left + right));
+            counts.merge(key, (long) stack.getCount(), ExtractionLedger::saturatedAdd);
         }
-        counts.replaceAll((key, count) -> Math.max(0, count - pending.getOrDefault(key, 0)));
+        counts.replaceAll((key, count) ->
+                Math.max(0L, count - pending.getOrDefault(key, 0L)));
         counts.entrySet().removeIf(entry -> entry.getValue() <= 0);
     }
 
     private int reserveCandidates(
             LinkedHashMap<CraftingResolver.StackKey, ItemStack> templates,
-            LinkedHashMap<CraftingResolver.StackKey, Integer> counts,
-            Map<CraftingResolver.StackKey, Integer> pending, Ingredient ingredient,
+            LinkedHashMap<CraftingResolver.StackKey, Long> counts,
+            Map<CraftingResolver.StackKey, Long> pending, Ingredient ingredient,
             int needed, Source source, @Nullable CraftStorageEndpoint sourceEndpoint) {
         int remaining = needed;
         for (var candidate : counts.entrySet()) {
             if (remaining <= 0) break;
-            int take = Math.min(remaining, candidate.getValue());
+            int take = (int) Math.min(remaining, candidate.getValue());
             if (take <= 0) continue;
             ItemStack template = templates.get(candidate.getKey());
-            pending.merge(candidate.getKey(), take, Integer::sum);
+            pending.merge(candidate.getKey(), (long) take, ExtractionLedger::saturatedAdd);
             recordEntry(new Entry(source, ingredient, template.copyWithCount(take), null,
                     null, null, sourceEndpoint, true));
             remaining -= take;
@@ -1105,7 +1112,7 @@ public final class ExtractionLedger implements AutoCloseable {
         @Nullable final ResonanceStorageView resonanceView;
         final int resonanceSlot;
         @Nullable final ResonanceReservationKey resonanceKey;
-        final Map<CraftingResolver.StackKey, Integer> pendingNetworkAllocation = new HashMap<>();
+        final Map<CraftingResolver.StackKey, Long> pendingNetworkAllocation = new HashMap<>();
         List<ItemStack> extracted = List.of();
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
@@ -1260,7 +1267,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 long endpointAvailable = snapshot == null ? 0L
                         : snapshot.countExact(selected.session().itemKey(template));
                 endpointAvailable = Math.max(0L, endpointAvailable
-                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0));
+                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0L));
                 long resonanceAvailable = countExactAvailableInPreferredResonance(
                         template, selected, player);
                 return (int) Math.min(Integer.MAX_VALUE,
@@ -1284,7 +1291,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 ResonanceReservationKey key = new ResonanceReservationKey(
                         view.backendId(), stored.slot(), CraftingResolver.StackKey.of(stack, true));
                 available += Math.max(0,
-                        stack.getCount() - pendingResonance.getOrDefault(key, 0));
+                        stack.getCount() - pendingResonance.getOrDefault(key, 0L));
                 if (available >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
             }
         }
@@ -1300,7 +1307,8 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) available += stored.getCount();
             }
         }
-        return Math.max(0, available - pendingInv.getOrDefault(key, 0));
+        return (int) Math.min(Integer.MAX_VALUE,
+                Math.max(0L, available - pendingInv.getOrDefault(key, 0L)));
     }
 
     private long countExactAvailableInInventoryLong(ServerPlayer player, ItemStack template) {
@@ -1324,14 +1332,14 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
         }
-        return Math.max(0L, available - pendingInv.getOrDefault(key, 0));
+        return Math.max(0L, available - pendingInv.getOrDefault(key, 0L));
     }
 
     private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
         int available = countExactAvailableInInventory(player, template);
         if (available < needed) return false;
-        pendingInv.merge(key, needed, Integer::sum);
+        pendingInv.merge(key, (long) needed, ExtractionLedger::saturatedAdd);
         return true;
     }
 
@@ -1365,8 +1373,8 @@ public final class ExtractionLedger implements AutoCloseable {
             int inventory = countExactAvailableInInventory(player, template);
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
             return "network=" + network + ", inventory=" + inventory
-                    + ", pendingNetwork=" + pendingNet.getOrDefault(key, 0)
-                    + ", pendingInventory=" + pendingInv.getOrDefault(key, 0);
+                    + ", pendingNetwork=" + pendingNet.getOrDefault(key, 0L)
+                    + ", pendingInventory=" + pendingInv.getOrDefault(key, 0L);
         } catch (RuntimeException e) {
             return "unreadable:" + e.getClass().getSimpleName();
         }
@@ -1393,13 +1401,14 @@ public final class ExtractionLedger implements AutoCloseable {
             // Single-stack fast path: one stack has enough → track pendingNet here
             for (ItemStack stored : stacks) {
                 if (!IngredientMatcher.test(ingredient, stored)) continue;
-                int available = stored.getCount()
-                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
+                long available = stored.getCount()
+                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0L);
                 if (available <= 0) continue;
                 if (available >= needed) {
                     ItemStack template = stored.copy();
                     template.setCount(1);
-                    pendingNet.merge(CraftingResolver.StackKey.of(stored, true), needed, Integer::sum);
+                    pendingNet.merge(CraftingResolver.StackKey.of(stored, true),
+                            (long) needed, ExtractionLedger::saturatedAdd);
                     return template;
                 }
             }
@@ -1407,14 +1416,14 @@ public final class ExtractionLedger implements AutoCloseable {
             // Multi-stack aggregation: distribute pendingNet across all
             // contributing stacks so subsequent reservations see accurate counts
             ItemStack pass1Template = ItemStack.EMPTY;
-            int pass1Total = 0;
+            long pass1Total = 0L;
             ItemStack pass2Template = ItemStack.EMPTY;
-            int pass2Total = 0;
+            long pass2Total = 0L;
 
             for (ItemStack stored : stacks) {
                 if (!IngredientMatcher.test(ingredient, stored)) continue;
-                int available = stored.getCount()
-                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
+                long available = stored.getCount()
+                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0L);
                 if (available <= 0) continue;
 
                 if (!stored.hasTag()) {
@@ -1451,12 +1460,13 @@ public final class ExtractionLedger implements AutoCloseable {
             for (ItemStack stored : stacks) {
                 if (remaining <= 0) break;
                 if (!IngredientMatcher.test(ingredient, stored)) continue;
-                int available = stored.getCount()
-                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0);
+                long available = stored.getCount()
+                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(stored, true), 0L);
                 if (available <= 0) continue;
                 if (pass1Sufficient && stored.hasTag()) continue;
-                int contrib = Math.min(remaining, available);
-                pendingNet.merge(CraftingResolver.StackKey.of(stored, true), contrib, Integer::sum);
+                int contrib = (int) Math.min(remaining, available);
+                pendingNet.merge(CraftingResolver.StackKey.of(stored, true),
+                        (long) contrib, ExtractionLedger::saturatedAdd);
                 remaining -= contrib;
             }
             return chosen;
@@ -1471,8 +1481,8 @@ public final class ExtractionLedger implements AutoCloseable {
             ItemStack best = ItemStack.EMPTY;
             for (ItemStack stack : player.getInventory().items) {
                 if (!IngredientMatcher.test(ingredient, stack)) continue;
-                int available = stack.getCount()
-                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                long available = stack.getCount()
+                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
                 if (available >= needed && (best.isEmpty()
                         || GoetySoulTotemCrafting.storedSouls(stack)
                         > GoetySoulTotemCrafting.storedSouls(best))) {
@@ -1484,8 +1494,8 @@ public final class ExtractionLedger implements AutoCloseable {
                     ItemStack stack = backpack.getStackInSlot(slot);
                     if (!IngredientMatcher.test(ingredient, stack)
                             || !InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
-                    int available = stack.getCount()
-                            - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                    long available = stack.getCount()
+                            - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
                     if (available >= needed && (best.isEmpty()
                             || GoetySoulTotemCrafting.storedSouls(stack)
                             > GoetySoulTotemCrafting.storedSouls(best))) {
@@ -1495,20 +1505,20 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             if (best.isEmpty()) return ItemStack.EMPTY;
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(best, true);
-            pendingInv.merge(key, needed, Integer::sum);
+            pendingInv.merge(key, (long) needed, ExtractionLedger::saturatedAdd);
             return best.copyWithCount(1);
         }
         // Single-stack fast path: one stack has enough → track pendingInv here
         for (ItemStack stack : player.getInventory().items) {
             if (!IngredientMatcher.test(ingredient, stack)) continue;
-            int available = stack.getCount()
-                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+            long available = stack.getCount()
+                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
             if (available <= 0) continue;
 
             if (!stack.hasTag() && available >= needed) {
                 ItemStack template = stack.copy();
                 template.setCount(1);
-                pendingInv.merge(CraftingResolver.StackKey.of(stack, true), needed, Integer::sum);
+                pendingInv.merge(CraftingResolver.StackKey.of(stack, true), (long) needed, ExtractionLedger::saturatedAdd);
                 return template;
             }
         }
@@ -1519,27 +1529,27 @@ public final class ExtractionLedger implements AutoCloseable {
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
-                int available = stack.getCount()
-                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                long available = stack.getCount()
+                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
                 if (available <= 0) continue;
                 if (!stack.hasTag() && available >= needed) {
                     ItemStack template = stack.copy();
                     template.setCount(1);
-                    pendingInv.merge(CraftingResolver.StackKey.of(stack, true), needed, Integer::sum);
+                    pendingInv.merge(CraftingResolver.StackKey.of(stack, true), (long) needed, ExtractionLedger::saturatedAdd);
                     return template;
                 }
             }
         }
 
         ItemStack pass1Template = ItemStack.EMPTY;
-        int pass1Total = 0;
+        long pass1Total = 0L;
         ItemStack pass2Template = ItemStack.EMPTY;
-        int pass2Total = 0;
+        long pass2Total = 0L;
 
         for (ItemStack stack : player.getInventory().items) {
             if (!IngredientMatcher.test(ingredient, stack)) continue;
-            int available = stack.getCount()
-                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+            long available = stack.getCount()
+                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
             if (available <= 0) continue;
 
             if (!stack.hasTag()) {
@@ -1563,8 +1573,8 @@ public final class ExtractionLedger implements AutoCloseable {
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
-                int available = stack.getCount()
-                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                long available = stack.getCount()
+                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
                 if (available <= 0) continue;
                 if (!stack.hasTag()) {
                     pass1Total += available;
@@ -1593,16 +1603,16 @@ public final class ExtractionLedger implements AutoCloseable {
         if (chosen.isEmpty()) return ItemStack.EMPTY;
 
         // Distribute pendingInv across all contributing stacks (main inventory)
-        int remaining = needed;
+        long remaining = needed;
         for (ItemStack stack : player.getInventory().items) {
             if (remaining <= 0) break;
             if (!IngredientMatcher.test(ingredient, stack)) continue;
-            int available = stack.getCount()
-                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+            long available = stack.getCount()
+                    - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
             if (available <= 0) continue;
             if (pass1Sufficient && stack.hasTag()) continue;
-            int contrib = Math.min(remaining, available);
-            pendingInv.merge(CraftingResolver.StackKey.of(stack, true), contrib, Integer::sum);
+            int contrib = (int) Math.min(remaining, available);
+            pendingInv.merge(CraftingResolver.StackKey.of(stack, true), (long) contrib, ExtractionLedger::saturatedAdd);
             remaining -= contrib;
         }
         // Distribute remaining across backpack contents
@@ -1613,12 +1623,12 @@ public final class ExtractionLedger implements AutoCloseable {
                 ItemStack stack = bp.getStackInSlot(s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
-                int available = stack.getCount()
-                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0);
+                long available = stack.getCount()
+                        - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
                 if (available <= 0) continue;
                 if (pass1Sufficient && stack.hasTag()) continue;
-                int contrib = Math.min(remaining, available);
-                pendingInv.merge(CraftingResolver.StackKey.of(stack, true), contrib, Integer::sum);
+                int contrib = (int) Math.min(remaining, available);
+                pendingInv.merge(CraftingResolver.StackKey.of(stack, true), (long) contrib, ExtractionLedger::saturatedAdd);
                 remaining -= contrib;
             }
         }
@@ -2082,7 +2092,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private void decrementPending(Entry entry) {
         if (entry.source == Source.RESONANCE_DISK && entry.resonanceKey != null) {
             pendingResonance.computeIfPresent(entry.resonanceKey, (ignored, reserved) -> {
-                int remaining = reserved - entry.count;
+                long remaining = reserved - entry.count;
                 return remaining <= 0 ? null : remaining;
             });
             return;
@@ -2090,17 +2100,17 @@ public final class ExtractionLedger implements AutoCloseable {
         if (entry.source == Source.NETWORK && !entry.pendingNetworkAllocation.isEmpty()) {
             for (var allocation : entry.pendingNetworkAllocation.entrySet()) {
                 pendingNet.computeIfPresent(allocation.getKey(), (ignored, reserved) -> {
-                    int remaining = reserved - allocation.getValue();
+                    long remaining = reserved - allocation.getValue();
                     return remaining <= 0 ? null : remaining;
                 });
             }
             return;
         }
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(entry.template, true);
-        Map<CraftingResolver.StackKey, Integer> pending =
+        Map<CraftingResolver.StackKey, Long> pending =
                 entry.source == Source.PLAYER_INVENTORY ? pendingInv : pendingNet;
         pending.computeIfPresent(key, (ignored, reserved) -> {
-            int remaining = reserved - entry.count;
+            long remaining = reserved - entry.count;
             return remaining <= 0 ? null : remaining;
         });
     }

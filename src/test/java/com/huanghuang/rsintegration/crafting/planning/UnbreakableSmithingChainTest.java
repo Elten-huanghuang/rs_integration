@@ -45,7 +45,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     @ValueSource(ints = {0, 1})
     void existingUnbreakableSwordReachesTheRealSoulBladeAndFinalWorkbench(int start) {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
-        Map<MaterialRef, Integer> stock = stock(start, STOCKED);
+        Map<MaterialRef, Long> stock = stock(start, STOCKED);
         PureRecipePlanner.Result plan = plan(graph, stock);
         PureDemandTreeInspector.Result tree = PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1);
 
@@ -68,7 +68,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     @ValueSource(strings = {"", "{Damage:3,Unbreakable:1b}", "{Damage:0,Unbreakable:0b}"})
     void ordinaryOrDamagedSwordCannotAcquirePristineUnbreakableState(String nbt) {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
-        Map<MaterialRef, Integer> stock = stock(0, nbt);
+        Map<MaterialRef, Long> stock = stock(0, nbt);
         assertFalse(plan(graph, stock).feasible());
         assertEquals(PureDemandTreeInspector.Status.MISSING_MATERIALS,
                 PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1).status());
@@ -78,7 +78,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     @ValueSource(ints = {0, 1})
     void lookupOptimizationKeepsTheFullModifiedSwordPlanAndTree(int start) {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
-        Map<MaterialRef, Integer> stock = stock(start, MODIFIED);
+        Map<MaterialRef, Long> stock = stock(start, MODIFIED);
         var uncachedLimits = new PlanningLookupCache.Limits(0, 0, 0, 0);
         PureRecipePlanner.Result expected = PlanningLookupCache.run(uncachedLimits, () -> plan(graph, stock));
         PureRecipePlanner.Result actual = plan(graph, stock);
@@ -94,7 +94,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     @Test
     void exactChainAlsoAcceptsEquivalentDefaultDamageWithoutInventingOrdinaryStock() {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.EXACT);
-        Map<MaterialRef, Integer> stock = stock(0, STOCKED);
+        Map<MaterialRef, Long> stock = stock(0, STOCKED);
         assertTrue(plan(graph, stock).feasible());
         List<IngredientRef> roots = new ArrayList<>(graph.recipesById().get(FINAL_RECIPE).inputs());
         roots.add(any(material(SWORDS[0], ""), 1));
@@ -116,9 +116,9 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
 
     @Test
     void ordinarySwordAlongsideTheUnbreakableSwordIsNotConsumedByTheUpgradeChain() {
-        Map<MaterialRef, Integer> stock = new LinkedHashMap<>(stock(1, STOCKED));
+        Map<MaterialRef, Long> stock = new LinkedHashMap<>(stock(1, STOCKED));
         MaterialRef ordinary = material(SWORDS[1], "");
-        stock.put(ordinary, 1);
+        stock.put(ordinary, 1L);
         var result = plan(graph(NbtMatchMode.EXACT), stock);
         assertTrue(result.feasible(), result.toString());
         assertEquals(1, result.remaining().get(ordinary));
@@ -163,7 +163,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                 "{Damage:broken,Unbreakable:1}"));
     }
 
-    private static PureRecipePlanner.Result plan(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> stock) {
+    private static PureRecipePlanner.Result plan(ImmutableRecipeGraph graph, Map<MaterialRef, Long> stock) {
         return PureRecipePlanner.resolve(graph, stock, graph.recipesById().get(FINAL_RECIPE).inputs(), 30);
     }
 
@@ -183,9 +183,9 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                         node.modTypeId(), node.recipeTypeId())).toList()));
         var mapped = new ImmutableRecipeGraph(recipes);
         var available = Map.of(new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(
-                        start == 0 ? Items.WOODEN_SWORD : Items.STONE_SWORD, MODIFIED), 1,
-                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.PAPER, null), 6,
-                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.IRON_INGOT, null), 6);
+                        start == 0 ? Items.WOODEN_SWORD : Items.STONE_SWORD, MODIFIED), 1L,
+                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.PAPER, null), 6L,
+                new com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey(Items.IRON_INGOT, null), 6L);
         var snapshot = new PlanningSnapshot(java.util.UUID.randomUUID(), 1, 1, FINAL_RECIPE,
                 available, Map.of(), mapped, "network", "binding", false);
         var stock = ImmutableRecipeGraphProjector.projectAvailability(available);
@@ -205,7 +205,7 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     @ValueSource(ints = {0, 1})
     void preparationReusePreservesModifiedSwordPlanningAndInspection(int start) {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
-        Map<MaterialRef, Integer> stock = stock(start, MODIFIED);
+        Map<MaterialRef, Long> stock = stock(start, MODIFIED);
         var expectedPlan = PlanningLookupCache.run(new PlanningLookupCache.Limits(0, 0, 0, 0),
                 () -> plan(graph, stock));
         var expectedTree = PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1);
@@ -231,12 +231,12 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                 output, 1, List.of(any(TEMPLATE, 1), any(base, 1), any(ADDITION, 1)),
                 "smithing", new ResourceLocation("minecraft:smithing"));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(upgrade)));
-        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        Map<MaterialRef, Long> stock = new LinkedHashMap<>();
         for (int index = 0; index < 512; index++) {
-            stock.put(material("test:any_base", "{variant:" + index + "}"), 1);
+        stock.put(material("test:any_base", "{variant:" + index + "}"), 1L);
         }
-        stock.put(TEMPLATE, 1);
-        stock.put(ADDITION, 1);
+        stock.put(TEMPLATE, 1L);
+        stock.put(ADDITION, 1L);
         List<IngredientRef> roots = List.of(any(material("test:any_upgrade", ""), 1));
 
         PlanningLookupCache.run(() -> {
@@ -269,13 +269,13 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 relevantOutput, List.of(relevantUpgrade),
                 unrelatedOutput, List.of(unrelatedUpgrade)));
-        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
-        stock.put(material("test:relevant_base", MODIFIED), 1);
+        Map<MaterialRef, Long> stock = new LinkedHashMap<>();
+        stock.put(material("test:relevant_base", MODIFIED), 1L);
         for (int index = 0; index < 512; index++) {
-            stock.put(material("test:unrelated_base", "{variant:" + index + "}"), 1);
+        stock.put(material("test:unrelated_base", "{variant:" + index + "}"), 1L);
         }
-        stock.put(TEMPLATE, 1);
-        stock.put(ADDITION, 1);
+        stock.put(TEMPLATE, 1L);
+        stock.put(ADDITION, 1L);
         List<IngredientRef> roots = List.of(new IngredientRef(
                 List.of(material("test:relevant_upgrade", REQUIRED)), 1,
                 NbtMatchMode.PARTIAL));
@@ -307,10 +307,10 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                 "smithing", new ResourceLocation("minecraft:smithing"));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 taggedOutput, List.of(taggedUpgrade), taglessOutput, List.of(taglessUpgrade)));
-        Map<MaterialRef, Integer> stock = Map.of(
-                material("test:tagged_base", MODIFIED), 1,
-                material("test:tagless_base", "{irrelevant:1}"), 1,
-                TEMPLATE, 1, ADDITION, 1);
+        Map<MaterialRef, Long> stock = Map.of(
+                material("test:tagged_base", MODIFIED), 1L,
+                material("test:tagless_base", "{irrelevant:1}"), 1L,
+                TEMPLATE, 1L, ADDITION, 1L);
         List<IngredientRef> roots = List.of(new IngredientRef(List.of(
                 material("test:tagged_upgrade", REQUIRED),
                 material("test:tagless_upgrade", "")), 1, NbtMatchMode.PARTIAL));
@@ -384,8 +384,8 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
         assertFalse(IngredientMatcher.test(partial, actual));
     }
 
-    private static Map<MaterialRef, Integer> stock(int start, String nbt) {
-        return Map.of(material(SWORDS[start], nbt), 1, TEMPLATE, 6, ADDITION, 6);
+    private static Map<MaterialRef, Long> stock(int start, String nbt) {
+        return Map.of(material(SWORDS[start], nbt), 1L, TEMPLATE, 6L, ADDITION, 6L);
     }
 
     private static ImmutableRecipeGraph graph(NbtMatchMode mode) {

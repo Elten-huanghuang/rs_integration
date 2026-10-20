@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -73,10 +74,10 @@ class GenericCraftPreviewTest extends BootstrapTest {
                 new ResourceLocation("rs_integration", "fluid_container"));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 producerNode.output(), List.of(producerNode), fillNode.output(), List.of(fillNode)));
-        Map<StackKey, Integer> stock = Map.of(new StackKey(Items.BUCKET, null), 3,
-                new StackKey(Items.REDSTONE, null), 59, new StackKey(Items.FEATHER, null), 49,
-                new StackKey(Items.WATER_BUCKET, null), filledStock,
-                new StackKey(fluid.getItem(), fluid.getTag().toString()), fluidStock);
+        Map<StackKey, Long> stock = Map.of(new StackKey(Items.BUCKET, null), 3L,
+                new StackKey(Items.REDSTONE, null), 59L, new StackKey(Items.FEATHER, null), 49L,
+                new StackKey(Items.WATER_BUCKET, null), (long) filledStock,
+                new StackKey(fluid.getItem(), fluid.getTag().toString()), (long) fluidStock);
         var planned = PureRecipePlanner.resolve(graph,
                 ImmutableRecipeGraphProjector.projectAvailability(stock),
                 List.of(ImmutableRecipeGraphProjector.projectIngredient(
@@ -89,7 +90,7 @@ class GenericCraftPreviewTest extends BootstrapTest {
                 preview.stream().map(GenericCraftPacket.PreviewStep::batches).toList());
 
         List<PlanStep> steps = new ArrayList<>();
-        Map<Item, Integer> needed = new LinkedHashMap<>();
+        Map<Item, Long> needed = new LinkedHashMap<>();
         Map<Item, Ingredient> sources = new LinkedHashMap<>();
         for (var step : preview) {
             Recipe<?> recipe = recipes.get(step.step().recipeId());
@@ -98,21 +99,24 @@ class GenericCraftPreviewTest extends BootstrapTest {
             for (IngredientSpec input : inputs) {
                 ItemStack display = input.ingredient().getItems()[0].copyWithCount(input.count());
                 displays.add(display);
-                needed.merge(display.getItem(), input.count() * step.batches(), Integer::sum);
+                needed.merge(display.getItem(), (long) input.count() * step.batches(),
+                        SaturatingLongMath::signedAdd);
                 sources.putIfAbsent(display.getItem(), input.ingredient());
             }
             ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
-            needed.merge(output.getItem(), -output.getCount() * step.batches(), Integer::sum);
+            needed.merge(output.getItem(), -(long) output.getCount() * step.batches(),
+                    SaturatingLongMath::signedAdd);
             steps.add(new PlanStep(recipe.getId(), output, step.batches(), displays));
         }
         ItemStack target = new ItemStack(Items.DIAMOND);
         ResourceLocation targetId = new ResourceLocation("test", "target");
         steps.add(new PlanStep(targetId, target, 1, List.of(new ItemStack(Items.WATER_BUCKET, 2))));
-        needed.merge(Items.WATER_BUCKET, 2, Integer::sum);
+        needed.merge(Items.WATER_BUCKET, 2L, SaturatingLongMath::signedAdd);
         sources.put(Items.WATER_BUCKET, Ingredient.of(Items.WATER_BUCKET));
         var bill = PlanMaterialBill.summarize(needed, sources,
-                Map.of(Items.BUCKET, 3, Items.REDSTONE, 59, Items.FEATHER, 49,
-                        Items.WATER_BUCKET, filledStock, fluid.getItem(), fluidStock),
+                Map.of(Items.BUCKET, 3L, Items.REDSTONE, 59L, Items.FEATHER, 49L,
+                        Items.WATER_BUCKET, (long) filledStock,
+                        fluid.getItem(), (long) fluidStock),
                 stock, target, steps, 1, null, false);
         assertTrue(bill.feasible(), bill.toString());
         assertEquals(new PlanResponse.Availability(2, filledStock, 0),

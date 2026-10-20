@@ -351,13 +351,6 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         return myPos;
     }
 
-    public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
-                                       Map<Item, Integer> itemAvailable,
-                                       Map<Item, Ingredient> itemSource,
-                                       Map<Item, Integer> neededCounts,
-                                       int repeatCount) {
-    }
-
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
                                                    @Nullable ResourceLocation dim,
                                                    @Nullable BlockPos pos) {

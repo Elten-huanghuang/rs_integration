@@ -113,24 +113,9 @@ public final class CraftingResolver {
         HIDDEN_OUTPUT_CACHE.clear();
     }
 
-    public static List<ResourceLocation> resolveStepsFor(
-            List<ItemStack> needed,
-            Map<Item, Integer> available,
-            Level level) {
-        return resolveStepsFor(needed, available, level, null);
-    }
-
-    public static List<ResourceLocation> resolveStepsFor(
-            List<ItemStack> needed,
-            Map<Item, Integer> available,
-            Level level,
-            @Nullable List<String> missingOut) {
-        return resolveStepsForStacks(needed, stacksFromCounts(available), level, missingOut);
-    }
-
     public static List<ResourceLocation> resolveStepsForKeyed(
             List<ItemStack> needed,
-            Map<StackKey, Long> available,
+            Map<StackKey, ? extends Number> available,
             Level level,
             @Nullable List<String> missingOut) {
         return resolveStepsForStacks(needed, stacksFromKeyedCounts(available), level, missingOut);
@@ -236,7 +221,7 @@ public final class CraftingResolver {
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -247,7 +232,7 @@ public final class CraftingResolver {
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -259,7 +244,7 @@ public final class CraftingResolver {
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
             List<Ingredient> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -300,7 +285,7 @@ public final class CraftingResolver {
      */
     public static List<ResolutionStep> resolveStepsForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -334,7 +319,7 @@ public final class CraftingResolver {
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -347,7 +332,7 @@ public final class CraftingResolver {
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -361,7 +346,7 @@ public final class CraftingResolver {
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -375,7 +360,7 @@ public final class CraftingResolver {
     }
 
     public static CraftPlanGraph resolveGraphForSpecsWithTypes(
-            List<IngredientSpec> needed, Map<StackKey, Long> availableKeyed,
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
             Level level, @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
@@ -393,7 +378,7 @@ public final class CraftingResolver {
      */
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -406,7 +391,7 @@ public final class CraftingResolver {
 
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -420,7 +405,7 @@ public final class CraftingResolver {
 
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -434,7 +419,7 @@ public final class CraftingResolver {
     }
 
     public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
-            List<IngredientSpec> needed, Map<StackKey, Long> availableKeyed,
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
             Level level, @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
@@ -446,7 +431,7 @@ public final class CraftingResolver {
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -464,7 +449,7 @@ public final class CraftingResolver {
 
     /** 补做原料沿用同一规划器，并排除当前等待中的生产步骤以阻断跨轮次循环。 */
     static CraftPlanGraph resolveSupplementalGraph(List<IngredientSpec> needed,
-            Map<StackKey, Long> available, Level level, ServerPlayer player, CraftStorageEndpoint storageEndpoint,
+            Map<StackKey, ? extends Number> available, Level level, ServerPlayer player, CraftStorageEndpoint storageEndpoint,
             List<String> missing, Set<ResourceLocation> excludedRecipes,
             Map<ResourceLocation, ResourceLocation> forcedRecipes, Map<String, ItemStack> materialLocks,
             ActiveRootRecipe activeRoot) {
@@ -473,7 +458,7 @@ public final class CraftingResolver {
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
-            List<IngredientSpec> needed, Map<StackKey, Long> availableKeyed, Level level,
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
             @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint, @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
@@ -568,7 +553,7 @@ public final class CraftingResolver {
     /** Vanilla-only variant that returns flat recipe-id list. */
     public static List<ResourceLocation> resolveStepsForSpecs(
             List<IngredientSpec> needed,
-            Map<StackKey, Long> availableKeyed,
+            Map<StackKey, ? extends Number> availableKeyed,
             Level level,
             @Nullable List<String> missingOut) {
         List<ItemStack> availStacks = stacksFromKeyedCounts(availableKeyed);
@@ -593,7 +578,7 @@ public final class CraftingResolver {
 
     public static List<ResolutionStep> resolveStepsForKeyedWithTypes(
             List<ItemStack> needed,
-            Map<StackKey, Long> available,
+            Map<StackKey, ? extends Number> available,
             Level level,
             @Nullable ServerPlayer player,
             @Nullable CraftStorageEndpoint storageEndpoint,
@@ -1186,21 +1171,10 @@ public final class CraftingResolver {
                 entry.modType(), specs, entry.recipe(), access);
     }
 
-    private static List<ItemStack> stacksFromCounts(Map<Item, Integer> counts) {
+    public static List<ItemStack> stacksFromKeyedCounts(Map<StackKey, ? extends Number> counts) {
         List<ItemStack> list = new ArrayList<>();
         for (var entry : counts.entrySet()) {
-            int count = entry.getValue();
-            if (count > 0) {
-                list.add(new ItemStack(entry.getKey(), count));
-            }
-        }
-        return list;
-    }
-
-    public static List<ItemStack> stacksFromKeyedCounts(Map<StackKey, Long> counts) {
-        List<ItemStack> list = new ArrayList<>();
-        for (var entry : counts.entrySet()) {
-            long remaining = Math.max(0L, entry.getValue());
+            long remaining = Math.max(0L, entry.getValue().longValue());
             while (remaining > 0L) {
                 int count = SaturatingLongMath.clampToInt(remaining);
                 StackKey key = entry.getKey();
@@ -1496,7 +1470,7 @@ public final class CraftingResolver {
     public static List<TraceEntry> traceCandidates(Ingredient ingredient,
                                                     Level level,
                                                     @Nullable ServerPlayer player,
-                                                    Map<StackKey, Long> available) {
+                                                    Map<StackKey, ? extends Number> available) {
         ResolutionContext ctx = new ResolutionContext(level,
                 RecipeIndex.get(level), available, null, player, null, false, null);
         List<CandidateEngine.CandidateDiagnostic> raw = new ArrayList<>();

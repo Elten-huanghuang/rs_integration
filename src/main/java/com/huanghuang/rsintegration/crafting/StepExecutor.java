@@ -367,7 +367,7 @@ final class StepExecutor {
                         CraftingResolver.ingredientOf(stack, stack.hasTag())) >= quantity)
                 .reversed()
                 .thenComparingInt(stack -> preferences.rank(stack.getItem()))
-                .thenComparing(Comparator.comparingInt((ItemStack stack) ->
+                .thenComparing(Comparator.comparingLong((ItemStack stack) ->
                         ctx.countMatching(CraftingResolver.ingredientOf(
                                 stack, stack.hasTag()))).reversed())
                 .thenComparing(stack -> {

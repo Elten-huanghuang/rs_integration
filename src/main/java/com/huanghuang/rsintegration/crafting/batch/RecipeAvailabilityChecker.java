@@ -98,9 +98,15 @@ public final class RecipeAvailabilityChecker {
     }
 
     public static MaterialAvailability evaluate(@Nullable List<IngredientSpec> specs,
-                                                Map<StackKey, Long> available) {
+                                                Map<StackKey, ? extends Number> supplied) {
         if (specs == null || specs.isEmpty() || specs.stream().anyMatch(spec -> spec == null || spec.count() < 0)
                 || specs.stream().noneMatch(spec -> !spec.isEmpty())) return MaterialAvailability.UNKNOWN;
+        Map<StackKey, Long> available = new HashMap<>();
+        supplied.forEach((key, count) -> {
+            if (key != null && count != null && count.longValue() > 0L) {
+                available.put(key, count.longValue());
+            }
+        });
         return DirectMaterialAllocator.allocate(specs, available).feasible()
                 ? MaterialAvailability.READY : MaterialAvailability.MISSING;
     }

@@ -603,7 +603,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     // ── plan warnings ────────────────────────────────────────────
 
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
-                                       Map<Item, Integer> itemAvailable,
+                                       Map<Item, Long> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
                                        Map<Item, Long> neededCounts,
                                        long requiredBurnUnits) {
@@ -615,7 +615,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             ResourceLocation rl = ResourceLocation.tryParse(id);
             if (rl == null) continue;
             Item item = ForgeRegistries.ITEMS.getValue(rl);
-            if (item != null && item != Items.AIR && itemAvailable.getOrDefault(item, 0) > 0
+            if (item != null && item != Items.AIR && itemAvailable.getOrDefault(item, 0L) > 0
                     && ForgeHooks.getBurnTime(new ItemStack(item), null) > 0) {
                 preferred = item;
                 break;

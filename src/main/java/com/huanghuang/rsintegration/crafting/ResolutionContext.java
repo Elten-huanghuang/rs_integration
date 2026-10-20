@@ -160,7 +160,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Long> keyedCounts,
+                      Map<CraftingResolver.StackKey, ? extends Number> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
@@ -170,7 +170,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Long> keyedCounts,
+                      Map<CraftingResolver.StackKey, ? extends Number> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       boolean bestEffort,
                       @Nullable List<String> missingOut,
@@ -182,7 +182,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Long> keyedCounts,
+                      Map<CraftingResolver.StackKey, ? extends Number> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable CraftStorageEndpoint storageEndpoint,
@@ -194,7 +194,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Long> keyedCounts,
+                      Map<CraftingResolver.StackKey, ? extends Number> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
@@ -207,7 +207,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Long> keyedCounts,
+                      Map<CraftingResolver.StackKey, ? extends Number> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
@@ -220,7 +220,7 @@ final class ResolutionContext {
         this.index = index;
         this.reusableCatalystRoutes = level == null
                 ? Map.of() : RecipeIndex.reusableCatalystRoutes(level);
-        this.counts = new LinkedHashMap<>(keyedCounts);
+        this.counts = new LinkedHashMap<>();
         this.steps = new ArrayList<>();
         this.recipeCycles = new RecipeCycleGuard();
         this.preferredRecipes = immutableOrNull(preferredRecipes);
@@ -232,10 +232,12 @@ final class ResolutionContext {
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
-        for (Map.Entry<CraftingResolver.StackKey, Long> entry : keyedCounts.entrySet()) {
-            if (entry.getValue() > 0) {
+        for (Map.Entry<CraftingResolver.StackKey, ? extends Number> entry : keyedCounts.entrySet()) {
+            long amount = entry.getValue() == null ? 0L : entry.getValue().longValue();
+            if (amount > 0L) {
+                counts.put(entry.getKey(), amount);
                 MaterialKey material = MaterialKey.of(entry.getKey().toStack());
-                addSupply(newSupply(material, new MaterialSource.InitialPool(material), entry.getValue()));
+                addSupply(newSupply(material, new MaterialSource.InitialPool(material), amount));
             }
         }
         buildInventoryIndex();

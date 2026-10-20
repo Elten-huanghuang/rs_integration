@@ -523,7 +523,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     /** 为目标 Aether 机器补充默认燃料需求，冷冻器主燃料固定为 Icestone。 */
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Recipe<?> recipe,
-                                       Map<Item, Integer> itemAvailable,
+                                       Map<Item, Long> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
                                        Map<Item, Long> neededCounts,
                                        int repeatCount) {

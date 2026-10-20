@@ -14,6 +14,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -25,7 +26,7 @@ public final class PureDemandTreeInspector {
     private PureDemandTreeInspector() {}
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Long> available,
+                                 Map<MaterialRef, ? extends Number> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount) {
         return inspect(graph, available, targetRecipeId, repeatCount,
@@ -33,7 +34,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Long> available,
+                                 Map<MaterialRef, ? extends Number> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes) {
@@ -41,7 +42,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Long> available,
+                                 Map<MaterialRef, ? extends Number> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -51,7 +52,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Long> available,
+                                 Map<MaterialRef, ? extends Number> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -62,7 +63,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Long> available,
+                                 Map<MaterialRef, ? extends Number> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -75,7 +76,7 @@ public final class PureDemandTreeInspector {
     }
 
     static Result inspectWithDeadline(ImmutableRecipeGraph graph,
-                                      Map<MaterialRef, Long> available,
+                                      Map<MaterialRef, ? extends Number> supplied,
                                       ResourceLocation targetRecipeId,
                                       int repeatCount,
                                       int maxNodes,
@@ -83,13 +84,13 @@ public final class PureDemandTreeInspector {
                                       Set<ResourceLocation> reusableCatalystRecipeIds,
                                       Set<ResourceLocation> pureIncompatibleOutputIds,
                                       long deadlineNanos) {
-        return PlanningLookupCache.run(() -> inspectInScope(graph, available, targetRecipeId,
+        return PlanningLookupCache.run(() -> inspectInScope(graph, supplied, targetRecipeId,
                 repeatCount, maxNodes, reusableCatalystOutputIds, reusableCatalystRecipeIds,
                 pureIncompatibleOutputIds, deadlineNanos));
     }
 
     private static Result inspectInScope(ImmutableRecipeGraph graph,
-                                         Map<MaterialRef, Long> available,
+                                         Map<MaterialRef, ? extends Number> supplied,
                                          ResourceLocation targetRecipeId, int repeatCount, int maxNodes,
                                          Set<ResourceLocation> reusableCatalystOutputIds,
                                          Set<ResourceLocation> reusableCatalystRecipeIds,
@@ -105,6 +106,7 @@ public final class PureDemandTreeInspector {
 
         List<IngredientRef> roots = PureDemandNormalizer.mergeEquivalent(
                 SelfAmplifyingRecipePolicy.scaleTargetInputs(target, repeatCount));
+        Map<MaterialRef, Long> available = longCounts(supplied);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(graph, available, roots);
         Walker walker = new Walker(graph, available, Math.max(1, maxNodes),
                 reusableCatalystOutputIds, pureIncompatibleOutputIds, deadlineNanos);
@@ -477,7 +479,7 @@ public final class PureDemandTreeInspector {
                 available.forEach((material, count) -> {
                     if (material == null || count == null || count <= 0) return;
                     stock.put(material, count);
-                    orderPositions.put(material, order.size());
+                    orderPositions.put(material, (long) order.size());
                     order.add(material);
                     byItem.computeIfAbsent(material.itemId(), ignored -> new ArrayList<>()).add(material);
                 });
@@ -563,5 +565,16 @@ public final class PureDemandTreeInspector {
 
     private static long routingCount(long count) {
         return Math.max(0L, count);
+    }
+
+    private static Map<MaterialRef, Long> longCounts(
+            Map<MaterialRef, ? extends Number> supplied) {
+        Map<MaterialRef, Long> counts = new LinkedHashMap<>();
+        supplied.forEach((material, count) -> {
+            if (material != null && count != null && count.longValue() > 0L) {
+                counts.put(material, count.longValue());
+            }
+        });
+        return counts;
     }
 }

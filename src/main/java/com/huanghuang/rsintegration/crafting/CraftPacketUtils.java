@@ -1503,7 +1503,7 @@ public final class CraftPacketUtils {
      * exact count is an estimate.  One fuel item typically lasts for several
      * crafts; we estimate conservatively.
      */
-    public static void addFuelToMaterials(Map<Item, Integer> itemAvailable,
+    public static void addFuelToMaterials(Map<Item, Long> itemAvailable,
                                            Map<Item, Ingredient> itemSource,
                                            Map<Item, Long> neededCounts,
                                            long requiredBurnUnits) {
@@ -1515,7 +1515,8 @@ public final class CraftPacketUtils {
             try {
                 int burnTime = ForgeHooks.getBurnTime(
                         new ItemStack(entry.getKey()), null);
-                long coverage = Math.max(0, entry.getValue()) * (long) burnTime;
+                long coverage = SaturatingLongMath.multiply(
+                        Math.max(0L, entry.getValue()), Math.max(0, burnTime));
                 if (burnTime > 0 && coverage > bestCoverage) {
                     bestCoverage = coverage;
                     bestBurnTime = burnTime;
@@ -1530,10 +1531,9 @@ public final class CraftPacketUtils {
             bestBurnTime = Math.max(1, ForgeHooks.getBurnTime(
                     new ItemStack(bestFuel), null));
         }
-        int fuelNeeded = (int) Math.min(Integer.MAX_VALUE,
-                InputConsumption.fuel(1L).requiredPhysicalAmount(
-                        requiredBurnUnits, 1L, Math.max(1, bestBurnTime)));
-        neededCounts.merge(bestFuel, (long) fuelNeeded, SaturatingLongMath::signedAdd);
+        long fuelNeeded = InputConsumption.fuel(1L).requiredPhysicalAmount(
+                requiredBurnUnits, 1L, Math.max(1, bestBurnTime));
+        neededCounts.merge(bestFuel, fuelNeeded, SaturatingLongMath::signedAdd);
         itemSource.putIfAbsent(bestFuel, Ingredient.of(bestFuel));
     }
 

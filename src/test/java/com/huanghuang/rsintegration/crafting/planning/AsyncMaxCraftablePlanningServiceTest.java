@@ -38,7 +38,7 @@ class AsyncMaxCraftablePlanningServiceTest {
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 plank, List.of(planks), stick, List.of(sticks)));
         PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
-                sticks.recipeId(), Map.of(new StackKey(Items.OAK_LOG, null), 10), Map.of(),
+                sticks.recipeId(), Map.of(new StackKey(Items.OAK_LOG, null), 10L), Map.of(),
                 graph, "network", "bindings", false);
 
         AsyncMaxCraftablePlanningService.CompletedSearch result =
@@ -59,7 +59,7 @@ class AsyncMaxCraftablePlanningServiceTest {
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
                 input, List.of(producer), output, List.of(target)));
         PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
-                target.recipeId(), Map.of(new StackKey(Items.COBBLESTONE, null), 1), Map.of(),
+                target.recipeId(), Map.of(new StackKey(Items.COBBLESTONE, null), 1L), Map.of(),
                 graph, "network", "bindings", false);
 
         AsyncMaxCraftablePlanningService.CompletedSearch result =
@@ -78,7 +78,7 @@ class AsyncMaxCraftablePlanningServiceTest {
         RecipeNode sticks = recipe("sticks", stick, 4, ingredient(plank, 2));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(plank, List.of(planks), stick, List.of(sticks)));
         PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L,
-                sticks.recipeId(), Map.of(new StackKey(Items.OAK_LOG, null), 10), Map.of(),
+                sticks.recipeId(), Map.of(new StackKey(Items.OAK_LOG, null), 10L), Map.of(),
                 graph, "network", "bindings", false);
         var expected = PlanningLookupCache.run(new PlanningLookupCache.Limits(0, 0, 0, 0),
                 () -> AsyncMaxCraftablePlanningService.compute(snapshot, 1024, 100, 65_536, 8_192));

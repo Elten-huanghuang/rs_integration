@@ -28,9 +28,9 @@ class CraftStorageReservationViewTest extends com.huanghuang.rsintegration.testu
         var matches = List.of(new StoredItem(new StorageItemKey(backend, firstIdentity, display), 2),
                 new StoredItem(new StorageItemKey(backend, secondIdentity, display), 3));
         var key = CraftingResolver.StackKey.of(display, true);
-        Map<CraftingResolver.StackKey, Integer> pending = new HashMap<>(Map.of(key, 3));
+        Map<CraftingResolver.StackKey, Long> pending = new HashMap<>(Map.of(key, 3L));
         assertEquals(2, ExtractionLedger.reserveEndpointMatches(matches, 2, pending).template().getCount());
-        assertEquals(Map.of(key, 5), pending);
+        assertEquals(Map.of(key, 5L), pending);
         assertTrue(ExtractionLedger.reserveEndpointMatches(matches, 1, pending).template().isEmpty());
     }
 
@@ -38,11 +38,11 @@ class CraftStorageReservationViewTest extends com.huanghuang.rsintegration.testu
     void insufficientReservationDoesNotPublishPartialAllocations() {
         ItemStack stack = new ItemStack(Items.IRON_INGOT, 3);
         var key = CraftingResolver.StackKey.of(stack, true);
-        Map<CraftingResolver.StackKey, Integer> pending = new HashMap<>(Map.of(key, 1));
+        Map<CraftingResolver.StackKey, Long> pending = new HashMap<>(Map.of(key, 1L));
         var result = ExtractionLedger.reserveEndpointMatches(List.of(new StoredItem(
                 StorageItemKey.fromItemStack(new StorageBackendId("test"), stack), 3)), 4, pending);
         assertTrue(result.template().isEmpty());
-        assertEquals(Map.of(key, 1), pending);
+        assertEquals(Map.of(key, 1L), pending);
     }
 
     @Test
@@ -66,7 +66,7 @@ class CraftStorageReservationViewTest extends com.huanghuang.rsintegration.testu
         ItemStack slabs = new ItemStack(Items.OAK_SLAB, 2);
         List<StoredItem> matches = List.of(new StoredItem(
                 StorageItemKey.fromItemStack(backend, slabs), slabs.getCount()));
-        Map<CraftingResolver.StackKey, Integer> pending = new HashMap<>();
+        Map<CraftingResolver.StackKey, Long> pending = new HashMap<>();
 
         assertEquals(1, ExtractionLedger.reserveEndpointMatches(matches, 1, pending)
                 .template().getCount());
@@ -74,7 +74,7 @@ class CraftStorageReservationViewTest extends com.huanghuang.rsintegration.testu
                 .template().getCount());
         assertTrue(ExtractionLedger.reserveEndpointMatches(matches, 1, pending)
                 .template().isEmpty());
-        assertEquals(2, pending.values().stream().mapToInt(Integer::intValue).sum());
+        assertEquals(2L, pending.values().stream().mapToLong(Long::longValue).sum());
     }
 
     @Test

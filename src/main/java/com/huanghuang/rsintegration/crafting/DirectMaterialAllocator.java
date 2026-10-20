@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,14 @@ import java.util.Set;
 public final class DirectMaterialAllocator {
     private DirectMaterialAllocator() {}
 
-    public static Result allocate(List<IngredientSpec> specs, Map<StackKey, Long> available) {
+    public static Result allocate(List<IngredientSpec> specs,
+                                  Map<StackKey, ? extends Number> supplied) {
+        Map<StackKey, Long> available = new LinkedHashMap<>();
+        supplied.forEach((key, count) -> {
+            if (key != null && count != null && count.longValue() > 0L) {
+                available.put(key, count.longValue());
+            }
+        });
         List<IndexedSpec> demands = new ArrayList<>();
         long totalDemand = 0L;
         for (int i = 0; i < specs.size(); i++) {
@@ -102,15 +110,15 @@ public final class DirectMaterialAllocator {
             flow.addEdge(supplyStart + j, sink, supplies.get(j).getValue());
         }
 
-        long supplied = flow.maxFlow(source, sink);
-        if (supplied != totalDemand) {
+        long totalSupplied = flow.maxFlow(source, sink);
+        if (totalSupplied != totalDemand) {
             for (DemandEdges demand : demandEdges) {
                 if (demand.sourceEdge().capacity > 0) {
                     return new Result(false, List.of(), demand.indexed().index(),
                             demand.sourceEdge().capacity);
                 }
             }
-            return new Result(false, List.of(), -1, totalDemand - supplied);
+            return new Result(false, List.of(), -1, totalDemand - totalSupplied);
         }
 
         List<Allocation> result = new ArrayList<>();

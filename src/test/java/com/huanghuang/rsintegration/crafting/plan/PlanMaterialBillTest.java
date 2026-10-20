@@ -58,7 +58,7 @@ class PlanMaterialBillTest extends BootstrapTest {
         var producer = new PlanStep(new ResourceLocation("test", "iron"),
                 new ItemStack(Items.IRON_INGOT), 2, List.of(new ItemStack(Items.IRON_ORE)));
         var terminal = new PlanStep(TARGET_RECIPE, target, 1, List.of(new ItemStack(Items.IRON_INGOT, 2)));
-        return PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, ingotNet, Items.IRON_ORE, 2),
+        return PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, ingotNet, Items.IRON_ORE, 2L),
                 Map.of(Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT),
                         Items.IRON_ORE, Ingredient.of(Items.IRON_ORE)),
                 Map.of(Items.IRON_ORE, oreAvailable),
@@ -73,10 +73,10 @@ class PlanMaterialBillTest extends BootstrapTest {
                 new ItemStack(Items.IRON_INGOT), 2, List.of(new ItemStack(Items.IRON_ORE)));
         PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1,
                 List.of(new ItemStack(Items.IRON_INGOT, 2)));
-        var result = PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, 0, Items.IRON_ORE, 2),
+        var result = PlanMaterialBill.summarize(Map.of(Items.IRON_INGOT, 0L, Items.IRON_ORE, 2L),
                 Map.of(Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT),
                         Items.IRON_ORE, Ingredient.of(Items.IRON_ORE)),
-                Map.of(Items.IRON_ORE, 1), Map.of(new StackKey(Items.IRON_ORE, null), 1),
+                Map.of(Items.IRON_ORE, 1L), Map.of(new StackKey(Items.IRON_ORE, null), 1L),
                 target, List.of(producer, terminal), 1, null, false);
         assertFalse(result.feasible());
         assertEquals(0, result.materials().get(IngredientKey.of(new ItemStack(Items.IRON_INGOT))).missingCount());
@@ -96,8 +96,8 @@ class PlanMaterialBillTest extends BootstrapTest {
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
                 mapOf(Items.IRON_INGOT, 1, Items.DIAMOND, -2),
                 Map.of(Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT)),
-                Map.of(Items.IRON_INGOT, 1),
-                Map.of(new StackKey(Items.IRON_INGOT, null), 1),
+                Map.of(Items.IRON_INGOT, 1L),
+                Map.of(new StackKey(Items.IRON_INGOT, null), 1L),
                 target, List.of(targetStep), 2, null, false);
 
         assertTrue(result.feasible(), "one net ingot is available for execution");
@@ -117,9 +117,9 @@ class PlanMaterialBillTest extends BootstrapTest {
                 mapOf(Items.DIAMOND, 1, Items.IRON_INGOT, 65),
                 Map.of(Items.DIAMOND, Ingredient.of(Items.DIAMOND),
                         Items.IRON_INGOT, Ingredient.of(Items.IRON_INGOT)),
-                Map.of(Items.DIAMOND, 1, Items.IRON_INGOT, 65),
-                Map.of(new StackKey(Items.DIAMOND, null), 1,
-                        new StackKey(Items.IRON_INGOT, null), 65),
+                Map.of(Items.DIAMOND, 1L, Items.IRON_INGOT, 65L),
+                Map.of(new StackKey(Items.DIAMOND, null), 1L,
+                        new StackKey(Items.IRON_INGOT, null), 65L),
                 target, List.of(targetStep), 65, null, false);
 
         assertEquals(1, targetStep.totalInputCount(0, 65));
@@ -206,7 +206,7 @@ class PlanMaterialBillTest extends BootstrapTest {
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
                 mapOf(Items.OAK_LOG, 2, Items.BIRCH_LOG, -1),
                 Map.of(Items.OAK_LOG, logs),
-                Map.of(Items.OAK_LOG, 0, Items.BIRCH_LOG, 1),
+                Map.of(Items.OAK_LOG, 0L, Items.BIRCH_LOG, 1L),
                 Map.of(), new ItemStack(Items.DIAMOND), List.of(), 1, null, false);
 
         assertTrue(result.feasible());
@@ -222,12 +222,12 @@ class PlanMaterialBillTest extends BootstrapTest {
         other.getOrCreateTag().putInt("charge", 1);
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.DIAMOND, 2),
+                Map.of(Items.DIAMOND, 2L),
                 Map.of(Items.DIAMOND, StrictNBTIngredient.of(charged)),
-                Map.of(Items.DIAMOND, 10),
+                Map.of(Items.DIAMOND, 10L),
                 Map.of(
-                        new StackKey(Items.DIAMOND, charged.getTag().toString()), 1,
-                        new StackKey(Items.DIAMOND, other.getTag().toString()), 9),
+                        new StackKey(Items.DIAMOND, charged.getTag().toString()), 1L,
+                        new StackKey(Items.DIAMOND, other.getTag().toString()), 9L),
                 new ItemStack(Items.EMERALD), List.of(), 1, null, false);
 
         IngredientKey chargedKey = IngredientKey.of(charged);
@@ -261,13 +261,13 @@ class PlanMaterialBillTest extends BootstrapTest {
                                 new PlanGraphView.SourceView(false, 1, 0), target, 1)))),
                 List.of(), List.of(1));
 
-        Map<StackKey, Integer> availableStacks = Map.of(
-                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1,
-                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1);
+        Map<StackKey, Long> availableStacks = Map.of(
+                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1L,
+                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1L);
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.ENCHANTED_BOOK, 4),
+                Map.of(Items.ENCHANTED_BOOK, 4L),
                 Map.of(Items.ENCHANTED_BOOK, StrictNBTIngredient.of(protection)),
-                Map.of(Items.ENCHANTED_BOOK, 2), availableStacks,
+                Map.of(Items.ENCHANTED_BOOK, 2L), availableStacks,
                 target, List.of(), 1, graph, false);
 
         long distinctBookEntries = result.materials().keySet().stream()
@@ -314,8 +314,8 @@ class PlanMaterialBillTest extends BootstrapTest {
                         new ItemStack(Items.GOLD_INGOT), 2)), List.of(1, 2));
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(), Map.of(), Map.of(Items.IRON_ORE, 1),
-                Map.of(new StackKey(Items.IRON_ORE, null), 1), target, List.of(), 1,
+                Map.of(), Map.of(), Map.of(Items.IRON_ORE, 1L),
+                Map.of(new StackKey(Items.IRON_ORE, null), 1L), target, List.of(), 1,
                 graph, false);
 
         assertEquals(Map.of(
@@ -337,14 +337,14 @@ class PlanMaterialBillTest extends BootstrapTest {
         ItemStack target = new ItemStack(Items.DIAMOND);
         PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1,
                 List.of(protection, mending, infinity, unbreaking));
-        Map<StackKey, Integer> availableStacks = Map.of(
-                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1,
-                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1);
+        Map<StackKey, Long> availableStacks = Map.of(
+                new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1L,
+                new StackKey(Items.ENCHANTED_BOOK, unbreaking.getTag().toString()), 1L);
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.ENCHANTED_BOOK, 4),
+                Map.of(Items.ENCHANTED_BOOK, 4L),
                 Map.of(Items.ENCHANTED_BOOK, StrictNBTIngredient.of(protection)),
-                Map.of(Items.ENCHANTED_BOOK, 2), availableStacks,
+                Map.of(Items.ENCHANTED_BOOK, 2L), availableStacks,
                 target, List.of(terminal), 1, null, false);
 
         assertEquals(4, result.materials().keySet().stream()
@@ -361,11 +361,11 @@ class PlanMaterialBillTest extends BootstrapTest {
         PlanStep terminal = new PlanStep(TARGET_RECIPE, target, 1, List.of(looting));
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.ENCHANTED_BOOK, 1), Map.of(),
-                Map.of(Items.ENCHANTED_BOOK, 2),
+                Map.of(Items.ENCHANTED_BOOK, 1L), Map.of(),
+                Map.of(Items.ENCHANTED_BOOK, 2L),
                 Map.of(
-                        new StackKey(Items.ENCHANTED_BOOK, looting.getTag().toString()), 1,
-                        new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1),
+                        new StackKey(Items.ENCHANTED_BOOK, looting.getTag().toString()), 1L,
+                        new StackKey(Items.ENCHANTED_BOOK, mending.getTag().toString()), 1L),
                 target, List.of(terminal), 1, null, false);
 
         assertEquals(new PlanResponse.Availability(1, 1),
@@ -388,12 +388,12 @@ class PlanMaterialBillTest extends BootstrapTest {
         other.getOrCreateTag().putString("modifier", "other");
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.IRON_HELMET, 2),
+                Map.of(Items.IRON_HELMET, 2L),
                 Map.of(Items.IRON_HELMET, Ingredient.of(template)),
-                Map.of(Items.IRON_HELMET, 2),
+                Map.of(Items.IRON_HELMET, 2L),
                 Map.of(
-                        new StackKey(Items.IRON_HELMET, template.getTag().toString()), 1,
-                        new StackKey(Items.IRON_HELMET, other.getTag().toString()), 1),
+                        new StackKey(Items.IRON_HELMET, template.getTag().toString()), 1L,
+                        new StackKey(Items.IRON_HELMET, other.getTag().toString()), 1L),
                 new ItemStack(Items.EMERALD), List.of(), 1, null, false);
 
         assertTrue(result.feasible());
@@ -412,10 +412,10 @@ class PlanMaterialBillTest extends BootstrapTest {
                 List.of(displayTemplate));
 
         PlanMaterialBill.Result result = PlanMaterialBill.summarize(
-                Map.of(Items.IRON_HELMET, 1),
+                Map.of(Items.IRON_HELMET, 1L),
                 Map.of(Items.IRON_HELMET, Ingredient.of(displayTemplate)),
-                Map.of(Items.IRON_HELMET, 1),
-                Map.of(new StackKey(Items.IRON_HELMET, stored.getTag().toString()), 1),
+                Map.of(Items.IRON_HELMET, 1L),
+                Map.of(new StackKey(Items.IRON_HELMET, stored.getTag().toString()), 1L),
                 new ItemStack(Items.EMERALD), List.of(targetStep), 1, null, false);
 
         IngredientKey plainKey = IngredientKey.of(new ItemStack(Items.IRON_HELMET));
@@ -435,11 +435,11 @@ class PlanMaterialBillTest extends BootstrapTest {
                 result.leftovers());
     }
 
-    private static Map<Item, Integer> mapOf(Item firstItem, int firstCount,
-                                             Item secondItem, int secondCount) {
-        Map<Item, Integer> result = new LinkedHashMap<>();
-        result.put(firstItem, firstCount);
-        result.put(secondItem, secondCount);
+    private static Map<Item, Long> mapOf(Item firstItem, int firstCount,
+                                         Item secondItem, int secondCount) {
+        Map<Item, Long> result = new LinkedHashMap<>();
+        result.put(firstItem, (long) firstCount);
+        result.put(secondItem, (long) secondCount);
         return result;
     }
 
@@ -448,10 +448,10 @@ class PlanMaterialBillTest extends BootstrapTest {
                                                              int netNeeded,
                                                              int available) {
         return PlanMaterialBill.summarize(
-                Map.of(Items.DIAMOND, netNeeded),
+                Map.of(Items.DIAMOND, (long) netNeeded),
                 Map.of(Items.DIAMOND, Ingredient.of(Items.DIAMOND)),
-                Map.of(Items.DIAMOND, available),
-                Map.of(new StackKey(Items.DIAMOND, null), available),
+                Map.of(Items.DIAMOND, (long) available),
+                Map.of(new StackKey(Items.DIAMOND, null), (long) available),
                 target, steps, 1, null, false);
     }
 }

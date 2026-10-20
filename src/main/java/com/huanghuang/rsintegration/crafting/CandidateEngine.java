@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -302,7 +303,7 @@ final class CandidateEngine {
     static ItemStack findStockedSmithingOutput(
             SmithingTransformRecipe recipe,
             Predicate<ItemStack> accepts,
-            Map<CraftingResolver.StackKey, Long> available,
+            Map<CraftingResolver.StackKey, ? extends Number> available,
             Map<Item, List<RecipeIndex.Entry>> index, RegistryAccess access,
             Set<ResourceLocation> visited, BooleanSupplier timedOut) {
         return findStockedSmithingOutput(recipe, accepts, new InventoryCandidateLookup(available),
@@ -474,10 +475,11 @@ final class CandidateEngine {
         if (specs != null) {
             Map<String, IngredientDemand> demands = specDemands(specs);
             for (IngredientDemand demand : demands.values()) {
-                int available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
+                long available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
                 if (available >= demand.required()) score += 10;
                 else if (available > 0) {
-                    score += Math.max(0, 10 - (demand.required() - available) * 5);
+                    score += SaturatingLongMath.clampToInt(Math.max(0L,
+                            10L - (demand.required() - available) * 5L));
                 }
             }
             score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
@@ -517,9 +519,10 @@ final class CandidateEngine {
         List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
         Map<String, IngredientDemand> demands = specDemands(specs);
         for (IngredientDemand demand : demands.values()) {
-            int available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
+            long available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
             if (available >= demand.required()) score += 10;
-            else if (available > 0) score += Math.max(0, 10 - (demand.required() - available) * 5);
+            else if (available > 0) score += SaturatingLongMath.clampToInt(
+                    Math.max(0L, 10L - (demand.required() - available) * 5L));
         }
 
         score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
