@@ -370,7 +370,8 @@ public final class AsyncCraftChain {
             initialiseGraphMaterialFlow(graph);
             logGraphNodeMappings(graph);
             GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
-                    steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList());
+                    steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList(),
+                    graph);
             int atomicVanillaLimit = configuredAtomicVanillaGraphLimit();
             int dispatchOperationLimit = configuredOperationsPerDispatch();
             boolean oversizedNode = requiresFlatExecutionForOversizedNode(

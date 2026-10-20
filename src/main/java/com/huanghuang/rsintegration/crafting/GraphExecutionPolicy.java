@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
 
 import java.util.Collection;
 
@@ -10,7 +13,8 @@ final class GraphExecutionPolicy {
     enum Reason {
         GRAPH_COMPLETE,
         APPENDED_TERMINAL_NOT_IN_GRAPH,
-        MOD_REQUIRES_FLAT_EXECUTION
+        MOD_REQUIRES_FLAT_EXECUTION,
+        STATEFUL_GENERIC_REUSE_REQUIRES_FLAT
     }
 
     record Decision(boolean useGraphExecutor, Reason reason, String detail) {}
@@ -39,6 +43,11 @@ final class GraphExecutionPolicy {
     }
 
     static Decision decide(boolean hasAppendedTerminalStep, Collection<ModType> types) {
+        return decide(hasAppendedTerminalStep, types, null);
+    }
+
+    static Decision decide(boolean hasAppendedTerminalStep, Collection<ModType> types,
+                           CraftPlanGraph graph) {
         if (hasAppendedTerminalStep) {
             return decide(true, (ModTypeConstraint) null);
         }
@@ -51,7 +60,20 @@ final class GraphExecutionPolicy {
                 }
             }
         }
+        if (requiresFlatStatefulReuse(graph)) {
+            return new Decision(false, Reason.STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
+                    "generic catalyst or durability input requires ordered reuse");
+        }
         return decide(false, (ModTypeConstraint) null);
+    }
+
+    static boolean requiresFlatStatefulReuse(CraftPlanGraph graph) {
+        if (graph == null) return false;
+        return graph.nodes().stream().anyMatch(node ->
+                ModType.GENERIC.id().equals(node.modTypeId())
+                        && node.inputs().stream().map(InputDemand::role)
+                        .anyMatch(role -> role == DemandRole.CATALYST
+                                || role == DemandRole.DURABILITY));
     }
 
     private static String constraintReason(ModType type) {

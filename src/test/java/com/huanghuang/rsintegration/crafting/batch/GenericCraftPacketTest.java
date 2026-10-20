@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -564,6 +565,8 @@ class GenericCraftPacketTest extends BootstrapTest {
 
         assertTrue(GenericCraftPacket.isSelfAmplifyingRecipe(
                 duplicate, net.minecraft.core.RegistryAccess.EMPTY));
+        assertFalse(GenericCraftPacket.canUseDirectCraftingReservation(
+                duplicate, net.minecraft.core.RegistryAccess.EMPTY));
     }
 
     @Test
@@ -575,6 +578,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                         Ingredient.of(Items.SUGAR_CANE)));
 
         assertFalse(GenericCraftPacket.isSelfAmplifyingRecipe(
+                ordinary, net.minecraft.core.RegistryAccess.EMPTY));
+        assertTrue(GenericCraftPacket.canUseDirectCraftingReservation(
                 ordinary, net.minecraft.core.RegistryAccess.EMPTY));
     }
 
@@ -820,6 +825,28 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertEquals(1, scaled.get(0).count());
         assertEquals(42, scaled.get(1).count());
         assertEquals(6, scaled.get(2).count());
+    }
+
+    @Test
+    void selfAmplifyingTerminalCannotBypassTheSeedChainPlanner() {
+        ItemStack template = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
+        List<IngredientSpec> templateSpecs = GenericCraftPacket.scaleTerminalIngredientSpecs(
+                List.of(
+                        new IngredientSpec(
+                                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
+                        new IngredientSpec(Ingredient.of(Items.DIAMOND), 7),
+                        new IngredientSpec(Ingredient.of(Items.NETHERRACK), 1)),
+                template, 1024);
+        assertFalse(GenericCraftPacket.useDirectTerminalPlan(
+                new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
+                templateSpecs, template));
+
+        ItemStack planks = new ItemStack(Items.OAK_PLANKS, 4);
+        List<IngredientSpec> ordinarySpecs = GenericCraftPacket.scaleTerminalIngredientSpecs(
+                List.of(new IngredientSpec(Ingredient.of(Items.OAK_LOG), 1)), planks, 16);
+        assertTrue(GenericCraftPacket.useDirectTerminalPlan(
+                new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
+                ordinarySpecs, planks));
     }
 
     @Test

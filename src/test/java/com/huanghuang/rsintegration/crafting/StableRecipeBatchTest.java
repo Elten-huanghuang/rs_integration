@@ -108,6 +108,33 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void executesSelfAmplifyingSeedStagesWithoutCollapsingToPerCraftLoops() {
+        ResourceLocation recipeId = new ResourceLocation("test", "amplifying_stage");
+        ShapelessRecipe recipe = new ShapelessRecipe(
+                recipeId, "", CraftingBookCategory.MISC,
+                new ItemStack(Items.DIAMOND, 2),
+                NonNullList.of(Ingredient.EMPTY,
+                        Ingredient.of(Items.DIAMOND), Ingredient.of(Items.REDSTONE)));
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        List<ItemStack> inventory = new ArrayList<>(List.of(
+                new ItemStack(Items.DIAMOND, 1),
+                new ItemStack(Items.REDSTONE, 7)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    execute(fixture, recipeId, 1, inventory, ledger));
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    execute(fixture, recipeId, 2, inventory, ledger));
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    execute(fixture, recipeId, 4, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.DIAMOND));
+        assertEquals(8, inventory.get(0).getCount());
+    }
+
+    @Test
     void preservesMultiItemRecipeYieldAcrossEveryWoodPlankCraft() {
         ResourceLocation recipeId = new ResourceLocation("test", "test_planks");
         NonNullList<Ingredient> ingredients =

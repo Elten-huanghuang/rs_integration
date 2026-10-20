@@ -315,6 +315,32 @@ class PureRecipePlannerTest {
     }
 
     @Test
+    void selfAmplifyingIntermediateScalesOtherInputsAcrossNodes() {
+        MaterialRef template = material("template_with_cost");
+        MaterialRef stone = material("template_cost_stone");
+        MaterialRef artifact = material("template_artifact");
+        RecipeNode duplicate = recipe("duplicate_template_with_cost", template, 2,
+                ingredient(template, 1), ingredient(stone, 7));
+        RecipeNode assemble = recipe("assemble_template_artifact", artifact, 1,
+                ingredient(template, 8));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                template, List.of(duplicate), artifact, List.of(assemble)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(template, 1, stone, 49), List.of(ingredient(artifact, 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("duplicate_template_with_cost"), 1),
+                new PureRecipePlanner.PlannedStep(id("duplicate_template_with_cost"), 2),
+                new PureRecipePlanner.PlannedStep(id("duplicate_template_with_cost"), 4),
+                new PureRecipePlanner.PlannedStep(id("assemble_template_artifact"), 1)),
+                result.steps());
+        assertTrue(result.remaining().isEmpty());
+        assertEquals(0L, result.remaining().getOrDefault(stone, 0L));
+    }
+
+    @Test
     void cycleTerminatesAndReportsMissing() {
         RecipeNode logFromPlank = recipe("log", LOG, 1, ingredient(PLANK, 1));
         RecipeNode plankFromLog = recipe("plank", PLANK, 1, ingredient(LOG, 1));

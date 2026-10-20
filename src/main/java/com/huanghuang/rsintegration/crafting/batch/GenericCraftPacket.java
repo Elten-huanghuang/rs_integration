@@ -2625,31 +2625,34 @@ public final class GenericCraftPacket {
         // intentionally cannot represent.
         if (recipe instanceof CraftingRecipe craftingRecipe
                 && !isPhysicalMachineRecipe(recipe, modType)) {
-            ItemStack directOutput = ModRecipeHandlers.tryGetResultItem(
-                    recipe, player.serverLevel().registryAccess());
-            List<IngredientSpec> directSpecs = scaleTerminalIngredientSpecs(
-                    recipe, extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
-            Map<StackKey, Long> directAvailable = listAvailable(
-                    player, storageEndpoint);
-            DirectReservationCheck directReservation = probeDirectTerminalReservation(
-                    player, recipeId, directSpecs, directAvailable, storageEndpoint);
-            if (directReservation.available()) {
-                launchAsyncChain(player, List.of(genericTerminalStep(recipeId, repeatCount)),
-                        LegacyExecutionMetrics.Reason.DIRECT_TERMINAL_RESERVATION,
-                        storageEndpoint, repeatCount, recipeId, forcedRecipes,
-                        effectiveDim, effectivePos, inferMode, baseItem, targetOutput,
-                        outputDestination, machineSelectionMode, materialLocks);
-                return;
-            }
-            PlanCache.Entry cachedCraftingPlan = findValidatedExecutionPlan(player, recipeId,
-                    forcedRecipes, repeatCount, targetOutput, modType, effectiveDim, effectivePos,
-                    executionStorageReference, materialLocks);
-            if (cachedCraftingPlan != null
-                    && tryExecuteCachedCraftingPlan(player, recipe, recipeId, forcedRecipes,
-                    dim, pos, repeatCount, inferMode, baseItem, targetOutput,
-                    outputDestination, machineSelectionMode, storageEndpoint,
-                    cachedCraftingPlan, materialLocks)) {
-                return;
+            if (canUseDirectCraftingReservation(
+                    recipe, player.serverLevel().registryAccess())) {
+                ItemStack directOutput = ModRecipeHandlers.tryGetResultItem(
+                        recipe, player.serverLevel().registryAccess());
+                List<IngredientSpec> directSpecs = scaleTerminalIngredientSpecs(
+                        recipe, extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
+                Map<StackKey, Long> directAvailable = listAvailable(
+                        player, storageEndpoint);
+                DirectReservationCheck directReservation = probeDirectTerminalReservation(
+                        player, recipeId, directSpecs, directAvailable, storageEndpoint);
+                if (directReservation.available()) {
+                    launchAsyncChain(player, List.of(genericTerminalStep(recipeId, repeatCount)),
+                            LegacyExecutionMetrics.Reason.DIRECT_TERMINAL_RESERVATION,
+                            storageEndpoint, repeatCount, recipeId, forcedRecipes,
+                            effectiveDim, effectivePos, inferMode, baseItem, targetOutput,
+                            outputDestination, machineSelectionMode, materialLocks);
+                    return;
+                }
+                PlanCache.Entry cachedCraftingPlan = findValidatedExecutionPlan(player, recipeId,
+                        forcedRecipes, repeatCount, targetOutput, modType, effectiveDim, effectivePos,
+                        executionStorageReference, materialLocks);
+                if (cachedCraftingPlan != null
+                        && tryExecuteCachedCraftingPlan(player, recipe, recipeId, forcedRecipes,
+                        dim, pos, repeatCount, inferMode, baseItem, targetOutput,
+                        outputDestination, machineSelectionMode, storageEndpoint,
+                        cachedCraftingPlan, materialLocks)) {
+                    return;
+                }
             }
             // Every projected crafting-table recipe belongs on the immutable worker.
             // The bounded server-thread resolver below is only a compatibility path
@@ -3246,6 +3249,18 @@ public final class GenericCraftPacket {
     static List<IngredientSpec> scaleTerminalIngredientSpecs(
             List<IngredientSpec> specs, ItemStack output, int executions) {
         return SelfAmplifyingRecipePolicy.scaleTargetInputs(specs, output, executions);
+    }
+
+    static boolean useDirectTerminalPlan(DirectMaterialAllocator.Result allocation,
+                                         List<IngredientSpec> scaledSpecs,
+                                         ItemStack output) {
+        return allocation.feasible()
+                && !SelfAmplifyingRecipePolicy.isSelfAmplifying(scaledSpecs, output);
+    }
+
+    static boolean canUseDirectCraftingReservation(Recipe<?> recipe,
+                                                   RegistryAccess registryAccess) {
+        return !isSelfAmplifyingRecipe(recipe, registryAccess);
     }
 
     static List<IngredientSpec> scaleTerminalIngredientSpecs(
@@ -4087,7 +4102,8 @@ public final class GenericCraftPacket {
                 && hasFixedTerminalInputs
                 ? DirectMaterialAllocator.allocate(recipeSpecs, available)
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
-        boolean directTerminalPlan = directPreviewAllocation.feasible();
+        boolean directTerminalPlan = useDirectTerminalPlan(
+                directPreviewAllocation, recipeSpecs, planTargetOutput);
         if (directTerminalPlan) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-plan] direct terminal preview recipe={} specs={} fragments={} recursivePlannerBypassed=true",
@@ -4310,7 +4326,9 @@ public final class GenericCraftPacket {
                 : recursiveHandler.getRecursiveIngredients(recipe, recipeSpecs);
         boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
                 ? false
-                : DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available).feasible();
+                : useDirectTerminalPlan(
+                        DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available),
+                        recursiveRecipeSpecs, planTargetOutput);
 
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;

@@ -1,10 +1,25 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.mods.apprenticecodex.ApprenticeCodexRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.Test;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.List;
 
@@ -12,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class GraphExecutionPolicyTest {
+class GraphExecutionPolicyTest extends BootstrapTest {
 
     @Test
     void appendedTerminalStepCannotUseIncompleteGraphExecutor() {
@@ -59,6 +74,21 @@ class GraphExecutionPolicyTest {
 
         assertTrue(decision.useGraphExecutor());
         assertEquals(GraphExecutionPolicy.Reason.GRAPH_COMPLETE, decision.reason());
+    }
+
+    @Test
+    void genericCatalystOrDurabilityInputsRequireOrderedFlatExecution() {
+        CraftPlanGraph catalystGraph = graphWithRole(DemandRole.CATALYST);
+        GraphExecutionPolicy.Decision catalyst = GraphExecutionPolicy.decide(
+                false, List.of(ModType.GENERIC), catalystGraph);
+        assertFalse(catalyst.useGraphExecutor());
+        assertEquals(GraphExecutionPolicy.Reason.STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
+                catalyst.reason());
+
+        assertFalse(GraphExecutionPolicy.requiresFlatStatefulReuse(
+                graphWithRole(DemandRole.CONSUMED)));
+        assertTrue(GraphExecutionPolicy.requiresFlatStatefulReuse(
+                graphWithRole(DemandRole.DURABILITY)));
     }
 
     @Test
@@ -119,5 +149,20 @@ class GraphExecutionPolicyTest {
         assertTrue(GraphExecutionPolicy.decide(false, reviewed).useGraphExecutor());
         assertFalse(GraphExecutionPolicy.decide(false, omitted).useGraphExecutor());
         omitted.confirmGraphExecution("test cleanup");
+    }
+
+    private static CraftPlanGraph graphWithRole(DemandRole role) {
+        NodeId nodeId = new NodeId(0);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        InputDemand input = new InputDemand(new InputPortId(nodeId, 0),
+                Ingredient.of(Items.DIAMOND), 1, role, new ItemStack(Items.DIAMOND));
+        CraftNode node = new CraftNode(nodeId, new ResourceLocation("test", "role"),
+                ModType.GENERIC.id(), null, 1, List.of(), List.of(), false,
+                null, null, List.of(input), List.of(), List.of());
+        RootDemand root = new RootDemand(Ingredient.of(Items.DIAMOND), 1, 0,
+                new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
+                new MaterialSource.InitialPool(diamond), diamond, 1)), role);
+        return new CraftPlanGraph(1, List.of(node), List.of(), List.of(root),
+                List.of(), List.of(nodeId));
     }
 }
