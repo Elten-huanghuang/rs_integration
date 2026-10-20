@@ -311,6 +311,18 @@ class AltarBindingRegistryTest {
     }
 
     @Test
+    void sharedCookingRecipeLeavesAreNotFilteredByRecipeClassSubtype() {
+        assertTrue(AltarBindingRegistry.isSharedCookingPotLeaf(
+                ModType.byId("farmersdelight_cooking_pot")));
+        assertTrue(AltarBindingRegistry.isSharedCookingPotLeaf(
+                ModType.byId(ModIds.ID_MD_COPPER_POT)));
+        assertTrue(AltarBindingRegistry.isSharedCookingPotLeaf(
+                ModType.byId(ModIds.ID_DD_MONSTER_POT)));
+        assertFalse(AltarBindingRegistry.isSharedCookingPotLeaf(
+                ModType.byId("farmersdelight")));
+    }
+
+    @Test
     void leafSpellWorkstationsIgnoreRecipeGroupingPaths() {
         registerLeafType("iss_csw_spell_forge");
         registerLeafType("irons_spellbooks_scroll_forge");

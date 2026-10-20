@@ -904,6 +904,9 @@ public final class AltarBindingRegistry {
         if (recipe == null) return null;
         if (type != null) {
             String typeId = type.id();
+            // Farmer's Delight 的烹饪配方类会被多个叶子锅具复用。这里必须
+            // 先接受具体锅类型，不能再拿共享配方的类映射去过滤绑定键。
+            if (isSharedCookingPotLeaf(type)) return null;
             // YHK 三种锅共用 PotCookingRecipe 类，必须用配方结果携带的锅具容器
             // 分类；共享类名映射只会命中注册顺序中的第一种锅。
             if (typeId.equals("youkaishomecoming_cooking_small")
@@ -930,6 +933,13 @@ public final class AltarBindingRegistry {
             return classHint;
         }
         return normalizeSubType(recipeSubTypeHint(recipe.getId()), type);
+    }
+
+    static boolean isSharedCookingPotLeaf(@Nullable ModType type) {
+        if (type == null) return false;
+        return "farmersdelight_cooking_pot".equals(type.id())
+                || ModIds.ID_MD_COPPER_POT.equals(type.id())
+                || ModIds.ID_DD_MONSTER_POT.equals(type.id());
     }
 
     /** Map recipe-ID sub-type names to canonical machine-prefix names.
@@ -1132,9 +1142,7 @@ public final class AltarBindingRegistry {
         // Cooking Pot is a leaf machine type as well. Add-ons commonly group
         // compatible recipes under their own namespace folders, which must not
         // be interpreted as a different physical pot.
-        if ("farmersdelight_cooking_pot".equals(type.id())
-                || ModIds.ID_MD_COPPER_POT.equals(type.id())
-                || ModIds.ID_DD_MONSTER_POT.equals(type.id())) {
+        if (isSharedCookingPotLeaf(type)) {
             return null;
         }
         // Cutting Board is also a leaf machine type. Native Farmer's Delight
