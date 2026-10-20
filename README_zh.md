@@ -38,7 +38,7 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 - 材料来源包括玩家背包以及分别解析的 RS、BD 网络；会沿工作台、模组机器、交易和纯背包配方递归合成，但不会把 RS 与 BD 余额相加。
 - 支持替代配方、概率材料补做、多产物、副产物、容器返还和流体容器配方；支持的机器可输入预载与批量处理，减少反复派发。
 - DAG 调度、材料预留、机器/捕获租约、输入缓存和产物结算会在取消、机器卸载、玩家断线和失败时维持物料守恒。
-- 支持时返还产物、容器和未用完材料；无法放入网络的流体会转为退款物品，背包满或离线后可用 `/rsi_fluid_refund` 领取。
+- 支持时返还产物、容器和未用完材料；无法放入网络的流体会转为退款物品，背包满或离线后可用 `/rsi_fluid_refund` 领取。离线合成产生的普通物品退款会随世界保存，登录时自动领取，也可使用 `/rsi_item_refund` 补领。
 - 按 `P` 查看进度，可在进度界面或输入 `/rsi cancel` 取消合成链。
 
 ### 工作台式即时批量
@@ -276,6 +276,7 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 
 - `/rsi cancel`：取消当前合成。
 - `/rsi_fluid_refund`：领取因背包已满或玩家离线而保留的流体退款物品。
+- `/rsi_item_refund`：领取因玩家离线而保存的普通合成退款物品。
 - `/rsi_debug`：向权限等级 2 的管理员提供合成链、绑定、处理器、资源预留和性能诊断。
 - `/rsi_unified_disk list [page]` 与 `recover <uuid>`：列出检查点并按 UUID 找回万界归墟盘物理凭据（权限等级 2）。
 - `/rsi_storage_test snapshot|simulate_insert|roundtrip <amount>`：供管理员对 RS 存储执行显式冒烟测试。

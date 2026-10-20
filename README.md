@@ -38,7 +38,7 @@ RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursiv
 - Uses the player inventory plus separately resolved RS and BD networks, follows recipes through crafting tables, machines, trades, and inventory-only crafting, and never adds RS and BD balances together.
 - Handles alternatives, probabilistic ingredients, multi-output recipes, byproducts, remainders, container transformations, and fluid-container recipes. Input buffering and batch conversion reduce repeated dispatch for supported machines.
 - DAG execution, reservations, machine/capture leases, input buffers, and output accounting keep materials conserved across recursion, cancellation, unloaded machines, disconnects, and failures.
-- Returns outputs, containers, and unused materials where supported. Unplaceable fluids become refund vouchers; `/rsi_fluid_refund` restores vouchers held after an inventory-full or offline event.
+- Returns outputs, containers, and unused materials where supported. Unplaceable fluids become refund vouchers; `/rsi_fluid_refund` restores vouchers held after an inventory-full or offline event. Ordinary item refunds created while the player is offline are saved with the world, claimed automatically on login, and recoverable with `/rsi_item_refund`.
 - Shows progress with `P`; cancel from the progress screen or with `/rsi cancel`.
 
 ### Workbench-style instant batching
@@ -278,6 +278,7 @@ Grid search caches live under the game directory at `rs_integration/cache/grid_s
 
 - `/rsi cancel`: cancel the current craft.
 - `/rsi_fluid_refund`: claim refund vouchers retained after an inventory-full or offline event.
+- `/rsi_item_refund`: claim ordinary crafting refunds retained while the player was offline.
 - `/rsi_debug`: operator diagnostics for chains, bindings, handlers, reservations, and performance (permission level 2).
 - `/rsi_unified_disk list [page]` and `recover <uuid>`: list checkpoints and recover a lost unified-disk credential (permission level 2).
 - `/rsi_storage_test snapshot|simulate_insert|roundtrip <amount>`: explicit RS storage smoke tests for operators.

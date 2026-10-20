@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -82,6 +83,41 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     }
 
     @Test
+    void selectedEndpointAndPlayerInventoryShareOneReservation() {
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 5));
+        when(player.getInventory()).thenReturn(inventory);
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(
+                        stored(new ItemStack(Items.IRON_INGOT, 5))))));
+
+        ItemStack reserved = ledger.reserve(
+                Ingredient.of(Items.IRON_INGOT), 10, endpoint, player, null, null);
+
+        assertEquals(10, reserved.getCount());
+        assertTrue(ledger.describeEntries().stream()
+                .anyMatch(entry -> entry.contains("source=network")));
+        assertTrue(ledger.describeEntries().stream()
+                .anyMatch(entry -> entry.contains("source=inventory")));
+    }
+
+    @Test
+    void failedInventoryTopUpRollsBackTheEndpointReservation() {
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 4));
+        when(player.getInventory()).thenReturn(inventory);
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(
+                        stored(new ItemStack(Items.IRON_INGOT, 5))))));
+
+        ItemStack reserved = ledger.reserve(
+                Ingredient.of(Items.IRON_INGOT), 10, endpoint, player, null, null);
+
+        assertTrue(reserved.isEmpty());
+        assertTrue(ledger.describeEntries().isEmpty());
+    }
+
+    @Test
     void filledBucketsAreRecheckedBeforeAnyExtraction() {
         when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
                 new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.WATER_BUCKET))))));
@@ -153,6 +189,32 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         verify(recovery).retainRaw(eq(owner), captured.capture(), isNull());
         assertEquals(250, captured.getValue().getInt("Amount"));
         verify(session, never()).insert(eq(player), argThat(InkFluidSupport::isToken), eq(false));
+    }
+
+    @Test
+    void offlineInventoryRefundIsPersistedForTheOriginalOwner() {
+        UUID owner = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(owner);
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 3));
+        when(player.getInventory()).thenReturn(inventory);
+        Ingredient iron = Ingredient.of(Items.IRON_INGOT);
+        assertEquals(3, ledger.reserveFromInventory(iron, 3, player).getCount());
+        try (MockedStatic<PlayerUtils> playerUtils = mockStatic(PlayerUtils.class)) {
+            playerUtils.when(() -> PlayerUtils.broadcastInventoryChanges(player))
+                    .thenAnswer(ignored -> null);
+            assertTrue(ledger.commitToEndpoint(null, player));
+        }
+
+        CraftItemRecovery recovery = mock(CraftItemRecovery.class);
+        try (MockedStatic<CraftItemRecovery> recoveryData =
+                     mockStatic(CraftItemRecovery.class)) {
+            recoveryData.when(() -> CraftItemRecovery.get(player.server)).thenReturn(recovery);
+            ledger.refundCommittedToEndpoint(null, null);
+        }
+
+        verify(recovery).retain(eq(owner), argThat(stack ->
+                stack.is(Items.IRON_INGOT) && stack.getCount() == 3));
     }
 
     @Test

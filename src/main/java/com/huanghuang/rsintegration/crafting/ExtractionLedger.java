@@ -288,18 +288,76 @@ public final class ExtractionLedger implements AutoCloseable {
 
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) {
-            ItemStack stored = reserveFromEndpoint(ingredient, count, selected, player);
-            if (!stored.isEmpty()) return stored;
-            return reserveFromInventory(ingredient, count, player);
+            return reserveAcrossEndpointAndInventory(ingredient, count, selected, player);
         }
 
         CraftStorageEndpoint binding = CraftStorageEndpoints.resolveBinding(
                 player, altarDim, altarPos).orElse(null);
         if (binding != null) {
-            ItemStack matched = reserveFromEndpoint(ingredient, count, binding, player);
+            ItemStack matched = reserveAcrossEndpointAndInventory(
+                    ingredient, count, binding, player);
             if (!matched.isEmpty()) return matched;
         }
         return reserveFromInventory(ingredient, count, player);
+    }
+
+    /** 先使用 endpoint 的可用部分，剩余数量再从玩家背包补足。 */
+    private ItemStack reserveAcrossEndpointAndInventory(
+            Ingredient ingredient, int count, CraftStorageEndpoint endpoint,
+            ServerPlayer player) {
+        if (hasPreferredResonanceReservations()) {
+            ItemStack stored = reserveFromEndpoint(ingredient, count, endpoint, player);
+            return stored.isEmpty() ? reserveFromInventory(ingredient, count, player) : stored;
+        }
+
+        int endpointCount = Math.min(count,
+                countAvailableInEndpoint(endpoint, ingredient, player));
+        if (endpointCount <= 0) {
+            return reserveFromInventory(ingredient, count, player);
+        }
+
+        int mark = reservationMark();
+        ItemStack fromEndpoint = reserveFromEndpoint(
+                ingredient, endpointCount, endpoint, player);
+        if (fromEndpoint.isEmpty() || fromEndpoint.getCount() != endpointCount) {
+            cancelReservationsSince(mark);
+            return reserveFromInventory(ingredient, count, player);
+        }
+
+        int remaining = count - endpointCount;
+        if (remaining <= 0) return fromEndpoint;
+
+        ItemStack fromInventory = reserveFromInventory(ingredient, remaining, player);
+        if (fromInventory.isEmpty() || fromInventory.getCount() != remaining) {
+            cancelReservationsSince(mark);
+            return reserveFromInventory(ingredient, count, player);
+        }
+        if (!MaterialMatcher.equivalentRuntimeFragment(fromEndpoint, fromInventory)) {
+            // 单个返回栈不能安全表示两种运行时变体，仅在该槽位能完全由背包满足时回退。
+            cancelReservationsSince(mark);
+            return reserveFromInventory(ingredient, count, player);
+        }
+        return fromEndpoint.copyWithCount(count);
+    }
+
+    private int countAvailableInEndpoint(
+            CraftStorageEndpoint endpoint, Ingredient ingredient, ServerPlayer player) {
+        StorageSnapshot snapshot = reservationSnapshot(endpoint, player);
+        if (snapshot == null) return 0;
+        Map<CraftingResolver.StackKey, Long> available = new LinkedHashMap<>();
+        for (StoredItem stored : snapshot.match(ingredient).items()) {
+            CraftingResolver.StackKey key =
+                    CraftingResolver.StackKey.of(stored.stack(), true);
+            available.merge(key, stored.amount(), ExtractionLedger::saturatedAdd);
+        }
+        long total = 0L;
+        for (Map.Entry<CraftingResolver.StackKey, Long> entry : available.entrySet()) {
+            long unreserved = Math.max(0L,
+                    entry.getValue() - pendingNet.getOrDefault(entry.getKey(), 0));
+            total = saturatedAdd(total, unreserved);
+            if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        }
+        return (int) total;
     }
 
     /**
@@ -1793,6 +1851,20 @@ public final class ExtractionLedger implements AutoCloseable {
             leftover = endpoint.insert(stack, false)
                     .remainder().orElse(ItemStack.EMPTY);
             if (leftover.isEmpty()) return;
+        }
+
+        MinecraftServer recoveryServer = refundServer;
+        UUID recoveryOwner = refundOwner;
+        if (recoveryServer != null && recoveryOwner != null) {
+            try {
+                CraftItemRecovery.get(recoveryServer).retain(recoveryOwner, leftover);
+                LOGGER.warn("[RSI-Ledger] Player offline; retained {} x{} for later claim",
+                        ItemStackUtils.registryId(leftover), leftover.getCount());
+                return;
+            } catch (RuntimeException failure) {
+                LOGGER.error("[RSI-Ledger] Could not persist offline item refund; "
+                        + "falling back to a world drop", failure);
+            }
         }
 
         // Player offline AND (network full or absent) — never discard. Drop a
