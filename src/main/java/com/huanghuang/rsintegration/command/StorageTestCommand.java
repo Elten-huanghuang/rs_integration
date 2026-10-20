@@ -12,13 +12,17 @@ import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +34,8 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.concurrent.CompletableFuture;
+
 /** Explicit RS-only smoke tests; never selected by normal gameplay code. */
 @Mod.EventBusSubscriber(modid = RSIntegrationMod.MOD_ID)
 public final class StorageTestCommand {
@@ -40,17 +46,22 @@ public final class StorageTestCommand {
     @SubscribeEvent
     public static void register(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-        dispatcher.register(Commands.literal("rsi_storage_test")
+        dispatcher.register(buildCommand());
+    }
+
+    static LiteralArgumentBuilder<CommandSourceStack> buildCommand() {
+        return Commands.literal("rsi_storage_test")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("snapshot").executes(StorageTestCommand::snapshot))
                 .then(Commands.literal("simulate_insert").executes(StorageTestCommand::simulateInsert))
                 .then(Commands.literal("insert")
                         .then(Commands.argument("amount", LongArgumentType.longArg(1L, Long.MAX_VALUE))
-                                .then(Commands.argument("item", StringArgumentType.word())
+                                .then(Commands.argument("item", ResourceLocationArgument.id())
+                                        .suggests(StorageTestCommand::suggestItems)
                                         .executes(StorageTestCommand::insert))))
                 .then(Commands.literal("roundtrip")
                         .then(Commands.argument("amount", IntegerArgumentType.integer(1, 64))
-                                .executes(StorageTestCommand::roundTrip))));
+                                .executes(StorageTestCommand::roundTrip)));
     }
 
     private static int snapshot(CommandContext<CommandSourceStack> context)
@@ -90,11 +101,10 @@ public final class StorageTestCommand {
             throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
         long amount = LongArgumentType.getLong(context, "amount");
-        ResourceLocation itemId = ResourceLocation.tryParse(
-                StringArgumentType.getString(context, "item"));
-        Item item = itemId == null ? null : ForgeRegistries.ITEMS.getValue(itemId);
+        ResourceLocation itemId = ResourceLocationArgument.getId(context, "item");
+        Item item = ForgeRegistries.ITEMS.getValue(itemId);
         if (item == null || item == Items.AIR) {
-            return fail(context, "unknown item: " + context.getArgument("item", String.class));
+            return fail(context, "unknown item: " + itemId);
         }
         StorageSession session = resolve(player, context);
         if (session == null) return 0;
@@ -126,6 +136,12 @@ public final class StorageTestCommand {
             if (moved < chunk) break;
         }
         return accepted;
+    }
+
+    private static CompletableFuture<Suggestions> suggestItems(
+            CommandContext<CommandSourceStack> context, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggestResource(
+                ForgeRegistries.ITEMS.getKeys(), builder);
     }
 
     private static int roundTrip(CommandContext<CommandSourceStack> context)
