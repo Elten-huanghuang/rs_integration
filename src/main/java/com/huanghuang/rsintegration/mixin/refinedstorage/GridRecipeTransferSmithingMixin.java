@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.network.SmithingJeiTransferHandler;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
+import mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.crafting.SmithingRecipe;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
@@ -20,7 +21,9 @@ public abstract class GridRecipeTransferSmithingMixin {
                                           IRecipeSlotsView recipeSlots, Player player,
                                           boolean maxTransfer, boolean doTransfer,
                                           CallbackInfoReturnable<IRecipeTransferError> cir) {
-        if (!(recipe instanceof SmithingRecipe) && !(recipe instanceof StonecutterRecipe)) return;
+        if (!(recipe instanceof SmithingRecipe)
+                && !(recipe instanceof IJeiAnvilRecipe)
+                && !(recipe instanceof StonecutterRecipe)) return;
         if (SmithingJeiTransferHandler.isPreflightInProgress()) return;
         cir.setReturnValue(SmithingJeiTransferHandler.intercept(container, recipe,
                 recipeSlots, player, maxTransfer, doTransfer));

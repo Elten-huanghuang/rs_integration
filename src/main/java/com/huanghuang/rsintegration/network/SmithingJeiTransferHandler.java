@@ -22,6 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.SmithingRecipe;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
 import mezz.jei.api.recipe.RecipeType;
+import mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -102,10 +103,8 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
     public IRecipeTransferError transferRecipe(GridContainerMenu container, Object recipe,
                                                 IRecipeSlotsView recipeSlots, Player player,
                                                 boolean maxTransfer, boolean doTransfer) {
-        CraftingStationMode targetMode;
-        if (recipe instanceof SmithingRecipe) targetMode = CraftingStationMode.SMITHING;
-        else if (recipe instanceof StonecutterRecipe) targetMode = CraftingStationMode.STONECUTTER;
-        else {
+        CraftingStationMode targetMode = targetMode(recipe);
+        if (targetMode == null) {
             return GridRecipeTransferHandler.INSTANCE.transferRecipe(container, recipe, recipeSlots,
                     player, maxTransfer, doTransfer);
         }
@@ -123,7 +122,7 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
         List<List<ItemStack>> options = new ArrayList<>();
         for (IRecipeSlotView view : recipeSlots.getSlotViews(RecipeIngredientRole.INPUT)) {
             options.add(view.getItemStacks().map(ItemStack::copy).toList());
-            int targetSlots = targetMode == CraftingStationMode.SMITHING ? 3 : 1;
+            int targetSlots = inputSlotCount(targetMode);
             if (options.size() == targetSlots) break;
         }
         // 模式校验、切换和物品提取全部由服务端按顺序完成。
@@ -132,5 +131,22 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
         access.rsi$refreshCraftingStationSlots();
         NetworkHandler.CHANNEL.sendToServer(new CraftingStationJeiTransferPacket(targetMode, options));
         return null;
+    }
+
+    @Nullable
+    static CraftingStationMode targetMode(@Nullable Object recipe) {
+        if (recipe instanceof SmithingRecipe) return CraftingStationMode.SMITHING;
+        if (recipe instanceof IJeiAnvilRecipe) return CraftingStationMode.ANVIL;
+        if (recipe instanceof StonecutterRecipe) return CraftingStationMode.STONECUTTER;
+        return null;
+    }
+
+    private static int inputSlotCount(CraftingStationMode mode) {
+        return switch (mode) {
+            case SMITHING -> 3;
+            case ANVIL -> 2;
+            case STONECUTTER -> 1;
+            default -> 0;
+        };
     }
 }
