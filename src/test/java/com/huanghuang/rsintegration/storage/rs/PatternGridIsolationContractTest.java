@@ -17,8 +17,8 @@ class PatternGridIsolationContractTest {
     void patternGridIsExcludedFromClientInputAndMachineTabMixins() throws IOException {
         String mouse = read("GridScreenMouseMixin.java");
         assertTrue(mouse.contains("onMousePressedPre") && mouse.contains("GridType.PATTERN"));
-        assertTrue(count(mouse, "GridType.PATTERN") >= 5,
-                "鼠标按下、拖拽、释放和滚轮入口都必须保留样板终端原生行为");
+        assertTrue(count(mouse, "GridType.PATTERN") >= 3,
+                "保留的鼠标按下和释放入口必须排除样板终端");
 
         String tabs = read("GridScreenMachineTabMixin.java");
         int patternGuard = tabs.indexOf("GridType.PATTERN");

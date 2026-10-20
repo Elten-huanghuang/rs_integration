@@ -5,11 +5,9 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
-import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
 import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.ChatFormatting;
@@ -43,7 +41,6 @@ public final class MachineFavoritesClient {
     // 外框和机器方块物品一起落在 RS 原生 Tooltip（约 400）下面。
     private static final float FAVORITE_Z = 200.0F;
 
-    private static List<MachineFavoriteKey> favorites = List.of();
     private static boolean initialized;
 
     private MachineFavoritesClient() {}
@@ -58,17 +55,22 @@ public final class MachineFavoritesClient {
         MinecraftForge.EVENT_BUS.addListener(MachineFavoritesClient::onLogout);
     }
 
-    public static void update(List<MachineFavoriteKey> synchronizedFavorites) {
-        favorites = List.copyOf(synchronizedFavorites);
+    public static void update(List<MachineFavoriteKey> synchronizedFavorites,
+                              List<MachineFavoriteKey> synchronizedBlocked) {
+        MachinePreferenceClient.update(synchronizedFavorites, synchronizedBlocked);
     }
 
     public static boolean isFavorite(BindingInfo info) {
-        MachineFavoriteKey candidate = MachineFavoriteKey.from(info);
-        return favorites.contains(candidate);
+        return MachinePreferenceClient.isFavorite(info);
+    }
+
+    public static boolean isBlocked(BindingInfo info) {
+        return MachinePreferenceClient.isBlocked(info);
     }
 
     /** Resolve synchronized favorites against the currently bound machines. */
     public static List<BindingInfo> getFavoriteMachines() {
+        List<MachineFavoriteKey> favorites = MachinePreferenceClient.favorites();
         List<BindingInfo> result = new ArrayList<>(favorites.size());
         List<BindingInfo> available = MachineTabHandler.getAllMachines();
         for (MachineFavoriteKey favorite : favorites) {
@@ -83,13 +85,11 @@ public final class MachineFavoritesClient {
     }
 
     public static void requestToggle(BindingInfo info) {
-        MachineFavoriteKey key = MachineFavoriteKey.from(info);
-        List<MachineFavoriteKey> optimistic = new ArrayList<>(favorites);
-        if (!optimistic.remove(key) && optimistic.size() < MachineFavoritesSavedData.MAX_FAVORITES) {
-            optimistic.add(key);
-        }
-        favorites = List.copyOf(optimistic);
-        RSSidePanelNetworkHandler.CHANNEL.sendToServer(new MachineFavoriteTogglePacket(key));
+        MachinePreferenceClient.requestFavoriteToggle(info);
+    }
+
+    public static void requestBlockToggle(BindingInfo info) {
+        MachinePreferenceClient.requestAutomationBlockToggle(info);
     }
 
     public static List<Rect2i> getJeiExtraAreas(GridScreen screen) {
@@ -144,7 +144,7 @@ public final class MachineFavoritesClient {
     }
 
     private static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
-        favorites = List.of();
+        MachinePreferenceClient.clear();
     }
 
     private static DockLayout layout(GridScreen screen) {

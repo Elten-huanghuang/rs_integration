@@ -354,7 +354,6 @@ public final class RSIntegrationConfig {
 
     //  numeric params
     public static ForgeConfigSpec.IntValue MACHINE_TAB_THRESHOLD;
-    public static ForgeConfigSpec.IntValue MACHINE_HUB_TOGGLE_KEY;
     /** 魔法资源：没有空间管辖时指名的权威后端；空串表示不指名。 */
     public static ForgeConfigSpec.ConfigValue<String> MAGIC_RESOURCE_PINNED_BACKEND;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
@@ -840,7 +839,7 @@ public final class RSIntegrationConfig {
         c.comment("远程机器").push("remoteMachineGui");
         ENABLE_MACHINE_GUI_TABS = c
                 .comment("启用虚拟机器界面",
-                        "在机器中心和 RS 终端显示虚拟机器界面；关闭后拒绝相应远程请求，与机器是否必须绑定的选项独立。")
+                        "允许从 RSI 控制中心和终端收藏栏远程打开已绑定机器；关闭后拒绝相应远程请求。")
                 .define("enableMachineGuiTabs", true);
         REQUIRE_MACHINE_BINDING_FOR_GUI = c
                 .comment("远程界面要求机器绑定",
@@ -1448,12 +1447,8 @@ public final class RSIntegrationConfig {
         s.comment("远程机器").push("remoteMachineGui");
         MACHINE_TAB_THRESHOLD = s
                 .comment("机器快捷页签折叠阈值",
-                        "机器快捷页签超过该数量时折叠为机器中心按钮；0 表示始终使用机器中心。")
-                .defineInRange("machineTabThreshold", 0, 0, 64);
-        MACHINE_HUB_TOGGLE_KEY = s
-                .comment("机器中心按键码",
-                        "在 RS 网格中切换机器中心面板，GLFW 按键码默认 H 为 72。")
-                .defineInRange("machineHubToggleKey", 72, 32, 348);
+                        "有 GUI 的机器超过该数量时使用终端机器中心；0 表示始终使用机器中心。")
+                .defineInRange("machineTabThreshold", 5, 0, 64);
         s.pop();
 
         s.comment("高级设置").push("advanced");

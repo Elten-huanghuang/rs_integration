@@ -26,6 +26,8 @@ class BeyondDimensionsOverlayLayerContractTest {
         assertTrue(mixinSource.contains("renderTerminalControlsBeforeTooltip"));
         assertTrue(clientSource.contains("renderMachineCenterEntry(screen, graphics, mouseX, mouseY);"));
         assertTrue(clientSource.contains("renderResonanceEntry(screen, graphics, mouseX, mouseY);"));
+        assertTrue(clientSource.contains("MachineHubRenderer"));
+        assertTrue(clientSource.contains("MachineHubInputHandler"));
         assertFalse(clientSource.contains("translate(0, 0, 460)"),
                 "terminal controls must stay below Minecraft's tooltip layer");
     }

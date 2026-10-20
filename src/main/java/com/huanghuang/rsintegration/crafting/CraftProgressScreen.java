@@ -32,6 +32,7 @@ public final class CraftProgressScreen extends Screen {
     private Button hudButton;
     private Button cancelButton;
     private Button diagnosticButton;
+    private Button machinesButton;
     private int footerHeight;
     private int nodeScroll;
     private ItemStack hoveredNodeStack = ItemStack.EMPTY;
@@ -63,10 +64,6 @@ public final class CraftProgressScreen extends Screen {
     public void tick() {
         UUID previous = selectedCraft;
         refreshCrafts();
-        if (selectedCraft == null && crafts.isEmpty()) {
-            onClose();
-            return;
-        }
         if (!Objects.equals(previous, selectedCraft)) nodeScroll = 0;
         updateButtonState();
     }
@@ -103,11 +100,17 @@ public final class CraftProgressScreen extends Screen {
         int footerY = panelY + panelHeight - footerHeight + 9;
         int columns = footerHeight == 64 ? 2 : 4;
         int buttonWidth = (contentWidth - 24 - (columns - 1) * 4) / columns;
+        machinesButton = addRenderableWidget(Button.builder(
+                        Component.translatable("rsi.control_center.machines"),
+                        button -> minecraft.setScreen(new MachineManagementScreen(
+                                this, MachineManagementScreen.View.ALL_BOUND)))
+                .bounds(panelX + panelWidth - 112, panelY + 7, 100, 20).build());
         hudButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
                     CraftProgressTracker.toggleVisible();
                     updateButtonState();
                 })
-                .bounds(contentX + 12, footerY, buttonWidth, 20).build());
+                .bounds(buttonX(0, columns, buttonWidth),
+                        buttonY(0, columns, footerY), buttonWidth, 20).build());
         diagnosticButton = addRenderableWidget(Button.builder(
                 Component.translatable("rsi.diagnostic.open"), button -> {
                     CraftProgressSnapshot snapshot = selectedSnapshot();
@@ -116,15 +119,24 @@ public final class CraftProgressScreen extends Screen {
                         if (entry != null) minecraft.setScreen(new CraftFailureScreen(this, entry));
                         else minecraft.gui.getChat().addMessage(Component.translatable("rsi.diagnostic.link_expired"));
                     }
-                }).bounds(contentX + 16 + buttonWidth, footerY, buttonWidth, 20).build());
+                }).bounds(buttonX(1, columns, buttonWidth),
+                buttonY(1, columns, footerY), buttonWidth, 20).build());
         cancelButton = addRenderableWidget(Button.builder(
                         Component.translatable("rsi.progress.cancel"), button -> confirmCancel())
-                .bounds(contentX + 12 + (2 % columns) * (buttonWidth + 4),
-                        footerY + (2 / columns) * 24, buttonWidth, 20).build());
+                .bounds(buttonX(2, columns, buttonWidth),
+                        buttonY(2, columns, footerY), buttonWidth, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
-                .bounds(contentX + 12 + (3 % columns) * (buttonWidth + 4),
-                        footerY + (3 / columns) * 24, buttonWidth, 20).build());
+                .bounds(buttonX(3, columns, buttonWidth),
+                        buttonY(3, columns, footerY), buttonWidth, 20).build());
         updateButtonState();
+    }
+
+    private int buttonX(int index, int columns, int buttonWidth) {
+        return contentX + 12 + (index % columns) * (buttonWidth + 4);
+    }
+
+    private int buttonY(int index, int columns, int footerY) {
+        return footerY + (index / columns) * 24;
     }
 
     private void updateButtonState() {
@@ -176,7 +188,7 @@ public final class CraftProgressScreen extends Screen {
         graphics.drawString(font, title, panelX + 15, panelY + 12, TEXT, true);
         String count = Component.translatable("rsi.progress.screen.task_count", crafts.size()).getString();
         int badgeWidth = font.width(count) + 14;
-        UIRenderer.pillBadge(graphics, font, panelX + panelWidth - badgeWidth - 13, panelY + 9,
+        UIRenderer.pillBadge(graphics, font, panelX + panelWidth - badgeWidth - 122, panelY + 9,
                 badgeWidth, 17, 0x663C5664, 0xFFD9E4EA, count);
     }
 

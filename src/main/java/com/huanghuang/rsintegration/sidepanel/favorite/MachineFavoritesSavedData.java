@@ -11,6 +11,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,8 +20,10 @@ import java.util.UUID;
 public final class MachineFavoritesSavedData extends SavedData {
     static final String NAME = "rsi_machine_favorites";
     public static final int MAX_FAVORITES = 64;
+    public static final int MAX_BLOCKED = 4096;
 
     private final Map<UUID, List<MachineFavoriteKey>> byPlayer = new LinkedHashMap<>();
+    private final Map<UUID, Set<MachineFavoriteKey>> blockedByPlayer = new LinkedHashMap<>();
 
     MachineFavoritesSavedData() {}
 
@@ -32,13 +35,20 @@ public final class MachineFavoritesSavedData extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag) {
         ListTag players = new ListTag();
-        for (Map.Entry<UUID, List<MachineFavoriteKey>> playerEntry : byPlayer.entrySet()) {
-            if (playerEntry.getValue().isEmpty()) continue;
+        Set<UUID> playerIds = new LinkedHashSet<>(byPlayer.keySet());
+        playerIds.addAll(blockedByPlayer.keySet());
+        for (UUID playerId : playerIds) {
+            List<MachineFavoriteKey> favorites = byPlayer.getOrDefault(playerId, List.of());
+            Set<MachineFavoriteKey> blocked = blockedByPlayer.getOrDefault(playerId, Set.of());
+            if (favorites.isEmpty() && blocked.isEmpty()) continue;
             CompoundTag encodedPlayer = new CompoundTag();
-            encodedPlayer.putUUID("player", playerEntry.getKey());
-            ListTag favorites = new ListTag();
-            for (MachineFavoriteKey key : playerEntry.getValue()) favorites.add(key.save());
-            encodedPlayer.put("favorites", favorites);
+            encodedPlayer.putUUID("player", playerId);
+            ListTag encodedFavorites = new ListTag();
+            for (MachineFavoriteKey key : favorites) encodedFavorites.add(key.save());
+            encodedPlayer.put("favorites", encodedFavorites);
+            ListTag encodedBlocked = new ListTag();
+            for (MachineFavoriteKey key : blocked) encodedBlocked.add(key.save());
+            encodedPlayer.put("blocked", encodedBlocked);
             players.add(encodedPlayer);
         }
         tag.put("players", players);
@@ -61,6 +71,13 @@ public final class MachineFavoritesSavedData extends SavedData {
                 if (key != null && unique.add(key)) favorites.add(key);
             }
             if (!favorites.isEmpty()) data.byPlayer.put(playerId, favorites);
+            ListTag encodedBlocked = encodedPlayer.getList("blocked", Tag.TAG_COMPOUND);
+            Set<MachineFavoriteKey> blocked = new LinkedHashSet<>();
+            for (int index = 0; index < encodedBlocked.size(); index++) {
+                MachineFavoriteKey key = MachineFavoriteKey.load(encodedBlocked.getCompound(index));
+                if (key != null) blocked.add(key);
+            }
+            if (!blocked.isEmpty()) data.blockedByPlayer.put(playerId, blocked);
         }
         return data;
     }
@@ -85,8 +102,9 @@ public final class MachineFavoritesSavedData extends SavedData {
     }
 
     public boolean remove(UUID playerId, MachineFavoriteKey key) {
+        boolean removedBlocked = removeBlocked(playerId, key);
         List<MachineFavoriteKey> favorites = byPlayer.get(playerId);
-        if (favorites == null || !favorites.remove(key)) return false;
+        if (favorites == null || !favorites.remove(key)) return removedBlocked;
         if (favorites.isEmpty()) byPlayer.remove(playerId);
         setDirty();
         return true;
@@ -99,11 +117,47 @@ public final class MachineFavoritesSavedData extends SavedData {
      */
     public boolean removeAt(UUID playerId, ResourceLocation dimension, BlockPos pos) {
         List<MachineFavoriteKey> favorites = byPlayer.get(playerId);
-        if (favorites == null) return false;
-        boolean removed = favorites.removeIf(favorite -> favorite.dimension().equals(dimension)
-                && favorite.pos().equals(pos));
-        if (!removed) return false;
-        if (favorites.isEmpty()) byPlayer.remove(playerId);
+        boolean removed = favorites != null && favorites.removeIf(favorite ->
+                favorite.dimension().equals(dimension) && favorite.pos().equals(pos));
+        if (removed && favorites.isEmpty()) byPlayer.remove(playerId);
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.get(playerId);
+        boolean removedBlocked = blocked != null && blocked.removeIf(key ->
+                key.dimension().equals(dimension) && key.pos().equals(pos));
+        if (blocked != null && blocked.isEmpty()) blockedByPlayer.remove(playerId);
+        if (removed || removedBlocked) {
+            setDirty();
+            return true;
+        }
+        return false;
+    }
+
+    public List<MachineFavoriteKey> getBlocked(UUID playerId) {
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.get(playerId);
+        return blocked == null ? List.of() : List.copyOf(blocked);
+    }
+
+    public boolean isBlocked(UUID playerId, MachineFavoriteKey key) {
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.get(playerId);
+        return blocked != null && blocked.contains(key);
+    }
+
+    public ToggleResult toggleBlocked(UUID playerId, MachineFavoriteKey key) {
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.computeIfAbsent(
+                playerId, ignored -> new LinkedHashSet<>());
+        if (blocked.remove(key)) {
+            if (blocked.isEmpty()) blockedByPlayer.remove(playerId);
+            setDirty();
+            return ToggleResult.REMOVED;
+        }
+        blocked.add(key);
+        setDirty();
+        return ToggleResult.ADDED;
+    }
+
+    private boolean removeBlocked(UUID playerId, MachineFavoriteKey key) {
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.get(playerId);
+        if (blocked == null || !blocked.remove(key)) return false;
+        if (blocked.isEmpty()) blockedByPlayer.remove(playerId);
         setDirty();
         return true;
     }

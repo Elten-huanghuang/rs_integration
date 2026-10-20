@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Container;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -81,6 +84,20 @@ class AltarBindingRegistryTest {
                 goety, "goety_component||block.goety.cursed_cage"));
         assertFalse(AltarBindingRegistry.isExecutableBinding(
                 goety, "goety_component||block.goety.soul_candlestick"));
+    }
+
+    @Test
+    void automationBlocklistMatchesDimensionPositionAndBlockIdentity() {
+        BindingStorage.BindingEntry entry = new BindingStorage.BindingEntry(
+                new ResourceLocation("minecraft", "overworld"), new BlockPos(12, 64, -3),
+                "example||block.example.machine", "example:machine", null);
+        MachineFavoriteKey key = new MachineFavoriteKey(
+                entry.dim(), entry.pos(), entry.blockKey());
+
+        assertTrue(AltarBindingRegistry.isAutomationBlocked(Set.of(key), entry));
+        assertFalse(AltarBindingRegistry.isAutomationBlocked(Set.of(), entry));
+        assertFalse(AltarBindingRegistry.isAutomationBlocked(Set.of(new MachineFavoriteKey(
+                entry.dim(), entry.pos().offset(1, 0, 0), entry.blockKey())), entry));
     }
 
     @Test

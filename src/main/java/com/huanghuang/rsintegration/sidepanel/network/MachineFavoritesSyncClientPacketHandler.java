@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
-import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
+import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -9,6 +9,6 @@ final class MachineFavoritesSyncClientPacketHandler {
     private MachineFavoritesSyncClientPacketHandler() {}
 
     static void handle(MachineFavoritesSyncPacket packet) {
-        MachineFavoritesClient.update(packet.favorites());
+        MachinePreferenceClient.update(packet.favorites(), packet.blocked());
     }
 }

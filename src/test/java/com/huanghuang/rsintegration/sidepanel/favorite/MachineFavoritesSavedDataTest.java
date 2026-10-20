@@ -65,11 +65,32 @@ class MachineFavoritesSavedDataTest {
         UUID player = UUID.randomUUID();
         original.toggle(player, key(4));
         original.toggle(player, key(5));
+        original.toggleBlocked(player, key(6));
 
         CompoundTag encoded = original.save(new CompoundTag());
         MachineFavoritesSavedData decoded = MachineFavoritesSavedData.load(encoded);
 
         assertEquals(original.getFavorites(player), decoded.getFavorites(player));
+        assertEquals(original.getBlocked(player), decoded.getBlocked(player));
+    }
+
+    @Test
+    void blockedMachinesAreIndependentFromFavoritesAndRemovedByPosition() {
+        MachineFavoritesSavedData data = new MachineFavoritesSavedData();
+        UUID player = UUID.randomUUID();
+        MachineFavoriteKey blocked = key(7);
+        MachineFavoriteKey favorite = key(8);
+
+        assertEquals(MachineFavoritesSavedData.ToggleResult.ADDED,
+                data.toggleBlocked(player, blocked));
+        data.toggle(player, favorite);
+        assertTrue(data.isBlocked(player, blocked));
+        assertEquals(java.util.List.of(blocked), data.getBlocked(player));
+        assertEquals(java.util.List.of(favorite), data.getFavorites(player));
+
+        assertTrue(data.removeAt(player, blocked.dimension(), blocked.pos()));
+        assertFalse(data.isBlocked(player, blocked));
+        assertEquals(java.util.List.of(favorite), data.getFavorites(player));
     }
 
     private static MachineFavoriteKey key(int index) {

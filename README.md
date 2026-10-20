@@ -58,7 +58,7 @@ Batch splitting, machine input buffering, and multi-machine parallelism remain s
 ### Machine access
 
 - Bind machines with a Network Linker, `Alt` + right-click, or `;` to scan nearby machines; broken links are cleaned up automatically.
-- Open bound machines remotely, inspect state, collect outputs, send inputs, and use the `H` Machine Center with favourites and compact tabs.
+- Use the terminal sidebar button to browse only machines that have a GUI and open them directly. The `P` control center lists all bound machines: `X` removes a binding and right-click toggles automatic crafting. Favourite GUI machines remain available in the terminal shortcut strip.
 - Multiple compatible machines can share repeated work, while per-machine operation limits and leases prevent overlapping automation.
 - Custom-GUI bindings cover machines that can be opened remotely even without recipe automation.
 - Respects FTB Chunks/Cadmus claims, never force-loads distant chunks, rate-limits remote GUI requests, and revalidates every server-side action.
@@ -133,8 +133,8 @@ All keys can be changed in Minecraft Controls.
 |---|---|
 | `F` | Transfer container contents, or fill RS/BD search from the selected JEI/EMI item |
 | `G` | Switch transfer target between RS and Sophisticated Backpack |
-| `Y` / `H` | Toggle the RS side panel / Machine Management Center |
-| `P` | Toggle craft progress |
+| `Y` | Toggle the RS side panel |
+| `P` | Toggle the RSI control center, including active crafts and bound-machine management |
 | `;` | Bind nearby supported machines |
 | `Alt` + right-click | Bind the held terminal to the targeted machine |
 | `Alt` + left-click | Filter JEI ingredients by mod |

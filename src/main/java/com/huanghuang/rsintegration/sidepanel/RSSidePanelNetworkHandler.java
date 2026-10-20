@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineCollectPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoritesSyncPacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockTogglePacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
@@ -139,6 +140,12 @@ public final class RSSidePanelNetworkHandler {
                 MachineFavoritesSyncPacket::encode, MachineFavoritesSyncPacket::decode,
                 MachineFavoritesSyncPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.MACHINE_AUTOMATION_BLOCK_TOGGLE,
+                MachineAutomationBlockTogglePacket.class,
+                MachineAutomationBlockTogglePacket::encode,
+                MachineAutomationBlockTogglePacket::decode,
+                MachineAutomationBlockTogglePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.PLACEBO_REMOTE_MENU_SNAPSHOT,
                 PlaceboRemoteMenuSnapshotPacket.class,
                 PlaceboRemoteMenuSnapshotPacket::encode, PlaceboRemoteMenuSnapshotPacket::decode,
@@ -413,7 +420,8 @@ public final class RSSidePanelNetworkHandler {
     public static void sendMachineFavoritesSync(ServerPlayer player) {
         MachineFavoritesSavedData data = MachineFavoritesSavedData.get(player.server);
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new MachineFavoritesSyncPacket(data.getFavorites(player.getUUID())));
+                new MachineFavoritesSyncPacket(data.getFavorites(player.getUUID()),
+                        data.getBlocked(player.getUUID())));
     }
 
     private static void collectBindingsFromStacks(List<ItemStack> stacks, List<BindingInfo> out) {

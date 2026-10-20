@@ -12,6 +12,5 @@ final class BeyondDimensionsBindingSyncClientPacketHandler {
     static void handle(BeyondDimensionsBindingSyncPacket packet) {
         BindingCache.getInstance().updateBindings(packet.bindings());
         BeyondDimensionsMachineHubClient.markAuthoritativeBindingSync();
-        MachineHub.refreshMachines();
     }
 }

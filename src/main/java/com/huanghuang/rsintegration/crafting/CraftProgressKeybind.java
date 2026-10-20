@@ -49,9 +49,17 @@ public final class CraftProgressKeybind {
     public static void onKeyInput(InputEvent.Key event) {
         if (TOGGLE_PROGRESS == null) return;
         if (event.getAction() != GLFW.GLFW_PRESS) return;
-        if (CraftProgressTracker.taskSnapshots().isEmpty()) return;
         while (TOGGLE_PROGRESS.consumeClick()) {
-            Minecraft.getInstance().setScreen(new CraftProgressScreen());
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.screen instanceof CraftProgressScreen
+                    || minecraft.screen instanceof MachineManagementScreen) {
+                minecraft.setScreen(null);
+            } else {
+                minecraft.setScreen(CraftProgressTracker.taskSnapshots().isEmpty()
+                        ? new MachineManagementScreen(
+                        null, MachineManagementScreen.View.ALL_BOUND)
+                        : new CraftProgressScreen());
+            }
         }
     }
 }

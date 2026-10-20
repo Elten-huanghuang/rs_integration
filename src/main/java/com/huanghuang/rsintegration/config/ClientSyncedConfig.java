@@ -12,8 +12,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 public final class ClientSyncedConfig {
     private static boolean synced;
     public static boolean ENABLE_MACHINE_GUI_TABS = true;
-    public static boolean REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = false;
     public static int MACHINE_TAB_THRESHOLD = 5;
+    public static boolean REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = false;
     public static boolean ENABLE_AUTO_EAT = true;
     public static boolean ENABLE_JEI = true;
     public static boolean ENABLE_JEI_NETWORK_OVERLAY = true;
@@ -34,8 +34,8 @@ public final class ClientSyncedConfig {
     public static void apply(ConfigSyncPacket packet) {
         synced = true;
         ENABLE_MACHINE_GUI_TABS = packet.enableMachineGuiTabs;
-        REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = packet.requireBoundMachineForVirtualStation;
         MACHINE_TAB_THRESHOLD = packet.machineTabThreshold;
+        REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = packet.requireBoundMachineForVirtualStation;
         ENABLE_AUTO_EAT = packet.enableAutoEat;
         ENABLE_JEI = packet.enableJei;
         ENABLE_JEI_NETWORK_OVERLAY = packet.enableJeiNetworkOverlay;
@@ -59,8 +59,8 @@ public final class ClientSyncedConfig {
     public static void reset() {
         synced = false;
         ENABLE_MACHINE_GUI_TABS = true;
-        REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = false;
         MACHINE_TAB_THRESHOLD = 5;
+        REQUIRE_BOUND_MACHINE_FOR_VIRTUAL_STATION = false;
         ENABLE_AUTO_EAT = true;
         ENABLE_JEI = true;
         ENABLE_JEI_NETWORK_OVERLAY = true;

@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
@@ -29,6 +30,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.Locale;
+import java.util.Set;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
@@ -649,8 +651,9 @@ public final class AltarBindingRegistry {
             @Nullable ResourceLocation recipeId,
             @Nullable Recipe<?> recipe) {
         List<BoundMachine> result = new ArrayList<>();
+        Set<MachineFavoriteKey> blocked = blockedMachines(player);
         forEachInventoryGroup(player, stacks -> collectBindingsForType(
-                stacks, type, subTypeHint, recipeId, recipe, player, result));
+                stacks, type, subTypeHint, recipeId, recipe, player, blocked, result));
         // Aether fallback: the generic "aether" ModType acts as a recipe
         // classifier but machines are bound under concrete sub-types.
         if ("aether".equals(type.id()) && result.isEmpty()) {
@@ -659,7 +662,7 @@ public final class AltarBindingRegistry {
                 if (subType != ModType.GENERIC) {
                     forEachInventoryGroup(player, stacks ->
                             collectBindingsForType(stacks, subType, subTypeHint, recipeId,
-                                    recipe, player, result));
+                                    recipe, player, blocked, result));
                 }
             }
         }
@@ -667,10 +670,12 @@ public final class AltarBindingRegistry {
     }
 
     private static boolean scanBindingsForType(List<ItemStack> stacks, ServerPlayer player, ModType type) {
+        Set<MachineFavoriteKey> blocked = blockedMachines(player);
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                if (isAutomationBlocked(blocked, entry)) continue;
                 if (!isCompatibleMachineType(type, entryType)
                         && !(PmmoRSModule.TYPE_ID
                         .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
@@ -694,6 +699,7 @@ public final class AltarBindingRegistry {
                                                 @Nullable ResourceLocation recipeId,
                                                 @Nullable Recipe<?> recipe,
                                                 ServerPlayer player,
+                                                Set<MachineFavoriteKey> blocked,
                                                 List<BoundMachine> out) {
         // A resolved recipe supplies the canonical class/ID mapping from
         // recipeMachineSubType(). Public callers without a recipe still pass a
@@ -703,6 +709,7 @@ public final class AltarBindingRegistry {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                if (isAutomationBlocked(blocked, entry)) continue;
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (!isCompatibleMachineType(type, entryType)
                         && !(PmmoRSModule.TYPE_ID
@@ -735,6 +742,20 @@ public final class AltarBindingRegistry {
                 out.add(new BoundMachine(entry.dim(), entry.pos(), executionType, entry.blockKey()));
             }
         }
+    }
+
+    static boolean isAutomationBlocked(Set<MachineFavoriteKey> blocked,
+                                       BindingStorage.BindingEntry entry) {
+        return blocked != null && entry != null && blocked.contains(new MachineFavoriteKey(
+                entry.dim(), entry.pos(), entry.blockKey()));
+    }
+
+    private static Set<MachineFavoriteKey> blockedMachines(ServerPlayer player) {
+        if (player == null || player.server == null || player.server.overworld() == null) {
+            return Set.of();
+        }
+        return Set.copyOf(MachineFavoritesSavedData.get(player.server)
+                .getBlocked(player.getUUID()));
     }
 
     static String bindingSubTypeFilter(String hint, ModType type,

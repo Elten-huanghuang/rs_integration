@@ -64,6 +64,7 @@ public final class NetworkPacketIds {
     public static final int MACHINE_FAVORITES_SYNC = 57;
     public static final int PLACEBO_REMOTE_MENU_SNAPSHOT = 58;
     public static final int RS_BINDING_SYNC_REQUEST = 59;
+    public static final int MACHINE_AUTOMATION_BLOCK_TOGGLE = 60;
 
     // ── Resonance backpack (70-79) ──────────────────────────────────
     public static final int OPEN_RESONANCE_BACKPACK = 70;

@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.sidepanel.client;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.machine.MachineHub;
 import com.huanghuang.rsintegration.machine.MachineSlotType;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
@@ -17,6 +16,9 @@ import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineCollectPacket
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineInsertPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsUnbindMachinePacket;
+import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
+import com.huanghuang.rsintegration.machine.MachineHub;
+import net.minecraft.client.Minecraft;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,16 +35,6 @@ public final class MachineTabHandler {
     private static final long CLICK_COOLDOWN_MS = 500; // prevent GUI DDoS
 
     private MachineTabHandler() {}
-
-    /** Get the list of machines to render as tabs (respects threshold + whitelist config). */
-    public static List<BindingInfo> getVisibleTabs() {
-        var cache = BindingCache.getInstance();
-        if (cache.getMachineCount() == 0) return EMPTY;
-        List<BindingInfo> filtered = filterByWhitelist(new ArrayList<>(cache.getAll()));
-        if (filtered.isEmpty()) return EMPTY;
-        if (MachineHub.shouldUseHub(filtered.size())) return EMPTY;
-        return filtered;
-    }
 
     /** Get all bound machines regardless of threshold (for Hub mode), filtered by whitelist. */
     public static List<BindingInfo> getAllMachines() {
@@ -65,16 +57,19 @@ public final class MachineTabHandler {
 
     public static void setMachineCenterHovered(boolean hovered) { machineCenterHovered = hovered; }
 
+    public static void openMachineCenter() {
+        Minecraft.getInstance().setScreen(new MachineManagementScreen(
+                null, MachineManagementScreen.View.GUI_ONLY));
+    }
+
+    public static void toggleMachineCenter() {
+        List<BindingInfo> all = getAllMachines();
+        if (!all.isEmpty()) MachineHub.toggle(all);
+    }
+
     public static boolean isResonanceBackpackHovered() { return resonanceBackpackHovered; }
 
     public static void setResonanceBackpackHovered(boolean hovered) { resonanceBackpackHovered = hovered; }
-
-    /** Toggle the Machine Hub overlay. Called when Machine Center side button is clicked. */
-    public static void toggleMachineCenter() {
-        List<BindingInfo> all = getAllMachines();
-        if (all.isEmpty()) return;
-        MachineHub.toggle(all);
-    }
 
     /** Open the Resonance Backpack GUI. Called when Resonance Backpack side button is clicked. */
     public static void toggleResonanceBackpack() {
