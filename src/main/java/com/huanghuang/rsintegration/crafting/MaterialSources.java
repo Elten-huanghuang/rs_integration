@@ -21,7 +21,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class MaterialSources {
 
     private static final Map<String, Map<StackKey, Long>> cache = new ConcurrentHashMap<>();
-    private static final Map<String, Map<StackKey, Long>> networkCache = new ConcurrentHashMap<>();
     private static final Object cacheLock = new Object();
     private static volatile int lastTick = -1;
     private static final LogSampler OVERFLOW_LOGS = new LogSampler(60_000L);
@@ -124,30 +123,6 @@ public final class MaterialSources {
             cache.putIfAbsent(cacheKey, snapshot);
             return snapshot;
         }
-        // Keep the RS compatibility bridge on its native cache representation.
-        // StorageItemKey intentionally normalizes display stacks to count=1 and
-        // can lose backend-specific payload details; the old planner consumed
-        // StackListEntry directly and is authoritative for RS item identity.
-        if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
-            String networkKey = networkCacheKey(legacy);
-            Map<StackKey, Long> networkItems = networkCache.get(networkKey);
-            if (networkItems == null) {
-                Map<StackKey, Long> scanned = new HashMap<>();
-                for (ItemStack stack : legacy.cachedStackVariants()) {
-                    if (!stack.isEmpty()) {
-                        mergeAvailable(scanned, StackKey.of(stack, true), stack.getCount(),
-                                "refined_storage");
-                    }
-                }
-                networkItems = Map.copyOf(scanned);
-                Map<StackKey, Long> existing = networkCache.putIfAbsent(networkKey, networkItems);
-                if (existing != null) networkItems = existing;
-            }
-            networkItems.forEach((key, count) -> mergeAvailable(available, key, count, "refined_storage_cache"));
-            Map<StackKey, Long> snapshot = Map.copyOf(available);
-            cache.putIfAbsent(cacheKey, snapshot);
-            return snapshot;
-        }
         var snapshotResult = endpoint.snapshot(player);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
                 mergeAvailable(available, StackKey.of(item.stack(), true), item.amount(),
@@ -236,7 +211,6 @@ public final class MaterialSources {
     public static void invalidateFor(ServerPlayer player) {
         String prefix = player.getUUID() + ":";
         cache.keySet().removeIf(key -> key.startsWith(prefix));
-        networkCache.clear();
     }
 
     /**
@@ -247,15 +221,6 @@ public final class MaterialSources {
     public static void invalidateFor(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         String prefix = player.getUUID() + ":";
         cache.keySet().removeIf(key -> key.startsWith(prefix));
-        if (endpoint == null) {
-            // Legacy callers may still mutate an RS network without exposing
-            // the endpoint identity. Keep the old correctness guarantee.
-            networkCache.clear();
-            return;
-        }
-        if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
-            networkCache.remove(networkCacheKey(legacy));
-        }
     }
 
     private static int currentTick(ServerPlayer player) {
@@ -274,16 +239,11 @@ public final class MaterialSources {
         }
     }
 
-    private static String networkCacheKey(LegacyRsCraftStorageEndpoint endpoint) {
-        return endpoint.cacheKey();
-    }
-
     private static void rotateCache(int currentTick) {
         if (currentTick == lastTick) return;
         synchronized (cacheLock) {
             if (currentTick != lastTick) {
                 cache.clear();
-                networkCache.clear();
                 lastTick = currentTick;
             }
         }

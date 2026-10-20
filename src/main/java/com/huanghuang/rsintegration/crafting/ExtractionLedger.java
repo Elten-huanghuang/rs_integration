@@ -1161,7 +1161,7 @@ public final class ExtractionLedger implements AutoCloseable {
         CraftStorageEndpoint sourceEndpoint = entry.sourceEndpoint != null
                 ? entry.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
         if (entry.source == Source.NETWORK && sourceEndpoint != null) {
-            return entry.exactIdentity && entry.template.getTag() != null
+            return entry.exactIdentity
                     ? sourceEndpoint.extractExact(player, entry.template, entry.count, false)
                     : sourceEndpoint.extractMatching(
                             player, entry.originalIngredient, entry.count, false);

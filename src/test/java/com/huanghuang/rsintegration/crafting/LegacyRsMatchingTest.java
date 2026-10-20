@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -15,7 +19,11 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+
 import java.util.List;
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -102,6 +110,30 @@ class LegacyRsMatchingTest extends BootstrapTest {
         assertEquals(List.of("first", "second"), result.snapshot().orElseThrow().items().stream()
                 .map(item -> item.stack().getTag().getString("variant")).toList());
         assertTrue(Float.isNaN(bread.getTag().getCompound("dish_attribute").getFloat("nutrition")));
+    }
+
+    @Test
+    void legacySnapshotUsesExactUnifiedDiskAmountAboveInt() {
+        ItemStack stone = new ItemStack(Items.STONE);
+        long exact = 510_000_000_000L;
+        when(network.getItemStorageCache().getList().getStacks()).thenReturn(
+                List.of(new StackListEntry<>(stone)));
+        UnifiedDiskCore disk = new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(),
+                new UnifiedDiskCore.Limits(8, 8, 1048576, 268435456));
+        disk.insert(FrozenKey.item(stone), exact, true);
+        UnifiedDiskManager manager = mock(UnifiedDiskManager.class);
+        UnifiedMountCoordinator mounts = mock(UnifiedMountCoordinator.class);
+        when(manager.mounts()).thenReturn(mounts);
+        when(mounts.disksForNetwork(network)).thenReturn(List.of(disk));
+        when(network.getLevel().getServer()).thenReturn(player.server);
+
+        try (MockedStatic<UnifiedDiskManager> managers = mockStatic(UnifiedDiskManager.class)) {
+            managers.when(() -> UnifiedDiskManager.existing(player.server)).thenReturn(manager);
+            var result = endpoint.snapshot(player);
+            assertEquals(exact, result.snapshot().orElseThrow().countExact(
+                    endpoint.session().itemKey(stone)));
+        }
     }
 
     private static ItemStack named(String variant, int count) {

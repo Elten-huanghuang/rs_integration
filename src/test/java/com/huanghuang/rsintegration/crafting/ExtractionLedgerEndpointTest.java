@@ -102,6 +102,28 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     }
 
     @Test
+    void exactTaglessReservationCommitsThroughExactExtraction() {
+        ItemStack stone = new ItemStack(Items.STONE);
+        int requested = Integer.MAX_VALUE - 1;
+        when(player.getInventory()).thenReturn(new Inventory(player));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.STONE, requested))))));
+        when(session.extractExact(eq(player), any(StorageItemKey.class),
+                eq((long) requested), eq(false)))
+                .thenReturn(StorageOperationResult.extracted(
+                        StorageOperationMode.PERFORM, requested,
+                        List.of(new ItemStack(Items.STONE, requested))));
+
+        assertEquals(requested, ledger.reserveExactAcrossNetworkAndInventory(
+                stone, requested, endpoint, player).getCount());
+        assertTrue(ledger.commitToEndpoint(null, player));
+
+        verify(session).extractExact(
+                eq(player), any(StorageItemKey.class), eq((long) requested), eq(false));
+        verify(session, never()).extractMatching(any(), any(), anyLong(), eq(false));
+    }
+
+    @Test
     void failedInventoryTopUpRollsBackTheEndpointReservation() {
         Inventory inventory = new Inventory(player);
         inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 4));

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
@@ -54,27 +55,6 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
     }
 
     INetwork network() { return network; }
-
-    /** 保留 RS 原生缓存顺序与 NBT 变体，供规划器构造材料视图。 */
-    List<ItemStack> cachedStackVariants() {
-        var cache = network.getItemStorageCache();
-        if (cache == null || cache.getList() == null) return List.of();
-        List<ItemStack> stacks = new ArrayList<>();
-        for (var entry : cache.getList().getStacks()) {
-            ItemStack stack = entry.getStack();
-            if (!stack.isEmpty()) stacks.add(stack);
-        }
-        stacks.addAll(InkFluidSupport.snapshot(network, null));
-        return stacks;
-    }
-
-    String cacheKey() {
-        try {
-            return session().reference().toString();
-        } catch (RuntimeException ignored) {
-            return "legacy@" + System.identityHashCode(network);
-        }
-    }
 
     @Nullable
     ResonanceStorageView resonanceView() {
@@ -218,7 +198,9 @@ final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint {
 
         private void addSnapshotItem(List<StoredItem> items, ItemStack stack) {
             try {
-                items.add(new StoredItem(itemKey(stack), stack.getCount()));
+                long amount = UnifiedDiskAmountResolver.itemAmount(
+                        network, stack, stack.getCount());
+                items.add(new StoredItem(itemKey(stack), amount));
             } catch (IllegalArgumentException failure) {
                 // 单个食物的异常 NBT 不应让整个 RS 网络的合成材料消失。
                 var itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
