@@ -3,7 +3,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
@@ -22,15 +21,10 @@ import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 import com.huanghuang.rsintegration.sidepanel.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
-import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.registries.ForgeRegistries;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /** BD-only machine-center entrypoint. Keeps RS Grid mixins and layout untouched. */
 @OnlyIn(Dist.CLIENT)
@@ -58,8 +52,7 @@ public final class BeyondDimensionsMachineHubClient {
             new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button_hovered.png");
     private static final ResourceLocation MACHINE_CENTER_ICON =
             new ResourceLocation("rs_integration", "textures/gui/machine_center_bd_icon_16x16.png");
-    private static long lastLocalRefresh;
-    private static long authoritativeSyncUntil;
+    private static long lastBindingSyncRequest;
     private static final int BD_LEFT_ICON_X_OFFSET = 0;
     private static final int BD_LEFT_ICON_Y_OFFSET = 0;
     private static final int BD_RIGHT_ICON_X_OFFSET = 3;
@@ -73,6 +66,7 @@ public final class BeyondDimensionsMachineHubClient {
     private static int machineCenterY;
     private static int resonanceBackpackX;
     private static int resonanceBackpackY;
+    private static boolean machineCenterAvailable;
 
     private BeyondDimensionsMachineHubClient() {}
 
@@ -133,12 +127,14 @@ public final class BeyondDimensionsMachineHubClient {
         // primary-network switcher. Keep the machine center below that last
         // native control so it never covers the primary-network button.
         machineCenterY = top + 6 + 18 * 8;
-        boolean hovered = !MachineTabHandler.getAllMachines().isEmpty()
+        machineCenterAvailable = !MachineTabHandler.getAllMachines().isEmpty();
+        boolean hovered = machineCenterAvailable
                 && mouseX >= machineCenterX
                 && mouseX < machineCenterX + MACHINE_CENTER_SIZE
                 && mouseY >= machineCenterY
                 && mouseY < machineCenterY + MACHINE_CENTER_SIZE;
         MachineTabHandler.setMachineCenterHovered(hovered);
+        if (!machineCenterAvailable) return;
         int iconX = machineCenterX + BD_LEFT_ICON_X_OFFSET;
         int iconY = machineCenterY + BD_LEFT_ICON_Y_OFFSET;
         g.blit(hovered ? BD_SLOT_HOVER : BD_SLOT, iconX, iconY, 0, 0,
@@ -151,7 +147,8 @@ public final class BeyondDimensionsMachineHubClient {
     private static void renderResonanceEntry(Screen screen, GuiGraphics g, int mouseX, int mouseY) {
         int left = resolveScreenInt(screen, "getGuiLeft", "leftPos", (screen.width - 176) / 2);
         resonanceBackpackX = Math.max(0, left - 18);
-        resonanceBackpackY = machineCenterY + 18;
+        resonanceBackpackY = machineCenterY
+                + (machineCenterAvailable ? MACHINE_CENTER_SIZE + 2 : 0);
         boolean available = ModItems.DIMENSIONAL_RESONANCE_DISK != null;
         boolean hovered = available
                 && mouseX >= resonanceBackpackX
@@ -359,41 +356,15 @@ public final class BeyondDimensionsMachineHubClient {
     }
 
     private static void refreshLocalBindings() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
+        if (!BindingCache.getInstance().isEmpty()) return;
         long now = System.currentTimeMillis();
-        if (now < authoritativeSyncUntil) return;
-        if (now - lastLocalRefresh < 250L) return;
-        lastLocalRefresh = now;
-
-        Map<String, BindingInfo> unique = new LinkedHashMap<>();
-        List<ItemStack> stacks = new ArrayList<>();
-        stacks.addAll(mc.player.getInventory().items);
-        stacks.addAll(mc.player.getInventory().offhand);
-        stacks.addAll(mc.player.getInventory().armor);
-        // BD terminals are valid Curios equipment; include their bindings in
-        // the local machine-center view just like inventory-held terminals.
-        stacks.addAll(CuriosAccess.stacks(mc.player));
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
-            if (itemId == null || !"beyonddimensions".equals(itemId.getNamespace())
-                    || !"net_terminal_item".equals(itemId.getPath())) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                String key = itemId + "@" + entry.dim() + ":" + entry.pos();
-                String display = BindingEventHandler.resolveBlockName(
-                        entry.blockKey(), entry.blockRegKey(), entry.displayStack()).getString();
-                unique.putIfAbsent(key, new BindingInfo(itemId.toString(), entry.dim(), entry.pos(),
-                        entry.blockKey(), display, entry.blockRegKey(), entry.displayStack()));
-            }
-        }
-        BindingCache.getInstance().updateBindings(List.copyOf(unique.values()));
-        MachineHub.refreshMachines();
+        if (now - lastBindingSyncRequest < 2000L) return;
+        lastBindingSyncRequest = now;
+        MachineTabHandler.requestBindingSync();
     }
 
-    /** Prevent a stale client inventory snapshot from undoing a server sync. */
+    /** 服务端快照到达后重置空缓存请求节奏。 */
     static void markAuthoritativeBindingSync() {
-        authoritativeSyncUntil = System.currentTimeMillis() + 1000L;
-        lastLocalRefresh = authoritativeSyncUntil;
+        lastBindingSyncRequest = 0L;
     }
 }

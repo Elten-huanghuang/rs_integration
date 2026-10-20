@@ -3291,6 +3291,18 @@ public final class AsyncCraftChain {
                 online, step.modType(), step.recipeId());
         if (machines.isEmpty()) {
             waitingForMachineLease = false;
+            List<BoundMachine> blockedMatches =
+                    AltarBindingRegistry.getBlockedMachinesForRecipe(
+                            online, step.modType(), step.recipeId());
+            if (!blockedMatches.isEmpty()) {
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "All matching machines are excluded by the automation blocklist: "
+                                + "modType={} recipe={} blocked={}"),
+                        step.modType(), step.recipeId(), blockedMatches.size());
+                online.sendSystemMessage(Component.translatable(
+                        "rsi.async.error.machine_automation_blocked", step.recipeId()));
+                return null;
+            }
             // Diagnostic: also check how many bindings exist for this mod type
             // (without sub-type filter) so we can tell if sub-type mismatch or
             // no binding at all.

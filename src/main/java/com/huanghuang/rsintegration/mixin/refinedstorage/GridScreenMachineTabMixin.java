@@ -94,15 +94,16 @@ public abstract class GridScreenMachineTabMixin {
                 && mouseY >= rsi$machineCenterRelY
                 && mouseY < rsi$machineCenterRelY + BUTTON_SIZE;
 
-        boolean hasBinding = !MachineTabHandler.getAllMachines().isEmpty();
+        List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
+        boolean hasBinding = !allMachines.isEmpty();
         MachineTabHandler.setMachineCenterHovered(rsi$machineCenterHovered && hasBinding);
 
-        ResourceLocation mcTex = rsi$machineCenterHovered ? MACHINE_CENTER_HOVER_TEX : MACHINE_CENTER_TEX;
-        RenderSystem.setShaderTexture(0, mcTex);
-        gfx.blit(mcTex, rsi$machineCenterRelX, rsi$machineCenterRelY, 0, 0, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE);
-
-        List<BindingInfo> allMachines = MachineTabHandler.getAllMachines();
-        if (!allMachines.isEmpty()) {
+        if (hasBinding) {
+            ResourceLocation mcTex = rsi$machineCenterHovered
+                    ? MACHINE_CENTER_HOVER_TEX : MACHINE_CENTER_TEX;
+            RenderSystem.setShaderTexture(0, mcTex);
+            gfx.blit(mcTex, rsi$machineCenterRelX, rsi$machineCenterRelY,
+                    0, 0, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE);
             int cnt = allMachines.size();
             String label = cnt > 99 ? "…" : String.valueOf(cnt);
             int labelW = Minecraft.getInstance().font.width(label);
@@ -116,7 +117,8 @@ public abstract class GridScreenMachineTabMixin {
         if (!RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()) return;
 
         rsi$resonanceBackpackRelX = -BUTTON_SIZE - 2;
-        rsi$resonanceBackpackRelY = rsi$machineCenterRelY + BUTTON_SIZE + BUTTON_GAP;
+        rsi$resonanceBackpackRelY = rsi$machineCenterRelY
+                + (hasBinding ? BUTTON_SIZE + BUTTON_GAP : 0);
 
         rsi$resonanceBackpackHovered = mouseX >= rsi$resonanceBackpackRelX
                 && mouseX < rsi$resonanceBackpackRelX + BUTTON_SIZE

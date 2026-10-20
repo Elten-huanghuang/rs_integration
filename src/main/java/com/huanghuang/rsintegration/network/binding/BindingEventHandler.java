@@ -27,6 +27,7 @@ import com.huanghuang.rsintegration.magic.ResonantMagicStorage;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
@@ -48,6 +49,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
@@ -247,7 +249,8 @@ public final class BindingEventHandler {
                 if (binding.isPresent()) {
                     AltarBindingRegistry.bind(player.getUUID(), event.getLevel().dimension(),
                             bindingPos, binding.get());
-                    BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey, displayStack);
+                    BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey,
+                            displayStack, player.getUUID());
                     AltarBindingRegistry.invalidateScanCache();
                     RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
                     Component dimensionName = Component.translatable(
@@ -330,7 +333,7 @@ public final class BindingEventHandler {
         ItemStack displayStack = new ItemStack(block.asItem());
         AltarBindingRegistry.bind(player.getUUID(), level.dimension(), pos, binding);
         BindingStorage.addBinding(held, level.dimension().location(), pos,
-                blockKey, blockId.toString(), displayStack);
+                blockKey, blockId.toString(), displayStack, player.getUUID());
         AltarBindingRegistry.invalidateScanCache();
         RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
     }
@@ -455,7 +458,8 @@ public final class BindingEventHandler {
                 return NearbyBindResult.ALREADY_BOUND;
             }
             if (!BindingStorage.addBinding(
-                    connector, dim, pos, blockKey, blockRegKey, displayStack)) {
+                    connector, dim, pos, blockKey, blockRegKey, displayStack,
+                    player.getUUID())) {
                 return NearbyBindResult.ALREADY_BOUND;
             }
             AltarBindingRegistry.bind(player.getUUID(), level.dimension(), pos,
@@ -958,11 +962,23 @@ public final class BindingEventHandler {
         // The binding handler is shared by RS and BD-only installations.  The
         // side-panel bridge has an optional RS API type in its method table,
         // so never link it when Refined Storage is absent.
-        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return;
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            if (ModList.get().isLoaded("beyonddimensions")) {
+                BeyondDimensionsMachineOperations.sendBindingSync(player);
+            }
+            return;
+        }
         try {
             RSSidePanelNetworkHandler.sendBindingSync(player);
         } catch (Exception | LinkageError e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync", e);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            BindingSyncRequestRateLimiter.onPlayerLogout(player.getUUID());
         }
     }
 

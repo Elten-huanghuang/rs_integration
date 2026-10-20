@@ -14,10 +14,12 @@ import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPack
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineCollectPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineInsertPacket;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsBindingSyncRequestPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsUnbindMachinePacket;
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.machine.MachineHub;
+import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import net.minecraft.client.Minecraft;
 
 import java.util.ArrayList;
@@ -32,6 +34,7 @@ public final class MachineTabHandler {
     private static boolean machineCenterHovered;
     private static boolean resonanceBackpackHovered;
     private static long lastClickTime;
+    private static long lastBindingSyncRequest;
     private static final long CLICK_COOLDOWN_MS = 500; // prevent GUI DDoS
 
     private MachineTabHandler() {}
@@ -40,13 +43,18 @@ public final class MachineTabHandler {
     public static List<BindingInfo> getAllMachines() {
         var cache = BindingCache.getInstance();
         if (cache.getMachineCount() == 0) return EMPTY;
-        return filterByWhitelist(new ArrayList<>(cache.getAll()));
+        return filterEntries(new ArrayList<>(cache.getAll()));
     }
 
-    private static List<BindingInfo> filterByWhitelist(List<BindingInfo> list) {
-        list.removeIf(info -> !BindingEventHandler
-                .supportsGuiByInfo(info));
+    private static List<BindingInfo> filterEntries(List<BindingInfo> list) {
+        list.removeIf(info -> !BindingEventHandler.supportsGuiByInfo(info)
+                || MachinePreferenceClient.isBlocked(info));
         return list;
+    }
+
+    /** P 管理页使用的完整绑定列表，不受 GUI 和自动化黑名单过滤。 */
+    public static List<BindingInfo> getAllBoundMachinesForManagement() {
+        return BindingCache.getInstance().getAll();
     }
 
     public static int getHoveredTabIndex() { return hoveredTabIndex; }
@@ -60,6 +68,25 @@ public final class MachineTabHandler {
     public static void openMachineCenter() {
         Minecraft.getInstance().setScreen(new MachineManagementScreen(
                 null, MachineManagementScreen.View.GUI_ONLY));
+    }
+
+    /** 请求服务端权威绑定快照，避免每个终端界面自行扫描背包。 */
+    public static void requestBindingSync() {
+        long now = System.currentTimeMillis();
+        if (now - lastBindingSyncRequest < 1000L) return;
+        lastBindingSyncRequest = now;
+        if (ModList.get().isLoaded("refinedstorage")) {
+            try {
+                RSSidePanelNetworkHandler.sendBindingSyncRequest();
+                return;
+            } catch (Exception | LinkageError ignored) {
+                // 混合安装初始化失败时继续尝试 BD 独立通道。
+            }
+        }
+        if (ModList.get().isLoaded("beyonddimensions")) {
+            NetworkHandler.CHANNEL.sendToServer(
+                    new BeyondDimensionsBindingSyncRequestPacket());
+        }
     }
 
     public static void toggleMachineCenter() {
@@ -85,6 +112,7 @@ public final class MachineTabHandler {
     /** Handle a click on a machine tab. Sends the OpenBoundMachineGuiPacket to server. */
     public static void onClick(BindingInfo info) {
         if (info == null) return;
+        if (MachinePreferenceClient.isBlocked(info)) return;
         if (!checkCooldown()) return;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineTab] Clicked: {}", info.displayName());
         boolean beyondDimensions = isBeyondDimensions(info);

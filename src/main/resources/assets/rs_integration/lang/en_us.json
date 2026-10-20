@@ -745,6 +745,7 @@
   "rsi.async.error.commit_failed": "§cFailed to finalize crafting chain — materials were not consumed",
   "rsi.async.error.wrong_machine_type": "§cRecipe %s requires a different machine type (%s machine(s) bound but none match) — bind the correct machine type",
   "rsi.async.error.no_machine_bound": "§cRecipe %s requires a bound machine — bind an item to the target machine first (Shift+Right Click)",
+  "rsi.async.error.machine_automation_blocked": "§cAll machines that can craft %s are disabled for automated crafting in the machine center",
   "rsi.async.error.machine_valid_failed": "§cRecipe %s machine validation failed — a machine is bound but is not ready. See the error message above for details",
   "rsi.async.error.output_extracted": "§cCraft output was externally extracted: expected %s, collected %s. The chain was stopped; recovered intermediates were preserved.",
   "rsi.plan.unknown_item": "Unknown item",

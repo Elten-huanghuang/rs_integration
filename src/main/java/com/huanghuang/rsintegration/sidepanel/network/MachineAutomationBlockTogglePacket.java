@@ -36,6 +36,7 @@ public record MachineAutomationBlockTogglePacket(MachineFavoriteKey key) {
                 MachineFavoritesSavedData.ToggleResult result =
                         MachineFavoritesSavedData.get(player.server)
                                 .toggleBlocked(player.getUUID(), packet.key);
+                AltarBindingRegistry.invalidateScanCache();
                 player.displayClientMessage(Component.translatable(
                         result == MachineFavoritesSavedData.ToggleResult.ADDED
                                 ? "rsi.machine.automation_blocked"

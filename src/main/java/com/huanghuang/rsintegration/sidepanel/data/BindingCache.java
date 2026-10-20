@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.sidepanel.data;
 
+import com.huanghuang.rsintegration.network.binding.BindingStorage;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
+import javax.annotation.Nullable;
 import java.util.*;
 
 /**
@@ -18,7 +22,10 @@ public final class BindingCache {
     private final Map<String, List<BindingInfo>> byItemKey = new LinkedHashMap<>();
 
     /** All bound machines in insertion order. */
-    private final List<BindingInfo> allBindings = new ArrayList<>();
+    private List<BindingInfo> allBindings = List.of();
+    private final Map<UUID, List<BindingInfo>> byBookId = new LinkedHashMap<>();
+    private final Map<UUID, List<BindingStorage.BindingEntry>> entriesByBookId =
+            new LinkedHashMap<>();
 
     private BindingCache() {}
 
@@ -29,14 +36,32 @@ public final class BindingCache {
     /** Replace all bindings with a fresh list from the server. */
     public void updateBindings(List<BindingInfo> bindings) {
         byItemKey.clear();
-        allBindings.clear();
-        if (bindings == null) return;
+        byBookId.clear();
+        entriesByBookId.clear();
+        if (bindings == null) {
+            allBindings = List.of();
+            return;
+        }
+        List<BindingInfo> updated = new ArrayList<>(bindings.size());
         for (var info : bindings) {
             if (info != null && info.itemKey() != null) {
                 byItemKey.computeIfAbsent(info.itemKey(), k -> new ArrayList<>()).add(info);
-                allBindings.add(info);
+                updated.add(info);
+                if (info.bindingBookId() != null) {
+                    byBookId.computeIfAbsent(info.bindingBookId(), k -> new ArrayList<>())
+                            .add(info);
+                    entriesByBookId.computeIfAbsent(
+                            info.bindingBookId(), k -> new ArrayList<>())
+                            .add(new BindingStorage.BindingEntry(
+                                    info.dim(), info.pos(), info.blockKey(),
+                                    info.blockRegKey(), info.displayStack()));
+                }
             }
         }
+        byItemKey.replaceAll((ignored, values) -> List.copyOf(values));
+        byBookId.replaceAll((ignored, values) -> List.copyOf(values));
+        entriesByBookId.replaceAll((ignored, values) -> List.copyOf(values));
+        allBindings = List.copyOf(updated);
     }
 
     // ── Queries ─────────────────────────────────────────────────────
@@ -44,21 +69,38 @@ public final class BindingCache {
     /** Return the first binding for this itemKey, or null. */
     public BindingInfo getBinding(String itemKey) {
         List<BindingInfo> list = byItemKey.get(itemKey);
-        return list != null && !list.isEmpty() ? list.get(0) : null;
+        if (list == null) return null;
+        for (BindingInfo info : list) {
+            if (BindingEventHandler.supportsGuiByInfo(info)
+                    && !MachinePreferenceClient.isBlocked(info)) return info;
+        }
+        return null;
     }
 
     /** Return all bindings for this itemKey (immutable). */
     public List<BindingInfo> getBindings(String itemKey) {
         List<BindingInfo> list = byItemKey.get(itemKey);
-        return list != null ? Collections.unmodifiableList(list) : Collections.emptyList();
+        return list != null ? list : List.of();
     }
 
     public int getMachineCount() {
         return allBindings.size();
     }
 
-    public Collection<BindingInfo> getAll() {
-        return Collections.unmodifiableList(allBindings);
+    public List<BindingInfo> getAll() {
+        return allBindings;
+    }
+
+    public List<BindingInfo> getByBookId(@Nullable UUID bookId) {
+        if (bookId == null) return List.of();
+        List<BindingInfo> bindings = byBookId.get(bookId);
+        return bindings == null ? List.of() : bindings;
+    }
+
+    public List<BindingStorage.BindingEntry> getEntriesByBookId(@Nullable UUID bookId) {
+        if (bookId == null) return List.of();
+        List<BindingStorage.BindingEntry> entries = entriesByBookId.get(bookId);
+        return entries == null ? List.of() : entries;
     }
 
     /** Whether any bindings exist at all. */
@@ -70,7 +112,7 @@ public final class BindingCache {
 
     /** Whether any binding exists for this itemKey. */
     public boolean hasGui(String itemKey) {
-        return byItemKey.containsKey(itemKey);
+        return getBinding(itemKey) != null;
     }
 
     /** Check if the binding exists (regardless of GUI status). */
@@ -83,6 +125,8 @@ public final class BindingCache {
     /** Reset all state (e.g. on world unload). */
     public void clear() {
         byItemKey.clear();
-        allBindings.clear();
+        allBindings = List.of();
+        byBookId.clear();
+        entriesByBookId.clear();
     }
 }

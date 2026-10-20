@@ -12,6 +12,8 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -336,8 +338,16 @@ public final class PlanningStateValidator {
         var blockEntity = level.getBlockEntity(pos);
         String type = blockEntity == null ? "none" : blockEntity.getType().toString();
         var persisted = AltarBindingRegistry.findBindingEntry(player, dimension.location(), pos);
+        long blockedHash = 0x9E3779B97F4A7C15L;
+        for (MachineFavoriteKey blocked : MachineFavoritesSavedData.get(player.server)
+                .getBlocked(player.getUUID())) {
+            blockedHash = blockedHash * 31 + blocked.dimension().hashCode();
+            blockedHash = blockedHash * 31 + blocked.pos().asLong();
+            blockedHash = blockedHash * 31 + blocked.blockKey().hashCode();
+        }
         return dimension.location() + ":" + pos.asLong() + ':' + type + ':'
                 + level.getBlockState(pos).getBlock() + ':'
-                + (persisted == null ? "none" : persisted.blockKey());
+                + (persisted == null ? "none" : persisted.blockKey())
+                + ":blocked=" + Long.toHexString(blockedHash);
     }
 }

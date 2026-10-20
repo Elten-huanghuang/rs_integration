@@ -22,6 +22,8 @@ import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
@@ -116,7 +118,12 @@ final class EmiCraftButtonResolver {
             dimension = minecraft.level.dimension().location();
             machinePos = minecraft.player.blockPosition();
         } else {
-            BindingStorage.BindingEntry binding = findBinding(filter, sourceRecipe);
+            ModType bindingType = ModType.findById(filter);
+            if (bindingType == null || bindingType == ModType.GENERIC) {
+                bindingType = recipeModType;
+            }
+            BindingStorage.BindingEntry binding = findBinding(
+                    filter, sourceRecipe, backingRecipe, bindingType);
             if (binding == null) return Optional.empty();
             dimension = binding.dim();
             machinePos = binding.pos();
@@ -294,32 +301,52 @@ final class EmiCraftButtonResolver {
     }
 
     @Nullable
-    private static BindingStorage.BindingEntry findBinding(String filter, Object recipe) {
+    private static BindingStorage.BindingEntry findBinding(
+            String filter, Object recipe, @Nullable Recipe<?> backingRecipe,
+            @Nullable ModType recipeType) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
         for (ItemStack stack : player.getInventory().items) {
-            BindingStorage.BindingEntry found = findBinding(stack, filter, recipe);
+            BindingStorage.BindingEntry found = findBinding(
+                    stack, filter, recipe, backingRecipe, recipeType);
             if (found != null) return found;
         }
         for (ItemStack stack : player.getInventory().offhand) {
-            BindingStorage.BindingEntry found = findBinding(stack, filter, recipe);
+            BindingStorage.BindingEntry found = findBinding(
+                    stack, filter, recipe, backingRecipe, recipeType);
             if (found != null) return found;
         }
         for (ItemStack stack : CuriosAccess.stacks(player)) {
-            BindingStorage.BindingEntry found = findBinding(stack, filter, recipe);
+            BindingStorage.BindingEntry found = findBinding(
+                    stack, filter, recipe, backingRecipe, recipeType);
             if (found != null) return found;
         }
         return null;
     }
 
     @Nullable
-    private static BindingStorage.BindingEntry findBinding(ItemStack stack, String filter, Object recipe) {
+    private static BindingStorage.BindingEntry findBinding(
+            ItemStack stack, String filter, Object recipe,
+            @Nullable Recipe<?> backingRecipe, @Nullable ModType recipeType) {
         for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-            if (bindingMatchesFilter(entry, filter) && bindingMatchesRecipe(entry, filter, recipe)) {
+            if (bindingMatchesFilter(entry, filter)
+                    && bindingMatchesRecipe(entry, filter, recipe)
+                    && bindingMatchesMachine(entry, recipe, backingRecipe, recipeType)) {
                 return entry;
             }
         }
         return null;
+    }
+
+    private static boolean bindingMatchesMachine(
+            BindingStorage.BindingEntry entry, Object recipe,
+            @Nullable Recipe<?> backingRecipe, @Nullable ModType recipeType) {
+        if (MachinePreferenceClient.isBlocked(entry)) return false;
+        if (recipeType == null || recipeType == ModType.GENERIC) return true;
+        Recipe<?> nativeRecipe = recipe instanceof Recipe<?> nativeEntry
+                ? nativeEntry : backingRecipe;
+        return nativeRecipe == null || AltarBindingRegistry.isRecipeBindingCompatible(
+                nativeRecipe, recipeType, entry.blockKey());
     }
 
     private static boolean bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {

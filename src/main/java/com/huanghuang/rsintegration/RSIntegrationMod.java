@@ -71,6 +71,7 @@ import com.huanghuang.rsintegration.anvilmemory.AnvilMemoryNetworkHandler;
 import com.huanghuang.rsintegration.client.ClientEventBootstrap;
 import com.huanghuang.rsintegration.client.UpdateCheckClient;
 import com.huanghuang.rsintegration.client.StorageClientBootstrap;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmService;
 import com.huanghuang.rsintegration.compat.ftbquests.ClaimAllChainService;
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
@@ -871,6 +872,8 @@ public final class RSIntegrationMod {
                         ConfigSyncPacket.fromServerConfig());
                 if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
                     RSOptionalBootstrap.onPlayerLoggedIn(sp);
+                } else if (ModList.get().isLoaded("beyonddimensions")) {
+                    BeyondDimensionsMachineOperations.sendBindingSync(sp);
                 }
                 sp.server.execute(() -> {
                     if (sp.hasDisconnected()) return;

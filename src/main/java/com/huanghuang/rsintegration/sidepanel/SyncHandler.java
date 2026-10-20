@@ -110,7 +110,9 @@ final class SyncHandler {
             RSSidePanelClient.networkAvailable = false;
             RSSidePanelClient.networkName = networkName;
             RSSidePanelClient.displayDirty = true;
-            BindingCache.getInstance().updateBindings(bindings);
+            if (!bindings.isEmpty()) {
+                BindingCache.getInstance().updateBindings(bindings);
+            }
             RSIntegrationMod.LOGGER.debug(
                     "[RSI] Network temporarily unavailable; retaining {} cached panel entries and retrying",
                     prevSize);
@@ -144,7 +146,9 @@ final class SyncHandler {
         RSSidePanelClient.clampScroll();
 
         RSSidePanelClient.dataModel.updatePanels(new ArrayList<>(RSSidePanelClient.panels), RSSidePanelClient.totalSlotCount);
-        BindingCache.getInstance().updateBindings(bindings);
+        if (!bindings.isEmpty()) {
+            BindingCache.getInstance().updateBindings(bindings);
+        }
     }
 
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {

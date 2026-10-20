@@ -7,11 +7,15 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraftforge.registries.ForgeRegistries;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 public final class BindingStorage {
 
@@ -22,6 +26,30 @@ public final class BindingStorage {
     public record BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey,
                                 @Nullable String blockRegKey,
                                 @Nullable ItemStack displayStack) {
+        public BindingEntry copy() {
+            return new BindingEntry(dim, pos, blockKey, blockRegKey,
+                    displayStack == null ? null : displayStack.copy());
+        }
+
+        /** 普通方块图标可由 blockRegKey 重建，无需把完整 ItemStack NBT 存进索引和同步包。 */
+        public BindingEntry compactDisplayStack() {
+            if (displayStack == null || displayStack.isEmpty()) {
+                return displayStack == null ? this : new BindingEntry(
+                        dim, pos, blockKey, blockRegKey, null);
+            }
+            CompoundTag displayTag = displayStack.getTag();
+            if (blockRegKey == null || (displayTag != null && !displayTag.isEmpty())
+                    || displayStack.getDamageValue() != 0) {
+                return this;
+            }
+            ResourceLocation blockId = ResourceLocation.tryParse(blockRegKey);
+            Block block = blockId == null ? null : ForgeRegistries.BLOCKS.getValue(blockId);
+            if (block == null || block == Blocks.AIR || !displayStack.is(block.asItem())) {
+                return this;
+            }
+            return new BindingEntry(dim, pos, blockKey, blockRegKey, null);
+        }
+
         public CompoundTag toTag() {
             CompoundTag tag = new CompoundTag();
             tag.putString("dim", dim.toString());
@@ -62,17 +90,18 @@ public final class BindingStorage {
             }
             return new BindingEntry(dim, pos, blockKey, regKey, dispStack);
         }
+    }
 
-        }
+    /**
+     * 服务端从权威索引读取，客户端从同步缓存读取；只有旧物品或尚未同步时
+     * 才回退到物品 NBT。该路径不会修改物品。
+     */
+    public static List<BindingEntry> getBindings(ItemStack stack) {
+        return MachineBindingService.getBindings(stack);
+    }
 
-        /** Read-only — called from server and client (JEI) threads.
-         *  Does NOT mutate the tag.  Concurrent reads are safe because
-         *  {@link #addBinding}/{@link #removeBinding} use Copy-on-Write
-         *  (clone → mutate → swap via {@code ItemStack.setTag}) and
-         *  {@code ItemStack.tag} is a volatile reference, guaranteeing
-         *  that readers always see a fully-constructed tag snapshot.
-         *  Falls back to reading legacy format without migrating. */
-        public static List<BindingEntry> getBindings(ItemStack stack) {
+    /** 仅供无服务端上下文的兼容路径和客户端首次同步前回退使用。 */
+    public static List<BindingEntry> readLegacyBindings(ItemStack stack) {
         CompoundTag tag = stack.getTag();
         if (tag == null) {
             return Collections.emptyList();
@@ -116,12 +145,25 @@ public final class BindingStorage {
         return new BindingEntry(dim, pos, blockKey, null, null);
     }
 
-    /** Copy-on-write: clone the tag, mutate the copy, then atomically swap.
-     *  Prevents the client render thread (JEI) from seeing a half-mutated
-     *  CompoundTag when reading {@link #getBindings} concurrently. */
+    /** 有服务端上下文时写入权威索引；仅无服务端的兼容环境才追加旧 NBT 列表。 */
     public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                      String blockKey, @Nullable String blockRegKey,
-                                      @Nullable ItemStack displayStack) {
+                                     String blockKey, @Nullable String blockRegKey,
+                                     @Nullable ItemStack displayStack) {
+        return addBinding(stack, dim, pos, blockKey, blockRegKey, displayStack, null);
+    }
+
+    /** 生产路径应传入当前玩家，以便服务端索引记录终端所有权。 */
+    public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
+                                     String blockKey, @Nullable String blockRegKey,
+                                     @Nullable ItemStack displayStack,
+                                     @Nullable UUID ownerId) {
+        return MachineBindingService.addBinding(
+                stack, dim, pos, blockKey, blockRegKey, displayStack, ownerId);
+    }
+
+    static boolean addLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
+                                    String blockKey, @Nullable String blockRegKey,
+                                    @Nullable ItemStack displayStack) {
         CompoundTag oldTag = stack.getTag();
         CompoundTag tag = oldTag != null ? oldTag.copy() : new CompoundTag();
         migrateFromLegacy(tag);
@@ -146,6 +188,10 @@ public final class BindingStorage {
 
     /** Copy-on-write: same as {@link #addBinding} — clone, mutate, swap. */
     public static boolean removeBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        return MachineBindingService.removeBinding(stack, dim, pos);
+    }
+
+    static boolean removeLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
         CompoundTag oldTag = stack.getTag();
         if (oldTag == null) return false;
         if (!oldTag.contains(KEY_BINDINGS, Tag.TAG_LIST) && !oldTag.contains("aec_bound_x")) return false;
@@ -172,6 +218,13 @@ public final class BindingStorage {
     /** Copy-on-write replacement for one binding's machine identity. */
     public static boolean replaceBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
                                                  String expectedBlockKey, String replacementBlockKey) {
+        return MachineBindingService.replaceBindingBlockKey(
+                stack, dim, pos, expectedBlockKey, replacementBlockKey);
+    }
+
+    static boolean replaceLegacyBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
+                                                String expectedBlockKey,
+                                                String replacementBlockKey) {
         CompoundTag oldTag = stack.getTag();
         if (oldTag == null || expectedBlockKey.equals(replacementBlockKey)) return false;
         CompoundTag tag = oldTag.copy();
@@ -208,6 +261,10 @@ public final class BindingStorage {
     }
 
     public static boolean hasBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        return MachineBindingService.hasBinding(stack, dim, pos);
+    }
+
+    static boolean hasLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
         if (!stack.hasTag()) return false;
         CompoundTag tag = stack.getTag();
         if (tag == null) return false;
@@ -235,6 +292,10 @@ public final class BindingStorage {
     }
 
     public static boolean hasAnyBinding(ItemStack stack) {
+        return MachineBindingService.hasAnyBinding(stack);
+    }
+
+    static boolean hasAnyLegacyBinding(ItemStack stack) {
         if (!stack.hasTag()) return false;
         CompoundTag tag = stack.getTag();
         if (tag == null) return false;

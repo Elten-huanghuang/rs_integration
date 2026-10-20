@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
@@ -86,7 +85,7 @@ public final class MachineManagementScreen extends Screen {
         doneButton = addRenderableWidget(Button.builder(
                         Component.translatable("gui.done"), button -> onClose())
                 .bounds(panelX + panelWidth - 74, panelY + panelHeight - 28, 62, 20).build());
-        RSSidePanelNetworkHandler.sendBindingSyncRequest();
+        MachineTabHandler.requestBindingSync();
     }
 
     @Override
@@ -107,8 +106,10 @@ public final class MachineManagementScreen extends Screen {
 
     private void refreshMachines() {
         machines.clear();
-        for (BindingInfo info : BindingCache.getInstance().getAll()) {
-            if (view == View.GUI_ONLY && !BindingEventHandler.supportsGuiByInfo(info)) continue;
+        for (BindingInfo info : MachineTabHandler.getAllBoundMachinesForManagement()) {
+            if (view == View.GUI_ONLY
+                    && (!BindingEventHandler.supportsGuiByInfo(info)
+                    || MachinePreferenceClient.isBlocked(info))) continue;
             machines.add(info);
         }
         machines.sort(Comparator
@@ -220,18 +221,21 @@ public final class MachineManagementScreen extends Screen {
         lines.add(displayComponent(hovered));
         lines.add(Component.literal(hovered.dim() + " " + hovered.pos().toShortString())
                 .withStyle(ChatFormatting.DARK_GRAY));
-        lines.add(Component.translatable("rsi.control_center.hint.open")
-                .withStyle(ChatFormatting.GRAY));
+        boolean blocked = MachinePreferenceClient.isBlocked(hovered);
+        if (!blocked && BindingEventHandler.supportsGuiByInfo(hovered)) {
+            lines.add(Component.translatable("rsi.control_center.hint.open")
+                    .withStyle(ChatFormatting.GRAY));
+        }
         if (view == View.GUI_ONLY) {
             lines.add(Component.translatable("rsi.control_center.hint.favorite")
                     .withStyle(ChatFormatting.GRAY));
         } else {
             lines.add(Component.translatable("rsi.control_center.hint.unbind")
                     .withStyle(ChatFormatting.RED));
-            lines.add(Component.translatable(MachinePreferenceClient.isBlocked(hovered)
+            lines.add(Component.translatable(blocked
                             ? "rsi.control_center.hint.allow_automation"
                             : "rsi.control_center.hint.block_automation")
-                    .withStyle(MachinePreferenceClient.isBlocked(hovered)
+                    .withStyle(blocked
                             ? ChatFormatting.GREEN : ChatFormatting.GOLD));
         }
         graphics.renderTooltip(font, lines, Optional.empty(), mouseX, mouseY);
@@ -270,7 +274,8 @@ public final class MachineManagementScreen extends Screen {
                 }
                 return true;
             }
-            if (button == 0 && BindingEventHandler.supportsGuiByInfo(info)) {
+            if (button == 0 && !MachinePreferenceClient.isBlocked(info)
+                    && BindingEventHandler.supportsGuiByInfo(info)) {
                 MachineTabHandler.onClick(info);
                 return true;
             }

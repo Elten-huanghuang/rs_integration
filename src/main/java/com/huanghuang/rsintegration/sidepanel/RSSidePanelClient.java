@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.sidepanel;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+import com.huanghuang.rsintegration.sidepanel.client.BindingSyncChunkAccumulator;
 import com.huanghuang.rsintegration.sidepanel.data.MachineStatusCache;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
@@ -118,6 +119,7 @@ public final class RSSidePanelClient {
         networkAvailable = false;
         networkName = "";
         SyncHandler.clearOnLogout();
+        BindingSyncChunkAccumulator.clear();
         BindingCache.getInstance().clear();
         MachineStatusCache.getInstance().clear();
         ClientSyncedConfig.reset();

@@ -56,6 +56,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
@@ -343,7 +345,12 @@ public class RecipeGuiLayoutsMixin {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
             } else {
-                BindingStorage.BindingEntry binding = findBinding(filter, recipe);
+                ModType bindingType = ModType.findById(filter);
+                if (bindingType == null || bindingType == ModType.GENERIC) {
+                    bindingType = recipeModType;
+                }
+                BindingStorage.BindingEntry binding = findBinding(
+                        filter, recipe, bindingType);
                 if (binding == null) {
                     if (isFa) faNoBinding++;
                 if (isFaOrTlm) {
@@ -1696,7 +1703,8 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static BindingStorage.BindingEntry findBinding(String filter, @Nullable Object recipe) {
+    private static BindingStorage.BindingEntry findBinding(
+            String filter, @Nullable Object recipe, @Nullable ModType recipeType) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
@@ -1711,14 +1719,16 @@ public class RecipeGuiLayoutsMixin {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(entry, filter)
-                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)
+                        && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
         }
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(entry, filter)
-                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)
+                        && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
         }
 
@@ -1726,7 +1736,8 @@ public class RecipeGuiLayoutsMixin {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(entry, filter)
-                        && rsi$bindingMatchesRecipe(entry, filter, recipe)) return entry;
+                        && rsi$bindingMatchesRecipe(entry, filter, recipe)
+                        && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
         }
 
@@ -1736,6 +1747,17 @@ public class RecipeGuiLayoutsMixin {
         }
 
         return null;
+    }
+
+    @Unique
+    private static boolean rsi$bindingMatchesMachine(
+            BindingStorage.BindingEntry entry, @Nullable Object recipe,
+            @Nullable ModType recipeType) {
+        if (MachinePreferenceClient.isBlocked(entry)) return false;
+        if (recipeType == null || recipeType == ModType.GENERIC
+                || !(recipe instanceof Recipe<?> nativeRecipe)) return true;
+        return AltarBindingRegistry.isRecipeBindingCompatible(
+                nativeRecipe, recipeType, entry.blockKey());
     }
 
     @Unique

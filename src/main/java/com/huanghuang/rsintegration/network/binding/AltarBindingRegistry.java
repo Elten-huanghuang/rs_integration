@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import net.minecraft.core.BlockPos;
@@ -23,6 +24,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
@@ -50,7 +52,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry that maps world positions to altar bindings (mod machine type
- * and RS network info). Bindings survive server restarts via item NBT.
+ * and RS network info). Bindings survive server restarts through the
+ * server-authoritative index; terminal items only carry a binding-book UUID.
  *
  * <p><b>Limitation (Ship-of-Theseus):</b> If a bound machine is destroyed
  * and replaced with the same block type at the same coordinates, the
@@ -155,7 +158,7 @@ public final class AltarBindingRegistry {
 
     /**
      * Remove one machine binding from every connector carried by this player.
-     * This updates the item NBT, which is the authoritative persistent store.
+     * 实际绑定条目位于服务端索引，终端 NBT 只保留书 UUID。
      *
      * @return number of connector stacks that contained the binding
      */
@@ -205,7 +208,7 @@ public final class AltarBindingRegistry {
     public static boolean isBound(ResourceKey<Level> dim, BlockPos altarPos, ServerPlayer player) {
         // Never trust the process-wide cache alone: it may contain a binding
         // reconstructed for a different player's NetworkItem.  Ownership is
-        // established by the requester's own item NBT.
+        // established by the requester's own terminal binding-book UUID.
         if (rebuildBindingFromNBT(player, dim, altarPos)) return true;
         return findBindingEntry(player, dim.location(), altarPos) != null;
     }
@@ -318,6 +321,7 @@ public final class AltarBindingRegistry {
 
         unbindAll(dim, pos);
         SCAN_CACHE.clear();
+        MachineBindingService.removeEverywhere(server, dim.location(), pos);
         RSIntegrationMod.LOGGER.debug("[RSI-Bind] Lazy-cleaned ghost binding at dim={} pos={} (block is air)",
                 dim.location(), pos);
 
@@ -405,6 +409,7 @@ public final class AltarBindingRegistry {
         Set<String> keys = cache.blockKeysByType.get(type.id());
         if (keys == null) return false;
         for (String bk : keys) {
+            if (!isExecutableBinding(type, bk)) continue;
             if (subType != null && (bk == null
                     || !bk.toLowerCase(Locale.ROOT).contains(subType))) {
                 continue;
@@ -414,7 +419,7 @@ public final class AltarBindingRegistry {
         return false;
     }
 
-    static boolean isRecipeBindingCompatible(
+    public static boolean isRecipeBindingCompatible(
             Recipe<?> recipe,
             ModType type, @Nullable String blockKey) {
         ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
@@ -432,7 +437,9 @@ public final class AltarBindingRegistry {
 
         Set<String> modTypeIds = new HashSet<>();
         Map<String, Set<String>> blockKeysByType = new HashMap<>();
-        forEachInventoryGroup(player, stacks -> collectBoundInfo(stacks, player, modTypeIds, blockKeysByType));
+        Set<MachineFavoriteKey> blocked = blockedMachines(player);
+        forEachInventoryGroup(player, stacks ->
+                collectBoundInfo(stacks, player, blocked, modTypeIds, blockKeysByType));
 
         cache = new TickCache(tick, modTypeIds, blockKeysByType);
         SCAN_CACHE.put(pid, cache);
@@ -452,13 +459,16 @@ public final class AltarBindingRegistry {
 
     /** Collect all ModType IDs and blockKeys that this stack list has fresh bindings for. */
     private static void collectBoundInfo(List<ItemStack> stacks, ServerPlayer player,
+                                            Set<MachineFavoriteKey> blocked,
                                             Set<String> modTypeIds,
                                             Map<String, Set<String>> blockKeysByType) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                if (isAutomationBlocked(blocked, entry)) continue;
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                if (entryType == null) continue;
+                if (entryType == null || !isExecutableBinding(
+                        entryType, entry.blockKey())) continue;
                 ResourceKey<Level> altarDim = ResourceKey.create(
                         Registries.DIMENSION, entry.dim());
                 ServerLevel entryLevel = player.server.getLevel(altarDim);
@@ -533,9 +543,15 @@ public final class AltarBindingRegistry {
     // ── event handlers ──────────────────────────────────────────
 
     @SubscribeEvent
+    public static void onServerStarted(ServerStartedEvent event) {
+        MachineBindingSavedData.get(event.getServer());
+    }
+
+    @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         BINDINGS.clear();
         SCAN_CACHE.clear();
+        MachineBindingSavedData.release(event.getServer());
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSIntegrationNetwork
                     .clearNetworkResolutionCache();
@@ -556,10 +572,16 @@ public final class AltarBindingRegistry {
 
         boolean cachedBinding = bindingPositions.stream().anyMatch(candidate -> isBound(dim, candidate));
 
-        // Clean up all online players' NBT and sync their side panels.
-        // Only cleaning the breaker would leave stale bindings on other
-        // players' items and out-of-date MachineHub tabs on their clients.
         MinecraftServer server = level.getServer();
+        int indexedEntries = 0;
+        if (server != null) {
+            for (BlockPos candidate : bindingPositions) {
+                indexedEntries += MachineBindingService.removeEverywhere(
+                        server, dim.location(), candidate);
+            }
+        }
+
+        // 兼容尚未迁移的旧终端：索引删除后仍扫描在线玩家的旧列表格式。
         int removedEntries = 0;
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -570,13 +592,14 @@ public final class AltarBindingRegistry {
                 }
             }
         }
-        if (!cachedBinding && removedEntries == 0) return;
+        if (!cachedBinding && indexedEntries == 0 && removedEntries == 0) return;
 
         for (BlockPos candidate : bindingPositions) unbindAll(dim, candidate);
         SCAN_CACHE.clear();
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-Bind] Auto-cleaned binding at dim={} brokenPos={} rootPos={} nbtEntries={} (block broken)",
-                dim.location(), pos, rootPos, removedEntries);
+                "[RSI-Bind] Auto-cleaned binding at dim={} brokenPos={} rootPos={} "
+                        + "indexed={} legacyEntries={} (block broken)",
+                dim.location(), pos, rootPos, indexedEntries, removedEntries);
 
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -585,6 +608,8 @@ public final class AltarBindingRegistry {
                             .invalidateNetworkResolution(p.getUUID());
                     RSSidePanelNetworkHandler
                             .sendBindingSync(p);
+                } else if (ModList.get().isLoaded("beyonddimensions")) {
+                    BeyondDimensionsMachineOperations.sendBindingSync(p);
                 }
             }
         }
@@ -621,12 +646,35 @@ public final class AltarBindingRegistry {
     /** Enumerate machines that can execute this exact recipe. */
     public static List<BoundMachine> getBoundMachinesForRecipe(
             ServerPlayer player, ModType type, ResourceLocation recipeId) {
+        return getBoundMachinesForRecipe(player, type, recipeId, false);
+    }
+
+    /** 诊断用：保留被自动化黑名单排除的匹配机器。 */
+    public static List<BoundMachine> getBlockedMachinesForRecipe(
+            ServerPlayer player, ModType type, ResourceLocation recipeId) {
+        List<BoundMachine> including =
+                getBoundMachinesForRecipe(player, type, recipeId, true);
+        Set<MachineFavoriteKey> blocked = blockedMachines(player);
+        if (blocked.isEmpty()) return List.of();
+        return including.stream()
+                .filter(machine -> machine.blockKey() != null
+                        && blocked.contains(new MachineFavoriteKey(
+                        machine.dim(), machine.pos(), machine.blockKey())))
+                .toList();
+    }
+
+    private static List<BoundMachine> getBoundMachinesForRecipe(
+            ServerPlayer player, ModType type, ResourceLocation recipeId,
+            boolean includeBlocked) {
         Recipe<?> recipe = player.serverLevel()
                 .getRecipeManager().byKey(recipeId).orElse(null);
         String subType = recipe != null
                 ? recipeMachineSubType(recipe, type)
                 : recipeSubTypeHint(recipeId);
-        return getBoundMachinesForType(player, type, subType, recipeId, recipe);
+        Set<MachineFavoriteKey> blocked = includeBlocked
+                ? Set.of() : blockedMachines(player);
+        return getBoundMachinesForType(
+                player, type, subType, recipeId, recipe, blocked);
     }
 
     /**
@@ -650,8 +698,16 @@ public final class AltarBindingRegistry {
             ServerPlayer player, ModType type, @Nullable String subTypeHint,
             @Nullable ResourceLocation recipeId,
             @Nullable Recipe<?> recipe) {
+        return getBoundMachinesForType(player, type, subTypeHint, recipeId, recipe,
+                blockedMachines(player));
+    }
+
+    private static List<BoundMachine> getBoundMachinesForType(
+            ServerPlayer player, ModType type, @Nullable String subTypeHint,
+            @Nullable ResourceLocation recipeId,
+            @Nullable Recipe<?> recipe,
+            Set<MachineFavoriteKey> blocked) {
         List<BoundMachine> result = new ArrayList<>();
-        Set<MachineFavoriteKey> blocked = blockedMachines(player);
         forEachInventoryGroup(player, stacks -> collectBindingsForType(
                 stacks, type, subTypeHint, recipeId, recipe, player, blocked, result));
         // Aether fallback: the generic "aether" ModType acts as a recipe

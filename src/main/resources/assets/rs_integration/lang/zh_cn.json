@@ -750,6 +750,7 @@
   "rsi.async.error.commit_failed": "§c合成链最终提交失败 — 材料未被消耗",
   "rsi.async.error.wrong_machine_type": "§c配方 %s 需要其他类型的机器（已绑定 %s 台同模组机器但类型不匹配），请绑定正确的机器类型",
   "rsi.async.error.no_machine_bound": "§c配方 %s 需要绑定对应模组机器才能执行 — 请手持绑定物品 Shift+右键目标机器",
+  "rsi.async.error.machine_automation_blocked": "§c可合成 %s 的机器都已在机器中心中禁用自动合成",
   "rsi.async.error.machine_valid_failed": "§c配方 %s 的机器验证失败（机器已绑定但当前状态不可用），请检查上方具体错误信息",
   "rsi.async.error.output_extracted": "§c合成产物已被外部抽取：应有 %s 个，实际收取 %s 个。合成链已中止，仍持有的中间产物已恢复。",
   "rsi.plan.unknown_item": "未知物品",

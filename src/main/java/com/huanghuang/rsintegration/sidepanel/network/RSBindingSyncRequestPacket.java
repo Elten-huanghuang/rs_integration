@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.sidepanel.network;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -27,7 +28,8 @@ public final class RSBindingSyncRequestPacket {
                               Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         ServerPlayer player = context.getSender();
-        if (player != null && !(player instanceof FakePlayer)) {
+        if (player != null && !(player instanceof FakePlayer)
+                && !BindingSyncRequestRateLimiter.isRateLimited(player.getUUID())) {
             context.enqueueWork(() -> {
                 if (RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
                     RSSidePanelNetworkHandler.sendBindingSync(player);

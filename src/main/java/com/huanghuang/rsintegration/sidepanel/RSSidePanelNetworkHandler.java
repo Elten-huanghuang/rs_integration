@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
-import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
@@ -24,6 +23,8 @@ import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.RSBindingSyncRequestPacket;
 import com.huanghuang.rsintegration.sidepanel.network.UnbindMachinePacket;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.network.binding.MachineBindingService;
+import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
@@ -42,7 +43,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -82,10 +86,13 @@ public final class RSSidePanelNetworkHandler {
     private static final Map<UUID, Map<String, MachineStatus>> lastPushedStatuses = new ConcurrentHashMap<>();
     private static final Set<UUID> dirtyMachinePlayers = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Long> syncGenerations = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> bindingFingerprints = new ConcurrentHashMap<>();
     private static int machineScanCounter;
     private static long machineStatusSequence;
     private static boolean registered;
     private static final AtomicLong CLIENT_OPERATION_IDS =
+            new AtomicLong(1L);
+    private static final AtomicLong MACHINE_BINDING_GENERATION =
             new AtomicLong(1L);
 
     private RSSidePanelNetworkHandler() {}
@@ -259,12 +266,8 @@ public final class RSSidePanelNetworkHandler {
     }
 
     private static void pushMachineStatusDeltasFor(ServerPlayer player) {
-        List<BindingInfo> bindings = new ArrayList<>();
-        collectBindingsFromStacks(player.getInventory().items, bindings);
-        collectBindingsFromStacks(player.getInventory().offhand, bindings);
-        collectBindingsFromStacks(player.getInventory().armor, bindings);
-        collectBindingsFromStacks(
-                CuriosAccess.stacks(player), bindings);
+        List<MachineBindingService.PlayerEndpoint> endpoints =
+                MachineBindingService.collectPlayerEndpoints(player);
 
         UUID pid = player.getUUID();
         Map<String, MachineStatus> playerLast = lastPushedStatuses.computeIfAbsent(pid,
@@ -273,27 +276,28 @@ public final class RSSidePanelNetworkHandler {
         List<MachineStatusDeltaPacket.Entry> changed = new ArrayList<>();
         Set<String> activeKeys = new HashSet<>();
 
-        for (BindingInfo info : bindings) {
+        for (MachineBindingService.PlayerEndpoint endpoint : endpoints) {
+            var entry = endpoint.entry();
             // Defensive: skip entries with invalid dims before they reach network encoding
-            if (info.dim() == null
-                    || ResourceLocation.tryParse(info.dim().toString()) == null) {
+            if (entry.dim() == null) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Delta] Skipping binding with invalid dim: dim={} blockKey={}",
-                        info.dim(), info.blockKey());
+                        entry.dim(), entry.blockKey());
                 continue;
             }
-            if (MachineInteractType.fromBlockKey(info.blockKey()) != MachineInteractType.QUICK)
+            if (MachineInteractType.fromBlockKey(entry.blockKey()) != MachineInteractType.QUICK)
                 continue;
 
-            var machineLevel = player.server.getLevel(info.dimensionKey());
+            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, entry.dim());
+            var machineLevel = player.server.getLevel(dimension);
             if (machineLevel == null) continue;
 
-            String key = statusKey(info.dim(), info.pos());
+            String key = statusKey(entry.dim(), entry.pos());
             activeKeys.add(key);
-            MachineStatus current = MachineStatusReader.read(machineLevel, info.pos());
+            MachineStatus current = MachineStatusReader.read(machineLevel, entry.pos());
             MachineStatus last = playerLast.get(key);
 
             if (last == null || !current.equals(last)) {
-                changed.add(new MachineStatusDeltaPacket.Entry(info.dim(), info.pos(), current));
+                changed.add(new MachineStatusDeltaPacket.Entry(entry.dim(), entry.pos(), current));
                 playerLast.put(key, current);
             }
         }
@@ -359,10 +363,33 @@ public final class RSSidePanelNetworkHandler {
     }
 
     public static void sendBindingSync(ServerPlayer player) {
-        List<BindingInfo> bindings = collectPlayerBindings(player);
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new RSBindingSyncPacket(bindings));
         sendMachineFavoritesSync(player);
+        sendBindingSnapshot(player, true);
+    }
+
+    private static void sendBindingSnapshot(ServerPlayer player, boolean force) {
+        List<MachineBindingService.PlayerEndpoint> endpoints =
+                MachineBindingService.collectPlayerEndpoints(player);
+        long fingerprint = bindingFingerprint(endpoints);
+        Long previousFingerprint = bindingFingerprints.get(player.getUUID());
+        if (!force && previousFingerprint != null
+                && previousFingerprint.longValue() == fingerprint) return;
+
+        List<BindingInfo> bindings = toBindingInfos(endpoints);
+        int totalChunks = Math.max(1,
+                (bindings.size() + RSBindingSyncPacket.CHUNK_SIZE - 1)
+                        / RSBindingSyncPacket.CHUNK_SIZE);
+        long generation = MACHINE_BINDING_GENERATION.incrementAndGet();
+        for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            int from = chunkIndex * RSBindingSyncPacket.CHUNK_SIZE;
+            int to = Math.min(from + RSBindingSyncPacket.CHUNK_SIZE, bindings.size());
+            List<BindingInfo> chunk = from >= bindings.size()
+                    ? List.of() : List.copyOf(bindings.subList(from, to));
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new RSBindingSyncPacket(
+                            chunk, generation, chunkIndex, totalChunks));
+        }
+        bindingFingerprints.put(player.getUUID(), fingerprint);
     }
 
     public static void sendSync(ServerPlayer player, List<UUID> ids, List<ItemStack> items,
@@ -372,8 +399,8 @@ public final class RSSidePanelNetworkHandler {
                                 String networkName) {
         if (!RSSidePanelModule.isEnabled()) return;
         synchronizedStackIds.put(player.getUUID(), Set.copyOf(ids));
-        // Build binding info list from player's inventory bindings
-        List<BindingInfo> bindings = collectPlayerBindings(player);
+        // 绑定快照走独立分块通道，避免物品页分包时重复携带完整 NBT 绑定数据。
+        List<BindingInfo> bindings = List.of();
 
         int total = ids.size();
         if (total <= RSSidePanelSyncPacket.CHUNK_SIZE) {
@@ -393,28 +420,59 @@ public final class RSSidePanelNetworkHandler {
                 List<ItemStack> cItems = new ArrayList<>(items.subList(from, to));
                 List<Long> cTimestamps = new ArrayList<>(timestamps.subList(from, to));
                 List<Boolean> cFlags = new ArrayList<>(craftableFlags.subList(from, to));
-                List<BindingInfo> cBindings = (i == 0) ? bindings : Collections.emptyList();
                 CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new RSSidePanelSyncPacket(cIds, cItems, cTimestamps, cFlags,
                                 totalSlotCount, networkAvailable, networkName,
-                                cBindings, i, totalChunks, generation));
+                                bindings, i, totalChunks, generation));
             }
         }
         sendMachineFavoritesSync(player);
+        sendBindingSnapshot(player, false);
     }
 
     public static List<BindingInfo> collectPlayerBindings(ServerPlayer player) {
-        List<BindingInfo> bindings = new ArrayList<>();
+        List<MachineBindingService.PlayerEndpoint> endpoints =
+                MachineBindingService.collectPlayerEndpoints(player);
+        return toBindingInfos(endpoints);
+    }
+
+    private static List<BindingInfo> toBindingInfos(
+            List<MachineBindingService.PlayerEndpoint> endpoints) {
+        if (endpoints.isEmpty()) return List.of();
+        List<BindingInfo> bindings = new ArrayList<>(endpoints.size());
         try {
-            collectBindingsFromStacks(player.getInventory().items, bindings);
-            collectBindingsFromStacks(player.getInventory().offhand, bindings);
-            collectBindingsFromStacks(player.getInventory().armor, bindings);
-            collectBindingsFromStacks(
-                    CuriosAccess.stacks(player), bindings);
+            for (MachineBindingService.PlayerEndpoint endpoint : endpoints) {
+                var entry = endpoint.entry();
+                String itemKey = endpoint.itemKey() == null
+                        ? "minecraft:air" : endpoint.itemKey().toString();
+                String displayName = resolveDisplayName(
+                        entry.blockKey(), entry.blockRegKey(), entry.displayStack());
+                bindings.add(new BindingInfo(
+                        itemKey, entry.dim(), entry.pos(), entry.blockKey(),
+                        displayName, entry.blockRegKey(), entry.displayStack(),
+                        endpoint.bookId(), endpoint.endpointId()));
+            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect player bindings", e);
         }
         return List.copyOf(bindings);
+    }
+
+    private static long bindingFingerprint(
+            List<MachineBindingService.PlayerEndpoint> endpoints) {
+        long hash = 0x9E3779B97F4A7C15L;
+        for (MachineBindingService.PlayerEndpoint endpoint : endpoints) {
+            var entry = endpoint.entry();
+            hash = hash * 31 + endpoint.bookId().getMostSignificantBits();
+            hash = hash * 31 + endpoint.bookId().getLeastSignificantBits();
+            hash = hash * 31 + endpoint.endpointId().value().getMostSignificantBits();
+            hash = hash * 31 + endpoint.endpointId().value().getLeastSignificantBits();
+            hash = hash * 31 + (endpoint.itemKey() == null ? 0 : endpoint.itemKey().hashCode());
+            hash = hash * 31 + entry.dim().hashCode();
+            hash = hash * 31 + entry.pos().asLong();
+            hash = hash * 31 + endpoint.revision();
+        }
+        return hash;
     }
 
     public static void sendMachineFavoritesSync(ServerPlayer player) {
@@ -422,20 +480,6 @@ public final class RSSidePanelNetworkHandler {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new MachineFavoritesSyncPacket(data.getFavorites(player.getUUID()),
                         data.getBlocked(player.getUUID())));
-    }
-
-    private static void collectBindingsFromStacks(List<ItemStack> stacks, List<BindingInfo> out) {
-        for (ItemStack stack : stacks) {
-            if (stack.isEmpty()) continue;
-            var itemKey = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            if (itemKey == null) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                if (!BindingEventHandler.supportsGuiByBlockKey(entry.blockKey())) continue;
-                String displayName = resolveDisplayName(entry.blockKey(), entry.blockRegKey(), entry.displayStack());
-                out.add(new BindingInfo(itemKey.toString(), entry.dim(), entry.pos(),
-                        entry.blockKey(), displayName, entry.blockRegKey(), entry.displayStack()));
-            }
-        }
     }
 
     private static String resolveDisplayName(String blockKey, String blockRegKey,
@@ -745,6 +789,7 @@ public final class RSSidePanelNetworkHandler {
         nextPriorityRefreshTick.clear();
         dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
+        bindingFingerprints.clear();
         syncGenerations.clear();
         lastKnownNetworks.clear();
         pendingInvalidatedCaches.clear();
@@ -870,8 +915,10 @@ public final class RSSidePanelNetworkHandler {
             UUID pid = sp.getUUID();
             unregisterListener(pid);
             lastPushedStatuses.remove(pid);
+            bindingFingerprints.remove(pid);
             dirtyMachinePlayers.remove(pid);
             syncGenerations.remove(pid);
+            BindingSyncRequestRateLimiter.onPlayerLogout(pid);
             RemoteGuiAuth.onPlayerLogout(pid);
             try {
                 GuiOpenRateLimiter.onPlayerLogout(pid);

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.network.binding.MachineBindingService;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -43,12 +44,14 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Server-side machine-center operations for BD-bound machines. */
 public final class BeyondDimensionsMachineOperations {
     private static final ResourceLocation BD_TERMINAL =
             ResourceLocation.fromNamespaceAndPath("beyonddimensions", "net_terminal_item");
     private static final StorageBackendId BD_BACKEND = new StorageBackendId("beyonddimensions");
+    private static final AtomicLong BINDING_SYNC_GENERATION = new AtomicLong(1L);
 
     private BeyondDimensionsMachineOperations() {}
 
@@ -166,18 +169,32 @@ public final class BeyondDimensionsMachineOperations {
             return;
         }
         List<BindingInfo> bindings = new ArrayList<>();
-        for (ItemStack stack : connectorStacks(player)) {
-            if (!BD_TERMINAL.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
-                String display = BindingEventHandler.resolveBlockName(
-                        entry.blockKey(), entry.blockRegKey(), entry.displayStack()).getString();
-                bindings.add(new BindingInfo(BD_TERMINAL.toString(), entry.dim(), entry.pos(),
-                        entry.blockKey(), display, entry.blockRegKey(), entry.displayStack()));
-            }
+        for (MachineBindingService.PlayerEndpoint endpoint :
+                MachineBindingService.collectPlayerEndpoints(player)) {
+            if (!BD_TERMINAL.equals(endpoint.itemKey())) continue;
+            var entry = endpoint.entry();
+            String display = BindingEventHandler.resolveBlockName(
+                    entry.blockKey(), entry.blockRegKey(), entry.displayStack()).getString();
+            bindings.add(new BindingInfo(
+                    BD_TERMINAL.toString(), entry.dim(), entry.pos(),
+                    entry.blockKey(), display, entry.blockRegKey(), entry.displayStack(),
+                    endpoint.bookId(), endpoint.endpointId()));
         }
-        NetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                new BeyondDimensionsBindingSyncPacket(bindings));
+        int totalChunks = Math.max(1,
+                (bindings.size() + BeyondDimensionsBindingSyncPacket.CHUNK_SIZE - 1)
+                        / BeyondDimensionsBindingSyncPacket.CHUNK_SIZE);
+        long generation = BINDING_SYNC_GENERATION.incrementAndGet();
+        for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            int from = chunkIndex * BeyondDimensionsBindingSyncPacket.CHUNK_SIZE;
+            int to = Math.min(
+                    from + BeyondDimensionsBindingSyncPacket.CHUNK_SIZE, bindings.size());
+            List<BindingInfo> chunk = from >= bindings.size()
+                    ? List.of() : List.copyOf(bindings.subList(from, to));
+            NetworkHandler.CHANNEL.send(
+                    PacketDistributor.PLAYER.with(() -> player),
+                    new BeyondDimensionsBindingSyncPacket(
+                            chunk, generation, chunkIndex, totalChunks));
+        }
     }
 
     private static ServerLevel resolveTarget(ServerPlayer player, ResourceLocation dim, BlockPos pos) {

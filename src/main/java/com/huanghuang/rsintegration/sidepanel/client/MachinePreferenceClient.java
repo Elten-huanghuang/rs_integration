@@ -1,11 +1,14 @@
 package com.huanghuang.rsintegration.sidepanel.client;
 
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockTogglePacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,7 +34,7 @@ public final class MachinePreferenceClient {
         List<BindingInfo> result = new ArrayList<>(favorites.size());
         for (MachineFavoriteKey favorite : favorites) {
             for (BindingInfo info : BindingCache.getInstance().getAll()) {
-                if (favorite.matches(info)) {
+                if (favorite.matches(info) && !isBlocked(info)) {
                     result.add(info);
                     break;
                 }
@@ -45,7 +48,20 @@ public final class MachinePreferenceClient {
     }
 
     public static boolean isBlocked(BindingInfo info) {
-        return info != null && blocked.contains(MachineFavoriteKey.from(info));
+        return info != null && isBlocked(
+                info.dim(), info.pos(), info.blockKey());
+    }
+
+    public static boolean isBlocked(BindingStorage.BindingEntry entry) {
+        return entry != null && isBlocked(
+                entry.dim(), entry.pos(), entry.blockKey());
+    }
+
+    public static boolean isBlocked(ResourceLocation dim,
+                                    BlockPos pos,
+                                    String blockKey) {
+        return dim != null && pos != null && blockKey != null
+                && blocked.contains(new MachineFavoriteKey(dim, pos, blockKey));
     }
 
     public static void requestFavoriteToggle(BindingInfo info) {

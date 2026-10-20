@@ -141,4 +141,5 @@ public final class NetworkPacketIds {
     public static final int RESONANT_MAGIC_SYNC = 154;
     /** 完整 PlanResponse 的业务载荷分页传输。 */
     public static final int PLAN_RESPONSE_PAGE = 155;
+    public static final int BD_BINDING_SYNC_REQUEST = 156;
 }

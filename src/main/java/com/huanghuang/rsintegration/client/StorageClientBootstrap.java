@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.client;
 
 import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
+import com.huanghuang.rsintegration.sidepanel.client.ClientBindingLookup;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import com.huanghuang.rsintegration.network.binding.BindingHintOverlay;
@@ -13,6 +14,7 @@ public final class StorageClientBootstrap {
     private StorageClientBootstrap() {}
 
     public static void register() {
+        ClientBindingLookup.register();
         RSIKeyBindings.registerKeyMappings();
         StorageSearchClient.register();
         MinecraftForge.EVENT_BUS.register(

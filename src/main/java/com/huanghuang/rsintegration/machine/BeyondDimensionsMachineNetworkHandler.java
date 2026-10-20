@@ -43,6 +43,12 @@ public final class BeyondDimensionsMachineNetworkHandler {
                 BeyondDimensionsBindingSyncPacket::decode,
                 BeyondDimensionsBindingSyncPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        NetworkHandler.CHANNEL.registerMessage(NetworkPacketIds.BD_BINDING_SYNC_REQUEST,
+                BeyondDimensionsBindingSyncRequestPacket.class,
+                BeyondDimensionsBindingSyncRequestPacket::encode,
+                BeyondDimensionsBindingSyncRequestPacket::decode,
+                BeyondDimensionsBindingSyncRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         registered = true;
     }
 }

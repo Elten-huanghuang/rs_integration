@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.huanghuang.rsintegration.sidepanel.client.BindingSyncChunkAccumulator;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
@@ -316,6 +317,7 @@ public final class MachineHub {
     /** Clear all state on logout to prevent cross-server contamination. */
     @SubscribeEvent
     public void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        BindingSyncChunkAccumulator.clear();
         hideImmediate();
     }
 

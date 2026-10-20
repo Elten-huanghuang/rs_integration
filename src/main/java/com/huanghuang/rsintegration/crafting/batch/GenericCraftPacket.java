@@ -112,7 +112,6 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
-import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
@@ -4078,7 +4077,10 @@ public final class GenericCraftPacket {
 
         boolean hasFixedTerminalInputs = recipeSpecs.stream()
                 .anyMatch(spec -> spec != null && !spec.isEmpty());
-        DirectMaterialAllocator.Result directPreviewAllocation = effectiveOverrides.isEmpty()
+        boolean executionMachineAvailable = !requiresBoundMachine(recipe, recipeModType)
+                || hasBindingForExecutionType(player, recipe, recipeModType);
+        DirectMaterialAllocator.Result directPreviewAllocation =
+                executionMachineAvailable && effectiveOverrides.isEmpty()
                 && hasFixedTerminalInputs
                 ? DirectMaterialAllocator.allocate(recipeSpecs, available)
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
@@ -5149,11 +5151,6 @@ public final class GenericCraftPacket {
 
         // v3.4 availability passport: collect modTypes the player has bound machines for.
         Set<String> boundMachineTypes = new LinkedHashSet<>();
-        // Vanilla furnace/blast/smoker/stonecutter recipes (all classified as
-        // vanilla_furnace, classifyRecipe → null) need no bound machine — they're
-        // always usable. Seed the passport so their alternatives render as normal
-        // selectable badges instead of grayed/locked in the tree dropdown.
-        boundMachineTypes.add("vanilla_furnace");
         for (ModType mt : ModType.values()) {
             if (AltarBindingRegistry.hasAnyBindingForType(player, mt)) {
                 boundMachineTypes.add(mt.id());
@@ -5165,7 +5162,6 @@ public final class GenericCraftPacket {
             List<AltarBindingRegistry.BoundMachine> executionMachines =
                     AltarBindingRegistry.getBoundMachinesForRecipe(
                             player, recipeModType, recipeId);
-            executionMachines = LoadBalancer.filterAvailable(executionMachines, player.getServer());
             allExecutionMachinesLeased = !executionMachines.isEmpty()
                     && AsyncCraftManager.getInstance()
                     .areAllMachinesLeased(executionMachines, recipeModType.id());
