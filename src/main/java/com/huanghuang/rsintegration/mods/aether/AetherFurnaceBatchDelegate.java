@@ -19,10 +19,12 @@ import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -30,6 +32,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -58,6 +62,23 @@ import java.util.Map;
  * {@code getBurnDuration()} (furnace) or {@code getIncubatingMap()} (incubator).
  */
 public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
+    record FuelProfile(String itemId, int burnDuration) {
+        InputConsumption consumption() {
+            return InputConsumption.fuel(1L);
+        }
+
+        int requiredItems(long requiredBurnUnits) {
+            return (int) Math.min(Integer.MAX_VALUE,
+                    consumption().requiredPhysicalAmount(
+                            requiredBurnUnits, 1L, burnDuration));
+        }
+    }
+    private static final FuelProfile FREEZER_FUEL =
+            new FuelProfile("aether:icestone", 400);
+    private static final FuelProfile ALTAR_FUEL =
+            new FuelProfile("aether:ambrosium_shard", 250);
+    private static final FuelProfile INCUBATOR_FUEL =
+            new FuelProfile("aether:ambrosium_torch", 500);
 
     // Cached incubator fuel map — resolved once via reflection (no SRG names needed
     // because this is a public static method, not a vanilla method).
@@ -499,6 +520,48 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return warnings;
     }
 
+    /** 为目标 Aether 机器补充默认燃料需求，冷冻器主燃料固定为 Icestone。 */
+    public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
+                                       Recipe<?> recipe,
+                                       Map<Item, Integer> itemAvailable,
+                                       Map<Item, Ingredient> itemSource,
+                                       Map<Item, Long> neededCounts,
+                                       int repeatCount) {
+        if (!isAetherMachineType(recipeModTypeId) || recipe == null) return;
+        FuelProfile profile = fuelProfileForRecipe(recipe);
+        if (profile == null) return;
+        Item fuel = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(profile.itemId()));
+        if (fuel == null || fuel == Items.AIR) return;
+        int fuelNeeded = fuelAmountForRecipe(recipe, repeatCount);
+        neededCounts.merge(fuel, (long) Math.max(1, fuelNeeded),
+                SaturatingLongMath::signedAdd);
+        itemSource.putIfAbsent(fuel, Ingredient.of(fuel));
+    }
+
+    static boolean isAetherMachineType(@Nullable String recipeModTypeId) {
+        return "aether".equals(recipeModTypeId)
+                || (recipeModTypeId != null && recipeModTypeId.startsWith("aether_"));
+    }
+
+    static int fuelAmountForRecipe(Recipe<?> recipe, int repeatCount) {
+        FuelProfile profile = fuelProfileForRecipe(recipe);
+        if (profile == null) return 0;
+        long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(recipe, repeatCount);
+        return profile.requiredItems(requiredBurnUnits);
+    }
+
+    @Nullable
+    static FuelProfile fuelProfileForRecipe(Recipe<?> recipe) {
+        if (recipe == null) return null;
+        String name = recipe.getClass().getSimpleName();
+        if ("FreezingRecipe".equals(name)) return FREEZER_FUEL;
+        if ("EnchantingRecipe".equals(name) || "AltarRepairRecipe".equals(name)) {
+            return ALTAR_FUEL;
+        }
+        if ("IncubationRecipe".equals(name)) return INCUBATOR_FUEL;
+        return null;
+    }
+
     // ── fuel helpers ──
 
     /**
@@ -543,9 +606,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (room <= 0) return ItemStack.EMPTY;
 
         int burnDuration = Math.max(1, fuelBurnDuration(be, fuelType));
-        int required = (int) Math.min(Integer.MAX_VALUE,
-                InputConsumption.fuel(1L).requiredPhysicalAmount(
-                        requiredBurnUnits, 1L, burnDuration));
+        long requiredAmount = InputConsumption.fuel(1L).requiredPhysicalAmount(
+                requiredBurnUnits, 1L, burnDuration);
+        int required = (int) Math.min(Integer.MAX_VALUE, requiredAmount);
         int missing = Math.max(0, required - fuelSlot.getCount());
         if (missing <= 0) return ItemStack.EMPTY;
         room = Math.min(room, missing);
@@ -583,12 +646,39 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (endpoint == null) return ItemStack.EMPTY;
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
+        Item preferred = preferredFuelItem(be);
+        if (preferred != null && preferred != Items.AIR) {
+            for (var entry : snapshot.items()) {
+                ItemStack stack = entry.stack();
+                if (!stack.isEmpty() && stack.is(preferred)
+                        && isValidFuelForMachine(be, stack)) {
+                    return stack;
+                }
+            }
+        }
         for (var entry : snapshot.items()) {
             ItemStack stack = entry.stack();
             if (stack.isEmpty()) continue;
             if (isValidFuelForMachine(be, stack)) return stack;
         }
         return ItemStack.EMPTY;
+    }
+
+    @Nullable
+    private static Item preferredFuelItem(BlockEntity be) {
+        String name = be.getClass().getSimpleName();
+        FuelProfile profile;
+        if (name.contains("Freezer")) {
+            profile = FREEZER_FUEL;
+        } else if (name.contains("Altar")) {
+            profile = ALTAR_FUEL;
+        } else if (name.contains("Incubator")) {
+            profile = INCUBATOR_FUEL;
+        } else {
+            return null;
+        }
+        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(profile.itemId()));
+        return item == Items.AIR ? null : item;
     }
 
     @Nullable

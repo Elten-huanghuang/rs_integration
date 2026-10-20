@@ -79,6 +79,7 @@ import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.crockpot.BirdcageEggCatalog;
 import com.huanghuang.rsintegration.mods.biomancy.BiomancyDigestingRecipeResolver;
+import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
@@ -4990,13 +4991,15 @@ public final class GenericCraftPacket {
 
         // Add fuel requirement for machine recipes that consume fuel items.
         // CrockPot: any burnable item (coal, charcoal, etc.)
-        // Aether: machine-specific fuel — fuel type depends on the machine BE,
-        //   so we skip it here and rely on getPlanWarnings() to inform the user.
+        // Aether: machine-specific fuel selected from the recipe family.
         long requiredFuelBurnUnits =
                 CraftPacketUtils.estimatedFuelBurnUnits(recipe, repeatCount);
         CrockPotBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, requiredFuelBurnUnits);
+        AetherFurnaceBatchDelegate.addFuelIfNeeded(
+                recipeModType != null ? recipeModType.id() : null, recipe,
+                itemAvailable, itemSource, neededCounts, repeatCount);
         // EnchantalCooler: lapis lazuli or fuel tag items
         EnchantalCoolerBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,
