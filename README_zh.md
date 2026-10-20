@@ -71,11 +71,14 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 ### 万界归墟盘
 
 - 同一张磁盘可保存物品、流体和魔法资源，并直接接入原版 RS 磁盘仓；物品种类、流体种类、单条目数据和整盘载荷上限均可配置。
+- 每个精确物品或流体条目最高保存 `Long.MAX_VALUE`；RS 原生的 `ItemStack`、`FluidStack` 和 `IStorageDisk` 操作仍按 `int` 分片，RSI 会在混合终端和合成快照中补回完整数量，不会与原生缓存重复计算。
 - `MANA`、`SOURCE` 和 `SOUL` 保持独立资源行，不互相换算；`MANA` 与 `SOUL` 可进入 RSI 递归合成，`SOURCE` 保留 Ars Nouveau 原生传输。
+- 魔法资源存档使用 `long`，旧版 12 字节 `int` 记录可直接读取；物品与流体数量页也改为 `long`，并兼容旧版 4 字节数量页。
+- 混合终端中的物品、流体和魔法数量，以及配方树标签、墨水数量和共振容器 HUD，统一使用 `K/M/G/T/P/E` 压缩显示，直到 `Long.MAX_VALUE` 都不会撑出格子；tooltip 仍保留完整数值。
 - 保留 NBT 敏感物品身份，可参与存储缓存、自动化设备、混合终端、JEI/EMI 查询及物品/流体递归提取。
 - 调高条目上限后旧盘会自动扩容；保存校验、异常 dirty 保留、掉落保护、虚空回收和按 UUID 的管理员找回降低丢盘风险。
 - 缺失模组的物品或流体只会被隔离，正常库存继续可用；隔离条目保留原始数据、数量并继续占用容量。
-- 存在对应配方时，无限 RS 磁盘可转化为万界归墟盘。
+- 存在对应配方时，无限容量 RS 磁盘可转化为万界归墟盘。
 - RS 归墟盘与 BD 网络是两套独立库存，RSI 不会自动把两边余额相加。
 
 ### 共振存储盘
@@ -279,6 +282,7 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `/rsi_item_refund`：领取因玩家离线而保存的普通合成退款物品。
 - `/rsi_debug`：向权限等级 2 的管理员提供合成链、绑定、处理器、资源预留和性能诊断。
 - `/rsi_unified_disk list [page]` 与 `recover <uuid>`：列出检查点并按 UUID 找回万界归墟盘物理凭据（权限等级 2）。
+- `/rsi_storage_test insert <数量> <物品 ID>`：按 RS 原生 `int` 分片向玩家当前解析到的 RS 网络插入指定 `long` 数量，供管理员测试大数量库存（权限等级 2）。
 - `/rsi_storage_test snapshot|simulate_insert|roundtrip <amount>`：供管理员对 RS 存储执行显式冒烟测试。
 - `diagnosticVerboseLogging`：启用详细解析和调度日志。
 
