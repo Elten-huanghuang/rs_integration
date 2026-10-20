@@ -28,16 +28,16 @@ class GoetySoulStorageTest extends BootstrapTest {
         UnifiedDiskCore disk = new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 new UnifiedDiskCore.Limits(8, 8, 1048576, 268435456));
         ItemStack totem = totem(Integer.MAX_VALUE, 1_000);
-        int accepted = disk.insertGoetySouls(GoetySoulTotem.souls(totem), true);
-        GoetySoulTotem.set(totem, GoetySoulTotem.souls(totem) - accepted);
+        long accepted = disk.insertGoetySouls(GoetySoulTotem.souls(totem), true);
+        GoetySoulTotem.set(totem, GoetySoulTotem.souls(totem) - Math.toIntExact(accepted));
         assertEquals(1_000, accepted);
         assertEquals(0, GoetySoulTotem.souls(totem));
         assertEquals(1_000, disk.goetySouls());
 
         ItemStack target = totem(10, 7);
         int requested = (int) Math.min(100, GoetySoulTotem.space(target));
-        int withdrawn = disk.extractGoetySouls(requested, true);
-        int inserted = GoetySoulTotem.insert(target, withdrawn, true);
+        long withdrawn = disk.extractGoetySouls(requested, true);
+        int inserted = GoetySoulTotem.insert(target, Math.toIntExact(withdrawn), true);
         disk.insertGoetySouls(withdrawn - inserted, true);
         assertEquals(3, inserted);
         assertEquals(10, GoetySoulTotem.souls(target));
@@ -46,12 +46,12 @@ class GoetySoulStorageTest extends BootstrapTest {
     }
 
     @Test
-    void unifiedDiskRejectsAmountsBeyondSignedInteger() {
+    void unifiedDiskSupportsAmountsBeyondSignedInteger() {
         UnifiedDiskCore disk = new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 new UnifiedDiskCore.Limits(8, 8, 1048576, 268435456));
-        assertEquals(Integer.MAX_VALUE, disk.insertGoetySouls(Integer.MAX_VALUE, true));
-        assertEquals(0, disk.insertGoetySouls(1, true));
-        assertEquals(Integer.MAX_VALUE, disk.goetySouls());
+        long aboveInt = Integer.MAX_VALUE + 123L;
+        assertEquals(aboveInt, disk.insertGoetySouls(aboveInt, true));
+        assertEquals(aboveInt, disk.goetySouls());
     }
 
     @Test

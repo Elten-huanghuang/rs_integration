@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.core;
 
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
@@ -27,8 +28,8 @@ public final class UnifiedDiskCore {
     public final Limits limits;
     public final ResourceTable items, fluids;
     private int payloadBytes;
-    private final int[] magicAmounts = new int[MagicResourceKind.values().length];
-    private final int[] savedMagicAmounts = new int[MagicResourceKind.values().length];
+    private final long[] magicAmounts = new long[MagicResourceKind.values().length];
+    private final long[] savedMagicAmounts = new long[MagicResourceKind.values().length];
 
     public UnifiedDiskCore(UUID worldId, UUID diskId, UUID owner, Limits limits) {
         this.worldId = worldId;
@@ -49,38 +50,38 @@ public final class UnifiedDiskCore {
     public int payloadBytes() { return payloadBytes; }
 
     /** 该魔法资源的当前库存；与物品、流体分开计量。 */
-    public int magicAmount(MagicResourceKind kind) {
+    public long magicAmount(MagicResourceKind kind) {
         checkThread();
         return magicAmounts[kind.ordinal()];
     }
 
-    /** 单条目上界由资源自身决定；原生容器装不下 int 上限。 */
-    public int magicCapacity(MagicResourceKind kind) {
+    /** 单条目上界由资源自身决定；原生接口只在各自的边界显式分段。 */
+    public long magicCapacity(MagicResourceKind kind) {
         checkThread();
         return kind.capacity();
     }
 
-    public int insertMagic(MagicResourceKind kind, int amount, boolean perform) {
+    public long insertMagic(MagicResourceKind kind, long amount, boolean perform) {
         checkThread();
         if (amount <= 0) return 0;
         int index = kind.ordinal();
-        int accepted = Math.min(amount, magicCapacity(kind) - magicAmounts[index]);
+        long accepted = Math.min(amount, magicCapacity(kind) - magicAmounts[index]);
         if (accepted <= 0) return 0;
         if (perform) magicAmounts[index] += accepted;
         return accepted;
     }
 
-    public int extractMagic(MagicResourceKind kind, int amount, boolean perform) {
+    public long extractMagic(MagicResourceKind kind, long amount, boolean perform) {
         checkThread();
         if (amount <= 0) return 0;
         int index = kind.ordinal();
-        int taken = Math.min(amount, magicAmounts[index]);
+        long taken = Math.min(amount, magicAmounts[index]);
         if (perform) magicAmounts[index] -= taken;
         return taken;
     }
 
     /** 从存档恢复；长度不符或为负都视为损坏，由调用方拒绝加载。 */
-    public void restoreMagic(int[] amounts) {
+    public void restoreMagic(long[] amounts) {
         if (amounts == null || amounts.length != magicAmounts.length) {
             throw new IllegalArgumentException("统一盘魔法资源记录长度非法");
         }
@@ -91,34 +92,34 @@ public final class UnifiedDiskCore {
         }
     }
 
-    public int[] magicSnapshot() {
+    public long[] magicSnapshot() {
         checkThread();
         return magicAmounts.clone();
     }
 
-    public void acknowledgeMagic(int[] amounts) {
+    public void acknowledgeMagic(long[] amounts) {
         checkThread();
         if (amounts == null || amounts.length != savedMagicAmounts.length) return;
         System.arraycopy(amounts, 0, savedMagicAmounts, 0, amounts.length);
     }
 
-    public int goetySouls() { return magicAmount(MagicResourceKind.SOUL); }
+    public long goetySouls() { return magicAmount(MagicResourceKind.SOUL); }
 
-    public int insertGoetySouls(int amount, boolean perform) {
+    public long insertGoetySouls(long amount, boolean perform) {
         return insertMagic(MagicResourceKind.SOUL, amount, perform);
     }
 
-    public int extractGoetySouls(int amount, boolean perform) {
+    public long extractGoetySouls(long amount, boolean perform) {
         return extractMagic(MagicResourceKind.SOUL, amount, perform);
     }
 
-    public void restoreGoetySouls(int amount) {
+    public void restoreGoetySouls(long amount) {
         if (amount < 0) throw new IllegalArgumentException("统一盘灵魂数量非法");
         magicAmounts[MagicResourceKind.SOUL.ordinal()] = amount;
         savedMagicAmounts[MagicResourceKind.SOUL.ordinal()] = amount;
     }
 
-    public void acknowledgeGoetySouls(int amount) {
+    public void acknowledgeGoetySouls(long amount) {
         checkThread();
         if (amount == magicAmounts[MagicResourceKind.SOUL.ordinal()]) {
             savedMagicAmounts[MagicResourceKind.SOUL.ordinal()] = amount;

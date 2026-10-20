@@ -221,25 +221,25 @@ class MagicResourceRouterTest extends BootstrapTest {
                         return MagicScopeHandle.of(location);
                     }
 
-                    @Override public int amount(MagicResourceKind kind, MagicScopeHandle handle) {
+                    @Override public long amount(MagicResourceKind kind, MagicScopeHandle handle) {
                         requireSupported(kind);
                         return 0;
                     }
 
                     @Override public MagicResourceNetworkPool reserve(MagicResourceKind kind,
-                                                                      int requested,
+                                                                      long requested,
                                                                       MagicScopeHandle handle) {
                         requireSupported(kind);
                         return emptyPool();
                     }
 
-                    @Override public int insert(MagicResourceKind kind, int amount,
+                    @Override public long insert(MagicResourceKind kind, long amount,
                                                  MagicScopeHandle handle) {
                         requireSupported(kind);
                         return 0;
                     }
 
-                    @Override public int extract(MagicResourceKind kind, int amount,
+                    @Override public long extract(MagicResourceKind kind, long amount,
                                                   MagicScopeHandle handle) {
                         requireSupported(kind);
                         return 0;
@@ -251,15 +251,15 @@ class MagicResourceRouterTest extends BootstrapTest {
 
     private static MagicResourceNetworkPool emptyPool() {
         return new MagicResourceNetworkPool() {
-            @Override public int remaining() {
+            @Override public long remaining() {
                 return 0;
             }
 
-            @Override public int withdraw(int requested) {
+            @Override public long withdraw(long requested) {
                 return 0;
             }
 
-            @Override public void refund(int amount) {
+            @Override public void refund(long amount) {
             }
 
             @Override public void close() {

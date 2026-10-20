@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.server.level.ServerPlayer;
 import org.junit.jupiter.api.Test;
 
+import java.util.OptionalLong;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,14 +39,14 @@ class SoulPlanPreviewTest extends BootstrapTest {
     void unreachableEstimateCountsAsInsufficientForPreparation() {
         // 预览显示不可达时，执行侧必须按「一个都没有」判缺料，而不是当成免费。
         assertEquals(0, new SoulPlanPreview.Estimate(300,
-                java.util.OptionalInt.empty(), SoulPlanPreview.SourceKind.UNREACHABLE)
+                OptionalLong.empty(), SoulPlanPreview.SourceKind.UNREACHABLE)
                 .authoritativeOrZero());
     }
 
     @Test
     void sharesSplitTotalByAuthoritativeAmount() {
         SoulPlanPreview.Estimate estimate = new SoulPlanPreview.Estimate(1_000,
-                java.util.OptionalInt.of(400), SoulPlanPreview.SourceKind.RS_DISK);
+                OptionalLong.of(400), SoulPlanPreview.SourceKind.RS_DISK);
 
         assertEquals(400, estimate.backendShare());
         assertEquals(600, estimate.fallbackShare());
@@ -55,7 +57,7 @@ class SoulPlanPreviewTest extends BootstrapTest {
     @Test
     void sharesNeverExceedTotal() {
         SoulPlanPreview.Estimate estimate = new SoulPlanPreview.Estimate(100,
-                java.util.OptionalInt.of(9_999), SoulPlanPreview.SourceKind.BD_NETWORK);
+                OptionalLong.of(9_999), SoulPlanPreview.SourceKind.BD_NETWORK);
 
         assertEquals(100, estimate.backendShare());
         assertEquals(0, estimate.fallbackShare());

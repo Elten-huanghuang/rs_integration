@@ -48,7 +48,7 @@ public final class UnifiedDiskTooltip {
                 tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_fluids", DiskTooltipEffects.Theme.GUIXU,
                         DiskTooltipEffects.Tone.FLUID, number(summary.fluids())));
                 for (MagicResourceKind kind : MagicResourceKind.values()) {
-                    int amount = summary.magicAmount(kind);
+                    long amount = summary.magicAmount(kind);
                     if (amount > 0) {
                         tooltip.add(DiskTooltipEffects.tint(PREFIX + "stored_magic",
                                 DiskTooltipEffects.Theme.GUIXU,

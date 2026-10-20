@@ -14,9 +14,9 @@ import java.util.UUID;
 /** 一次递归合成任务持有的共享磁盘预留。 */
 public final class MagicResourceTaskReservation implements AutoCloseable {
     private static final MagicResourceNetworkPool EMPTY = new MagicResourceNetworkPool() {
-        @Override public int remaining() { return 0; }
-        @Override public int withdraw(int requested) { return 0; }
-        @Override public void refund(int amount) { }
+        @Override public long remaining() { return 0; }
+        @Override public long withdraw(long requested) { return 0; }
+        @Override public void refund(long amount) { }
         @Override public void close() { }
     };
 
@@ -25,7 +25,7 @@ public final class MagicResourceTaskReservation implements AutoCloseable {
     private final MagicResourceTaskLedger ledger;
     private final Map<MagicResourceKind, MagicResourceNetworkPool> pools =
             new EnumMap<>(MagicResourceKind.class);
-    private final Map<MagicResourceKind, Integer> reserved = new EnumMap<>(MagicResourceKind.class);
+    private final Map<MagicResourceKind, Long> reserved = new EnumMap<>(MagicResourceKind.class);
     private boolean closed;
 
     private MagicResourceTaskReservation(MinecraftServer server, UUID taskId,
@@ -50,7 +50,7 @@ public final class MagicResourceTaskReservation implements AutoCloseable {
         for (MagicResourceCost cost : supported) {
             MagicResourceNetworkPool pool = MagicResourceEndpoint.reserve(
                     server, cost.kind(), cost.amountPerOperation());
-            int claimed = Math.max(0, pool.remaining());
+            long claimed = Math.max(0, pool.remaining());
             reservation.pools.put(cost.kind(), pool);
             reservation.reserved.put(cost.kind(), claimed);
             if (claimed > 0) actual.add(new MagicResourceCost(cost.kind(), claimed));
@@ -63,15 +63,15 @@ public final class MagicResourceTaskReservation implements AutoCloseable {
         return taskId;
     }
 
-    public int reserved(MagicResourceKind kind) {
-        return reserved.getOrDefault(kind, 0);
+    public long reserved(MagicResourceKind kind) {
+        return reserved.getOrDefault(kind, 0L);
     }
 
     public MagicResourceNetworkPool pool(MagicResourceKind kind) {
         return closed ? EMPTY : pools.getOrDefault(kind, EMPTY);
     }
 
-    public UUID recordInjection(MagicResourceKind kind, @Nullable RecoveryLocation location, int amount) {
+    public UUID recordInjection(MagicResourceKind kind, @Nullable RecoveryLocation location, long amount) {
         if (closed || location == null || amount <= 0) return null;
         return ledger.recordInjection(taskId, kind, location.dimension(), location.position(), amount);
     }
@@ -80,7 +80,7 @@ public final class MagicResourceTaskReservation implements AutoCloseable {
         if (!closed) ledger.consumed(injectionId);
     }
 
-    public void injectedRecovered(@Nullable UUID injectionId, int remaining) {
+    public void injectedRecovered(@Nullable UUID injectionId, long remaining) {
         if (!closed && injectionId != null) ledger.recovered(injectionId, remaining);
     }
 

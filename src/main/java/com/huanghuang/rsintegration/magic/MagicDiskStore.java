@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import net.minecraft.server.MinecraftServer;
@@ -42,47 +43,48 @@ public final class MagicDiskStore {
     }
 
     /** 网络内该资源的当前库存；不含预留。 */
-    public static int total(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
+    public static long total(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
         long total = 0L;
         for (UnifiedDiskCore disk : disks) {
-            total += Math.max(0, disk.magicAmount(kind));
-            if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            total = SaturatingLongMath.add(total, disk.magicAmount(kind));
+            if (total == Long.MAX_VALUE) return Long.MAX_VALUE;
         }
-        return (int) total;
+        return total;
     }
 
-    /** 已挂载归墟盘为该资源提供的总容量，按盘汇总并在 int 上限处饱和。 */
-    public static int capacity(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
+    /** 已挂载归墟盘为该资源提供的总容量，按盘饱和汇总。 */
+    public static long capacity(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
         long capacity = 0L;
         for (UnifiedDiskCore disk : disks) {
-            capacity += Math.max(0, disk.magicCapacity(kind));
-            if (capacity >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            capacity = SaturatingLongMath.add(capacity, disk.magicCapacity(kind));
+            if (capacity == Long.MAX_VALUE) return Long.MAX_VALUE;
         }
-        return (int) capacity;
+        return capacity;
     }
 
     /** 网络内该资源的可用量（库存减去其他任务尚未使用的预留）。 */
-    public static int available(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
+    public static long available(List<UnifiedDiskCore> disks, MagicResourceKind kind) {
         long available = 0L;
         for (UnifiedDiskCore disk : disks) {
-            int reserved;
+            long reserved;
             synchronized (MagicResourceReservations.LOCK) {
                 reserved = MagicResourceReservations.reserved(disk.diskId, kind);
             }
-            available += Math.max(0, disk.magicAmount(kind) - reserved);
-            if (available >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            available = SaturatingLongMath.add(available,
+                    Math.max(0L, disk.magicAmount(kind) - reserved));
+            if (available == Long.MAX_VALUE) return Long.MAX_VALUE;
         }
-        return (int) available;
+        return available;
     }
 
     /** 按盘顺序提取，返回实际移出的数量。 */
-    public static int extract(List<UnifiedDiskCore> disks, MagicResourceKind kind,
-                              int requested, boolean perform) {
+    public static long extract(List<UnifiedDiskCore> disks, MagicResourceKind kind,
+                               long requested, boolean perform) {
         if (requested <= 0) return 0;
-        int moved = 0;
+        long moved = 0;
         for (UnifiedDiskCore disk : disks) {
             if (moved >= requested) break;
-            int taken = disk.extractMagic(kind, requested - moved, perform);
+            long taken = disk.extractMagic(kind, requested - moved, perform);
             moved += taken;
         }
         if (perform && moved > 0) MagicResourceDirty.bump();
@@ -90,13 +92,13 @@ public final class MagicDiskStore {
     }
 
     /** 按盘顺序插入，返回实际收下的数量。 */
-    public static int insert(List<UnifiedDiskCore> disks, MagicResourceKind kind,
-                             int requested, boolean perform) {
+    public static long insert(List<UnifiedDiskCore> disks, MagicResourceKind kind,
+                              long requested, boolean perform) {
         if (requested <= 0) return 0;
-        int moved = 0;
+        long moved = 0;
         for (UnifiedDiskCore disk : disks) {
             if (moved >= requested) break;
-            int accepted = disk.insertMagic(kind, requested - moved, perform);
+            long accepted = disk.insertMagic(kind, requested - moved, perform);
             moved += accepted;
         }
         if (perform && moved > 0) MagicResourceDirty.bump();

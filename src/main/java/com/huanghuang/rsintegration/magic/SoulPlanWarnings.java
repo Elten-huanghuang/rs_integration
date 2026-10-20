@@ -23,7 +23,7 @@ public final class SoulPlanWarnings {
      */
     @Nullable
     public static Component describe(
-            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, int total) {
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, long total) {
         if (total <= 0) return null;
         SoulPlanPreview.Estimate estimate = SoulPlanPreview.estimate(player, endpoint, total);
         if (!estimate.reachable()) {

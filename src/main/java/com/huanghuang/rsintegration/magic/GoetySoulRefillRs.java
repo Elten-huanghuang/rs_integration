@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.Polarice3.Goety.utils.SEHelper;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -26,8 +27,8 @@ public final class GoetySoulRefillRs {
         INetwork network = RSAltarBindingResolver.resolveNetworkForAltar(player, dim, pos);
         if (network == null) return 0;
 
-        int extracted = MagicResourceEndpoint.extract(
-                network, MagicResourceKind.SOUL, wanted, true);
+        int extracted = SaturatingLongMath.clampToInt(MagicResourceEndpoint.extract(
+                network, MagicResourceKind.SOUL, wanted, true));
         if (extracted <= 0) return 0;
 
         int accepted = 0;

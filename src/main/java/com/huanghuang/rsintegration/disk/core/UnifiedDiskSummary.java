@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import java.util.Arrays;
 
 /** 展示用摘要，不参与库存读写；汇总允许超过单种资源的 int 上限。 */
-public record UnifiedDiskSummary(long items, long fluids, int[] magicAmounts, int itemTypes, int fluidTypes,
+public record UnifiedDiskSummary(long items, long fluids, long[] magicAmounts, int itemTypes, int fluidTypes,
                                  int itemCapacity, int fluidCapacity) {
     public UnifiedDiskSummary {
         magicAmounts = magicAmounts.clone();
@@ -16,12 +16,12 @@ public record UnifiedDiskSummary(long items, long fluids, int[] magicAmounts, in
                 || magicAmounts.length != MagicResourceKind.values().length) {
             throw new IllegalArgumentException("统一盘展示摘要非法");
         }
-        for (int amount : magicAmounts) {
+        for (long amount : magicAmounts) {
             if (amount < 0) throw new IllegalArgumentException("统一盘魔法资源数量非法");
         }
     }
 
-    @Override public int[] magicAmounts() { return magicAmounts.clone(); }
+    @Override public long[] magicAmounts() { return magicAmounts.clone(); }
 
     @Override
     public boolean equals(Object other) {
@@ -46,13 +46,13 @@ public record UnifiedDiskSummary(long items, long fluids, int[] magicAmounts, in
         return 31 * result + fluidCapacity;
     }
 
-    public int magicAmount(MagicResourceKind kind) { return magicAmounts[kind.ordinal()]; }
+    public long magicAmount(MagicResourceKind kind) { return magicAmounts[kind.ordinal()]; }
 
-    public int goetySouls() { return magicAmount(MagicResourceKind.SOUL); }
+    public long goetySouls() { return magicAmount(MagicResourceKind.SOUL); }
 
     /** 是否存在需要展示的魔法资源余额。 */
     public boolean hasMagic() {
-        for (int amount : magicAmounts) if (amount > 0) return true;
+        for (long amount : magicAmounts) if (amount > 0) return true;
         return false;
     }
 

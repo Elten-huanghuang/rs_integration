@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore;
 import com.huanghuang.rsintegration.disk.persistence.DiskFileStore.Snapshot;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -37,6 +38,20 @@ class DiskFileStoreTest extends BootstrapTest {
         Files.write(root.resolve("unknown/manifest.bin"), new byte[] {1});
         assertEquals(List.of(core.diskId), files.savedDiskIds());
         assertEquals(0, files.load(core.worldId, core.diskId).items.size());
+    }
+
+    @Test void magicAmountsRoundTripAboveIntWithoutLosingPrecision() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(8);
+        long mana = Integer.MAX_VALUE + 12_345L;
+        core.insertMagic(MagicResourceKind.MANA, mana, true);
+        core.insertMagic(MagicResourceKind.SOUL, 42, true);
+        files.save(Snapshot.freeze(core), null);
+
+        UnifiedDiskCore loaded = files.load(core.worldId, core.diskId);
+        assertEquals(mana, loaded.magicAmount(MagicResourceKind.MANA));
+        assertEquals(42, loaded.magicAmount(MagicResourceKind.SOUL));
+        assertFalse(loaded.dirty());
     }
     private void acknowledge(UnifiedDiskCore core, Snapshot snapshot) {
         core.items.acknowledge(snapshot.items()); core.fluids.acknowledge(snapshot.fluids());

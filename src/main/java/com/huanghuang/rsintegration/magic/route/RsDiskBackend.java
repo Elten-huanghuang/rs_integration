@@ -61,7 +61,7 @@ public final class RsDiskBackend implements MagicStorageBackend {
     }
 
     @Override
-    public int amount(MagicResourceKind kind, MagicScopeHandle handle) {
+    public long amount(MagicResourceKind kind, MagicScopeHandle handle) {
         requireSupported(kind);
         if (!handle.belongsTo(ID)) return 0;
         if (!(handle.get("disks") instanceof List<?> raw)) return 0;
@@ -73,20 +73,20 @@ public final class RsDiskBackend implements MagicStorageBackend {
     }
 
     @Override
-    public MagicResourceNetworkPool reserve(MagicResourceKind kind, int requested,
+    public MagicResourceNetworkPool reserve(MagicResourceKind kind, long requested,
                                             MagicScopeHandle handle) {
         requireSupported(kind);
         return MagicResourceReservations.reserve(manager(), kind, requested);
     }
 
     @Override
-    public int insert(MagicResourceKind kind, int amount, MagicScopeHandle handle) {
+    public long insert(MagicResourceKind kind, long amount, MagicScopeHandle handle) {
         requireSupported(kind);
         return MagicDiskStore.insert(MagicDiskStore.mountedDisks(manager()), kind, amount, true);
     }
 
     @Override
-    public int extract(MagicResourceKind kind, int amount, MagicScopeHandle handle) {
+    public long extract(MagicResourceKind kind, long amount, MagicScopeHandle handle) {
         requireSupported(kind);
         return MagicDiskStore.extract(MagicDiskStore.mountedDisks(manager()), kind, amount, true);
     }

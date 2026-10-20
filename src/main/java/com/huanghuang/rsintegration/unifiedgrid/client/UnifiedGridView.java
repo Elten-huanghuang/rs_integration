@@ -42,6 +42,8 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import static com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath.clampToInt;
+
 /** 复用原版条目绘制；变化只修改受影响的对象，排序合并到客户端 tick。 */
 public final class UnifiedGridView implements IGridView {
     private final GridScreen screen;
@@ -127,7 +129,7 @@ public final class UnifiedGridView implements IGridView {
                     RSGridSearchCache.onGridDelta(screen, this, row.primary);
                     dirty = true;
                 } else if (old != null) {
-                    int before = old.primary.isCraftable() ? 0 : old.primary.getQuantity();
+                    long before = old.primary.isCraftable() ? 0 : getQuantity(old.primary);
                     if (update.amount() > 0) {
                         if (old.primary instanceof ItemGridStack item) item.setZeroed(false);
                         if (old.primary instanceof FluidGridStack fluid) fluid.setZeroed(false);
@@ -135,7 +137,7 @@ public final class UnifiedGridView implements IGridView {
                     if (!old.primary.isCraftable()) {
                         // 跨过 0 的增减要重排：空资源不占格，有量时才需要出现。
                         if ((before > 0) != (update.amount() > 0)) dirty = true;
-                        old.primary.setQuantity(update.amount());
+                        setQuantity(old.primary, update.amount());
                     }
                     old.primary.setTrackerEntry(update.tracker());
                     if (old.crafting != null) old.crafting.setTrackerEntry(update.tracker());
@@ -165,19 +167,29 @@ public final class UnifiedGridView implements IGridView {
         UUID other = crafting ? entry.storedId() : entry.craftableId();
         IGridStack stack;
         if (kind == GridResourceKind.item()) {
-            ItemStack template = ((ItemStack) entry.template()).copyWithCount(crafting ? 1 : Math.max(1, entry.amount()));
+            ItemStack template = ((ItemStack) entry.template()).copyWithCount(crafting ? 1
+                    : Math.max(1, Math.toIntExact(entry.amount())));
             stack = new ItemGridStack(id, other, template, crafting, entry.tracker());
         } else if (kind == GridResourceKind.fluid()) {
             FluidStack template = ((FluidStack) entry.template()).copy();
-            template.setAmount(crafting ? 1 : Math.max(1, entry.amount()));
+            template.setAmount(crafting ? 1 : Math.max(1, Math.toIntExact(entry.amount())));
             stack = new FluidGridStack(id, other, template, entry.tracker(), crafting);
         } else {
-            int amount = crafting ? 1 : Math.max(1, entry.amount());
+            long amount = crafting ? 1 : Math.max(1, entry.amount());
             stack = new MagicStackGridStack(kind.magicKind(), id, other, amount,
                     entry.capacity(), entry.tracker(), crafting);
         }
         if (!crafting && entry.amount() == 0) stack.setQuantity(0);
         return stack;
+    }
+
+    private static void setQuantity(IGridStack stack, long quantity) {
+        if (stack instanceof MagicStackGridStack magic) magic.setLongQuantity(quantity);
+        else stack.setQuantity(clampToInt(quantity));
+    }
+
+    private static long getQuantity(IGridStack stack) {
+        return stack instanceof MagicStackGridStack magic ? magic.getLongQuantity() : stack.getQuantity();
     }
 
     private void removeAliases(Row row) {
@@ -336,5 +348,5 @@ public final class UnifiedGridView implements IGridView {
     }
 
     public record Row(GridResourceKind kind, int serial, IGridStack primary, IGridStack crafting) { }
-    public record QuantityChange(IGridStack stack, int before, int after) { }
+    public record QuantityChange(IGridStack stack, long before, long after) { }
 }

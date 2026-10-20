@@ -117,7 +117,7 @@ class GoetySoulCraftingTaskContractTest {
         assertTrue(virtualCandleSource.contains("currentTime += extraSpeed"));
         assertTrue(coordinator.contains("network.withdraw(fromNetwork)"));
         assertTrue(coordinator.contains("nativeSource.available() < nativeNeeded"));
-        assertTrue(coordinator.contains("nativeSource.consume(remaining)"));
+        assertTrue(coordinator.contains("nativeSource.consume((int) remaining)"));
         assertTrue(coordinator.contains("network.refund(withdrawn)"));
         assertTrue(nativeSource.contains("GoetyPlayerSoulAccess.consume"));
         assertTrue(nativeSource.contains("getOwner"));

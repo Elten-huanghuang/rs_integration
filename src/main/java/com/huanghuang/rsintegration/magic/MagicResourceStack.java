@@ -10,9 +10,9 @@ import net.minecraft.network.FriendlyByteBuf;
  */
 public class MagicResourceStack {
     private final MagicResourceKind kind;
-    private int amount;
+    private long amount;
 
-    public MagicResourceStack(MagicResourceKind kind, int amount) {
+    public MagicResourceStack(MagicResourceKind kind, long amount) {
         this.kind = kind;
         this.amount = Math.max(0, amount);
     }
@@ -21,11 +21,11 @@ public class MagicResourceStack {
         return kind;
     }
 
-    public int getAmount() {
+    public long getAmount() {
         return amount;
     }
 
-    public void setAmount(int amount) {
+    public void setAmount(long amount) {
         this.amount = Math.max(0, amount);
     }
 
@@ -34,13 +34,13 @@ public class MagicResourceStack {
     }
 
     /** 单条记录超过统一盘上界时截断；原生单位不会达到这个数量级。 */
-    public int cappedAmount() {
+    public long cappedAmount() {
         return Math.min(amount, kind.capacity());
     }
 
     public void writeToPacket(FriendlyByteBuf buf) {
         buf.writeVarInt(kind.ordinal());
-        buf.writeVarInt(amount);
+        buf.writeVarLong(amount);
     }
 
     public static MagicResourceStack readFromPacket(FriendlyByteBuf buf) {
@@ -48,7 +48,7 @@ public class MagicResourceStack {
         if (ordinal < 0 || ordinal >= MagicResourceKind.values().length) {
             throw new IllegalArgumentException("未知魔法资源类别");
         }
-        return new MagicResourceStack(MagicResourceKind.values()[ordinal], buf.readVarInt());
+        return new MagicResourceStack(MagicResourceKind.values()[ordinal], buf.readVarLong());
     }
 
     @Override
@@ -59,6 +59,6 @@ public class MagicResourceStack {
 
     @Override
     public int hashCode() {
-        return 31 * kind.ordinal() + amount;
+        return 31 * kind.ordinal() + Long.hashCode(amount);
     }
 }

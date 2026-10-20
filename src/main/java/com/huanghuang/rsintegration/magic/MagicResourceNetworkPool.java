@@ -2,11 +2,11 @@ package com.huanghuang.rsintegration.magic;
 
 /** 任务或节点可继续提取的魔法资源预留。 */
 public interface MagicResourceNetworkPool extends AutoCloseable {
-    int remaining();
+    long remaining();
 
-    int withdraw(int requested);
+    long withdraw(long requested);
 
-    void refund(int amount);
+    void refund(long amount);
 
     @Override
     void close();

@@ -5198,8 +5198,8 @@ public final class GenericCraftPacket {
         if (planGraph != null) {
             for (MagicResourceCost cost : planGraph.magicCosts()) {
                 long total = plannedMagicCosts.getOrDefault(cost.kind(), 0L);
-                plannedMagicCosts.put(cost.kind(), Math.min(Long.MAX_VALUE,
-                        total + cost.amountPerOperation()));
+                plannedMagicCosts.put(cost.kind(),
+                        SaturatingLongMath.add(total, cost.amountPerOperation()));
             }
         }
 

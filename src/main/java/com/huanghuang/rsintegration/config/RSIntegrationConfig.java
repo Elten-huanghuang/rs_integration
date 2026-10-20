@@ -130,6 +130,9 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK = 1;
     public static final int DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = 0;
     public static final int MAX_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = 1_000_000;
+    /** 创造魔法容器单次卸货量；库存、预留和网络汇总均使用 long。 */
+    public static final long DEFAULT_CREATIVE_MAGIC_DEPOSIT_AMOUNT = 2_100_000_000L;
+    public static final long MAX_CREATIVE_MAGIC_DEPOSIT_AMOUNT = Long.MAX_VALUE;
     public static final int DEFAULT_CRAFTING_MAX_GRAPH_NODES = 16_384;
     public static final int MIN_CRAFTING_MAX_GRAPH_NODES = 256;
     public static final int MAX_CRAFTING_MAX_GRAPH_NODES = 65_536;
@@ -356,6 +359,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue MACHINE_TAB_THRESHOLD;
     /** 魔法资源：没有空间管辖时指名的权威后端；空串表示不指名。 */
     public static ForgeConfigSpec.ConfigValue<String> MAGIC_RESOURCE_PINNED_BACKEND;
+    public static ForgeConfigSpec.LongValue CREATIVE_MAGIC_DEPOSIT_AMOUNT;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> CUSTOM_GUI_MACHINE_MODS;
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
     public static ForgeConfigSpec.IntValue SERVER_CONFIG_SCHEMA_VERSION;
@@ -1461,6 +1465,14 @@ public final class RSIntegrationConfig {
                         "只在没有后端声明管辖当前链路时生效；不会覆盖空间管辖，",
                         "也就是说玩家站在 RS 终端前时，这里填 BD 也不会把库存搬去 BD。")
                 .define("pinnedBackend", "");
+        CREATIVE_MAGIC_DEPOSIT_AMOUNT = s
+                .comment("创造魔法容器单次卸货量",
+                        "手持 ars_nouveau:creative_source_jar 或 botania:creative_pool，",
+                        "右键混合终端的魔法资源时，尝试一次充入的数量。",
+                        "默认 2100000000；RSI 与 BD 使用 long，原生 int 接口按实际容量接收。")
+                .defineInRange("creativeMagicDepositAmount",
+                        DEFAULT_CREATIVE_MAGIC_DEPOSIT_AMOUNT,
+                        1L, MAX_CREATIVE_MAGIC_DEPOSIT_AMOUNT);
         s.pop();
 
         SERVER_SPEC = s.build();

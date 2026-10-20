@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.magic;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ class MagicResourceTaskLedgerTest extends BootstrapTest {
                 .getCompound(0);
         assertEquals(taskId, injection.getUUID("task"));
         assertEquals("SOURCE", injection.getString("kind"));
-        assertEquals(80, injection.getInt("amount"));
+        assertEquals(80, injection.getLong("amount"));
         assertEquals("ACTIVE", injection.getString("state"));
     }
 
@@ -47,5 +48,38 @@ class MagicResourceTaskLedgerTest extends BootstrapTest {
 
         CompoundTag saved = ledger.save(new CompoundTag());
         assertFalse(saved.getList("tasks", Tag.TAG_COMPOUND).stream().findAny().isPresent());
+    }
+
+    @Test
+    void readsLegacyIntAmountRecords() {
+        CompoundTag saved = new CompoundTag();
+        CompoundTag task = new CompoundTag();
+        task.putUUID("id", UUID.randomUUID());
+        CompoundTag resources = new CompoundTag();
+        resources.putInt(MagicResourceKind.MANA.id(), Integer.MAX_VALUE);
+        task.put("resources", resources);
+        ListTag tasks = new ListTag();
+        tasks.add(task);
+        saved.put("tasks", tasks);
+
+        MagicResourceTaskLedger loaded = new MagicResourceTaskLedger(saved);
+        CompoundTag copy = loaded.save(new CompoundTag());
+        CompoundTag amount = copy.getList("tasks", Tag.TAG_COMPOUND)
+                .getCompound(0).getCompound("resources");
+        assertEquals(Integer.MAX_VALUE, amount.getLong(MagicResourceKind.MANA.id()));
+    }
+
+    @Test
+    void injectionAmountsAboveIntRoundTripWithoutNarrowing() {
+        MagicResourceTaskLedger ledger = new MagicResourceTaskLedger();
+        UUID taskId = UUID.randomUUID();
+        long amount = Integer.MAX_VALUE + 321L;
+        ledger.recordInjection(taskId, MagicResourceKind.SOUL,
+                new ResourceLocation("minecraft", "overworld"), BlockPos.ZERO, amount);
+
+        CompoundTag saved = ledger.save(new CompoundTag());
+        CompoundTag injection = saved.getList("injections", Tag.TAG_COMPOUND).getCompound(0);
+
+        assertEquals(amount, injection.getLong("amount"));
     }
 }

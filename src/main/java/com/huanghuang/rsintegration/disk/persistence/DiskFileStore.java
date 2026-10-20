@@ -53,12 +53,12 @@ public final class DiskFileStore {
     }
     public record Snapshot(UUID world, UUID disk, UUID owner, Limits limits,
                            int itemPages, int fluidPages, List<PageSnapshot> items, List<PageSnapshot> fluids,
-                           int[] coreMagic) {
+                           long[] coreMagic) {
         public Snapshot {
             coreMagic = coreMagic.clone();
         }
 
-        @Override public int[] coreMagic() { return coreMagic.clone(); }
+        @Override public long[] coreMagic() { return coreMagic.clone(); }
 
         public static Snapshot freeze(UnifiedDiskCore core) {
             core.checkThread();
@@ -248,7 +248,7 @@ public final class DiskFileStore {
     private void loadLegacySouls(UnifiedDiskCore core, UUID diskId) throws IOException {
         Path souls = directory(diskId).resolve(GoetySoulDiskStore.NAME);
         if (!Files.isRegularFile(souls)) return;
-        int[] amounts = new int[MagicResourceKind.values().length];
+        long[] amounts = new long[MagicResourceKind.values().length];
         try (DataInputStream input = input(readChecked(souls, 8))) {
             amounts[MagicResourceKind.SOUL.ordinal()] = GoetySoulDiskStore.read(input);
         }

@@ -14,7 +14,6 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MagicResourceCostPlanningTest extends BootstrapTest {
     @Test
@@ -50,14 +49,16 @@ class MagicResourceCostPlanningTest extends BootstrapTest {
     }
 
     @Test
-    void costMergeRejectsTotalsThatCannotBeRepresented() {
-        assertThrows(ArithmeticException.class, () -> MagicResourceCost.merge(List.of(
+    void costMergeSupportsTotalsAboveInt() {
+        List<MagicResourceCost> merged = MagicResourceCost.merge(List.of(
                 new MagicResourceCost(MagicResourceKind.MANA, 1_500_000_000),
-                new MagicResourceCost(MagicResourceKind.MANA, 800_000_000))));
+                new MagicResourceCost(MagicResourceKind.MANA, 800_000_000)));
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 2_300_000_000L)),
+                merged);
     }
 
     @Test
-    void purePlannerRejectsPerRecipeCostsAboveIntRange() {
+    void purePlannerAggregatesCostsAboveIntRange() {
         ResourceLocation recipeId = new ResourceLocation("test", "large_mana_recipe");
         ResourceLocation itemId = new ResourceLocation("minecraft", "stone");
         ImmutableRecipeGraph.MaterialRef output =
@@ -67,9 +68,11 @@ class MagicResourceCostPlanningTest extends BootstrapTest {
                 List.of(new MagicResourceCost(MagicResourceKind.MANA, 1_000_000_000)));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(node)));
 
-        assertThrows(ArithmeticException.class, () -> PureRecipePlanner.resolve(
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 graph, Map.of(),
-                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 3)), 8));
+                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 3)), 8);
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 3_000_000_000L)),
+                result.magicCosts());
     }
 
     @Test

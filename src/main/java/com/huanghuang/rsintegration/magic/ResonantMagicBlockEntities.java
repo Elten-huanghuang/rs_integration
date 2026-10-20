@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.ModBlocks;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraftforge.fml.ModList;
@@ -39,7 +40,7 @@ public final class ResonantMagicBlockEntities {
             if (nativeEntity != null) return nativeEntity;
         }
         return new ResonantMagicBlockEntity(MANA_POOL.get(), pos, state, MagicResourceKind.MANA,
-                MagicResourceKind.MANA.capacity());
+                SaturatingLongMath.clampToInt(MagicResourceKind.MANA.capacity()));
     }
 
     private static BlockEntity createSource(net.minecraft.core.BlockPos pos,
@@ -51,7 +52,7 @@ public final class ResonantMagicBlockEntities {
             if (optional != null) return optional;
         }
         return new ResonantMagicBlockEntity(SOURCE_TANK.get(), pos, state, MagicResourceKind.SOURCE,
-                MagicResourceKind.SOURCE.capacity());
+                SaturatingLongMath.clampToInt(MagicResourceKind.SOURCE.capacity()));
     }
 
     private static BlockEntity createOptional(String className,

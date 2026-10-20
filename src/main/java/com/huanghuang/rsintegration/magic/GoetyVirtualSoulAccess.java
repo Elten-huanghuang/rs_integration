@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.util.Reflect;
 
 import javax.annotation.Nullable;
@@ -51,7 +52,7 @@ public final class GoetyVirtualSoulAccess {
     public static int souls(Object source) {
         if (isBypassed()) return -1;
         GoetySoulSourceCoordinator coordinator = find(source);
-        return coordinator == null ? -1 : coordinator.available();
+        return coordinator == null ? -1 : SaturatingLongMath.clampToInt(coordinator.available());
     }
 
     public static boolean isActive(Object source) {

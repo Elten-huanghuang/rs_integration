@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -11,25 +12,26 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class CraftPlanGraphMagicCostTest {
+class CraftPlanGraphMagicCostTest extends BootstrapTest {
 
     @Test
-    void rejectsOneNodeCostThatExceedsIntRangeAfterScaling() {
+    void keepsOneNodeCostAboveIntAfterScaling() {
         CraftPlanGraph graph = graph(List.of(node(0, 3,
                 new MagicResourceCost(MagicResourceKind.MANA, 1_000_000_000))));
 
-        assertThrows(ArithmeticException.class, graph::magicCosts);
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 3_000_000_000L)),
+                graph.magicCosts());
     }
 
     @Test
-    void rejectsMergedNodeCostsThatExceedIntRange() {
+    void keepsMergedNodeCostsAboveInt() {
         CraftPlanGraph graph = graph(List.of(
                 node(0, 1, new MagicResourceCost(MagicResourceKind.MANA, 1_500_000_000)),
                 node(1, 1, new MagicResourceCost(MagicResourceKind.MANA, 800_000_000))));
 
-        assertThrows(ArithmeticException.class, graph::magicCosts);
+        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 2_300_000_000L)),
+                graph.magicCosts());
     }
 
     @Test

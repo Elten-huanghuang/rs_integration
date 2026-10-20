@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.server.MinecraftServer;
 
 import javax.annotation.Nullable;
@@ -13,7 +14,7 @@ import java.util.UUID;
  * 原生机器后才减少预留；任务失败时尽量把尚未消耗的磁盘资源收回。</p>
  */
 public final class MagicCraftingEnergyTask implements AutoCloseable {
-    /** 原生机器的最小读写边界。 */
+    /** 原生机器的最小读写边界；单次读写仍受 int 接口限制。 */
     public interface Target {
         int current();
 
@@ -32,7 +33,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
 
     private final MinecraftServer server;
     private final MagicResourceKind kind;
-    private final int total;
+    private final long total;
     @Nullable
     private MagicResourceNetworkPool reservation;
     @Nullable
@@ -42,13 +43,13 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     private Target target;
     @Nullable
     private UUID injectionId;
-    private int injected;
-    private int consumed;
+    private long injected;
+    private long consumed;
     private boolean prepared;
     private boolean completed;
     private boolean recovered;
 
-    private MagicCraftingEnergyTask(MinecraftServer server, MagicResourceKind kind, int total,
+    private MagicCraftingEnergyTask(MinecraftServer server, MagicResourceKind kind, long total,
                                     @Nullable MagicResourceTaskReservation taskReservation,
                                     boolean ownsReservation) {
         this.server = server;
@@ -61,7 +62,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     /** 为一次固定费用操作创建预算；无需资源时返回 null。 */
     @Nullable
     public static MagicCraftingEnergyTask reserve(
-            @Nullable MinecraftServer server, MagicResourceKind kind, int total) {
+            @Nullable MinecraftServer server, MagicResourceKind kind, long total) {
         if (server == null || kind == null || total <= 0
                 || !kind.supportsRsiRecursiveCrafting()) return null;
         return new MagicCraftingEnergyTask(server, kind, total, null, true);
@@ -70,7 +71,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
     /** 从递归任务级共享预留中取得本节点的预算。 */
     @Nullable
     public static MagicCraftingEnergyTask reserve(
-            @Nullable MinecraftServer server, MagicResourceKind kind, int total,
+            @Nullable MinecraftServer server, MagicResourceKind kind, long total,
             @Nullable MagicResourceTaskReservation taskReservation) {
         if (server == null || kind == null || total <= 0
                 || !kind.supportsRsiRecursiveCrafting()) {
@@ -86,11 +87,11 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
         return kind;
     }
 
-    public int total() {
+    public long total() {
         return total;
     }
 
-    public int injected() {
+    public long injected() {
         return injected;
     }
 
@@ -107,7 +108,7 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
                     : MagicResourceEndpoint.reserve(server, kind, total);
         }
         if (reservation.remaining() < total) return false;
-        int withdrawn = reservation.withdraw(total);
+        long withdrawn = reservation.withdraw(total);
         if (withdrawn != total) {
             if (withdrawn > 0) reservation.refund(withdrawn);
             return false;
@@ -137,15 +138,15 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
 
         // 只提取本次节点真正缺少的部分，剩余预留留给后续节点；原机容量不足时，
         // 未接受部分会退回预留，不会把整份任务预算抽走。
-        int wanted = Math.min(Math.max(0, total - current), reservation.remaining());
+        long wanted = Math.min(Math.max(0, total - current), reservation.remaining());
         if (wanted <= 0) {
             prepared = true;
             return true;
         }
 
-        int withdrawn = reservation.withdraw(wanted);
+        long withdrawn = reservation.withdraw(wanted);
         if (withdrawn <= 0) return false;
-        int accepted = Math.max(0, Math.min(withdrawn, target.accept(withdrawn)));
+        long accepted = acceptInIntChunks(target, withdrawn);
         if (accepted < withdrawn) reservation.refund(withdrawn - accepted);
         injected += accepted;
         if (accepted > 0 && taskReservation != null && injectionId == null) {
@@ -184,7 +185,8 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
 
     private void recoverInjected() {
         if (target == null || injected <= 0) return;
-        int reclaimable = Math.min(injected, Math.max(0, target.current()));
+        int reclaimable = SaturatingLongMath.clampToInt(
+                Math.min(injected, Math.max(0, target.current())));
         if (reclaimable <= 0) return;
         int extracted = Math.max(0, Math.min(reclaimable, target.extract(reclaimable)));
         if (extracted > 0 && reservation != null) reservation.refund(extracted);
@@ -196,6 +198,19 @@ public final class MagicCraftingEnergyTask implements AutoCloseable {
             reservation.refund(consumed);
             consumed = 0;
         }
+    }
+
+    private static long acceptInIntChunks(Target target, long requested) {
+        long accepted = 0;
+        while (accepted < requested) {
+            int chunk = SaturatingLongMath.clampToInt(requested - accepted);
+            if (chunk <= 0) break;
+            int moved = Math.max(0, target.accept(chunk));
+            if (moved <= 0) break;
+            accepted += Math.min(moved, chunk);
+            if (moved < chunk) break;
+        }
+        return accepted;
     }
 
     private void releaseReservation() {

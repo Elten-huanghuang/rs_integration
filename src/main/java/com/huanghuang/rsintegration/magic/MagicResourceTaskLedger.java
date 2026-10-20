@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -48,14 +49,14 @@ public final class MagicResourceTaskLedger extends SavedData {
      * 操作时自动退款只会伪造守恒，因此只保留核对依据，并附上失效时的 BD 网络 ID
      * 以便重连后继续核对。
      */
-    public record Pending(UUID id, @Nullable UUID taskId, MagicResourceKind kind, int amount,
+    public record Pending(UUID id, @Nullable UUID taskId, MagicResourceKind kind, long amount,
                           int bdNetworkId, PendingReason reason, long recordedAt) {
     }
 
     private record Injection(UUID id, UUID taskId, MagicResourceKind kind,
                              ResourceLocation dimension, BlockPos position,
-                             int amount, InjectionState state) {
-        private Injection withAmount(int next) {
+                             long amount, InjectionState state) {
+        private Injection withAmount(long next) {
             return new Injection(id, taskId, kind, dimension, position, next, state);
         }
 
@@ -68,7 +69,7 @@ public final class MagicResourceTaskLedger extends SavedData {
         }
     }
 
-    private final Map<UUID, Map<MagicResourceKind, Integer>> tasks = new LinkedHashMap<>();
+    private final Map<UUID, Map<MagicResourceKind, Long>> tasks = new LinkedHashMap<>();
     private final Map<UUID, Injection> injections = new LinkedHashMap<>();
     private final Set<UUID> pendingRecovery = new LinkedHashSet<>();
     private final Map<UUID, Pending> pendingAudits = new LinkedHashMap<>();
@@ -81,10 +82,11 @@ public final class MagicResourceTaskLedger extends SavedData {
         for (Tag value : tag.getList("tasks", Tag.TAG_COMPOUND)) {
             CompoundTag entry = (CompoundTag) value;
             if (!entry.hasUUID("id")) continue;
-            Map<MagicResourceKind, Integer> amounts = new LinkedHashMap<>();
+            Map<MagicResourceKind, Long> amounts = new LinkedHashMap<>();
             CompoundTag resources = entry.getCompound("resources");
             for (MagicResourceKind kind : MagicResourceKind.values()) {
-                int amount = resources.getInt(kind.id());
+                long amount = resources.contains(kind.id(), Tag.TAG_LONG)
+                        ? resources.getLong(kind.id()) : resources.getInt(kind.id());
                 if (amount > 0) amounts.put(kind, amount);
             }
             if (!amounts.isEmpty()) tasks.put(entry.getUUID("id"), amounts);
@@ -112,7 +114,7 @@ public final class MagicResourceTaskLedger extends SavedData {
     }
 
     public void recordTask(UUID taskId, List<MagicResourceCost> costs) {
-        Map<MagicResourceKind, Integer> amounts = new LinkedHashMap<>();
+        Map<MagicResourceKind, Long> amounts = new LinkedHashMap<>();
         for (MagicResourceCost cost : MagicResourceCost.merge(costs)) {
             amounts.put(cost.kind(), cost.amountPerOperation());
         }
@@ -125,7 +127,7 @@ public final class MagicResourceTaskLedger extends SavedData {
     }
 
     public UUID recordInjection(UUID taskId, MagicResourceKind kind,
-                                ResourceLocation dimension, BlockPos position, int amount) {
+                                ResourceLocation dimension, BlockPos position, long amount) {
         pruneOldestUnknownIfNeeded();
         prunePendingAudits();
         UUID id = UUID.randomUUID();
@@ -154,13 +156,13 @@ public final class MagicResourceTaskLedger extends SavedData {
      * 的自动回收，只提供核对依据；{@code bdNetworkId} 记录失效时所在的 BD 网络，
      * 便于服务器重连后按同一网络继续核对。
      */
-    public void archive(@Nullable UUID taskId, MagicResourceKind kind, int amount,
+    public void archive(@Nullable UUID taskId, MagicResourceKind kind, long amount,
                         int bdNetworkId, PendingReason reason) {
         archive(taskId, kind, amount, bdNetworkId, reason, 0L);
     }
 
     /** 同上，并记录产生时间（主世界游戏刻），用于超期淘汰。 */
-    public void archive(@Nullable UUID taskId, MagicResourceKind kind, int amount,
+    public void archive(@Nullable UUID taskId, MagicResourceKind kind, long amount,
                         int bdNetworkId, PendingReason reason, long recordedAt) {
         if (kind == null || amount <= 0) return;
         UUID id = UUID.randomUUID();
@@ -204,7 +206,7 @@ public final class MagicResourceTaskLedger extends SavedData {
         }
     }
 
-    public void recovered(UUID injectionId, int remaining) {
+    public void recovered(UUID injectionId, long remaining) {
         Injection injection = injections.get(injectionId);
         if (injection == null) return;
         pendingRecovery.remove(injectionId);
@@ -235,10 +237,10 @@ public final class MagicResourceTaskLedger extends SavedData {
                 continue;
             }
             if (injection.state() == InjectionState.DISK_PENDING) {
-                int accepted = MagicResourceEndpoint.insert(
+                long accepted = MagicResourceEndpoint.insert(
                         server, injection.kind(), injection.amount(), true);
                 if (accepted <= 0) continue;
-                int remaining = injection.amount() - accepted;
+                long remaining = injection.amount() - accepted;
                 if (remaining <= 0) {
                     injections.remove(injection.id());
                     pendingRecovery.remove(injection.id());
@@ -250,7 +252,7 @@ public final class MagicResourceTaskLedger extends SavedData {
             }
             MagicMachineResourceRecovery.Result result = MagicMachineResourceRecovery.recover(
                     server, injection.kind(), injection.dimension(), injection.position(),
-                    injection.amount());
+                    SaturatingLongMath.clampToInt(injection.amount()));
             if (result.status() == MagicMachineResourceRecovery.Status.UNAVAILABLE) continue;
             if (result.status() == MagicMachineResourceRecovery.Status.NO_TARGET) {
                 injections.put(injection.id(), injection.unknown());
@@ -260,11 +262,11 @@ public final class MagicResourceTaskLedger extends SavedData {
                 setDirty();
                 continue;
             }
-            int extracted = result.amount();
-            int accepted = extracted <= 0 ? 0
+            long extracted = result.amount();
+            long accepted = extracted <= 0 ? 0
                     : MagicResourceEndpoint.insert(server, injection.kind(), extracted, true);
-            int diskPending = Math.max(0, extracted - accepted);
-            int machineRemaining = Math.max(0, injection.amount() - extracted);
+            long diskPending = Math.max(0, extracted - accepted);
+            long machineRemaining = Math.max(0, injection.amount() - extracted);
             if (diskPending == 0 && machineRemaining == 0) {
                 injections.remove(injection.id());
                 pendingRecovery.remove(injection.id());
@@ -297,11 +299,11 @@ public final class MagicResourceTaskLedger extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag) {
         ListTag serializedTasks = new ListTag();
-        for (Map.Entry<UUID, Map<MagicResourceKind, Integer>> entry : tasks.entrySet()) {
+        for (Map.Entry<UUID, Map<MagicResourceKind, Long>> entry : tasks.entrySet()) {
             CompoundTag task = new CompoundTag();
             task.putUUID("id", entry.getKey());
             CompoundTag resources = new CompoundTag();
-            entry.getValue().forEach((kind, amount) -> resources.putInt(kind.id(), amount));
+            entry.getValue().forEach((kind, amount) -> resources.putLong(kind.id(), amount));
             task.put("resources", resources);
             serializedTasks.add(task);
         }
@@ -315,7 +317,7 @@ public final class MagicResourceTaskLedger extends SavedData {
             value.putString("kind", injection.kind().name());
             value.putString("dimension", injection.dimension().toString());
             value.putLong("position", injection.position().asLong());
-            value.putInt("amount", injection.amount());
+            value.putLong("amount", injection.amount());
             value.putString("state", injection.state().name());
             serializedInjections.add(value);
         }
@@ -327,7 +329,7 @@ public final class MagicResourceTaskLedger extends SavedData {
             value.putUUID("id", pending.id());
             if (pending.taskId() != null) value.putUUID("task", pending.taskId());
             value.putString("kind", pending.kind().name());
-            value.putInt("amount", pending.amount());
+            value.putLong("amount", pending.amount());
             value.putInt("bdNetwork", pending.bdNetworkId());
             value.putString("reason", pending.reason().name());
             value.putLong("at", pending.recordedAt());
@@ -369,9 +371,10 @@ public final class MagicResourceTaskLedger extends SavedData {
         } catch (IllegalArgumentException invalid) {
             return null;
         }
-        if (dimension == null || tag.getInt("amount") <= 0) return null;
+        long amount = tag.contains("amount", Tag.TAG_LONG) ? tag.getLong("amount") : tag.getInt("amount");
+        if (dimension == null || amount <= 0) return null;
         return new Injection(tag.getUUID("id"), tag.getUUID("task"), kind, dimension,
-                BlockPos.of(tag.getLong("position")), tag.getInt("amount"), state);
+                BlockPos.of(tag.getLong("position")), amount, state);
     }
 
     @Nullable
@@ -385,9 +388,10 @@ public final class MagicResourceTaskLedger extends SavedData {
         } catch (IllegalArgumentException invalid) {
             return null;
         }
-        if (tag.getInt("amount") <= 0) return null;
+        long amount = tag.contains("amount", Tag.TAG_LONG) ? tag.getLong("amount") : tag.getInt("amount");
+        if (amount <= 0) return null;
         return new Pending(tag.getUUID("id"),
                 tag.hasUUID("task") ? tag.getUUID("task") : null,
-                kind, tag.getInt("amount"), tag.getInt("bdNetwork"), reason, tag.getLong("at"));
+                kind, amount, tag.getInt("bdNetwork"), reason, tag.getLong("at"));
     }
 }

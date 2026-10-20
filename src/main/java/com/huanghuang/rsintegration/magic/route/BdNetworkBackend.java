@@ -31,9 +31,6 @@ public final class BdNetworkBackend implements MagicStorageBackend {
     public static MagicStorageBackendDescriptor builtInDescriptor() {
         return Descriptor.INSTANCE;
     }
-    /** 单个 BD 网络的灵魂上限（int 溢出保护）。 */
-    private static final int SOUL_LIMIT = Integer.MAX_VALUE;
-
     private final ServerPlayer player;
     private final MagicScope scope;
     private final int networkId;
@@ -76,33 +73,32 @@ public final class BdNetworkBackend implements MagicStorageBackend {
     }
 
     @Override
-    public int amount(MagicResourceKind kind, MagicScopeHandle handle) {
+    public long amount(MagicResourceKind kind, MagicScopeHandle handle) {
         requireSupported(kind);
         if (!handle.belongsTo(ID)) return 0;
         int id = handle.intValue("networkId", -1);
         String source = handle.stringValue("sourceKey");
-        Integer raw = BdReservationBridge.amount(player, id);
+        Long raw = BdReservationBridge.amount(player, id);
         if (raw == null) return 0;
-        return Math.max(0, Math.min(SOUL_LIMIT,
-                raw - BdReservationBridge.reservedFor(source, id)));
+        return Math.max(0, raw - BdReservationBridge.reservedFor(source, id));
     }
 
     @Override
-    public MagicResourceNetworkPool reserve(MagicResourceKind kind, int requested,
+    public MagicResourceNetworkPool reserve(MagicResourceKind kind, long requested,
                                             MagicScopeHandle handle) {
         requireSupported(kind);
         return BdReservationBridge.reserve(player, networkId, requested, sourceKey);
     }
 
     @Override
-    public int insert(MagicResourceKind kind, int amount, MagicScopeHandle handle) {
+    public long insert(MagicResourceKind kind, long amount, MagicScopeHandle handle) {
         requireSupported(kind);
         // 写入失败必须让调用方看到，而不是拿到一个「接受 0」的假成功。
         return BdReservationBridge.insertOrThrow(player, networkId, amount);
     }
 
     @Override
-    public int extract(MagicResourceKind kind, int amount, MagicScopeHandle handle) {
+    public long extract(MagicResourceKind kind, long amount, MagicScopeHandle handle) {
         requireSupported(kind);
         return BdReservationBridge.extractOrThrow(player, networkId, amount);
     }

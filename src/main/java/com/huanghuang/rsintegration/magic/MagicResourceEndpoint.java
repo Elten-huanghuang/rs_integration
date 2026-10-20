@@ -26,60 +26,60 @@ public final class MagicResourceEndpoint {
     }
 
     /** 该资源的总库存。 */
-    public static int total(@Nullable MinecraftServer server, MagicResourceKind kind) {
+    public static long total(@Nullable MinecraftServer server, MagicResourceKind kind) {
         return MagicDiskStore.total(disks(server), kind);
     }
 
-    public static int total(@Nullable INetwork network, MagicResourceKind kind) {
+    public static long total(@Nullable INetwork network, MagicResourceKind kind) {
         return MagicDiskStore.total(networkDisks(network), kind);
     }
 
     /** 绑定网络中所有已挂载归墟盘对该资源提供的总容量。 */
-    public static int capacity(@Nullable INetwork network, MagicResourceKind kind) {
+    public static long capacity(@Nullable INetwork network, MagicResourceKind kind) {
         return MagicDiskStore.capacity(networkDisks(network), kind);
     }
 
     /** 该资源的可用量（库存扣除其他任务尚未使用的预留）。 */
-    public static int available(@Nullable MinecraftServer server, MagicResourceKind kind) {
+    public static long available(@Nullable MinecraftServer server, MagicResourceKind kind) {
         return MagicDiskStore.available(disks(server), kind);
     }
 
     /** 指定 RS 网络中扣除任务预留后的可用量。 */
-    public static int available(@Nullable INetwork network, MagicResourceKind kind) {
+    public static long available(@Nullable INetwork network, MagicResourceKind kind) {
         return MagicDiskStore.available(networkDisks(network), kind);
     }
 
     /** 在当前已挂载的盘上预留；返回的账本必须由调用方关闭。 */
     public static MagicResourceReservations.Pool reserve(@Nullable MinecraftServer server,
-                                                         MagicResourceKind kind, int requested) {
+                                                         MagicResourceKind kind, long requested) {
         return MagicResourceReservations.reserve(UnifiedDiskManager.existing(server), kind, requested);
     }
 
     /** 在指定 RS 网络中预留；预留凭据只操作该网络的归墟盘。 */
     public static MagicResourceNetworkPool reserve(@Nullable INetwork network,
-                                                   MagicResourceKind kind, int requested) {
+                                                   MagicResourceKind kind, long requested) {
         return MagicResourceReservations.reserve(networkDisks(network), kind, requested);
     }
 
     /** 充入库存，返回实际接收量。 */
-    public static int insert(@Nullable MinecraftServer server, MagicResourceKind kind,
-                             int requested, boolean perform) {
+    public static long insert(@Nullable MinecraftServer server, MagicResourceKind kind,
+                              long requested, boolean perform) {
         return MagicDiskStore.insert(disks(server), kind, requested, perform);
     }
 
-    public static int insert(@Nullable INetwork network, MagicResourceKind kind,
-                             int requested, boolean perform) {
+    public static long insert(@Nullable INetwork network, MagicResourceKind kind,
+                              long requested, boolean perform) {
         return MagicDiskStore.insert(networkDisks(network), kind, requested, perform);
     }
 
     /** 从库存取出，返回实际取出量；会把其他任务的预留留在盘上。 */
-    public static int extract(@Nullable MinecraftServer server, MagicResourceKind kind,
-                              int requested, boolean perform) {
+    public static long extract(@Nullable MinecraftServer server, MagicResourceKind kind,
+                               long requested, boolean perform) {
         return MagicResourceReservations.extract(UnifiedDiskManager.existing(server), kind, requested, perform);
     }
 
-    public static int extract(@Nullable INetwork network, MagicResourceKind kind,
-                              int requested, boolean perform) {
+    public static long extract(@Nullable INetwork network, MagicResourceKind kind,
+                               long requested, boolean perform) {
         return MagicResourceReservations.extract(networkDisks(network), kind, requested, perform);
     }
 

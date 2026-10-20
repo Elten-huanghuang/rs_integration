@@ -21,16 +21,16 @@ public final class MagicResourceInteraction {
     }
 
     /** 把容器里的资源充入当前已挂载的归墟盘。 */
-    public static int depositToNetwork(ServerPlayer player, MagicResourceKind kind,
-                                       @Nullable ItemStack stack) {
+    public static long depositToNetwork(ServerPlayer player, MagicResourceKind kind,
+                                        @Nullable ItemStack stack) {
         if (player == null || stack == null || stack.isEmpty()) return 0;
         if (!kind.available() || MagicGridItemTransfer.kindOf(stack) != kind) return 0;
         return MagicGridItemTransfer.deposit(player, kind, stack);
     }
 
     /** 把容器中的资源存入终端当前连接的 RS 网络。 */
-    public static int depositToNetwork(ServerPlayer player, INetwork network,
-                                       MagicResourceKind kind, @Nullable ItemStack stack) {
+    public static long depositToNetwork(ServerPlayer player, INetwork network,
+                                        MagicResourceKind kind, @Nullable ItemStack stack) {
         if (player == null || network == null || stack == null || stack.isEmpty()) return 0;
         if (!kind.available() || MagicGridItemTransfer.kindOf(stack) != kind) return 0;
         return MagicGridItemTransfer.deposit(player, network, kind, stack);

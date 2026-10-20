@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import javax.annotation.Nullable;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -35,7 +36,7 @@ public final class DarkAltarSoulPort {
     /** 未接管时返回 -1。 */
     public static int souls(Object altar) {
         GoetySoulSourceCoordinator coordinator = find(altar);
-        return coordinator == null ? -1 : coordinator.available();
+        return coordinator == null ? -1 : SaturatingLongMath.clampToInt(coordinator.available());
     }
 
     public static boolean consume(Object altar, int amount) {

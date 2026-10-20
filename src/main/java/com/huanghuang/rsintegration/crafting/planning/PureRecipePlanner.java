@@ -214,25 +214,9 @@ public final class PureRecipePlanner {
             RecipeNode node = graph.recipesById().get(step.recipeId());
             if (node == null) continue;
             for (MagicResourceCost cost : node.magicCosts()) {
-                long total = 0L;
-                long remaining = Math.max(1L, step.batches());
-                while (remaining > 0L) {
-                    int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
-                    long partial = cost.totalFor(chunk);
-                    if (partial > Integer.MAX_VALUE - total) {
-                        total = (long) Integer.MAX_VALUE + 1L;
-                        break;
-                    }
-                    total += partial;
-                    remaining -= chunk;
-                }
+                long total = cost.totalFor(Math.max(1L, step.batches()));
                 if (total <= 0L) continue;
-                if (total > Integer.MAX_VALUE) {
-                    throw new ArithmeticException(
-                            "aggregated magic cost exceeds int for " + cost.kind() + ": " + total);
-                }
-                costs.add(new MagicResourceCost(
-                        cost.kind(), (int) total));
+                costs.add(new MagicResourceCost(cost.kind(), total));
             }
         }
         return MagicResourceCost.merge(costs);

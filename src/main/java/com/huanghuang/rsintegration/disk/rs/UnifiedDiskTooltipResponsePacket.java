@@ -17,7 +17,7 @@ public record UnifiedDiskTooltipResponsePacket(UUID world, UUID disk, UnifiedDis
         if (packet.summary != null) {
             UnifiedDiskSummary summary = packet.summary;
             buf.writeVarLong(summary.items()); buf.writeVarLong(summary.fluids());
-            for (int amount : summary.magicAmounts()) buf.writeVarInt(amount);
+            for (long amount : summary.magicAmounts()) buf.writeVarLong(amount);
             buf.writeVarInt(summary.itemTypes()); buf.writeVarInt(summary.fluidTypes());
             buf.writeVarInt(summary.itemCapacity()); buf.writeVarInt(summary.fluidCapacity());
         }
@@ -31,8 +31,8 @@ public record UnifiedDiskTooltipResponsePacket(UUID world, UUID disk, UnifiedDis
         UnifiedDiskSummary summary = null;
         if (buf.readBoolean()) {
             long items = buf.readVarLong(), fluids = buf.readVarLong();
-            int[] magic = new int[MagicResourceKind.values().length];
-            for (int index = 0; index < magic.length; index++) magic[index] = buf.readVarInt();
+            long[] magic = new long[MagicResourceKind.values().length];
+            for (int index = 0; index < magic.length; index++) magic[index] = buf.readVarLong();
             summary = new UnifiedDiskSummary(items, fluids, magic,
                     buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
         }

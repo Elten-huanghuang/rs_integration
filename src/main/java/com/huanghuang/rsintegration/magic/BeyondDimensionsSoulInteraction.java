@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.api.magic.BdMagicApi;
 import com.wintercogs.beyonddimensions.api.storage.handler.impl.AbstractUnorderedStackHandler;
+import com.wintercogs.beyonddimensions.api.storage.key.IStackKey;
+import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.common.menu.DimensionsNetMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -17,6 +20,17 @@ public final class BeyondDimensionsSoulInteraction {
                 || !menu.stillValid(player)
                 || (button != 0 && button != 1)) return false;
         ItemStack cursor = menu.getCarried();
+        MagicResourceKind creative = MagicGridItemTransfer.creativeKind(cursor);
+        if (creative != null) {
+            if (creative.available() && button == 1 && menu.storage != null) {
+                long moved = depositCreative(menu.storage, creative);
+                if (moved > 0) {
+                    player.getInventory().setChanged();
+                    menu.broadcastChanges();
+                }
+            }
+            return true;
+        }
         if (!GoetySoulTotem.isTotem(cursor) || menu.storage == null) return false;
 
         AbstractUnorderedStackHandler storage = menu.storage;
@@ -31,5 +45,19 @@ public final class BeyondDimensionsSoulInteraction {
             player.getInventory().setChanged();
         }
         return true;
+    }
+
+    private static long depositCreative(AbstractUnorderedStackHandler storage,
+                                        MagicResourceKind kind) {
+        IStackKey<?> key = BdMagicApi.canonicalKey(BdMagicApi.resolveKey(
+                kind == MagicResourceKind.MANA ? BdMagicApi.MANA_KEY : BdMagicApi.SOURCE_KEY));
+        if (key == null) return 0;
+        long requested = Math.min(MagicGridItemTransfer.creativeDepositAmount(), kind.capacity());
+        KeyAmount remainder = storage.insert(key, requested, true);
+        long accepted = requested - (remainder == null ? 0 : Math.max(0, remainder.amount()));
+        if (accepted <= 0) return 0;
+        KeyAmount actualRemainder = storage.insert(key, accepted, false);
+        return Math.max(0, accepted - (actualRemainder == null
+                ? 0 : Math.max(0, actualRemainder.amount())));
     }
 }

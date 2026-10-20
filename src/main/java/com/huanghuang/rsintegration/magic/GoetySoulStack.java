@@ -9,7 +9,7 @@ import net.minecraft.network.FriendlyByteBuf;
  * 容量规则都在通用类型里，这里只保留灵魂特有的构造和网络读写入口。</p>
  */
 public final class GoetySoulStack extends MagicResourceStack {
-    public GoetySoulStack(int amount) {
+    public GoetySoulStack(long amount) {
         super(MagicResourceKind.SOUL, amount);
     }
 
@@ -20,11 +20,11 @@ public final class GoetySoulStack extends MagicResourceStack {
 
     @Override
     public void writeToPacket(FriendlyByteBuf buf) {
-        buf.writeVarInt(getAmount());
+        buf.writeVarLong(getAmount());
     }
 
     public static GoetySoulStack readFromPacket(FriendlyByteBuf buf) {
-        return new GoetySoulStack(buf.readVarInt());
+        return new GoetySoulStack(buf.readVarLong());
     }
 
     @Override
@@ -34,6 +34,6 @@ public final class GoetySoulStack extends MagicResourceStack {
 
     @Override
     public int hashCode() {
-        return Integer.hashCode(getAmount());
+        return Long.hashCode(getAmount());
     }
 }

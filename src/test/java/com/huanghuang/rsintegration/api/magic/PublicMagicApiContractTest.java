@@ -26,15 +26,15 @@ class PublicMagicApiContractTest {
         try (MockedStatic<MagicResourceEndpoint> endpoint =
                      mockStatic(MagicResourceEndpoint.class)) {
             endpoint.when(() -> MagicResourceEndpoint.total(network, MagicResourceKind.SOUL))
-                    .thenReturn(120);
+                    .thenReturn(120L);
             endpoint.when(() -> MagicResourceEndpoint.available(network, MagicResourceKind.SOUL))
-                    .thenReturn(80);
+                    .thenReturn(80L);
             endpoint.when(() -> MagicResourceEndpoint.insert(
                             network, MagicResourceKind.SOUL, 40, false))
-                    .thenReturn(40);
+                    .thenReturn(40L);
             endpoint.when(() -> MagicResourceEndpoint.extract(
                             network, MagicResourceKind.SOUL, 20, true))
-                    .thenReturn(20);
+                    .thenReturn(20L);
             endpoint.when(() -> MagicResourceEndpoint.reserve(
                             network, MagicResourceKind.SOUL, 60))
                     .thenReturn(reservation);

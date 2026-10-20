@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import javax.annotation.Nullable;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -42,7 +43,8 @@ public final class BrazierSoulPort {
     /** 未接管时返回 -1。 */
     public static int souls(Object brazier) {
         ActiveSource active = find(brazier);
-        return active == null ? -1 : active.coordinator().available();
+        return active == null ? -1 : SaturatingLongMath.clampToInt(
+                active.coordinator().available());
     }
 
     public static boolean consume(Object brazier, int amount) {

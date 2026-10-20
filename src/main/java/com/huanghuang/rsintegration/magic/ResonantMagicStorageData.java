@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.nbt.CompoundTag;
@@ -33,7 +34,9 @@ final class ResonantMagicStorageData {
     int resourceCapacity() {
         if (owner.getLevel() != null && !owner.getLevel().isClientSide && binding != null) {
             INetwork network = resolveNetwork();
-            if (network != null) return MagicResourceEndpoint.capacity(network, kind);
+            if (network != null) {
+                return SaturatingLongMath.clampToInt(MagicResourceEndpoint.capacity(network, kind));
+            }
         }
         return displayCapacity;
     }
@@ -74,7 +77,8 @@ final class ResonantMagicStorageData {
             return displayAmount;
         }
         INetwork network = resolveNetwork();
-        return network == null ? 0 : MagicResourceEndpoint.total(network, kind);
+        return network == null ? 0
+                : SaturatingLongMath.clampToInt(MagicResourceEndpoint.total(network, kind));
     }
 
     boolean reachable() {
@@ -86,7 +90,8 @@ final class ResonantMagicStorageData {
         if (amount <= 0 || owner.getLevel() == null || owner.getLevel().isClientSide) return 0;
         INetwork network = resolveNetwork();
         if (network == null) return 0;
-        int accepted = MagicResourceEndpoint.insert(network, kind, amount, true);
+        int accepted = SaturatingLongMath.clampToInt(
+                MagicResourceEndpoint.insert(network, kind, amount, true));
         syncSnapshot();
         return accepted;
     }
@@ -95,7 +100,8 @@ final class ResonantMagicStorageData {
         if (amount <= 0 || owner.getLevel() == null || owner.getLevel().isClientSide) return 0;
         INetwork network = resolveNetwork();
         if (network == null) return 0;
-        int extracted = MagicResourceEndpoint.extract(network, kind, amount, true);
+        int extracted = SaturatingLongMath.clampToInt(
+                MagicResourceEndpoint.extract(network, kind, amount, true));
         syncSnapshot();
         return extracted;
     }

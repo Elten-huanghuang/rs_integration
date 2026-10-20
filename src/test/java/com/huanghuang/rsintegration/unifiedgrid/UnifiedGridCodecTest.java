@@ -24,10 +24,13 @@ class UnifiedGridCodecTest extends BootstrapTest {
             Object template = kind.isItem() ? item
                     : kind.isFluid() ? fluid
                     : new MagicResourceStack(kind.magicKind(), 1);
-            UnifiedGridEntry original = new UnifiedGridEntry(5, Integer.MAX_VALUE, true, stored, craftable,
+            long amount = kind.isMagic() ? Integer.MAX_VALUE + 123L : Integer.MAX_VALUE;
+            long capacity = kind.isMagic() ? Long.MAX_VALUE : 0;
+            UnifiedGridEntry original = new UnifiedGridEntry(5, amount, capacity, true, stored, craftable,
                     template, new StorageTrackerEntry(123, "player"));
             UnifiedGridEntry copy = roundTrip(kind, original);
-            assertEquals(Integer.MAX_VALUE, copy.amount());
+            assertEquals(amount, copy.amount());
+            assertEquals(capacity, copy.capacity());
             assertEquals(stored, copy.storedId());
             assertEquals(craftable, copy.craftableId());
             assertEquals(1, kind.amount(copy.template()));

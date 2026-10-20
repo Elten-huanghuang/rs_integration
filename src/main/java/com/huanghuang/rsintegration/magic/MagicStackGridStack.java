@@ -15,6 +15,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
+import static com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath.clampToInt;
+
 /**
  * 终端显示用的魔法资源 GridStack，实现 RS 的 IGridStack 接口。
  *
@@ -25,12 +27,12 @@ public final class MagicStackGridStack implements IGridStack {
     private final MagicResourceKind kind;
     private final UUID id;
     private final UUID otherId;
-    private int amount;
-    private final int capacity;
+    private long amount;
+    private final long capacity;
     private StorageTrackerEntry trackerEntry;
     private final boolean craftable;
 
-    public MagicStackGridStack(MagicResourceKind kind, UUID id, UUID otherId, int amount, int capacity,
+    public MagicStackGridStack(MagicResourceKind kind, UUID id, UUID otherId, long amount, long capacity,
                                StorageTrackerEntry trackerEntry, boolean craftable) {
         this.kind = kind;
         this.id = id;
@@ -71,16 +73,20 @@ public final class MagicStackGridStack implements IGridStack {
                 String.format(Locale.ROOT, "%,d", capacity)));
     }
 
-    public int getCapacity() { return capacity; }
+    public long getCapacity() { return capacity; }
+
+    public long getLongQuantity() { return amount; }
+
+    public void setLongQuantity(long quantity) { this.amount = Math.max(0, quantity); }
 
     @Override
     public int getQuantity() {
-        return amount;
+        return clampToInt(amount);
     }
 
     @Override
     public void setQuantity(int quantity) {
-        this.amount = quantity;
+        this.amount = Math.max(0, quantity);
     }
 
     @Override
@@ -135,7 +141,9 @@ public final class MagicStackGridStack implements IGridStack {
         MagicResourceTexture.render(graphics, kind, x, y);
         String text = craftable
                 ? I18n.get("gui.refinedstorage.grid.craft")
-                : API.instance().getQuantityFormatter().formatWithUnits(amount);
+                : amount > Integer.MAX_VALUE
+                        ? getFormattedFullQuantity()
+                        : API.instance().getQuantityFormatter().formatWithUnits(getQuantity());
         screen.renderQuantity(graphics, x, y, text, RenderSettings.INSTANCE.getSecondaryColor());
     }
 

@@ -95,6 +95,21 @@ class GoetySoulSourceAccountingTest {
         assertEquals(850, nativeSource.remaining);
     }
 
+    @Test
+    void networkBudgetAndConsumptionRemainLongAboveInt() {
+        long total = Integer.MAX_VALUE + 25L;
+        FakeNetworkPool network = new FakeNetworkPool(total);
+        FakeNativeSource nativeSource = new FakeNativeSource(0);
+        GoetySoulSourceCoordinator coordinator =
+                GoetySoulSourceCoordinator.create(total, network, nativeSource);
+
+        assertTrue(coordinator != null);
+        assertEquals(total, coordinator.availableAtStart());
+        assertTrue(coordinator.consume(total));
+        assertEquals(0, network.remaining);
+        assertEquals(0, coordinator.available());
+    }
+
     private static final class FakeContainer {
         private int souls;
 
@@ -112,27 +127,27 @@ class GoetySoulSourceAccountingTest {
     }
 
     private static final class FakeNetworkPool implements GoetySoulNetworkPool {
-        private int remaining;
+        private long remaining;
         private boolean closed;
 
-        private FakeNetworkPool(int remaining) {
+        private FakeNetworkPool(long remaining) {
             this.remaining = remaining;
         }
 
         @Override
-        public int remaining() {
+        public long remaining() {
             return remaining;
         }
 
         @Override
-        public int withdraw(int requested) {
-            int moved = Math.min(remaining, Math.max(0, requested));
+        public long withdraw(long requested) {
+            long moved = Math.min(remaining, Math.max(0, requested));
             remaining -= moved;
             return moved;
         }
 
         @Override
-        public void refund(int amount) {
+        public void refund(long amount) {
             remaining += Math.max(0, amount);
         }
 

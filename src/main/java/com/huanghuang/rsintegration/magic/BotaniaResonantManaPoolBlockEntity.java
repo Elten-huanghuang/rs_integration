@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.mixin.core.BlockEntityTypeAccessor;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -31,7 +32,7 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
         super(pos, state);
         setRegisteredType(this, type);
         storage = new ResonantMagicStorageData(this, MagicResourceKind.MANA,
-                MagicResourceKind.MANA.capacity());
+                SaturatingLongMath.clampToInt(MagicResourceKind.MANA.capacity()));
     }
 
     private static void setRegisteredType(ManaPoolBlockEntity entity, BlockEntityType<?> type) {

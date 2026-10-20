@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** JEI 内部汇总使用宽计数防止多个 NBT 变体相加溢出；资源和网络数量仍为 int。 */
+/** JEI 内部汇总使用宽计数防止多个 NBT 变体相加溢出；JEI 显示接口最终仍受 int 边界限制。 */
 public final class UnifiedGridJeiTracker {
     private UnifiedGridJeiTracker() { }
 

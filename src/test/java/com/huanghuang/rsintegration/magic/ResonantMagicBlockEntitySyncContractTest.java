@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -54,10 +55,10 @@ class ResonantMagicBlockEntitySyncContractTest {
         BlockPos pos = new BlockPos(4, 5, 6);
         var manaPool = new ResonantMagicBlockEntity(BlockEntityType.CHEST, pos,
                 Blocks.CHEST.defaultBlockState(), MagicResourceKind.MANA,
-                MagicResourceKind.MANA.capacity());
+                SaturatingLongMath.clampToInt(MagicResourceKind.MANA.capacity()));
 
         assertEquals(Integer.MAX_VALUE, manaPool.resourceCapacity());
-        assertEquals(Integer.MAX_VALUE, MagicResourceKind.SOURCE.capacity());
+        assertEquals(Long.MAX_VALUE, MagicResourceKind.SOURCE.capacity());
         String sourceAdapter = Files.readString(Path.of("src/main/java/com/huanghuang/"
                 + "rsintegration/magic/ArsResonantSourceTankBlockEntity.java"));
         assertTrue(sourceAdapter.contains("MagicResourceKind.SOURCE.capacity()"));

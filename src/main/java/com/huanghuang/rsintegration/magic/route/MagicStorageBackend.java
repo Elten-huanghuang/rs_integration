@@ -26,15 +26,15 @@ public interface MagicStorageBackend {
     MagicScopeHandle bind();
 
     /** 当前可达存量；调用前应确认 {@link #reachable(MagicResourceKind)}。 */
-    int amount(MagicResourceKind kind, MagicScopeHandle handle);
+    long amount(MagicResourceKind kind, MagicScopeHandle handle);
 
     /** 预留；预留不直接扣库存，真正提取时才减少。 */
-    MagicResourceNetworkPool reserve(MagicResourceKind kind, int requested,
+    MagicResourceNetworkPool reserve(MagicResourceKind kind, long requested,
                                      MagicScopeHandle handle);
 
-    int insert(MagicResourceKind kind, int amount, MagicScopeHandle handle);
+    long insert(MagicResourceKind kind, long amount, MagicScopeHandle handle);
 
-    int extract(MagicResourceKind kind, int amount, MagicScopeHandle handle);
+    long extract(MagicResourceKind kind, long amount, MagicScopeHandle handle);
 
     /**
      * 硬规则：资源不在声明范围内就抛，绝不静默返回 0。

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 
@@ -20,45 +21,45 @@ import javax.annotation.Nullable;
  */
 public final class MagicResourceReservations {
     static final Object LOCK = new Object();
-    private static final Map<UUID, int[]> BY_DISK = new HashMap<>();
+    private static final Map<UUID, long[]> BY_DISK = new HashMap<>();
 
     private MagicResourceReservations() {}
 
     /** 该盘上已被其他任务预留的数量。 */
-    static int reserved(UUID diskId, MagicResourceKind kind) {
-        int[] amounts = BY_DISK.get(diskId);
+    static long reserved(UUID diskId, MagicResourceKind kind) {
+        long[] amounts = BY_DISK.get(diskId);
         return amounts == null ? 0 : amounts[kind.ordinal()];
     }
 
-    private static void add(UUID diskId, MagicResourceKind kind, int delta) {
+    private static void add(UUID diskId, MagicResourceKind kind, long delta) {
         if (delta == 0) return;
-        int[] amounts = BY_DISK.computeIfAbsent(diskId,
-                ignored -> new int[MagicResourceKind.values().length]);
-        int next = amounts[kind.ordinal()] + delta;
-        amounts[kind.ordinal()] = Math.max(0, next);
+        long[] amounts = BY_DISK.computeIfAbsent(diskId,
+                ignored -> new long[MagicResourceKind.values().length]);
+        amounts[kind.ordinal()] = SaturatingLongMath.signedAdd(amounts[kind.ordinal()], delta);
+        if (amounts[kind.ordinal()] < 0) amounts[kind.ordinal()] = 0;
         // 预留的增减同样改变终端显示的可用量，所以也算一次库存变动。
         MagicResourceDirty.bump();
     }
 
     /** 在当前已挂载的盘上预留，返回可继续提取的凭据。 */
-    public static Pool reserve(UnifiedDiskManager manager, MagicResourceKind kind, int requested) {
+    public static Pool reserve(UnifiedDiskManager manager, MagicResourceKind kind, long requested) {
         return reserve(manager == null ? List.of() : MagicDiskStore.mountedDisks(manager),
                 kind, requested);
     }
 
     /** 在给定网络磁盘集合上预留，返回可继续提取的凭据。 */
     public static Pool reserve(List<UnifiedDiskCore> disks, MagicResourceKind kind,
-                               int requested) {
+                               long requested) {
         Pool pool = new Pool(kind);
         if (disks == null || disks.isEmpty() || requested <= 0) return pool;
         synchronized (LOCK) {
-            int left = Math.min(requested, MagicDiskStore.capacity(disks, kind));
+            long left = Math.min(requested, MagicDiskStore.capacity(disks, kind));
             for (UnifiedDiskCore disk : disks) {
                 if (left <= 0) break;
-                int available = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
-                int take = Math.min(available, left);
+                long available = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
+                long take = Math.min(available, left);
                 if (take <= 0) continue;
-                pool.claims.merge(disk, take, Integer::sum);
+                pool.claims.merge(disk, take, SaturatingLongMath::add);
                 add(disk.diskId, kind, take);
                 pool.remaining += take;
                 left -= take;
@@ -68,18 +69,18 @@ public final class MagicResourceReservations {
     }
 
     /** 从盘上取出没有归属的余额；其他任务已经预留的部分不会被挪用。 */
-    public static int extract(@Nullable UnifiedDiskManager manager, MagicResourceKind kind,
-                              int requested, boolean perform) {
+    public static long extract(@Nullable UnifiedDiskManager manager, MagicResourceKind kind,
+                               long requested, boolean perform) {
         if (manager == null || requested <= 0) return 0;
-        int moved = 0;
+        long moved = 0;
         synchronized (LOCK) {
             for (UnifiedDiskCore disk : MagicDiskStore.mountedDisks(manager)) {
                 if (moved >= requested) break;
-                int want = requested - moved;
-                int free = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
-                int fromFree = Math.min(want, free);
+                long want = requested - moved;
+                long free = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
+                long fromFree = Math.min(want, free);
                 if (fromFree > 0) {
-                    int taken = disk.extractMagic(kind, fromFree, perform);
+                    long taken = disk.extractMagic(kind, fromFree, perform);
                     moved += taken;
                 }
             }
@@ -88,15 +89,15 @@ public final class MagicResourceReservations {
     }
 
     /** 从指定网络的归墟盘提取，不触碰其他网络的预留。 */
-    public static int extract(List<UnifiedDiskCore> disks, MagicResourceKind kind,
-                              int requested, boolean perform) {
+    public static long extract(List<UnifiedDiskCore> disks, MagicResourceKind kind,
+                               long requested, boolean perform) {
         if (disks == null || requested <= 0) return 0;
-        int moved = 0;
+        long moved = 0;
         synchronized (LOCK) {
             for (UnifiedDiskCore disk : disks) {
                 if (moved >= requested) break;
-                int free = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
-                int take = Math.min(requested - moved, free);
+                long free = Math.max(0, disk.magicAmount(kind) - reserved(disk.diskId, kind));
+                long take = Math.min(requested - moved, free);
                 if (take > 0) moved += disk.extractMagic(kind, take, perform);
             }
         }
@@ -106,8 +107,8 @@ public final class MagicResourceReservations {
 
     /** 一次任务持有的预留；所有方法都在服务器主线程调用。 */    public static final class Pool implements GoetySoulNetworkPool {
         private final MagicResourceKind kind;
-        private final Map<UnifiedDiskCore, Integer> claims = new LinkedHashMap<>();
-        private int remaining;
+        private final Map<UnifiedDiskCore, Long> claims = new LinkedHashMap<>();
+        private long remaining;
 
         private Pool(MagicResourceKind kind) {
             this.kind = kind;
@@ -118,22 +119,22 @@ public final class MagicResourceReservations {
         }
 
         @Override
-        public int remaining() {
+        public long remaining() {
             return remaining;
         }
 
         /** 从本次预留中提取；提取多少就减少多少预留，提取失败不改变状态。 */
         @Override
-        public int withdraw(int requested) {
+        public long withdraw(long requested) {
             if (requested <= 0 || remaining <= 0) return 0;
-            int moved = 0;
+            long moved = 0;
             synchronized (LOCK) {
-                for (Map.Entry<UnifiedDiskCore, Integer> entry : claims.entrySet()) {
+                for (Map.Entry<UnifiedDiskCore, Long> entry : claims.entrySet()) {
                     if (moved >= requested) break;
-                    int claim = Math.max(0, entry.getValue());
-                    int want = Math.min(claim, requested - moved);
+                    long claim = Math.max(0, entry.getValue());
+                    long want = Math.min(claim, requested - moved);
                     if (want <= 0) continue;
-                    int extracted = entry.getKey().extractMagic(kind, want, true);
+                    long extracted = entry.getKey().extractMagic(kind, want, true);
                     if (extracted <= 0) continue;
                     entry.setValue(claim - extracted);
                     add(entry.getKey().diskId, kind, -extracted);
@@ -146,13 +147,13 @@ public final class MagicResourceReservations {
 
         /** 把未接受的部分放回预留，仍然计入本任务的账。 */
         @Override
-        public void refund(int amount) {
+        public void refund(long amount) {
             if (amount <= 0) return;
             synchronized (LOCK) {
                 for (UnifiedDiskCore disk : claims.keySet()) {
-                    int accepted = disk.insertMagic(kind, amount, true);
+                    long accepted = disk.insertMagic(kind, amount, true);
                     if (accepted <= 0) continue;
-                    claims.merge(disk, accepted, Integer::sum);
+                    claims.merge(disk, accepted, SaturatingLongMath::add);
                     add(disk.diskId, kind, accepted);
                     remaining += accepted;
                     return;
@@ -163,7 +164,7 @@ public final class MagicResourceReservations {
         @Override
         public void close() {
             synchronized (LOCK) {
-                for (Map.Entry<UnifiedDiskCore, Integer> entry : claims.entrySet()) {
+                for (Map.Entry<UnifiedDiskCore, Long> entry : claims.entrySet()) {
                     add(entry.getKey().diskId, kind, -entry.getValue());
                 }
                 claims.clear();

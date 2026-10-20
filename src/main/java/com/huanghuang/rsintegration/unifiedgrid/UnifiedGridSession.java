@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.magic.MagicResourceDirty;
 import com.huanghuang.rsintegration.magic.MagicResourceEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
@@ -185,7 +186,7 @@ public final class UnifiedGridSession {
                 if (!packet.kind().isMagic() || packet.serial() != 0 || !permitted(Permission.INSERT)) return;
                 MagicChannel channel = magicChannel(packet.kind());
                 if (channel == null) return;
-                int moved = MagicResourceInteraction.depositToNetwork(
+                long moved = MagicResourceInteraction.depositToNetwork(
                         player, network, channel.resource, menu.getCarried());
                 if (moved > 0) channel.forceRefresh(); // 立即刷新该资源条目
             }
@@ -202,7 +203,8 @@ public final class UnifiedGridSession {
                 MagicChannel channel = magicChannel(packet.kind());
                 if (channel == null || packet.serial() != channel.serial) return;
                 int moved = MagicResourceInteraction.withdrawFromNetwork(
-                        player, network, channel.resource, menu.getCarried(), channel.lastAmount);
+                        player, network, channel.resource, menu.getCarried(),
+                        SaturatingLongMath.clampToInt(channel.lastAmount));
                 if (moved > 0) channel.forceRefresh();
             }
             case EXTRACT, SCROLL -> {
@@ -448,8 +450,8 @@ public final class UnifiedGridSession {
         private final GridResourceKey key;
         private UUID storedId;
         private UUID craftableId;
-        private int amount;
-        private int capacity;
+        private long amount;
+        private long capacity;
         private StorageTrackerEntry tracker;
 
         private ServerEntry(int serial, Object template, GridResourceKey key) {
@@ -483,8 +485,8 @@ public final class UnifiedGridSession {
         private int lastPoll = -FALLBACK_POLL_INTERVAL;
         private long seenVersion = -1;
         private ServerEntry entry;
-        private int lastAmount = -1;
-        private int lastCapacity = -1;
+        private long lastAmount = -1;
+        private long lastCapacity = -1;
         private boolean sentInitial;
         private int serial;
 
@@ -539,8 +541,8 @@ public final class UnifiedGridSession {
             seenVersion = version;
             lastPoll = player.tickCount;
 
-            int total = MagicResourceEndpoint.available(network, resource);
-            int capacity = MagicResourceEndpoint.capacity(network, resource);
+            long total = MagicResourceEndpoint.available(network, resource);
+            long capacity = MagicResourceEndpoint.capacity(network, resource);
             // 数量和网络容量都变化时更新终端，容量来源与绑定方块完全一致。
             if (!sentInitial || total != lastAmount || capacity != lastCapacity) {
                 lastAmount = total;

@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;
-import java.util.OptionalInt;
+import java.util.OptionalLong;
 
 /**
  * 灵魂在「当前存储后端」上的实时可达量。
@@ -43,10 +43,10 @@ public final class SoulPlanPreview {
      * @param authoritative 权威后端可达量；不可达时为空（不是 0）
      * @param source        回答这个数的后端类型
      */
-    public record Estimate(int total, OptionalInt authoritative, SourceKind source) {
+    public record Estimate(long total, OptionalLong authoritative, SourceKind source) {
         public Estimate {
             total = Math.max(0, total);
-            authoritative = authoritative == null ? OptionalInt.empty() : authoritative;
+            authoritative = authoritative == null ? OptionalLong.empty() : authoritative;
             source = source == null ? SourceKind.UNREACHABLE : source;
         }
 
@@ -55,45 +55,45 @@ public final class SoulPlanPreview {
         }
 
         /** 权威后端可达量；不可达时为 0，仅用于展示，不要当作“真的没有”。 */
-        public int authoritativeOrZero() {
-            return authoritative.orElse(0);
+        public long authoritativeOrZero() {
+            return authoritative.orElse(0L);
         }
 
         /** 权威后端要承担的份额。 */
-        public int backendShare() {
+        public long backendShare() {
             return Math.min(total, authoritativeOrZero());
         }
 
         /** 需要机器原生来源/Arca 补足的份额。 */
-        public int fallbackShare() {
+        public long fallbackShare() {
             return Math.max(0, total - backendShare());
         }
 
         /** 与旧契约兼容的可用量；不可达时返回 -1。 */
-        public int legacyAvailable() {
+        public long legacyAvailable() {
             return authoritative.orElse(-1);
         }
     }
 
     public static Estimate estimate(ServerPlayer player,
-                                    @Nullable CraftStorageEndpoint endpoint, int total) {
-        if (player == null) return new Estimate(total, OptionalInt.empty(), SourceKind.UNREACHABLE);
+                                    @Nullable CraftStorageEndpoint endpoint, long total) {
+        if (player == null) return new Estimate(total, OptionalLong.empty(), SourceKind.UNREACHABLE);
         if (CraftStorageEndpointsSupport.isRefinedStorageEndpoint(endpoint)) {
             UnifiedDiskManager manager = UnifiedDiskManager.existing(player.server);
             if (manager == null) {
-                return new Estimate(total, OptionalInt.empty(), SourceKind.UNREACHABLE);
+                return new Estimate(total, OptionalLong.empty(), SourceKind.UNREACHABLE);
             }
-            return new Estimate(total, OptionalInt.of(MagicDiskStore.available(
+            return new Estimate(total, OptionalLong.of(MagicDiskStore.available(
                     MagicDiskStore.mountedDisks(manager), MagicResourceKind.SOUL)),
                     SourceKind.RS_DISK);
         }
         int networkId = bdNetworkId(endpoint);
         if (networkId >= 0) {
-            int available = BdReservationBridge.availableFor(player, networkId);
+            long available = BdReservationBridge.availableFor(player, networkId);
             return new Estimate(total, available < 0
-                    ? OptionalInt.empty() : OptionalInt.of(available), SourceKind.BD_NETWORK);
+                    ? OptionalLong.empty() : OptionalLong.of(available), SourceKind.BD_NETWORK);
         }
-        return new Estimate(total, OptionalInt.empty(), SourceKind.UNREACHABLE);
+        return new Estimate(total, OptionalLong.empty(), SourceKind.UNREACHABLE);
     }
 
     /** 端点为 BD 时的网络号；其他端点返回 -1。 */

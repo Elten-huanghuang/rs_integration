@@ -67,11 +67,14 @@ Batch splitting, machine input buffering, and multi-machine parallelism remain s
 
 - The Resonant Mana Pool extends Botania's native `ManaPoolBlockEntity`, preserving dropped-item manual infusion, sparks, receivers, output mode, and native mana rendering.
 - The Resonant Source Tank extends Ars Nouveau's native `SourceJarTile`, so relays, splitters, and source consumers use the normal Ars transfer path instead of recipe-specific patches.
+- Holding `ars_nouveau:creative_source_jar` or `botania:creative_pool` and right-clicking a magic resource row deposits one configured creative batch, default `2,100,000,000`, without consuming the creative item. RS and BD both accept only the capacity they actually have.
+- Magic stock, reservations, task ledgers, network totals, and mixed-terminal entries use `long`. Native Botania, Ars Nouveau, Goety, and RS APIs that still accept `int` are handled by explicit saturated or chunked adapters at the boundary.
 
 ### Myriad Realms Guixu Disk
 
 - One disk stores items, fluids, and magic resources in the native RS disk drive. Item and fluid entry limits, per-entry payload size, and total payload size are configurable.
 - `MANA`, `SOURCE`, and `SOUL` remain separate resource rows. `MANA` and `SOUL` can feed RSI recursive crafting; `SOURCE` remains on the native Ars transfer path.
+- Magic-resource files now store each resource as a `long`. Existing 12-byte `int` records are detected and read without migration loss.
 - NBT-sensitive variants retain identity. The disk participates in storage caches, automation devices, the mixed terminal, JEI/EMI lookup, and recursive item/fluid extraction.
 - Existing disks expand automatically when entry limits are raised. Save verification, crash-safe dirty handling, drop protection, void recovery, and UUID-based administrator recovery reduce data-loss risk.
 - Missing items or fluids from uninstalled mods are quarantined without blocking normal stock; their original data remains preserved and counts toward capacity.
@@ -230,11 +233,11 @@ RS magic resources are available through [`RsiMagicApi`](src/main/java/com/huang
 
 ```java
 RsiMagicApi.Session session = RsiMagicApi.network(network);
-int available = session.available(MagicResourceKind.SOUL);
+long available = session.available(MagicResourceKind.SOUL);
 
 try (MagicResourceNetworkPool pool =
              session.reserve(MagicResourceKind.SOUL, available)) {
-    int extracted = pool.withdraw(available);
+    long extracted = pool.withdraw(available);
     // Use the extracted souls.
 }
 ```
@@ -246,7 +249,7 @@ BdMagicApi.Session session = BdMagicApi.network(player, networkId);
 long souls = session.amount(BdMagicApi.SOUL_KEY);
 ```
 
-- `RsiMagicApi.Session` provides `amount`, `available`, `insert`, `extract`, and `reserve`.
+- `RsiMagicApi.Session` provides `amount`, `available`, `insert`, `extract`, and `reserve` with `long` quantities.
 - `BdMagicApi` provides `MANA_KEY`, `SOURCE_KEY`, `SOUL_KEY`, and matching `Session` methods.
 - `BdMagicApi.registerAlias(alias, canonical)` rewrites registered alias keys in BD insert/extract handlers.
 - An alias key must already be registered in BD's `StackKeyRegistry`; RSI does not create third-party key types.
@@ -260,7 +263,7 @@ Recipe handlers describe instant execution through `InstantRecipePolicy`: `NONE`
 - `saves/<world>/serverconfig/rs_integration/server.toml`: server crafting, machine, and magic-resource behavior.
 - `config/rs_integration/client.toml`: UI, JEI, and Tetra display options.
 
-Planning limits, preferred recipes/material variants, retained-item rules, probability-attempt caps, input-buffer limits, graph/operation concurrency, and parallel delegate policies are configurable. The server-side `magicResources.pinnedBackend` only breaks ties when no active scope claims the route and never merges RS with BD.
+Planning limits, preferred recipes/material variants, retained-item rules, probability-attempt caps, input-buffer limits, graph/operation concurrency, creative magic-container deposit size, and parallel delegate policies are configurable. The server-side `magicResources.pinnedBackend` only breaks ties when no active scope claims the route and never merges RS with BD.
 
 `integrations.enableGoetySoulReverseRefill` is disabled by default. When enabled, soul consumption from an Arca refills it to capacity from the bound RS network. Attempts are limited to once per player every 20 ticks.
 

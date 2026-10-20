@@ -65,12 +65,7 @@ public record CraftPlanGraph(
             for (MagicResourceCost cost : node.magicCosts()) {
                 long total = cost.totalFor(node.executions());
                 if (total <= 0L) continue;
-                if (total > Integer.MAX_VALUE) {
-                    throw new ArithmeticException(
-                            "aggregated magic cost exceeds int for " + cost.kind() + ": " + total);
-                }
-                costs.add(new MagicResourceCost(
-                        cost.kind(), (int) total));
+                costs.add(new MagicResourceCost(cost.kind(), total));
             }
         }
         return MagicResourceCost.merge(costs);

@@ -14,12 +14,14 @@ import java.io.IOException;
 public final class MagicResourceDiskStore {
     /** 归墟盘目录中的固定文件名。 */
     public static final String NAME = "magic-resources.bin";
-    /** 每种资源固定占 4 字节（int）。 */
-    public static final int MAX_BYTES = Math.multiplyExact(MagicResourceKind.values().length, 4);
+    /** 旧格式每种资源固定占 4 字节（int）。 */
+    public static final int LEGACY_BYTES = Math.multiplyExact(MagicResourceKind.values().length, Integer.BYTES);
+    /** 新格式每种资源固定占 8 字节（long）。 */
+    public static final int MAX_BYTES = Math.multiplyExact(MagicResourceKind.values().length, Long.BYTES);
 
     private MagicResourceDiskStore() {}
 
-    public static void write(DataOutputStream output, int[] amounts) throws IOException {
+    public static void write(DataOutputStream output, long[] amounts) throws IOException {
         if (amounts == null || amounts.length != MagicResourceKind.values().length) {
             throw new IOException("统一盘魔法资源记录长度非法");
         }
@@ -27,14 +29,19 @@ public final class MagicResourceDiskStore {
             if (amounts[index] < 0) {
                 throw new IOException("统一盘" + MagicResourceKind.values()[index].id() + "数量非法");
             }
-            output.writeInt(amounts[index]);
+            output.writeLong(amounts[index]);
         }
     }
 
-    public static int[] read(DataInputStream input) throws IOException {
-        int[] amounts = new int[MagicResourceKind.values().length];
+    public static long[] read(DataInputStream input) throws IOException {
+        int remaining = input.available();
+        if (remaining != LEGACY_BYTES && remaining != MAX_BYTES) {
+            throw new IOException("统一盘魔法资源记录长度非法: " + remaining);
+        }
+        boolean legacy = remaining == LEGACY_BYTES;
+        long[] amounts = new long[MagicResourceKind.values().length];
         for (int index = 0; index < amounts.length; index++) {
-            int amount = input.readInt();
+            long amount = legacy ? input.readInt() : input.readLong();
             if (amount < 0) {
                 throw new IOException("统一盘" + MagicResourceKind.values()[index].id() + "记录非法");
             }

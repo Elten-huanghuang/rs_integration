@@ -57,16 +57,33 @@ class MagicResourceDirtyContractTest extends BootstrapTest {
     }
 
     @Test
-    void capacitySaturatesAtIntLimitAcrossMountedDisks() {
+    void capacitySaturatesAtLongLimitAcrossMountedDisks() {
         UnifiedDiskCore first = disk();
         UnifiedDiskCore second = disk();
         assertEquals(0, MagicDiskStore.capacity(List.of(), MagicResourceKind.MANA));
-        assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
+        assertEquals(Long.MAX_VALUE, MagicDiskStore.capacity(
                 List.of(first), MagicResourceKind.MANA));
-        assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
+        assertEquals(Long.MAX_VALUE, MagicDiskStore.capacity(
                 List.of(first, second), MagicResourceKind.MANA));
-        assertEquals(Integer.MAX_VALUE, MagicDiskStore.capacity(
+        assertEquals(Long.MAX_VALUE, MagicDiskStore.capacity(
                 List.of(first, second, disk()), MagicResourceKind.MANA));
+    }
+
+    @Test
+    void totalsAndReservationsKeepAmountsAboveInt() {
+        UnifiedDiskCore first = disk();
+        UnifiedDiskCore second = disk();
+        long aboveInt = Integer.MAX_VALUE + 500L;
+        MagicDiskStore.insert(List.of(first), MagicResourceKind.MANA, aboveInt, true);
+        MagicDiskStore.insert(List.of(second), MagicResourceKind.MANA, 25, true);
+        assertEquals(aboveInt + 25, MagicDiskStore.total(List.of(first, second),
+                MagicResourceKind.MANA));
+
+        MagicResourceReservations.Pool pool = MagicResourceReservations.reserve(
+                List.of(first, second), MagicResourceKind.MANA, aboveInt);
+        assertEquals(aboveInt, pool.remaining());
+        assertEquals(aboveInt, pool.withdraw(aboveInt));
+        pool.close();
     }
 
     @Test

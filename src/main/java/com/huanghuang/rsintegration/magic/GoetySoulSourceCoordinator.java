@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+
 /**
  * 单次 Goety 任务的统一灵魂账本。
  *
@@ -9,14 +11,14 @@ package com.huanghuang.rsintegration.magic;
 public final class GoetySoulSourceCoordinator implements AutoCloseable {
     private final GoetySoulNetworkPool network;
     private final GoetyNativeSoulSource nativeSource;
-    private final int total;
-    private final int availableAtStart;
-    private int consumed;
+    private final long total;
+    private final long availableAtStart;
+    private long consumed;
     private boolean closed;
 
     private GoetySoulSourceCoordinator(GoetySoulNetworkPool network,
                                        GoetyNativeSoulSource nativeSource,
-                                       int total, int availableAtStart) {
+                                       long total, long availableAtStart) {
         this.network = network;
         this.nativeSource = nativeSource;
         this.total = total;
@@ -24,53 +26,53 @@ public final class GoetySoulSourceCoordinator implements AutoCloseable {
     }
 
     public static GoetySoulSourceCoordinator create(
-            int total, GoetySoulNetworkPool network, GoetyNativeSoulSource nativeSource) {
+            long total, GoetySoulNetworkPool network, GoetyNativeSoulSource nativeSource) {
         if (network == null || nativeSource == null || total <= 0) return null;
-        int available = combine(network.remaining(), nativeSource.available());
+        long available = combineLong(network.remaining(), nativeSource.available());
         if (available < total) return null;
         return new GoetySoulSourceCoordinator(
                 network, nativeSource, total, available);
     }
 
-    public int total() {
+    public long total() {
         return total;
     }
 
-    public int availableAtStart() {
+    public long availableAtStart() {
         return availableAtStart;
     }
 
-    public int available() {
+    public long available() {
         if (closed) return 0;
-        int remainingBudget = Math.max(0, total - consumed);
+        long remainingBudget = Math.max(0, total - consumed);
         return Math.min(remainingBudget,
-                combine(network.remaining(), nativeSource.available()));
+                combineLong(network.remaining(), nativeSource.available()));
     }
 
-    public int networkRemaining() {
+    public long networkRemaining() {
         return closed ? 0 : network.remaining();
     }
 
     /** 原子语义：无法足额扣除时不会留下本次网络扣费。 */
-    public boolean consume(int amount) {
+    public boolean consume(long amount) {
         if (closed || amount <= 0 || available() < amount) return false;
 
-        int fromNetwork = Math.min(amount, network.remaining());
-        int nativeNeeded = amount - fromNetwork;
-        if (nativeSource.available() < nativeNeeded) return false;
+        long fromNetwork = Math.min(amount, network.remaining());
+        long nativeNeeded = amount - fromNetwork;
+        if (nativeNeeded > Integer.MAX_VALUE || nativeSource.available() < nativeNeeded) return false;
 
-        int withdrawn = fromNetwork <= 0 ? 0 : network.withdraw(fromNetwork);
+        long withdrawn = fromNetwork <= 0 ? 0 : network.withdraw(fromNetwork);
         if (withdrawn != fromNetwork) {
             if (withdrawn > 0) network.refund(withdrawn);
             return false;
         }
-        int remaining = amount - withdrawn;
+        long remaining = amount - withdrawn;
         if (remaining <= 0) {
             consumed += amount;
             return true;
         }
 
-        int fromNative = nativeSource.consume(remaining);
+        int fromNative = nativeSource.consume((int) remaining);
         if (fromNative == remaining) {
             consumed += amount;
             return true;
@@ -87,8 +89,12 @@ public final class GoetySoulSourceCoordinator implements AutoCloseable {
         network.close();
     }
 
+    static long combineLong(long network, int nativeSource) {
+        return SaturatingLongMath.add(Math.max(0, network), Math.max(0, nativeSource));
+    }
+
+    /** Goety 原生接口仍以 int 暴露余额，跨过该边界时显式饱和。 */
     static int combine(int network, int nativeSource) {
-        long result = (long) Math.max(0, network) + Math.max(0, nativeSource);
-        return result > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
+        return SaturatingLongMath.clampToInt(combineLong(network, nativeSource));
     }
 }

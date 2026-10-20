@@ -81,7 +81,7 @@ public final class GridResourceKind {
     /**
      * 显示模板的数量；模板始终是单个单位，数量变化走条目增量。
      */
-    public int amount(Object stack) {
+    public long amount(Object stack) {
         if (this == ITEM) return ((ItemStack) stack).getCount();
         if (this == FLUID) return ((FluidStack) stack).getAmount();
         if (magic != null) return ((MagicResourceStack) stack).getAmount();

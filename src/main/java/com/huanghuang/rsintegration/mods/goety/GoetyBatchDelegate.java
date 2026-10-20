@@ -3,6 +3,7 @@ import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
@@ -339,7 +340,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
         int totalSouls = GoetySoulCraftingTask.nativeAvailableBrazier(
                 player, (BlockEntity) be);
-        int diskSouls = GoetySoulCraftingTask.availableInStorage(
+        long diskSouls = GoetySoulCraftingTask.availableInStorage(
                 player, null, storageEndpoint());
         int combinedSouls = saturatingAdd(totalSouls, diskSouls, 0);
         PreparationResult soulResult = soulPreparationResult(brazierSoulCost, combinedSouls);
@@ -1517,7 +1518,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private boolean validateSoulsAvailable(int cost, boolean notifyPlayer) {
         if (cost <= 0) return true;
         int nativeAvailable = GoetySoulCraftingTask.nativeAvailableDarkAltar(player, altar);
-        int diskAvailable = GoetySoulCraftingTask.availableInStorage(
+        long diskAvailable = GoetySoulCraftingTask.availableInStorage(
                 player, null, storageEndpoint());
         int combined = saturatingAdd(nativeAvailable,
                 Math.max(0, diskAvailable), 0);
@@ -1535,10 +1536,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private static int saturatingAdd(int first, int second, int third) {
-        long total = (long) Math.max(0, first)
-                + Math.max(0, second) + Math.max(0, third);
-        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    private static int saturatingAdd(int first, long second, long third) {
+        long total = SaturatingLongMath.add(Math.max(0, first),
+                SaturatingLongMath.add(Math.max(0, second), Math.max(0, third)));
+        return SaturatingLongMath.clampToInt(total);
     }
 
     private boolean beginSoulTask() {

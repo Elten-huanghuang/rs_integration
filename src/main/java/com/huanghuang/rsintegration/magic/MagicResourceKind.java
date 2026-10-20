@@ -11,19 +11,19 @@ import javax.annotation.Nullable;
  * 归墟盘和混合终端里可存储的魔法资源身份。
  *
  * <p>三种资源各自独立计量，默认按原生单位 1:1 转移，不引入互换比例。每种资源
- * 有自己的单盘容量上界；网络容量按已挂载的归墟盘累加，并在原生 int 范围处饱和。</p>
+ * 有自己的单盘容量上界；网络容量按已挂载的归墟盘饱和累加。</p>
  */
 public enum MagicResourceKind {
-    MANA("botania", "mana", "types.rs_integration.mana.name", Integer.MAX_VALUE),
-    SOURCE("ars_nouveau", "source", "types.rs_integration.source.name", Integer.MAX_VALUE),
-    SOUL("goety", "soul", "types.rs_integration.goety_soul.name", Integer.MAX_VALUE);
+    MANA("botania", "mana", "types.rs_integration.mana.name", Long.MAX_VALUE),
+    SOURCE("ars_nouveau", "source", "types.rs_integration.source.name", Long.MAX_VALUE),
+    SOUL("goety", "soul", "types.rs_integration.goety_soul.name", Long.MAX_VALUE);
 
     private final String namespace;
     private final String path;
     private final String translationKey;
-    private final int capacity;
+    private final long capacity;
 
-    MagicResourceKind(String namespace, String path, String translationKey, int capacity) {
+    MagicResourceKind(String namespace, String path, String translationKey, long capacity) {
         this.namespace = namespace;
         this.path = path;
         this.translationKey = translationKey;
@@ -54,7 +54,7 @@ public enum MagicResourceKind {
     }
 
     /** 统一盘单条目数量上界。 */
-    public int capacity() {
+    public long capacity() {
         return capacity;
     }
 

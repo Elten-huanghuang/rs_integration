@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.magic;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.hollingsworth.arsnouveau.common.block.tile.SourceJarTile;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -14,7 +15,7 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     public ArsResonantSourceTankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(castType(type), pos, state);
         storage = new ResonantMagicStorageData(this, MagicResourceKind.SOURCE,
-                MagicResourceKind.SOURCE.capacity());
+                SaturatingLongMath.clampToInt(MagicResourceKind.SOURCE.capacity()));
     }
 
     @Override public MagicResourceKind resourceKind() { return storage.kind(); }

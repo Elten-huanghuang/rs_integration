@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
@@ -80,7 +81,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
     private GoetySoulSourceCoordinator directCoordinator;
     @Nullable
     private Object directAltar;
-    private int startupAvailable;
+    private long startupAvailable;
 
     private GoetySoulCraftingTask(ServerPlayer player, @Nullable INetwork network,
                                   Mode mode, int perCharge, int intervalTicks,
@@ -173,7 +174,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         return total;
     }
 
-    public int remainingReservation() {
+    public long remainingReservation() {
         if (directCoordinator != null) return directCoordinator.networkRemaining();
         return reservation == null ? 0 : reservation.remaining();
     }
@@ -193,8 +194,8 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
     }
 
     /** RS/BD 端点的实时可用灵魂；未知端点返回 -1。 */
-    public static int availableInEndpoint(ServerPlayer player,
-                                          @Nullable CraftStorageEndpoint endpoint) {
+    public static long availableInEndpoint(ServerPlayer player,
+                                           @Nullable CraftStorageEndpoint endpoint) {
         return availableInStorage(player, null, endpoint);
     }
 
@@ -205,9 +206,9 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
      * 避免同一函数在 RS 与 BD 两条路径上语义不同。这里保留 {@code network} 参数是为了
      * 不改变调用方签名；RS 侧的可用量本来就是“已挂载盘之和”，与该网络无关。</p>
      */
-    public static int availableInStorage(ServerPlayer player,
-                                         @Nullable INetwork network,
-                                         @Nullable CraftStorageEndpoint endpoint) {
+    public static long availableInStorage(ServerPlayer player,
+                                          @Nullable INetwork network,
+                                          @Nullable CraftStorageEndpoint endpoint) {
         SoulPlanPreview.Estimate estimate = SoulPlanPreview.estimate(player, endpoint, 0);
         if (estimate.source() == SoulPlanPreview.SourceKind.UNREACHABLE) {
             // 无端点时仍允许调用方用显式的 legacy INetwork 兜底，保持旧行为。
@@ -225,7 +226,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
      */
     void onBdNetworkLost() {
         if (ledger == null) return;
-        int leaked = BdReservationBridge.takeUnaccounted(reservation);
+        long leaked = BdReservationBridge.takeUnaccounted(reservation);
         if (leaked <= 0) return;
         ledger.archive(taskId, MagicResourceKind.SOUL, leaked,
                 BdReservationBridge.parsedNetworkId(bdSource),
@@ -257,7 +258,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
     }
 
     /** 归墟盘上灵魂的可用量；没有挂载任何盘时是 0（确实是空，不是读不出来）。 */
-    private static int availableInRs(ServerPlayer player) {
+    private static long availableInRs(ServerPlayer player) {
         UnifiedDiskManager manager = UnifiedDiskManager.existing(player.server);
         if (manager == null) return 0;
         return MagicDiskStore.available(
@@ -304,7 +305,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         if (cageSouls >= perCharge) return;
 
         int need = perCharge - cageSouls;
-        int withdrawn = reservation.withdraw(need);
+        int withdrawn = SaturatingLongMath.clampToInt(reservation.withdraw(need));
         if (withdrawn <= 0) return;
         int injected = injectIntoCage(cage, withdrawn);
         if (injected < withdrawn) reservation.refund(withdrawn - injected);
@@ -324,7 +325,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
                         altar);
                 return false;
             }
-            startupAvailable = GoetySoulSourceCoordinator.combine(
+            startupAvailable = GoetySoulSourceCoordinator.combineLong(
                     reservation.remaining(), nativeSource.available());
             directCoordinator = GoetySoulSourceCoordinator.create(
                     total, reservation, nativeSource);
@@ -358,7 +359,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
                 virtualCandleSpeed = configuredVirtualCandleCount(total);
                 candles = List.of(virtualCandle);
             }
-            startupAvailable = GoetySoulSourceCoordinator.combine(
+            startupAvailable = GoetySoulSourceCoordinator.combineLong(
                     reservation.remaining(), nativeSource.available());
             directCoordinator = GoetySoulSourceCoordinator.create(
                     total, reservation, nativeSource);
@@ -443,7 +444,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
             int cageSouls = Reflect.<Integer>invoke(source.cage, GoetyReflection.M_GET_SOULS).orElse(0);
             if (cageSouls >= perCageTarget) continue;
             int need = perCageTarget - cageSouls;
-            int withdrawn = reservation.withdraw(need);
+            int withdrawn = SaturatingLongMath.clampToInt(reservation.withdraw(need));
             if (withdrawn <= 0) continue;
             int injected = injectIntoCage(source.cage, withdrawn);
             if (injected < withdrawn) reservation.refund(withdrawn - injected);
@@ -533,7 +534,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
      */
     private void archiveLostBdReservation() {
         if (ledger == null) return;
-        int leaked = BdReservationBridge.takeUnaccounted(reservation);
+        long leaked = BdReservationBridge.takeUnaccounted(reservation);
         if (leaked <= 0) return;
         int networkId = BdReservationBridge.parsedNetworkId(bdSource);
         MagicResourceTaskLedger.PendingReason reason = bdNetworkExists(networkId)
@@ -548,7 +549,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         return server == null ? 0L : server.overworld().getGameTime();
     }
 
-    public int startupAvailable() {
+    public long startupAvailable() {
         return startupAvailable;
     }
 
@@ -614,7 +615,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
     private interface Reservation extends GoetySoulNetworkPool {
         static GoetySoulNetworkPool forRoute(
                 ServerPlayer player, @Nullable INetwork network,
-                @Nullable SoulRoute soulRoute, int requested,
+                @Nullable SoulRoute soulRoute, long requested,
                 @Nullable MagicResourceTaskReservation sharedReservation,
                 String bdSource) {
             if (USE_ROUTER && soulRoute != null) {
@@ -658,18 +659,18 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
             this.pool = pool;
         }
 
-        @Override public int remaining() { return pool.remaining(); }
-        @Override public int withdraw(int requested) { return pool.withdraw(requested); }
-        @Override public void refund(int amount) { pool.refund(amount); }
+        @Override public long remaining() { return pool.remaining(); }
+        @Override public long withdraw(long requested) { return pool.withdraw(requested); }
+        @Override public void refund(long amount) { pool.refund(amount); }
         @Override public void close() { /* 由任务级预留统一关闭。 */ }
     }
 
     private static final class EmptyReservation implements Reservation {
         private static final EmptyReservation INSTANCE = new EmptyReservation();
 
-        @Override public int remaining() { return 0; }
-        @Override public int withdraw(int requested) { return 0; }
-        @Override public void refund(int amount) {}
+        @Override public long remaining() { return 0; }
+        @Override public long withdraw(long requested) { return 0; }
+        @Override public void refund(long amount) {}
         @Override public void close() {}
     }
 

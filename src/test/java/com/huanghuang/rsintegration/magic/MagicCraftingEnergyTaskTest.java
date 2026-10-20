@@ -26,8 +26,8 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
     void reservesDiskGapAndInjectsItIntoNativeMachine() {
         MinecraftServer server = mock(MinecraftServer.class);
         MagicResourceReservations.Pool pool = mock(MagicResourceReservations.Pool.class);
-        when(pool.remaining()).thenReturn(60);
-        when(pool.withdraw(60)).thenReturn(60);
+        when(pool.remaining()).thenReturn(60L);
+        when(pool.withdraw(60)).thenReturn(60L);
         CounterTarget target = new CounterTarget(40, 120);
 
         try (MockedStatic<MagicResourceEndpoint> endpoint = mockStatic(MagicResourceEndpoint.class)) {
@@ -48,7 +48,7 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
     void rejectsBudgetWhenDiskAndNativeBalanceCannotCoverIt() {
         MinecraftServer server = mock(MinecraftServer.class);
         MagicResourceReservations.Pool pool = mock(MagicResourceReservations.Pool.class);
-        when(pool.remaining()).thenReturn(30);
+        when(pool.remaining()).thenReturn(30L);
         CounterTarget target = new CounterTarget(20, 120);
 
         try (MockedStatic<MagicResourceEndpoint> endpoint = mockStatic(MagicResourceEndpoint.class)) {
@@ -72,8 +72,8 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
         when(taskReservation.pool(MagicResourceKind.SOUL)).thenReturn(pool);
         when(taskReservation.recordInjection(
                 MagicResourceKind.SOUL, null, 60)).thenReturn(injectionId);
-        when(pool.remaining()).thenReturn(60);
-        when(pool.withdraw(60)).thenReturn(60);
+        when(pool.remaining()).thenReturn(60L);
+        when(pool.withdraw(60)).thenReturn(60L);
 
         MagicCraftingEnergyTask task = MagicCraftingEnergyTask.reserve(
                 server, MagicResourceKind.SOUL, 100, taskReservation);
@@ -92,8 +92,8 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
                 mock(MagicResourceTaskReservation.class);
         MagicResourceNetworkPool pool = mock(MagicResourceNetworkPool.class);
         when(taskReservation.pool(MagicResourceKind.SOUL)).thenReturn(pool);
-        when(pool.remaining()).thenReturn(1_000);
-        when(pool.withdraw(60)).thenReturn(60);
+        when(pool.remaining()).thenReturn(1_000L);
+        when(pool.withdraw(60)).thenReturn(60L);
 
         MagicCraftingEnergyTask task = MagicCraftingEnergyTask.reserve(
                 server, MagicResourceKind.SOUL, 100, taskReservation);
@@ -109,6 +109,25 @@ class MagicCraftingEnergyTaskTest extends BootstrapTest {
         MinecraftServer server = mock(MinecraftServer.class);
         assertNotNull(MagicCraftingEnergyTask.reserve(server, MagicResourceKind.MANA, 100));
         assertNull(MagicCraftingEnergyTask.reserve(server, MagicResourceKind.SOURCE, 100));
+    }
+
+    @Test
+    void logicalConsumptionKeepsBudgetsAboveInt() {
+        MinecraftServer server = mock(MinecraftServer.class);
+        MagicResourceReservations.Pool pool = mock(MagicResourceReservations.Pool.class);
+        long total = Integer.MAX_VALUE + 123L;
+        when(pool.remaining()).thenReturn(total);
+        when(pool.withdraw(total)).thenReturn(total);
+
+        try (MockedStatic<MagicResourceEndpoint> endpoint = mockStatic(MagicResourceEndpoint.class)) {
+            endpoint.when(() -> MagicResourceEndpoint.reserve(
+                    server, MagicResourceKind.MANA, total)).thenReturn(pool);
+            MagicCraftingEnergyTask task = MagicCraftingEnergyTask.reserve(
+                    server, MagicResourceKind.MANA, total);
+            assertTrue(task.tryConsume());
+            task.complete();
+        }
+        verify(pool).withdraw(total);
     }
 
     @Test

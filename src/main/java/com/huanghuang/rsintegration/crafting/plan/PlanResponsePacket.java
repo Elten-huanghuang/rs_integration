@@ -517,7 +517,7 @@ public final class PlanResponsePacket {
         buf.writeVarInt(graph.magicCosts().size());
         for (MagicResourceCost cost : graph.magicCosts()) {
             buf.writeVarInt(cost.kind().ordinal());
-            buf.writeVarInt(cost.amountPerOperation());
+            buf.writeVarLong(cost.amountPerOperation());
         }
     }
 
@@ -596,7 +596,7 @@ public final class PlanResponsePacket {
                 throw new DecoderException("Unknown magic resource kind ordinal: " + ordinal);
             }
             magicCosts.add(new MagicResourceCost(MagicResourceKind.values()[ordinal],
-                    readNonNegativeVarInt(buf, "magic resource cost")));
+                    readNonNegativeVarLong(buf, "magic resource cost")));
         }
         return new PlanGraphView(version, nodes, edges, roots, unresolved, topological,
                 magicCosts);

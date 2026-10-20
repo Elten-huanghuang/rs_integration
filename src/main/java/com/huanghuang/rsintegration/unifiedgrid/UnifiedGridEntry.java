@@ -10,13 +10,13 @@ import net.minecraftforge.fluids.FluidStack;
 import java.util.UUID;
 
 /** template 为空表示数量增量；metadata=true 且两个 UUID 均空表示删除。 */
-public record UnifiedGridEntry(int serial, int amount, int capacity, boolean metadata, UUID storedId,
+public record UnifiedGridEntry(int serial, long amount, long capacity, boolean metadata, UUID storedId,
                                UUID craftableId, Object template, StorageTrackerEntry tracker) {
     public UnifiedGridEntry {
         if (serial <= 0 || amount < 0 || capacity < 0) throw new IllegalArgumentException("无效终端条目");
     }
 
-    public UnifiedGridEntry(int serial, int amount, boolean metadata, UUID storedId,
+    public UnifiedGridEntry(int serial, long amount, boolean metadata, UUID storedId,
                             UUID craftableId, Object template, StorageTrackerEntry tracker) {
         this(serial, amount, 0, metadata, storedId, craftableId, template, tracker);
     }
@@ -25,8 +25,12 @@ public record UnifiedGridEntry(int serial, int amount, int capacity, boolean met
 
     public void write(FriendlyByteBuf buf, GridResourceKind kind) {
         buf.writeVarInt(serial);
-        buf.writeVarInt(amount);
-        if (kind.isMagic()) buf.writeVarInt(capacity);
+        if (kind.isMagic()) {
+            buf.writeVarLong(amount);
+            buf.writeVarLong(capacity);
+        } else {
+            buf.writeVarInt(Math.toIntExact(amount));
+        }
         buf.writeBoolean(metadata);
         if (metadata) {
             writeId(buf, storedId);
@@ -46,8 +50,8 @@ public record UnifiedGridEntry(int serial, int amount, int capacity, boolean met
 
     public static UnifiedGridEntry read(FriendlyByteBuf buf, GridResourceKind kind) {
         int serial = buf.readVarInt();
-        int amount = buf.readVarInt();
-        int capacity = kind.isMagic() ? buf.readVarInt() : 0;
+        long amount = kind.isMagic() ? buf.readVarLong() : buf.readVarInt();
+        long capacity = kind.isMagic() ? buf.readVarLong() : 0;
         boolean metadata = buf.readBoolean();
         UUID stored = metadata ? readId(buf) : null;
         UUID craftable = metadata ? readId(buf) : null;
