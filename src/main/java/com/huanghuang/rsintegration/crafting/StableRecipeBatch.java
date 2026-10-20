@@ -188,7 +188,10 @@ final class StableRecipeBatch {
                 output.copyWithCount(1), targetOutput.copyWithCount(1))) {
             return null;
         }
-        return new BatchPlan(output.copyWithCount(1),
+        // Keep the recipe's real yield. Batch execution multiplies this count
+        // by the number of crafts; reducing it to one silently deletes surplus
+        // such as the remaining three planks from a log-to-planks recipe.
+        return new BatchPlan(output.copy(),
                 List.copyOf(slots));
     }
 

@@ -101,6 +101,30 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void preservesMultiItemRecipeYieldAcrossEveryWoodPlankCraft() {
+        ResourceLocation recipeId = new ResourceLocation("test", "test_planks");
+        NonNullList<Ingredient> ingredients =
+                NonNullList.withSize(9, Ingredient.EMPTY);
+        ingredients.set(0, Ingredient.of(Items.OAK_LOG));
+        ShapelessRecipe recipe = new ShapelessRecipe(
+                recipeId, "", CraftingBookCategory.MISC,
+                new ItemStack(Items.OAK_PLANKS, 4),
+                ingredients);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.OAK_LOG, 3)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
+                    fixture, recipeId, 3, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.OAK_PLANKS));
+        assertEquals(12, inventory.get(0).getCount());
+    }
+
+    @Test
     void finalTargetDoesNotDisableStableBatchingForUpstreamTiers() {
         ResourceLocation tier1 = new ResourceLocation("test", "target_chain_1");
         ResourceLocation tier2 = new ResourceLocation("test", "target_chain_2");
