@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.TagParser;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -29,8 +30,11 @@ public final class PurePlanAdapter {
                                                           ImmutableRecipeGraph graph) {
         List<ResolutionStep> projected = new ArrayList<>();
         for (PureRecipePlanner.PlannedStep step : result.steps()) {
-            ImmutableRecipeGraph.RecipeNode node = graph.recipesById().get(step.recipeId());
-            if (node == null) continue;
+            ImmutableRecipeGraph.RecipeNode node = findRecipe(graph, step.recipeId());
+            if (node == null) {
+                throw new IllegalStateException(
+                        "Planned recipe missing from immutable graph: " + step.recipeId());
+            }
             long remaining = Math.max(1L, step.batches());
             while (remaining > 0L) {
                 int executions = (int) Math.min(Integer.MAX_VALUE, remaining);
@@ -43,5 +47,16 @@ public final class PurePlanAdapter {
             }
         }
         return List.copyOf(projected);
+    }
+
+    private static ImmutableRecipeGraph.RecipeNode findRecipe(
+            ImmutableRecipeGraph graph, ResourceLocation recipeId) {
+        ImmutableRecipeGraph.RecipeNode indexed = graph.recipesById().get(recipeId);
+        if (indexed != null) return indexed;
+        return graph.recipesByOutput().values().stream()
+                .flatMap(List::stream)
+                .filter(recipe -> recipe.recipeId().equals(recipeId))
+                .findFirst()
+                .orElse(null);
     }
 }

@@ -52,6 +52,23 @@ class PurePlanAdapterTest extends com.huanghuang.rsintegration.testutil.Bootstra
     }
 
     @Test
+    void findsPlannedRecipeByOutputWhenByIdIndexIsIncomplete() {
+        MaterialRef output = material("indexed_after_binding");
+        ResourceLocation recipeId = id("indexed_after_binding_recipe");
+        RecipeNode recipe = new RecipeNode(recipeId, output, 2, List.of());
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(output, List.of(recipe)), Map.of());
+        PureRecipePlanner.Result plan = new PureRecipePlanner.Result(true,
+                List.of(new PureRecipePlanner.PlannedStep(recipeId, 6)),
+                List.of(), Map.of());
+
+        var steps = PurePlanAdapter.toResolutionSteps(plan, graph);
+
+        assertEquals(1, steps.size());
+        assertEquals(6, steps.get(0).executions());
+    }
+
+    @Test
     void splitsLongPlannedBatchesIntoWireSizedExecutionSegments() {
         MaterialRef output = material("large_batch_output");
         ResourceLocation recipeId = id("large_batch_recipe");

@@ -492,11 +492,8 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (sharedLedger != null && sharedLedger.storageEndpoint() != null) {
             setStorageEndpoint(sharedLedger.storageEndpoint());
         }
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> CraftPacketUtils
+                .resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         this.usingSharedLedger = true;
 
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {

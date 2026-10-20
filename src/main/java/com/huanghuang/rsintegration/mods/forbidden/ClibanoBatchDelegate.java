@@ -97,11 +97,8 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         this.expectedOutput = clibanoRecipe.getResultItem(resolved.registryAccess()).copy();
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> CraftPacketUtils
+                .resolveEndpointForCraft(player, dimension, pos).orElse(null));
         if ((storageEndpoint() == null && !hasStorageAccess()) || expectedOutput.isEmpty()) {
             resetState();
             resetOperationState();

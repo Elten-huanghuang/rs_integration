@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -53,11 +54,24 @@ class AsyncPurePlanningServiceTest {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
                 projectedStock,
                 com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy
-                        .scaleTargetInputs(duplicate, 6), 20);
+                        .planningRoots(duplicate, 6), 20);
 
         assertTrue(result.feasible());
-        assertEquals(List.of(), result.steps());
-        assertTrue(result.remaining().isEmpty());
+        assertTrue(!result.steps().isEmpty());
+    }
+
+    @Test
+    void selfAmplifyingTargetIsNotBlockedByTheCycleGuard() {
+        MaterialRef template = new MaterialRef(id("guard_template"), "");
+        RecipeNode duplicate = new RecipeNode(id("guard_duplicate"),
+                template, 2, List.of(new IngredientRef(List.of(template), 1)));
+        RecipeNode ordinary = new RecipeNode(id("guard_ordinary"),
+                new MaterialRef(id("guard_output"), ""), 1,
+                List.of(new IngredientRef(List.of(template), 1)));
+
+        assertEquals(Set.of(), AsyncPurePlanningService.planningRootGuard(duplicate));
+        assertEquals(Set.of(ordinary.output()),
+                AsyncPurePlanningService.planningRootGuard(ordinary));
     }
 
     @Test

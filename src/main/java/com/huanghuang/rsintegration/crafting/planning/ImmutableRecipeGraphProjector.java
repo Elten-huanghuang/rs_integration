@@ -188,8 +188,21 @@ public final class ImmutableRecipeGraphProjector {
         }
         MaterialRef outputRef = includeOutputNbt ? material(output, output.hasTag())
                 : new MaterialRef(BuiltInRegistries.ITEM.getKey(output.getItem()), "", true);
+        if (outputRef.runtimeNbt() && "smithing".equals(modTypeId)
+                && inputs.size() == 3 && templateProducesOutput(inputs.get(0), outputRef)) {
+            ResourceLocation outputItemId = outputRef.itemId();
+            outputRef = inputs.get(0).alternatives().stream()
+                    .filter(material -> material.itemId().equals(outputItemId))
+                    .findFirst()
+                    .orElse(outputRef);
+        }
         return new RecipeNode(recipeId, outputRef, Math.max(1, output.getCount()),
                 inputs, modTypeId, recipeTypeId, magicCosts);
+    }
+
+    private static boolean templateProducesOutput(IngredientRef template, MaterialRef output) {
+        return template.alternatives().stream()
+                .anyMatch(material -> material.itemId().equals(output.itemId()));
     }
 
     /** 根据当前机器状态替换指定配方的单次输入，不修改已发布的全局配方图。 */

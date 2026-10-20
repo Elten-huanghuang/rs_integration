@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
@@ -49,6 +50,7 @@ import net.minecraftforge.fml.ModList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -65,6 +67,31 @@ import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GenericCraftPacketTest extends BootstrapTest {
+
+    @Test
+    void directRecursiveTerminalPlanCountsAsASelectedPlanner() {
+        assertTrue(GenericCraftPacket.hasSelectedCraftingPlanner(false, true, false));
+        assertFalse(GenericCraftPacket.hasSelectedCraftingPlanner(false, false, false));
+    }
+
+    @Test
+    void selfAmplifyingPlannedStepDoesNotReceiveASecondFullTerminalStep() {
+        ResourceLocation recipeId = new ResourceLocation(
+                "minecraft", "netherite_upgrade_smithing_template");
+        ResolutionStep planned = new ResolutionStep(
+                recipeId, ModType.GENERIC, recipeId, List.of(), List.of(),
+                false, 6, null, null);
+        ResolutionStep terminal = new ResolutionStep(
+                recipeId, ModType.GENERIC, recipeId, List.of(), List.of(),
+                false, 65, null, null);
+        List<ResolutionStep> steps = new ArrayList<>(List.of(planned));
+
+        GenericCraftPacket.ensureTerminalRecipeStep(steps, terminal);
+
+        assertEquals(1, steps.size());
+        assertEquals(6, steps.get(0).executions());
+    }
+
 
     @BeforeAll
     static void loadServerConfig() {

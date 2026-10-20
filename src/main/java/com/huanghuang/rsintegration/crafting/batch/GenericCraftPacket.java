@@ -138,6 +138,7 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressServer;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue;
+import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator.StalePlanningResultException;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageReferenceCodec;
 import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
@@ -1076,7 +1077,7 @@ public final class GenericCraftPacket {
         if (canUsePureExecutionPlan(cached.purePlan(), terminalType)) {
             List<ResolutionStep> steps = new ArrayList<>(PurePlanAdapter.toResolutionSteps(
                     cached.purePlan(), cached.snapshot().recipeGraph()));
-            steps.add(genericTerminalStep(recipeId, repeatCount));
+            ensureTerminalRecipeStep(steps, genericTerminalStep(recipeId, repeatCount));
             RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
                     recipeId);
             boolean hasPhysicalSteps = steps.stream()
@@ -1254,7 +1255,26 @@ public final class GenericCraftPacket {
             Map<String, ItemStack> materialLocks, ImmutableRecipeGraph planningGraph,
             Set<ResourceLocation> blockedOutputIds, boolean excludePlannedRoot,
             ResolutionStep terminalStep, String planKind) {
+        submitRoutedPureExecutionPlan(
+                player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
+                baseItem, targetOutput, outputDestination, machineSelectionMode,
+                storageEndpoint, storageReference, materialLocks, planningGraph,
+                blockedOutputIds, excludePlannedRoot, terminalStep, planKind, true);
+    }
+
+    private static void submitRoutedPureExecutionPlan(
+            ServerPlayer player, ResourceLocation recipeId,
+            Map<String, String> forcedRecipes, @Nullable ResourceLocation dim,
+            @Nullable BlockPos pos, int repeatCount, boolean inferMode,
+            @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
+            OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
+            CraftStorageEndpoint storageEndpoint,
+            @Nullable StorageReference storageReference,
+            Map<String, ItemStack> materialLocks, ImmutableRecipeGraph planningGraph,
+            Set<ResourceLocation> blockedOutputIds, boolean excludePlannedRoot,
+            ResolutionStep terminalStep, String planKind, boolean retryOnStale) {
         int plannedExecutions = Math.max(1, repeatCount);
+        MaterialSources.invalidateFor(player, storageEndpoint);
         Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         var routeInputs = new AsyncPurePlanningService.RouteInputs(
                 routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
@@ -1329,7 +1349,7 @@ public final class GenericCraftPacket {
                     if (excludePlannedRoot) {
                         steps.removeIf(step -> step.recipeId().equals(recipeId));
                     }
-                    steps.add(terminalStep);
+                    ensureTerminalRecipeStep(steps, terminalStep);
                     RSIntegrationMod.LOGGER.info(
                             "[RSI-exec] async {} plan ready recipe={} steps={} states={}",
                             planKind, recipeId, steps.size(), result.expandedStates());
@@ -1339,6 +1359,20 @@ public final class GenericCraftPacket {
                             dim, pos, inferMode, baseItem, targetOutput,
                             outputDestination, machineSelectionMode, materialLocks);
                 }, failure -> {
+                    if (failure instanceof StalePlanningResultException && retryOnStale) {
+                        MaterialSources.invalidateFor(player, storageEndpoint);
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-exec] inventory changed during async {} planning; "
+                                        + "retrying once with a fresh snapshot recipe={}",
+                                planKind, recipeId);
+                        submitRoutedPureExecutionPlan(
+                                player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                inferMode, baseItem, targetOutput, outputDestination,
+                                machineSelectionMode, storageEndpoint, storageReference,
+                                materialLocks, planningGraph, blockedOutputIds,
+                                excludePlannedRoot, terminalStep, planKind, false);
+                        return;
+                    }
                     if (!(failure instanceof CancellationException)) {
                         RSIntegrationMod.LOGGER.warn(
                                 "[RSI-exec] async {} planning failed recipe={} directReservationAttempted=true failure={}",
@@ -3263,6 +3297,19 @@ public final class GenericCraftPacket {
         return !isSelfAmplifyingRecipe(recipe, registryAccess);
     }
 
+    static boolean hasSelectedCraftingPlanner(boolean pure, boolean directTerminal,
+                                               boolean typed) {
+        return pure || directTerminal || typed;
+    }
+
+    static void ensureTerminalRecipeStep(List<ResolutionStep> steps,
+                                         ResolutionStep terminalStep) {
+        if (steps.stream().noneMatch(step ->
+                step.recipeId().equals(terminalStep.recipeId()))) {
+            steps.add(terminalStep);
+        }
+    }
+
     static List<IngredientSpec> scaleTerminalIngredientSpecs(
             Recipe<?> recipe, List<IngredientSpec> specs, ItemStack output, int executions) {
         List<IngredientSpec> scaled = scaleTerminalIngredientSpecs(specs, output, executions);
@@ -4336,10 +4383,12 @@ public final class GenericCraftPacket {
         boolean usedPurePlan = false;
 
         boolean selectedTypedResolver = false;
+        boolean selectedDirectTerminalResolver = false;
         if ((directTerminalPlan || directRecursiveTerminalPlan) && selectedPureResolver) {
             resolutionSteps = List.of();
         } else if (directRecursiveTerminalPlan) {
             resolutionSteps = List.of();
+            selectedDirectTerminalResolver = true;
         } else if (canUsePrecomputedPlan(precomputedPlan) && selectedPureResolver) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
                     planningSnapshot.recipeGraph());
@@ -4455,7 +4504,8 @@ public final class GenericCraftPacket {
                 }
             }
         }
-        if (selectedPureResolver || selectedTypedResolver) {
+        if (hasSelectedCraftingPlanner(
+                selectedPureResolver, selectedDirectTerminalResolver, selectedTypedResolver)) {
             stepIds = resolutionSteps == null ? List.of() : resolutionSteps.stream()
                     .map(ResolutionStep::recipeId).collect(Collectors.toList());
         } else {

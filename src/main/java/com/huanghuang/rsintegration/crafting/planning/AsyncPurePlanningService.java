@@ -94,7 +94,7 @@ public final class AsyncPurePlanningService {
                         List.copyOf(routing.available().entrySet())), snapshot,
                 ignored -> computeRouted(snapshot, routing, repeatCount, maxSteps,
                         maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
-                current -> current.recipeRevision() == snapshot.recipeRevision(),
+                current -> PlanningStateValidator.sameState(snapshot, current),
                 (current, result) -> commit.accept(new RoutedPlan(current, routing,
                         result.inspection(), result.plan(), result.forcedRecipesProjected())),
                 rollback);
@@ -170,7 +170,7 @@ public final class AsyncPurePlanningService {
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }
-        List<IngredientRef> roots = SelfAmplifyingRecipePolicy.scaleTargetInputs(
+        List<IngredientRef> roots = SelfAmplifyingRecipePolicy.planningRoots(
                 target, repeatCount);
         setPhase(session, snapshot, PlanningSession.Phase.RECURSIVE_SEARCH);
         long searchStarted = System.nanoTime();
@@ -178,7 +178,7 @@ public final class AsyncPurePlanningService {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos, System::nanoTime,
-                Set.of(target.output()));
+                planningRootGuard(target));
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
@@ -192,6 +192,12 @@ public final class AsyncPurePlanningService {
                     lookupStats.outputIndexBuilds(), lookupStats.outputScans());
         }
         return result;
+    }
+
+    static Set<ImmutableRecipeGraph.MaterialRef> planningRootGuard(
+            RecipeNode target) {
+        return SelfAmplifyingRecipePolicy.isSelfAmplifying(target)
+                ? Set.of() : Set.of(target.output());
     }
 
     private static void setPhase(PlanningSession session, PlanningSnapshot snapshot,

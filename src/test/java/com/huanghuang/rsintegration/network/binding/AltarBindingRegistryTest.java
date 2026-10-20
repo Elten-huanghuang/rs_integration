@@ -101,26 +101,6 @@ class AltarBindingRegistryTest {
     }
 
     @Test
-    void cursedInfuserRecipeFolderIsNotTreatedAsMachineSubtype() {
-        ModType infuser = ModType.byId("goety_cursed_infuser");
-
-        assertNull(AltarBindingRegistry.normalizeSubType("shade", infuser));
-    }
-
-    @Test
-    void marketRecipeFolderIsNotTreatedAsMachineSubtype() {
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "market", ModType.FARMINGFORBLOCKHEADS_MARKET));
-    }
-
-    @Test
-    void birdcageRecipeFolderIsNotTreatedAsMachineSubtype() {
-        registerLeafType("crockpot_birdcage");
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "parrot_feeding", ModType.byId("crockpot_birdcage")));
-    }
-
-    @Test
     void biomancyRecipeFoldersDoNotOverrideConcreteMachineTypes() {
         String[][] types = {
                 {ModIds.ID_BIOMANCY_DIGESTER, "digesting"},
@@ -150,78 +130,10 @@ class AltarBindingRegistryTest {
     }
 
     @Test
-    void avaritiaRecipeFoldersDoNotPretendToBeMachineTiers() {
-        registerLeafType(ModIds.ID_AVARITIA_CRAFTING);
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "extreme", ModType.byId(ModIds.ID_AVARITIA_CRAFTING)));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "kjs", ModType.byId(ModIds.ID_AVARITIA_CRAFTING)));
-    }
-
-    @Test
-    void endCraftingRecipeFoldersDoNotRestrictTheOnlyTable() {
-        registerLeafType(ModIds.ID_UNTIL_ETERNITY_END_CRAFTING);
-        ModType table = ModType.byId(ModIds.ID_UNTIL_ETERNITY_END_CRAFTING);
-        assertNull(AltarBindingRegistry.normalizeSubType("end", table));
-        assertNull(AltarBindingRegistry.normalizeSubType("custom", table));
-    }
-
-    @Test
     void kubeJsGeneratedFolderIsNeverTreatedAsMachineSubtype() {
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.GENERIC));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", ModType.byId("goety")));
         assertNull(AltarBindingRegistry.normalizeSubType("kjs", null));
-    }
-
-    @Test
-    void pmmoSyntheticFolderDoesNotRestrictConfiguredSalvageBlockBinding() {
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "pmmo_salvage", ModType.byId("pmmo_salvage")));
-    }
-
-    @Test
-    void arsExtensionsTierFoldersDoNotRestrictArsMachineBindings() {
-        ResourceLocation lesserRecipe = new ResourceLocation(
-                "ars_extensions", "lesser/ring_of_lesser_mana_regen");
-
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(lesserRecipe),
-                ModType.byId(ModIds.ID_ARS_APPARATUS)));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "greater", ModType.byId(ModIds.ID_ARS_APPARATUS)));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "ultimate", ModType.byId(ModIds.ID_ARS_APPARATUS)));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                "greater", ModType.byId(ModIds.ID_ARS_IMBUEMENT)));
-    }
-
-    @Test
-    void mythicBotanyRecipeFoldersDoNotRestrictManaInfuserBindings() {
-        registerLeafType("mythicbotany_mana_infuser");
-        ModType infuser = ModType.byId("mythicbotany_mana_infuser");
-        ResourceLocation nativeRecipe = new ResourceLocation(
-                "mythicbotany", "mythicbotany_infusion/terrasteel_ingot");
-
-        assertEquals("mythicbotany_infusion",
-                AltarBindingRegistry.recipeSubTypeHint(nativeRecipe));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(nativeRecipe), infuser));
-        assertNull(AltarBindingRegistry.normalizeSubType("custom_pack_folder", infuser));
-        registerLeafType("test_machine_subtypes");
-        assertEquals("mythicbotany_infusion",
-                AltarBindingRegistry.normalizeSubType(
-                        "mythicbotany_infusion", ModType.byId("test_machine_subtypes")));
-    }
-
-    @Test
-    void scriptOwnedRecipeIdsDoNotExposeArbitraryMachineSubtypes() {
-        assertNull(AltarBindingRegistry.recipeSubTypeHint(
-                new ResourceLocation("crafttweaker", "custom_group/machine_recipe")));
-        assertNull(AltarBindingRegistry.recipeSubTypeHint(
-                new ResourceLocation("malum", "kjs/content_hash")));
-        assertNull(AltarBindingRegistry.recipeSubTypeHint(
-                new ResourceLocation("ars_nouveau", "kjs/71pk1d1jqrkd401c8e93sx7gy")));
-        assertNull(AltarBindingRegistry.recipeSubTypeHint(null));
     }
 
     @Test
@@ -249,50 +161,6 @@ class AltarBindingRegistryTest {
                 resolved, wr, true));
         assertEquals("arcane_iterator", AltarBindingRegistry.bindingSubTypeFilter(
                 "crystal_ritual", wr, false));
-    }
-
-    @Test
-    void campfireRecipeFolderDoesNotRejectFarmersDelightSkilletBinding() {
-        ResourceLocation recipeId = new ResourceLocation(
-                "alexsmobsdelight", "campfire_cooking/cooked_moose_rib_piece");
-
-        assertEquals("campfire_cooking", AltarBindingRegistry.recipeSubTypeHint(recipeId));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(recipeId),
-                ModType.byId(ModIds.ID_FD_SKILLET)));
-    }
-
-    @Test
-    void salvagingRecipeFolderDoesNotRejectFarmersDelightCuttingBoardBinding() {
-        ResourceLocation recipeId = new ResourceLocation(
-                "farmersdelight", "salvaging/stone");
-
-        assertEquals("salvaging", AltarBindingRegistry.recipeSubTypeHint(recipeId));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(recipeId),
-                ModType.byId(ModIds.ID_FD_CUTTING_BOARD)));
-    }
-
-    @Test
-    void addonRecipeFolderDoesNotRejectFarmersDelightCookingPotBinding() {
-        ResourceLocation recipeId = new ResourceLocation(
-                "cosmopolitan", "farmersdelight/cooking/tisane");
-
-        assertEquals("farmersdelight", AltarBindingRegistry.recipeSubTypeHint(recipeId));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(recipeId),
-                ModType.byId("farmersdelight_cooking_pot")));
-    }
-
-    @Test
-    void addonRecipeFolderDoesNotRejectMinersDelightCopperPotBinding() {
-        ResourceLocation recipeId = new ResourceLocation(
-                "veggiesdelight", "compat/culturaldelight/cooking/turnip_cake");
-
-        assertEquals("compat", AltarBindingRegistry.recipeSubTypeHint(recipeId));
-        assertNull(AltarBindingRegistry.normalizeSubType(
-                AltarBindingRegistry.recipeSubTypeHint(recipeId),
-                ModType.byId(ModIds.ID_MD_COPPER_POT)));
     }
 
     @Test

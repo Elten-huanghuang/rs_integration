@@ -239,11 +239,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Resolve network early so validateIdle can access it for crystal rituals
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> CraftPacketUtils
+                .resolveEndpointForCraft(player, myDim, myPos).orElse(null));
 
         // Validate idle state per machine type
         if (!validateIdle(player, level)) return false;
@@ -666,11 +663,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> CraftPacketUtils
+                .resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         this.ledger.setStorageEndpoint(storageEndpoint());
         this.filledSlotIndices = new ArrayList<>();
         this.filledPedestals = new ArrayList<>();

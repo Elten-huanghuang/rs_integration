@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -21,6 +22,8 @@ public final class SelfAmplifyingRecipePolicy {
         List<IngredientRef> scaled = new ArrayList<>(target.inputs().size());
         for (IngredientRef input : target.inputs()) {
             List<MaterialRef> alternatives = input.alternatives();
+            boolean selfInput = input.role() != DemandRole.CATALYST
+                    && referencesOutput(input, target.output());
             if (input.role() != DemandRole.CATALYST
                     && !amplification && alternatives.size() > 1
                     && alternatives.contains(target.output())) {
@@ -29,11 +32,26 @@ public final class SelfAmplifyingRecipePolicy {
                         .toList();
             }
             long count = input.role() == DemandRole.CATALYST
-                    || amplification && input.alternatives().contains(target.output())
+                    || amplification && selfInput
                     ? input.count() : saturatingMultiply(input.count(), multiplier);
             scaled.add(new IngredientRef(alternatives, count, input.nbtMatchMode(), input.role()));
         }
         return List.copyOf(scaled);
+    }
+
+    /**
+     * 普通终端规划的是“目标配方输入”；自增终端必须规划“目标产物需求”，
+     * 否则库存中的种子会被误认为已满足整个请求，产生零个生产步骤。
+     */
+    public static List<IngredientRef> planningRoots(RecipeNode target, int executions) {
+        if (!isSelfAmplifying(target)) {
+            return scaleTargetInputs(target, executions);
+        }
+        return List.of(new IngredientRef(
+                List.of(target.output()), Math.max(1, executions),
+                target.output().runtimeNbt()
+                        ? ImmutableRecipeGraph.NbtMatchMode.ANY
+                        : ImmutableRecipeGraph.NbtMatchMode.EXACT));
     }
 
     public static List<IngredientSpec> scaleTargetInputs(List<IngredientSpec> specs,
@@ -100,12 +118,28 @@ public final class SelfAmplifyingRecipePolicy {
         long consumed = 0L;
         for (IngredientRef input : inputs) {
             if (input.role() != DemandRole.CATALYST
-                    && input.alternatives().contains(output)) {
+                    && referencesOutput(input, output)) {
                 consumed = Long.MAX_VALUE - consumed < input.count()
                         ? Long.MAX_VALUE : consumed + input.count();
             }
         }
         return consumed;
+    }
+
+    private static boolean referencesOutput(IngredientRef input, MaterialRef output) {
+        for (MaterialRef alternative : input.alternatives()) {
+            if (!alternative.itemId().equals(output.itemId())) continue;
+            if (output.runtimeNbt() || alternative.runtimeNbt()
+                    || alternative.equals(output)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isSelfInput(IngredientRef input, MaterialRef output) {
+        return input != null && output != null && input.role() != DemandRole.CATALYST
+                && referencesOutput(input, output);
     }
 
     private static long saturatingMultiply(long count, int multiplier) {

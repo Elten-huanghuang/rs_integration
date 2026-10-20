@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
@@ -433,7 +434,7 @@ public final class PureRecipePlanner {
                         stepLimitReached = true;
                         continue;
                     }
-                    int selfConsumed = selfConsumedPerBatch(candidate, wanted);
+                    int selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
                     int netGain = candidate.outputCount() - selfConsumed;
                     long batches = batchesFor(needed,
                             selfConsumed > 0 ? netGain : candidate.outputCount());
@@ -1074,8 +1075,7 @@ public final class PureRecipePlanner {
         private static int selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
             long consumed = 0;
             for (IngredientRef input : candidate.inputs()) {
-                if (input.role() != DemandRole.CATALYST
-                        && input.alternatives().contains(output)) {
+                if (SelfAmplifyingRecipePolicy.isSelfInput(input, output)) {
                     consumed += input.count();
                     if (consumed > Integer.MAX_VALUE) return Integer.MAX_VALUE;
                 }

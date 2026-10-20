@@ -25,7 +25,9 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Shared base for all batch-craft delegates.
@@ -351,6 +353,15 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     /** Attach the chain-selected storage backend before private-ledger starts. */
     public final void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
         this.storageEndpoint = endpoint;
+    }
+
+    /**
+     * 保留执行链已经选定的存储端点；仅在缺失时才允许机器自行解析。
+     */
+    protected final void resolveStorageEndpointIfMissing(
+            Supplier<CraftStorageEndpoint> resolver) {
+        if (storageEndpoint != null) return;
+        setStorageEndpoint(Objects.requireNonNull(resolver, "resolver").get());
     }
 
     /** Attach the recursion-wide shared magic reservation to this physical node. */

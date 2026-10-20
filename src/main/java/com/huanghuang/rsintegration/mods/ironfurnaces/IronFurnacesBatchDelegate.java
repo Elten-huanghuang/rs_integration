@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -232,11 +233,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("Iron Furnace factory has no energy",
                     Component.translatable("rsi.ironfurnaces.error.factory_no_energy"));
         }
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, target.dimension(), pos).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> CraftPacketUtils
+                .resolveEndpointForCraft(player, target.dimension(), pos).orElse(null));
         this.factoryMode = ironFurnace.isFactory();
         this.rainbowMode = ironFurnace.isRainbowFurnace();
         this.plannedOperations = 1;
@@ -528,12 +526,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     private void resolveNetwork(ServerPlayer player) {
         this.player = player;
-        if (storageEndpoint() == null) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
-            if (storageEndpoint() == null) setStorageEndpoint(CraftStorageEndpoints.resolveDefault(player).orElse(null));
-        } else {
-            setStorageEndpoint(null);
-        }
+        resolveStorageEndpointIfMissing(() -> {
+            CraftStorageEndpoint resolved = CraftPacketUtils
+                    .resolveEndpointForCraft(player, dimension, pos).orElse(null);
+            return resolved != null ? resolved
+                    : CraftStorageEndpoints.resolveDefault(player).orElse(null);
+        });
     }
 
     private int physicalBatchCapacity() {

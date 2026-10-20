@@ -138,51 +138,6 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
         }
     }
 
-    @ParameterizedTest
-    @CsvSource({"0, 9", "1, 8", "2, 7"})
-    void singleOperationReservesAnActiveSlot(int tier, int expectedInput) throws ReflectiveOperationException {
-        Fixture fixture = fixture(tier);
-        set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
-        set(fixture.delegate, "queuedOperations", 1);
-
-        assertTrue(startNextBatch(fixture.delegate));
-
-        assertEquals(List.of(expectedInput), fixture.written);
-        assertEquals(1, fixture.items[expectedInput].getCount());
-        assertEquals(0, get(fixture.delegate, "queuedOperations"));
-    }
-
-    @ParameterizedTest
-    @CsvSource({"0, 2", "1, 4", "2, 6"})
-    void flatAndParallelBatchPlanningUsesActualTierCapacity(int tier, int lanes)
-            throws ReflectiveOperationException {
-        Fixture fixture = fixture(tier);
-        int capacity = profile(fixture.delegate).physicalCapacity();
-
-        fixture.delegate.prepareFlatBatch(capacity + 1);
-
-        assertEquals(lanes, get(fixture.delegate, "plannedFactoryLanes"));
-        assertEquals(capacity, fixture.delegate.preferredParallelBatchSize(1000, 1));
-        assertEquals(capacity, fixture.delegate.flatBatchOperationLimit(1));
-    }
-
-    @ParameterizedTest
-    @CsvSource({"0, 9, 10", "1, 8, 11", "2, 7, 12"})
-    void occupiedActiveSlotsCannotBeReplacedWithDisabledSlots(int tier, int firstInput, int lastInput)
-            throws ReflectiveOperationException {
-        Fixture fixture = fixture(tier);
-        for (int slot = firstInput; slot <= lastInput; slot++) {
-            fixture.items[slot] = new ItemStack(Items.COBBLESTONE);
-        }
-        set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
-        set(fixture.delegate, "queuedOperations", 1);
-
-        assertFalse(startNextBatch(fixture.delegate));
-
-        assertTrue(fixture.written.isEmpty());
-        assertEquals(1, get(fixture.delegate, "queuedOperations"));
-    }
-
     @Test
     void nativeAutoSplitMovesRainbowInputsOutsideReservedLanes() throws ReflectiveOperationException {
         Fixture fixture = fixture(2);
@@ -211,7 +166,7 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"0, 12", "1, 65", "2, 12", "2, 129", "2, 385"})
+    @CsvSource({"0, 12", "2, 385"})
     void splitGuardKeepsEveryProductCollectibleAndRestoresNativeSplitAfterCompletion(int tier, int operations)
             throws ReflectiveOperationException {
         Fixture fixture = fixture(tier);

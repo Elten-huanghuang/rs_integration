@@ -1,11 +1,20 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -21,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class PureRecipePlannerTest {
+class PureRecipePlannerTest extends BootstrapTest {
     private static final MaterialRef LOG = material("log");
     private static final MaterialRef PLANK = material("plank");
     private static final MaterialRef STICK = material("stick");
@@ -270,6 +279,87 @@ class PureRecipePlannerTest {
                 new PureRecipePlanner.PlannedStep(id("duplicate_template"), 4)),
                 result.steps());
         assertTrue(result.remaining().isEmpty());
+    }
+
+    @Test
+    void amplifiesTemplateFromFiftyNineStockToSixtyFiveOutput() {
+        MaterialRef template = material("template_with_large_seed_stock");
+        MaterialRef stone = material("stone_for_large_seed_stock");
+        RecipeNode duplicate = recipe("duplicate_template_large_seed_stock",
+                template, 2, ingredient(template, 1), ingredient(stone, 7));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                template, List.of(duplicate)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(template, 59, stone, 49), List.of(ingredient(template, 65)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_large_seed_stock"), 6)),
+                result.steps());
+    }
+
+    @Test
+    void amplifiesTemplateFromTwoStockToSixtyFiveOutputInSeedStages() {
+        MaterialRef template = material("template_with_small_seed_stock");
+        MaterialRef stone = material("stone_for_small_seed_stock");
+        RecipeNode duplicate = recipe("duplicate_template_small_seed_stock",
+                template, 2, ingredient(template, 1), ingredient(stone, 7));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                template, List.of(duplicate)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(template, 2, stone, 512), List.of(ingredient(template, 65)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 2),
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 4),
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 8),
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 16),
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 32),
+                new PureRecipePlanner.PlannedStep(
+                        id("duplicate_template_small_seed_stock"), 1)),
+                result.steps());
+    }
+
+    @Test
+    void runtimeNbtOutputStillRecognizesSmithingSelfAmplification() {
+        SmithingTransformRecipe recipe = new SmithingTransformRecipe(
+                id("runtime_template_duplicate"),
+                Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+                Ingredient.of(Items.NETHERRACK), Ingredient.of(Items.DIAMOND),
+                new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2));
+        ItemStack outputStack = recipe.getResultItem(RegistryAccess.EMPTY);
+        List<IngredientSpec> specs = new SmithingRecipeHandler().getIngredients(recipe);
+        RecipeNode duplicate = ImmutableRecipeGraphProjector.projectRecipe(
+                recipe, outputStack, specs, "smithing",
+                new ResourceLocation("minecraft", "smithing"), false);
+
+        assertFalse(duplicate.output().runtimeNbt());
+        assertTrue(SelfAmplifyingRecipePolicy.isSelfAmplifying(duplicate));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(duplicate.output(), List.of(duplicate)));
+
+        PureRecipePlanner.Result planningResult = PureRecipePlanner.resolve(graph,
+                Map.of(duplicate.output(), 2,
+                        minecraftMaterial("netherrack"), 512,
+                        minecraftMaterial("diamond"), 512),
+                SelfAmplifyingRecipePolicy.planningRoots(duplicate, 65), 20);
+
+        assertTrue(planningResult.feasible(), planningResult.toString());
+        assertTrue(planningResult.missing().isEmpty(), planningResult.toString());
+        assertEquals(6, planningResult.steps().size());
+        assertEquals(63L, planningResult.steps().stream()
+                .mapToLong(PureRecipePlanner.PlannedStep::batches)
+                .sum());
+        assertEquals(1L, planningResult.steps().get(
+                planningResult.steps().size() - 1).batches());
     }
 
     @Test
