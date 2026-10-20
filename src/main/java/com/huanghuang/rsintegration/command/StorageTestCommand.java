@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageBackendResolution;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -11,13 +13,19 @@ import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -36,6 +44,10 @@ public final class StorageTestCommand {
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("snapshot").executes(StorageTestCommand::snapshot))
                 .then(Commands.literal("simulate_insert").executes(StorageTestCommand::simulateInsert))
+                .then(Commands.literal("insert")
+                        .then(Commands.argument("amount", LongArgumentType.longArg(1L, Long.MAX_VALUE))
+                                .then(Commands.argument("item", StringArgumentType.word())
+                                        .executes(StorageTestCommand::insert))))
                 .then(Commands.literal("roundtrip")
                         .then(Commands.argument("amount", IntegerArgumentType.integer(1, 64))
                                 .executes(StorageTestCommand::roundTrip))));
@@ -72,6 +84,48 @@ public final class StorageTestCommand {
                         + result.remainder().isPresent()), false);
         return result.status() == StorageOperationStatus.SUCCESS
                 || result.status() == StorageOperationStatus.PARTIAL ? 1 : 0;
+    }
+
+    private static int insert(CommandContext<CommandSourceStack> context)
+            throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        long amount = LongArgumentType.getLong(context, "amount");
+        ResourceLocation itemId = ResourceLocation.tryParse(
+                StringArgumentType.getString(context, "item"));
+        Item item = itemId == null ? null : ForgeRegistries.ITEMS.getValue(itemId);
+        if (item == null || item == Items.AIR) {
+            return fail(context, "unknown item: " + context.getArgument("item", String.class));
+        }
+        StorageSession session = resolve(player, context);
+        if (session == null) return 0;
+        ItemStack template = new ItemStack(item);
+        long inserted = insertLong(session, player, template, amount);
+        if (inserted != amount) {
+            return fail(context, "insert incomplete: requested=" + amount
+                    + ", accepted=" + inserted);
+        }
+        context.getSource().sendSuccess(() -> Component.literal(
+                "RS insert OK: " + itemId + " x" + CompactQuantityFormat.format(inserted)
+                        + " (" + inserted + ")"), false);
+        return 1;
+    }
+
+    static long insertLong(StorageSession session, ServerPlayer player,
+                           ItemStack template, long requested) {
+        if (session == null || player == null || template == null
+                || template.isEmpty() || requested <= 0L) return 0L;
+        long accepted = 0L;
+        while (accepted < requested) {
+            int chunk = SaturatingLongMath.clampToInt(requested - accepted);
+            if (chunk <= 0) break;
+            StorageOperationResult result = session.insert(
+                    player, template.copyWithCount(chunk), false);
+            long moved = result.transferredAmount().orElse(0L);
+            if (moved <= 0L) break;
+            accepted = SaturatingLongMath.add(accepted, Math.min(moved, chunk));
+            if (moved < chunk) break;
+        }
+        return accepted;
     }
 
     private static int roundTrip(CommandContext<CommandSourceStack> context)

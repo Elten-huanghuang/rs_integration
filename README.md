@@ -73,8 +73,10 @@ Batch splitting, machine input buffering, and multi-machine parallelism remain s
 ### Myriad Realms Guixu Disk
 
 - One disk stores items, fluids, and magic resources in the native RS disk drive. Item and fluid entry limits, per-entry payload size, and total payload size are configurable.
+- Each exact item or fluid key stores up to `Long.MAX_VALUE`. RS-native `ItemStack`, `FluidStack`, and `IStorageDisk` operations still use `int` chunks; RSI aggregates the exact disk amount for the mixed terminal and crafting snapshots without double-counting the native cache.
 - `MANA`, `SOURCE`, and `SOUL` remain separate resource rows. `MANA` and `SOUL` can feed RSI recursive crafting; `SOURCE` remains on the native Ars transfer path.
 - Magic-resource files now store each resource as a `long`. Existing 12-byte `int` records are detected and read without migration loss.
+- Item and fluid amount pages now store `long` values and still read legacy 4-byte amount pages.
 - Mixed-terminal magic quantities, recipe-tree labels, ink counts, and resonant-container HUDs share compact `K/M/G/T/P/E` suffixes so values through `Long.MAX_VALUE` remain inside their cells; exact magic values remain available in the tooltip.
 - NBT-sensitive variants retain identity. The disk participates in storage caches, automation devices, the mixed terminal, JEI/EMI lookup, and recursive item/fluid extraction.
 - Existing disks expand automatically when entry limits are raised. Save verification, crash-safe dirty handling, drop protection, void recovery, and UUID-based administrator recovery reduce data-loss risk.
@@ -285,6 +287,7 @@ Grid search caches live under the game directory at `rs_integration/cache/grid_s
 - `/rsi_item_refund`: claim ordinary crafting refunds retained while the player was offline.
 - `/rsi_debug`: operator diagnostics for chains, bindings, handlers, reservations, and performance (permission level 2).
 - `/rsi_unified_disk list [page]` and `recover <uuid>`: list checkpoints and recover a lost unified-disk credential (permission level 2).
+- `/rsi_storage_test insert <amount> <item>` inserts a finite `long` amount into the player's resolved RS network in native `int` chunks (permission level 2).
 - `/rsi_storage_test snapshot|simulate_insert|roundtrip <amount>`: explicit RS storage smoke tests for operators.
 - `diagnosticVerboseLogging`: enable detailed resolver and dispatcher logs.
 
