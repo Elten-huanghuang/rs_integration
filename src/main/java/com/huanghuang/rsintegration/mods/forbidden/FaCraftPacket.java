@@ -236,19 +236,11 @@ public final class FaCraftPacket {
         // Pre-check essences per-type before material extraction
         if (!FaRitualHelper.checkEssences(player, ritual, be, ritualManager)) return;
 
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
+        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, endpoint);
 
         // Try auto-crafting if items are missing
         if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
-            List<ItemStack> allAvailable = available.entrySet().stream()
-                    .map(e -> {
-                        ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
-                        if (e.getKey().tag() != null) {
-                            try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
-                        }
-                        return s;
-                    })
-                    .toList();
+            List<ItemStack> allAvailable = CraftingResolver.stacksFromKeyedCounts(available);
             List<String> missing = new ArrayList<>();
             List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForStacks(needed, allAvailable, level, missing);
 

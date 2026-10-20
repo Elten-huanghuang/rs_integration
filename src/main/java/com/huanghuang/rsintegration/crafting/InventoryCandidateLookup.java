@@ -14,15 +14,15 @@ import java.util.Map;
 import java.util.Set;
 
 final class InventoryCandidateLookup {
-    private final Map<CraftingResolver.StackKey, Integer> available;
+    private final Map<CraftingResolver.StackKey, Long> available;
     private final boolean useIndex;
     private Map<Item, List<OrderedKey>> byItem;
 
-    InventoryCandidateLookup(Map<CraftingResolver.StackKey, Integer> available) {
+    InventoryCandidateLookup(Map<CraftingResolver.StackKey, Long> available) {
         this(available, true);
     }
 
-    InventoryCandidateLookup(Map<CraftingResolver.StackKey, Integer> available, boolean useIndex) {
+    InventoryCandidateLookup(Map<CraftingResolver.StackKey, Long> available, boolean useIndex) {
         this.available = available;
         this.useIndex = useIndex;
     }
@@ -31,8 +31,8 @@ final class InventoryCandidateLookup {
         return available.keySet();
     }
 
-    int count(CraftingResolver.StackKey key) {
-        return available.getOrDefault(key, 0);
+    long count(CraftingResolver.StackKey key) {
+        return available.getOrDefault(key, 0L);
     }
 
     Collection<CraftingResolver.StackKey> keysFor(Ingredient ingredient) {

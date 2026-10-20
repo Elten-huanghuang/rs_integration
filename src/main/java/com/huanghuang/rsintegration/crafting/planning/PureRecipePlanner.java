@@ -97,7 +97,7 @@ public final class PureRecipePlanner {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
-                graph, smithingAvailability(preciseAvailable), normalizedRoots);
+                graph, preciseAvailable, normalizedRoots);
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs);
         List<Task> pending = normalizedRoots.stream()
@@ -232,14 +232,6 @@ public final class PureRecipePlanner {
     private static long saturatedAdd(long left, long right) {
         if (right <= 0L) return left;
         return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
-    }
-
-    private static Map<MaterialRef, Integer> smithingAvailability(
-            Map<MaterialRef, Long> available) {
-        Map<MaterialRef, Integer> compatible = new LinkedHashMap<>(available.size());
-        available.forEach((material, count) -> compatible.put(material,
-                (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count))));
-        return compatible;
     }
 
     private static Map<MaterialRef, Long> longAvailability(

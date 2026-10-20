@@ -69,6 +69,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.plan.PlanWarnings;
 import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
@@ -191,14 +192,14 @@ import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
 
-    private static Map<StackKey, Integer> listAvailable(ServerPlayer player,
+    private static Map<StackKey, Long> listAvailable(ServerPlayer player,
                                                           @Nullable CraftStorageEndpoint endpoint) {
         return MaterialSources.listAllAvailable(player, endpoint);
     }
 
     private static DirectReservationCheck probeDirectTerminalReservation(
             ServerPlayer player, ResourceLocation recipeId, List<IngredientSpec> specs,
-            Map<StackKey, Integer> available, @Nullable CraftStorageEndpoint endpoint) {
+            Map<StackKey, Long> available, @Nullable CraftStorageEndpoint endpoint) {
         if (specs.stream().noneMatch(spec -> spec != null && !spec.isEmpty())) {
             return new DirectReservationCheck(false, "no-fixed-inputs", "unknown");
         }
@@ -220,19 +221,24 @@ public final class GenericCraftPacket {
             if (endpoint != null) probe.setStorageEndpoint(endpoint);
             for (DirectMaterialAllocator.Allocation fragment : allocation.allocations()) {
                 ItemStack template = fragment.material().toStack();
-                ItemStack reserved = endpoint != null
-                        ? probe.reserveExactAcrossNetworkAndInventory(
-                                template, fragment.count(), endpoint, player)
-                        : probe.reserveExactAcrossNetworkAndInventory(
-                                template, fragment.count(), (CraftStorageEndpoint) null, player);
-                if (reserved.isEmpty() || reserved.getCount() != fragment.count()) {
-                    probe.rollback(player);
-                    String material = String.valueOf(BuiltInRegistries.ITEM.getKey(template.getItem()))
-                            + (template.hasTag() ? template.getTag() : "");
-                    RSIntegrationMod.LOGGER.debug(
-                            "[RSI-DirectReserve] live reservation rejected recipe={} material={} count={} directAllocation=true",
-                            recipeId, material, fragment.count());
-                    return new DirectReservationCheck(false, material, "EXACT_ALLOCATION");
+                long remaining = fragment.count();
+                while (remaining > 0L) {
+                    int chunk = SaturatingLongMath.clampToInt(remaining);
+                    ItemStack reserved = endpoint != null
+                            ? probe.reserveExactAcrossNetworkAndInventory(
+                                    template, chunk, endpoint, player)
+                            : probe.reserveExactAcrossNetworkAndInventory(
+                                    template, chunk, (CraftStorageEndpoint) null, player);
+                    if (reserved.isEmpty() || reserved.getCount() != chunk) {
+                        probe.rollback(player);
+                        String material = String.valueOf(BuiltInRegistries.ITEM.getKey(template.getItem()))
+                                + (template.hasTag() ? template.getTag() : "");
+                        RSIntegrationMod.LOGGER.debug(
+                                "[RSI-DirectReserve] live reservation rejected recipe={} material={} count={} directAllocation=true",
+                                recipeId, material, remaining);
+                        return new DirectReservationCheck(false, material, "EXACT_ALLOCATION");
+                    }
+                    remaining -= chunk;
                 }
             }
             probe.rollback(player);
@@ -247,21 +253,23 @@ public final class GenericCraftPacket {
                                           String nbtMode) {}
 
     private static Map<IngredientKey, PlanResponse.Availability> directMaterialView(
-            DirectMaterialAllocator.Result allocation, Map<StackKey, Integer> available) {
-        Map<IngredientKey, Integer> needed = new LinkedHashMap<>();
-        Map<IngredientKey, Integer> stored = new LinkedHashMap<>();
+            DirectMaterialAllocator.Result allocation, Map<StackKey, Long> available) {
+        Map<IngredientKey, Long> needed = new LinkedHashMap<>();
+        Map<IngredientKey, Long> stored = new LinkedHashMap<>();
         for (DirectMaterialAllocator.Allocation fragment : allocation.allocations()) {
             IngredientKey key = IngredientKey.of(fragment.material().toStack());
-            needed.merge(key, fragment.count(), Integer::sum);
+            needed.merge(key, fragment.count(), SaturatingLongMath::add);
         }
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
             IngredientKey key = IngredientKey.of(entry.getKey().toStack());
-            if (needed.containsKey(key)) stored.merge(key, entry.getValue(), Integer::sum);
+            if (needed.containsKey(key)) {
+                stored.merge(key, entry.getValue(), SaturatingLongMath::add);
+            }
         }
         Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
         needed.forEach((key, count) -> result.put(key,
-                new PlanResponse.Availability(count, stored.getOrDefault(key, 0))));
+                new PlanResponse.Availability(count, stored.getOrDefault(key, 0L))));
         return result;
     }
 
@@ -1247,9 +1255,7 @@ public final class GenericCraftPacket {
             Set<ResourceLocation> blockedOutputIds, boolean excludePlannedRoot,
             ResolutionStep terminalStep, String planKind) {
         int plannedExecutions = Math.max(1, repeatCount);
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint);
-        Map<StackKey, Long> preciseAvailable =
-                MaterialSources.listAllAvailableLong(player, storageEndpoint);
+        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         var routeInputs = new AsyncPurePlanningService.RouteInputs(
                 routingAvailability(available), RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
@@ -1261,7 +1267,7 @@ public final class GenericCraftPacket {
         BlockPos effectivePos = pos != null ? pos : player.blockPosition();
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
-                player.getUUID(), 0L, recipeId, available, preciseAvailable,
+                player.getUUID(), 0L, recipeId, available,
                 Map.of(), planningGraph,
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
@@ -1658,7 +1664,7 @@ public final class GenericCraftPacket {
             MachineSelectionMode machineSelectionMode,
             @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             Map<String, ItemStack> materialLocks) {
-        Map<StackKey, Integer> available = listAvailable(player, storageEndpoint);
+        Map<StackKey, Long> available = listAvailable(player, storageEndpoint);
         List<String> missing = new ArrayList<>();
         CraftPlanGraph graph;
         try {
@@ -2509,7 +2515,7 @@ public final class GenericCraftPacket {
                     graphSpecs = SummoningRitualAltarBatchDelegate.planningMaterials(
                             player, recipe, effectiveDim, effectivePos, graphSpecs);
                 }
-                Map<StackKey, Integer> avail = listAvailable(player, storageEndpoint);
+                Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
                 logExecutionAvailability(recipeId, avail);
                 DirectReservationCheck directReservation = probeDirectTerminalReservation(
                         player, recipeId, graphSpecs, avail, storageEndpoint);
@@ -2623,7 +2629,7 @@ public final class GenericCraftPacket {
                     recipe, player.serverLevel().registryAccess());
             List<IngredientSpec> directSpecs = scaleTerminalIngredientSpecs(
                     recipe, extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
-            Map<StackKey, Integer> directAvailable = listAvailable(
+            Map<StackKey, Long> directAvailable = listAvailable(
                     player, storageEndpoint);
             DirectReservationCheck directReservation = probeDirectTerminalReservation(
                     player, recipeId, directSpecs, directAvailable, storageEndpoint);
@@ -2679,7 +2685,7 @@ public final class GenericCraftPacket {
             }
             List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
                     recipe, extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
-            Map<StackKey, Integer> available = listAvailable(player, storageEndpoint);
+            Map<StackKey, Long> available = listAvailable(player, storageEndpoint);
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph;
             try {
@@ -2764,7 +2770,7 @@ public final class GenericCraftPacket {
                     cachedExecutionPlan, materialLocks)) {
                 return;
             }
-            Map<StackKey, Integer> avail = listAvailable(player, storageEndpoint);
+            Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
             logExecutionAvailability(recipeId, avail);
             List<String> missingCheck = new ArrayList<>();
             ItemStack recipeOutput = cr2.getResultItem(
@@ -2873,7 +2879,7 @@ public final class GenericCraftPacket {
             List<IngredientSpec> smithingSpecs = scaleTerminalIngredientSpecs(
                     recipe, specs, smithingOutput, repeatCount);
             if (!smithingSpecs.isEmpty()) {
-                Map<StackKey, Integer> avail = listAvailable(player, storageEndpoint);
+                Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
                 DirectReservationCheck directSmithing = probeDirectTerminalReservation(
                         player, recipeId, smithingSpecs, avail, storageEndpoint);
                 if (!directSmithing.available()) {
@@ -3170,7 +3176,7 @@ public final class GenericCraftPacket {
     }
 
     private static void logExecutionAvailability(ResourceLocation recipeId,
-                                                  Map<StackKey, Integer> available) {
+                                                  Map<StackKey, Long> available) {
         if (!RSIntegrationMod.LOGGER.isDebugEnabled()) return;
         int tea = 0;
         int oak = 0;
@@ -3987,7 +3993,7 @@ public final class GenericCraftPacket {
 
         Map<ResourceLocation, ResourceLocation> effectiveOverrides =
                 forcedOverrides == null ? Map.of() : forcedOverrides;
-        Map<StackKey, Integer> available;
+        Map<StackKey, Long> available;
         PlanningSnapshot planningSnapshot;
         if (precomputedSnapshot != null) {
             if (!matchesAsyncRequest(precomputedSnapshot, player.getUUID(), recipeId,
@@ -4003,8 +4009,6 @@ public final class GenericCraftPacket {
             long snapshotStarted = System.nanoTime();
             try {
                 available = MaterialSources.listAllAvailable(player, planningEndpoint);
-                Map<StackKey, Long> preciseAvailable =
-                        MaterialSources.listAllAvailableLong(player, planningEndpoint);
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 BindingAwareGraph bindingGraph = recipe instanceof CraftingRecipe
                         || backgroundProjectable
@@ -4013,7 +4017,6 @@ public final class GenericCraftPacket {
                         : new BindingAwareGraph(new ImmutableRecipeGraph(Map.of()), Set.of());
                 planningSnapshot = PlanningSnapshotFactory.capture(
                         player.getUUID(), previewGeneration, recipeId, available,
-                        preciseAvailable,
                         effectiveOverrides,
                         bindingGraph.graph(),
                         PlanningStateValidator.networkFingerprint(
@@ -4285,9 +4288,10 @@ public final class GenericCraftPacket {
         if (levelBooks != null) {
             for (int lvl = levelBooks.length - 1; lvl >= 1; lvl--) {
                 ItemStack wanted = levelBooks[lvl - 1];
-                int matchingCount = available.entrySet().stream()
+                long matchingCount = available.entrySet().stream()
                         .filter(e -> MaterialMatcher.sameRuntimeFragment(e.getKey().toStack(), wanted))
-                        .mapToInt(Map.Entry::getValue).sum();
+                        .mapToLong(Map.Entry::getValue)
+                        .reduce(0L, SaturatingLongMath::add);
                 if (matchingCount >= repeatCount) {
                     iteratorStartLevel = lvl;
                     break;
@@ -4470,19 +4474,21 @@ public final class GenericCraftPacket {
 
         // Compute itemAvailable early — needed for ingredient matching in both
         // PlanStep display and material calculation.
-        Map<Item, Integer> itemAvailable = new HashMap<>();
+        Map<Item, Long> itemAvailable = new HashMap<>();
         for (var e : available.entrySet()) {
-            itemAvailable.merge(e.getKey().item(), e.getValue(), Integer::sum);
+            itemAvailable.merge(e.getKey().item(), e.getValue(), SaturatingLongMath::add);
         }
         // RecipeIndex for OR alternative material checks — allows alternatives
         // whose ingredients are craftable (not just directly available).
         // Display copy: decremented on each match so the same tag ingredient
         // showing up N times doesn't pick the same item N times (e.g. 1 cherry
         // + 1 acacia shown as 2 acacia when both are logs).
-        Map<Item, Integer> displayAvailable = new HashMap<>(itemAvailable);
+        Map<Item, Long> displayAvailable = new HashMap<>(itemAvailable);
 
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            int totalItems = itemAvailable.values().stream().mapToInt(Integer::intValue).sum();
+            long totalItems = itemAvailable.values().stream()
+                    .mapToLong(Long::longValue)
+                    .reduce(0L, SaturatingLongMath::add);
             RSIntegrationMod.debug("[RSI-Generic] itemAvailable: {} types, {} total items",
                     itemAvailable.size(), totalItems);
         }
@@ -4925,14 +4931,14 @@ public final class GenericCraftPacket {
         // mutated by the step/target display pass above, and reusing it here
         // causes matchBestAvailable fallback to return arbitrary items from
         // the ingredient array, producing bizarre material requirements.
-        Map<Item, Integer> matAvailable = new HashMap<>(itemAvailable);
+        Map<Item, Long> matAvailable = new HashMap<>(itemAvailable);
         Map<Item, Long> neededCounts = new LinkedHashMap<>();
         Map<Item, Ingredient> itemSource = new HashMap<>();
         for (IngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
-            Map<Item, Integer> consumed = consumeIngredientCount(
+            Map<Item, Long> consumed = consumeIngredientCount(
                     spec.ingredient(), spec.count(), matAvailable);
-            for (Map.Entry<Item, Integer> entry : consumed.entrySet()) {
+            for (Map.Entry<Item, Long> entry : consumed.entrySet()) {
                 neededCounts.merge(entry.getKey(), entry.getValue().longValue(),
                         SaturatingLongMath::signedAdd);
                 itemSource.putIfAbsent(entry.getKey(), spec.ingredient());
@@ -5361,8 +5367,20 @@ public final class GenericCraftPacket {
         CraftPlanGraph resolvedGraphForCache = planGraph;
         PlanningProgressServer.finalizing(player.getUUID(), previewGeneration);
         PLAN_REQUESTS.submitResponse(planningSnapshot, responseDraft, player.getServer()::execute,
-                current -> PlanningStateValidator.revalidatePreview(player, current, responseDraft,
-                        planDimKey, planLookupPos, PLAN_REQUESTS, planStorageReference),
+                current -> {
+                    boolean accepted = PlanningStateValidator.revalidatePreview(
+                            player, current, responseDraft, planDimKey, planLookupPos,
+                            PLAN_REQUESTS, planStorageReference);
+                    if (!accepted) {
+                        RSIntegrationMod.debug(
+                                "[RSI-plan] Final state validation rejected preview recipe={} "
+                                        + "generation={} requestCurrent={} revisionCurrent={}",
+                                recipeId, current.requestGeneration(),
+                                PLAN_REQUESTS.isCurrent(player.getUUID(), current.requestGeneration()),
+                                CraftPlanningRevision.isCurrent(current.recipeRevision()));
+                    }
+                    return accepted;
+                },
                 plan -> {
                     if (previewGeneration != 0L
                             && !PLAN_REQUESTS.isCurrent(player.getUUID(), previewGeneration)) {
@@ -5450,7 +5468,7 @@ public final class GenericCraftPacket {
     }
 
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
-                                  Map<Item, Integer> itemAvailable) {
+                                  Map<Item, Long> itemAvailable) {
         for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
             PlanResponse.Availability availability = entry.getValue();
             ItemStack display = entry.getKey().stack(1);
@@ -5466,7 +5484,7 @@ public final class GenericCraftPacket {
     }
 
     static String purePlanningFailureKey(PureRecipePlanner.Result result,
-                                         Map<StackKey, Integer> availableItems) {
+                                         Map<StackKey, Long> availableItems) {
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT
                 || result.status() == PureRecipePlanner.Status.SEARCH_LIMIT
                 || result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
@@ -5480,7 +5498,7 @@ public final class GenericCraftPacket {
     /** Sends a planner failure without discarding the exact shortage and quantity. */
     private static void sendPurePlanningFailure(
             ServerPlayer player, PureRecipePlanner.Result result,
-            Map<StackKey, Integer> availableItems,
+            Map<StackKey, Long> availableItems,
             Set<ResourceLocation> blockedOutputIds) {
         String key = allMissingRequireBlockedOutput(result.missing(), blockedOutputIds)
                 ? "rsi.plan.failure.no_bound_machine"
@@ -5638,11 +5656,11 @@ public final class GenericCraftPacket {
 
     static boolean hasPureNbtMismatch(
             List<ImmutableRecipeGraph.IngredientRef> missing,
-            Map<StackKey, Integer> availableItems) {
+            Map<StackKey, Long> availableItems) {
         if (missing == null || missing.isEmpty() || availableItems == null
                 || availableItems.isEmpty()) return false;
 
-        Map<ImmutableRecipeGraph.MaterialRef, Integer> projected =
+        Map<ImmutableRecipeGraph.MaterialRef, Long> projected =
                 ImmutableRecipeGraphProjector.projectAvailability(availableItems);
         for (ImmutableRecipeGraph.IngredientRef demand : missing) {
             if (demand.nbtMatchMode() == ImmutableRecipeGraph.NbtMatchMode.ANY) continue;
@@ -5662,18 +5680,18 @@ public final class GenericCraftPacket {
 
     static MarketTradeAvailability marketTradeAvailability(
             MarketRecipeWrapper recipe,
-            Map<StackKey, Integer> available, int repeatCount) {
+            Map<StackKey, Long> available, int repeatCount) {
         ItemStack cost = recipe.costItem();
         Ingredient costIngredient = Ingredient.of(cost);
         long matching = 0L;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (entry.getValue() > 0 && IngredientMatcher.test(costIngredient, entry.getKey().toStack())) {
-                matching = Math.min(Integer.MAX_VALUE, matching + entry.getValue());
+                matching = SaturatingLongMath.add(matching, entry.getValue());
             }
         }
         long required = (long) Math.max(1, cost.getCount()) * Math.max(1, repeatCount);
         int boundedRequired = (int) Math.min(Integer.MAX_VALUE, required);
-        int boundedAvailable = (int) matching;
+        int boundedAvailable = SaturatingLongMath.clampToInt(matching);
         return new MarketTradeAvailability(boundedRequired, boundedAvailable,
                 matching >= required);
     }
@@ -5685,7 +5703,7 @@ public final class GenericCraftPacket {
             MarketRecipeWrapper recipe,
             ResourceLocation recipeId, int repeatCount, ItemStack targetOutput,
             @Nullable ResourceLocation dim, @Nullable BlockPos pos,
-            Map<StackKey, Integer> available, PlanningSnapshot snapshot,
+            Map<StackKey, Long> available, PlanningSnapshot snapshot,
             PlanCache.Key cacheKey, long planStartNanos, PlanResultSink sink) {
         MarketTradeAvailability trade = marketTradeAvailability(recipe, available, repeatCount);
         if (!trade.feasible()) return false;
@@ -5762,7 +5780,7 @@ public final class GenericCraftPacket {
      * Preserves NBT so TACZ/Applied Armorer items display with correct attachments.
      * Strips BlockEntityTag/BlockId to avoid purple-black block entity rendering.
      */
-    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable) {
+    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Long> itemAvailable) {
         return matchBestAvailable(ingredient, itemAvailable, Collections.emptySet());
     }
 
@@ -5773,16 +5791,16 @@ public final class GenericCraftPacket {
      * arbitrary first tag entry, so a wood-tag gun slot shows the crafted oak_log
      * instead of dark_oak_log while the tree below builds oak_log.
      */
-    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Integer> itemAvailable,
+    private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Long> itemAvailable,
                                                 Set<Item> preferred) {
         ItemStack best = null;
-        int bestCount = -1;
+        long bestCount = -1L;
         int bestPreference = Integer.MAX_VALUE;
         var variantPreferences =
                 MaterialVariantPreferences.snapshot();
         for (ItemStack stack : ingredient.getItems()) {
             if (stack.isEmpty()) continue;
-            int count = itemAvailable.getOrDefault(stack.getItem(), 0);
+            long count = itemAvailable.getOrDefault(stack.getItem(), 0L);
             int preference = variantPreferences.rank(stack.getItem());
             boolean betterStockState = (count > 0) != (bestCount > 0) && count > 0;
             if (best == null || betterStockState
@@ -5840,15 +5858,15 @@ public final class GenericCraftPacket {
      * from the availability map so subsequent calls for the same tag-ingredient
      * spread across different valid items instead of always picking the same one.
      */
-    private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available) {
+    private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Long> available) {
         return matchAndConsume(ingredient, available, Collections.emptySet());
     }
 
-    private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Integer> available,
+    private static ItemStack matchAndConsume(Ingredient ingredient, Map<Item, Long> available,
                                              Set<Item> preferred) {
         ItemStack matched = matchBestAvailable(ingredient, available, preferred);
         if (matched != null) {
-            available.merge(matched.getItem(), -1, Integer::sum);
+            available.merge(matched.getItem(), -1L, SaturatingLongMath::add);
         }
         return matched;
     }
@@ -5860,14 +5878,14 @@ public final class GenericCraftPacket {
      * stocked ingredient once produces the same greedy result while keeping the
      * work proportional to the number of tag members.
      */
-    static Map<Item, Integer> consumeIngredientCount(Ingredient ingredient, int amount,
-                                                       Map<Item, Integer> available) {
+    static Map<Item, Long> consumeIngredientCount(Ingredient ingredient, int amount,
+                                                  Map<Item, Long> available) {
         return consumeIngredientCount(ingredient, amount, available,
                 Collections.emptySet());
     }
 
-    private static Map<Item, Integer> consumeIngredientCount(Ingredient ingredient, int amount,
-                                                               Map<Item, Integer> available,
+    private static Map<Item, Long> consumeIngredientCount(Ingredient ingredient, int amount,
+                                                          Map<Item, Long> available,
                                                                Set<Item> preferred) {
         if (ingredient == null || ingredient.isEmpty() || amount <= 0) return Map.of();
 
@@ -5879,12 +5897,12 @@ public final class GenericCraftPacket {
         candidates.sort((left, right) -> Integer.compare(
                 available.getOrDefault(right, 0), available.getOrDefault(left, 0)));
 
-        Map<Item, Integer> consumed = new LinkedHashMap<>();
+        Map<Item, Long> consumed = new LinkedHashMap<>();
         int remaining = amount;
         for (Item item : candidates) {
-            int stocked = Math.max(0, available.getOrDefault(item, 0));
+            long stocked = Math.max(0L, available.getOrDefault(item, 0L));
             if (stocked <= 0) continue;
-            int take = Math.min(remaining, stocked);
+            int take = (int) Math.min(remaining, stocked);
             available.put(item, stocked - take);
             consumed.put(item, take);
             remaining -= take;
@@ -5947,19 +5965,9 @@ public final class GenericCraftPacket {
     }
 
     /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */
-    private static Map<ImmutableRecipeGraph.MaterialRef, Integer> routingAvailability(
-            Map<StackKey, Integer> available) {
-        Map<ImmutableRecipeGraph.MaterialRef, Integer> projected = new HashMap<>();
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            int count = entry.getValue() == null ? 0 : entry.getValue();
-            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
-            if (itemId == null || count <= 0) continue;
-            String nbt = entry.getKey().tag() == null ? "" : entry.getKey().tag();
-            var material = new ImmutableRecipeGraph.MaterialRef(itemId, nbt);
-            projected.merge(material, count,
-                    (left, right) -> (int) Math.min(Integer.MAX_VALUE, (long) left + right));
-        }
-        return Map.copyOf(projected);
+    private static Map<ImmutableRecipeGraph.MaterialRef, Long> routingAvailability(
+            Map<StackKey, Long> available) {
+        return ImmutableRecipeGraphProjector.projectAvailability(available);
     }
 
     static List<ResolutionStep> attachIndexedAlternatives(

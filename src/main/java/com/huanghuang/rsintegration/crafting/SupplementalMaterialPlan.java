@@ -13,12 +13,12 @@ final class SupplementalMaterialPlan {
     private SupplementalMaterialPlan() {}
 
     /** 每个机器槽必须由同一种物品填满；相同谓词的不同槽依次扣减库存。 */
-    static boolean hasInputs(Map<StackKey, Integer> available, List<IngredientSpec> inputs) {
-        Map<StackKey, Integer> remaining = new LinkedHashMap<>(available);
+    static boolean hasInputs(Map<StackKey, Long> available, List<IngredientSpec> inputs) {
+        Map<StackKey, Long> remaining = new LinkedHashMap<>(available);
         for (IngredientSpec input : inputs) {
             if (input == null || input.isEmpty()) continue;
             StackKey selected = null;
-            for (Map.Entry<StackKey, Integer> entry : remaining.entrySet()) {
+            for (Map.Entry<StackKey, Long> entry : remaining.entrySet()) {
                 StackKey key = entry.getKey();
                 if (entry.getValue() >= input.count() && IngredientMatcher.test(input.ingredient(),
                         new MaterialKey(key.item(), key.tag()).toStack(1))) {
@@ -32,17 +32,17 @@ final class SupplementalMaterialPlan {
         return true;
     }
 
-    static Map<StackKey, Integer> afterProtecting(Map<StackKey, Integer> available,
+    static Map<StackKey, Long> afterProtecting(Map<StackKey, Long> available,
                                                 List<IngredientSpec> protectedInputs) {
-        Map<StackKey, Integer> remaining = new LinkedHashMap<>(available);
+        Map<StackKey, Long> remaining = new LinkedHashMap<>(available);
         for (IngredientSpec input : protectedInputs) {
-            int protect = input.count();
-            for (Map.Entry<StackKey, Integer> entry : remaining.entrySet()) {
+            long protect = input.count();
+            for (Map.Entry<StackKey, Long> entry : remaining.entrySet()) {
                 if (protect <= 0) break;
                 StackKey key = entry.getKey();
                 if (entry.getValue() <= 0 || !IngredientMatcher.test(input.ingredient(),
                         new MaterialKey(key.item(), key.tag()).toStack(1))) continue;
-                int take = Math.min(protect, entry.getValue());
+                long take = Math.min(protect, entry.getValue());
                 entry.setValue(entry.getValue() - take);
                 protect -= take;
             }
@@ -51,15 +51,15 @@ final class SupplementalMaterialPlan {
     }
 
     /** 与下游保护取并集，避免同一份产物被重复预留或被补做配方重新消耗。 */
-    static void protectProduced(Map<StackKey, Integer> available, Map<StackKey, Integer> usable,
+    static void protectProduced(Map<StackKey, Long> available, Map<StackKey, Long> usable,
                                 ProductionTarget target, long produced) {
         long protect = produced;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (protect <= 0L) break;
             StackKey key = entry.getKey();
             ItemStack stack = new MaterialKey(key.item(), key.tag()).toStack(1);
             if (!MaterialMatcher.matchesOutputDeclaration(target.material(), stack)) continue;
-            int count = Math.max(0, entry.getValue());
+            long count = Math.max(0L, entry.getValue());
             int take = (int) Math.min(protect, count);
             usable.computeIfPresent(key, (ignored, remaining) -> Math.min(remaining, count - take));
             protect -= take;

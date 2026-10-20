@@ -307,19 +307,7 @@ public final class ImmutableRecipeGraphProjector {
 
     private record DependencyEntry(ImmutableRecipeGraph graph, GraphIndexes indexes) {}
 
-    public static Map<MaterialRef, Integer> projectAvailability(Map<StackKey, Integer> available) {
-        Map<MaterialRef, Integer> projected = new HashMap<>();
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
-            PlanningThreadContext.throwIfCancelled();
-            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
-            if (itemId == null || entry.getValue() <= 0) continue;
-            String nbt = entry.getKey().tag() == null ? "" : entry.getKey().tag();
-            projected.merge(new MaterialRef(itemId, nbt), entry.getValue(), Integer::sum);
-        }
-        return Map.copyOf(projected);
-    }
-
-    public static Map<MaterialRef, Long> projectAvailabilityLong(
+    public static Map<MaterialRef, Long> projectAvailability(
             Map<StackKey, Long> available) {
         Map<MaterialRef, Long> projected = new HashMap<>();
         for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
@@ -343,7 +331,7 @@ public final class ImmutableRecipeGraphProjector {
      * counted once as an exact ingredient and again through a tagless alias.
      */
     public static ImmutableRecipeGraph bindAvailability(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+            ImmutableRecipeGraph graph, Map<MaterialRef, Long> available) {
         return PlanningLookupCache.run(() -> PlanningLookupCache.reusePreparation(
                 PlanningLookupCache.PreparationStage.INVENTORY, graph, available,
                 () -> bindAvailabilityInScope(graph, available)));
@@ -406,10 +394,10 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static ImmutableRecipeGraph bindAvailabilityInScope(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+            ImmutableRecipeGraph graph, Map<MaterialRef, Long> available) {
         graph = bindSmithingStates(graph, available);
         Map<ResourceLocation, List<MaterialRef>> availableByItem = new HashMap<>();
-        for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
+        for (Map.Entry<MaterialRef, Long> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
             availableByItem.computeIfAbsent(entry.getKey().itemId(), ignored -> new ArrayList<>())
                     .add(entry.getKey());
@@ -453,7 +441,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     static ImmutableRecipeGraph bindSmithingStates(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available) {
+            ImmutableRecipeGraph graph, Map<MaterialRef, Long> available) {
         return PlanningLookupCache.run(() -> PlanningLookupCache.reusePreparation(
                 PlanningLookupCache.PreparationStage.SMITHING, graph, available,
                 () -> bindSmithingStatesInScope(graph, available, null)));
@@ -464,7 +452,7 @@ public final class ImmutableRecipeGraphProjector {
      * an exact or partial NBT demand reachable from this request's roots.
      */
     static ImmutableRecipeGraph bindSmithingStates(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+            ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
             List<IngredientRef> roots) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Set<ResourceLocation> relevantItems =
@@ -476,7 +464,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static ImmutableRecipeGraph bindSmithingStatesInScope(
-            ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+            ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
             @Nullable Set<ResourceLocation> relevantItems) {
         if (relevantItems != null && relevantItems.isEmpty()) return graph;
         Map<ResourceLocation, List<RecipeNode>> upgrades = new HashMap<>();
@@ -579,9 +567,9 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     static IngredientRef bindIngredient(IngredientRef ingredient,
-                                        Map<MaterialRef, Integer> available) {
+                                        Map<MaterialRef, Long> available) {
         Map<ResourceLocation, List<MaterialRef>> availableByItem = new HashMap<>();
-        for (Map.Entry<MaterialRef, Integer> entry : available.entrySet()) {
+        for (Map.Entry<MaterialRef, Long> entry : available.entrySet()) {
             if (entry.getValue() == null || entry.getValue() <= 0) continue;
             availableByItem.computeIfAbsent(entry.getKey().itemId(), ignored -> new ArrayList<>())
                     .add(entry.getKey());

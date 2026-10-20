@@ -25,7 +25,7 @@ public final class PureDemandTreeInspector {
     private PureDemandTreeInspector() {}
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Integer> available,
+                                 Map<MaterialRef, Long> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount) {
         return inspect(graph, available, targetRecipeId, repeatCount,
@@ -33,7 +33,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Integer> available,
+                                 Map<MaterialRef, Long> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes) {
@@ -41,7 +41,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Integer> available,
+                                 Map<MaterialRef, Long> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -51,7 +51,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Integer> available,
+                                 Map<MaterialRef, Long> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -62,7 +62,7 @@ public final class PureDemandTreeInspector {
     }
 
     public static Result inspect(ImmutableRecipeGraph graph,
-                                 Map<MaterialRef, Integer> available,
+                                 Map<MaterialRef, Long> available,
                                  ResourceLocation targetRecipeId,
                                  int repeatCount,
                                  int maxNodes,
@@ -75,7 +75,7 @@ public final class PureDemandTreeInspector {
     }
 
     static Result inspectWithDeadline(ImmutableRecipeGraph graph,
-                                      Map<MaterialRef, Integer> available,
+                                      Map<MaterialRef, Long> available,
                                       ResourceLocation targetRecipeId,
                                       int repeatCount,
                                       int maxNodes,
@@ -89,7 +89,7 @@ public final class PureDemandTreeInspector {
     }
 
     private static Result inspectInScope(ImmutableRecipeGraph graph,
-                                         Map<MaterialRef, Integer> available,
+                                         Map<MaterialRef, Long> available,
                                          ResourceLocation targetRecipeId, int repeatCount, int maxNodes,
                                          Set<ResourceLocation> reusableCatalystOutputIds,
                                          Set<ResourceLocation> reusableCatalystRecipeIds,
@@ -190,7 +190,7 @@ public final class PureDemandTreeInspector {
         private boolean catalystRouteAvailable;
         private MaterialRef firstUnresolved;
 
-        private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Integer> available,
+        private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
                        int maxNodes, Set<ResourceLocation> reusableCatalystOutputIds,
                        Set<ResourceLocation> pureIncompatibleOutputIds, long deadlineNanos) {
             this.graph = graph;
@@ -209,14 +209,14 @@ public final class PureDemandTreeInspector {
                 return coverCatalyst(ingredient);
             }
             int mark = ledger.mark();
-            if (consumeAcrossAlternatives(ingredient) == 0) return Coverage.COVERED;
+            if (consumeAcrossAlternatives(ingredient) == 0L) return Coverage.COVERED;
 
             Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
             boolean largeAlternativeSet = ingredient.alternatives().size()
                     >= LARGE_ALTERNATIVE_THRESHOLD;
             for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
                 ledger.rollback(mark);
-                int remaining = consumeMatching(alternative, routingCount(ingredient.count()),
+                long remaining = consumeMatching(alternative, routingCount(ingredient.count()),
                         ingredient.nbtMatchMode());
                 Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
                 if (coverage == Coverage.COVERED) return coverage;
@@ -245,7 +245,7 @@ public final class PureDemandTreeInspector {
 
         private Coverage coverCatalyst(IngredientRef ingredient) {
             int mark = ledger.mark();
-            int remaining = Math.max(0, routingCount(ingredient.count())
+            long remaining = Math.max(0L, routingCount(ingredient.count())
                     - ledger.countAcrossAlternatives(ingredient));
             if (remaining <= 0) return Coverage.COVERED;
 
@@ -275,13 +275,13 @@ public final class PureDemandTreeInspector {
             return System.nanoTime() >= deadlineNanos;
         }
 
-        private int consumeAcrossAlternatives(IngredientRef ingredient) {
+        private long consumeAcrossAlternatives(IngredientRef ingredient) {
             int mark = ledger.mark();
-            int remaining = routingCount(ingredient.count());
+            long remaining = routingCount(ingredient.count());
             for (MaterialRef stocked : ledger.matching(ingredient)) {
-                int available = ledger.count(stocked);
+                long available = ledger.count(stocked);
                 if (available <= 0) continue;
-                int take = Math.min(available, remaining);
+                long take = Math.min(available, remaining);
                 ledger.set(stocked, available - take);
                 remaining -= take;
                 if (remaining == 0) break;
@@ -290,14 +290,14 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private int consumeMatching(MaterialRef requested, int count,
-                                    ImmutableRecipeGraph.NbtMatchMode mode) {
-            int remaining = count;
+        private long consumeMatching(MaterialRef requested, long count,
+                                     ImmutableRecipeGraph.NbtMatchMode mode) {
+            long remaining = count;
             for (MaterialRef stocked : ledger.byItem(requested.itemId())) {
-                int available = ledger.count(stocked);
+                long available = ledger.count(stocked);
                 if (available <= 0 || !ImmutableRecipeGraphProjector.matchesIngredient(stocked,
                         new IngredientRef(List.of(requested), count, mode))) continue;
-                int take = Math.min(available, remaining);
+                long take = Math.min(available, remaining);
                 ledger.set(stocked, available - take);
                 remaining -= take;
                 if (remaining == 0) break;
@@ -305,12 +305,12 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private Coverage coverMaterial(MaterialRef material, int count,
+        private Coverage coverMaterial(MaterialRef material, long count,
                                        ImmutableRecipeGraph.NbtMatchMode mode) {
             return coverMaterial(material, count, mode, false);
         }
 
-        private Coverage coverMaterial(MaterialRef material, int count,
+        private Coverage coverMaterial(MaterialRef material, long count,
                                        ImmutableRecipeGraph.NbtMatchMode mode, boolean catalyst) {
             if (count <= 0) return Coverage.COVERED;
             if (budgetExpired()) return Coverage.NODE_LIMIT;
@@ -339,18 +339,14 @@ public final class PureDemandTreeInspector {
                     ledger.rollback(mark);
                     long batches = ((long) count + candidate.outputCount() - 1L)
                             / candidate.outputCount();
-                    if (batches <= 0L || batches > Integer.MAX_VALUE) continue;
-                    if (isUnseededReverseConversion(candidate, material, (int) batches)) continue;
+                    if (batches <= 0L) continue;
+                    if (isUnseededReverseConversion(candidate, material, batches)) continue;
 
                     Coverage candidateCoverage = Coverage.COVERED;
                     for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
                             candidate.inputs())) {
                         long scaled = scaledInputCount(input, batches);
-                        if (scaled > Integer.MAX_VALUE) {
-                            candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
-                            break;
-                        }
-                        Coverage inputCoverage = coverIngredient(input.withCount((int) scaled));
+                        Coverage inputCoverage = coverIngredient(input.withCount(scaled));
                         if (inputCoverage == Coverage.NODE_LIMIT) {
                             candidateCoverage = Coverage.NODE_LIMIT;
                             break;
@@ -366,8 +362,7 @@ public final class PureDemandTreeInspector {
                     }
                     if (candidateCoverage == Coverage.COVERED) {
                         long remainingOutput = batches * candidate.outputCount() - (catalyst ? 0L : count);
-                        if (remainingOutput > 0L) ledger.add(candidate.output(),
-                                (int) Math.min(Integer.MAX_VALUE, remainingOutput));
+                        if (remainingOutput > 0L) ledger.add(candidate.output(), remainingOutput);
                         return Coverage.COVERED;
                     }
                     if (candidateCoverage == Coverage.NODE_LIMIT) return Coverage.NODE_LIMIT;
@@ -427,7 +422,7 @@ public final class PureDemandTreeInspector {
         }
 
         private boolean isUnseededReverseConversion(RecipeNode candidate, MaterialRef wanted,
-                                                    int batches) {
+                                                    long batches) {
             for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(candidate.inputs())) {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long required = scaledInputCount(input, batches);
@@ -470,15 +465,15 @@ public final class PureDemandTreeInspector {
 
         /** Mutable inventory with rollback checkpoints; keys and item buckets are immutable. */
         private static final class Ledger {
-            private record Change(MaterialRef material, int previousCount) {}
+            private record Change(MaterialRef material, long previousCount) {}
 
-            private final Map<MaterialRef, Integer> stock = new HashMap<>();
+            private final Map<MaterialRef, Long> stock = new HashMap<>();
             private final Map<ResourceLocation, List<MaterialRef>> byItem = new HashMap<>();
-            private final Map<MaterialRef, Integer> orderPositions = new HashMap<>();
+            private final Map<MaterialRef, Long> orderPositions = new HashMap<>();
             private final List<MaterialRef> order = new ArrayList<>();
             private final List<Change> changes = new ArrayList<>();
 
-            private Ledger(Map<MaterialRef, Integer> available) {
+            private Ledger(Map<MaterialRef, Long> available) {
                 available.forEach((material, count) -> {
                     if (material == null || count == null || count <= 0) return;
                     stock.put(material, count);
@@ -492,14 +487,14 @@ public final class PureDemandTreeInspector {
                 return changes.size();
             }
 
-            private int count(MaterialRef material) {
-                return stock.getOrDefault(material, 0);
+            private long count(MaterialRef material) {
+                return stock.getOrDefault(material, 0L);
             }
 
-            private int countAcrossAlternatives(IngredientRef ingredient) {
-                int remaining = routingCount(ingredient.count());
+            private long countAcrossAlternatives(IngredientRef ingredient) {
+                long remaining = routingCount(ingredient.count());
                 for (MaterialRef stocked : matching(ingredient)) {
-                    int available = count(stocked);
+                    long available = count(stocked);
                     if (available <= 0) continue;
                     remaining -= Math.min(available, remaining);
                     if (remaining == 0) break;
@@ -515,8 +510,8 @@ public final class PureDemandTreeInspector {
                 candidates.removeIf(material -> !ImmutableRecipeGraphProjector.matchesIngredient(
                         material, ingredient));
                 return candidates.stream()
-                        .sorted(Comparator.comparingInt(material ->
-                                orderPositions.getOrDefault(material, Integer.MAX_VALUE)))
+                        .sorted(Comparator.comparingLong(material ->
+                                orderPositions.getOrDefault(material, Long.MAX_VALUE)))
                         .toList();
             }
 
@@ -528,8 +523,8 @@ public final class PureDemandTreeInspector {
                 return order;
             }
 
-            private void set(MaterialRef material, int count) {
-                int previous = stock.getOrDefault(material, 0);
+            private void set(MaterialRef material, long count) {
+                long previous = stock.getOrDefault(material, 0L);
                 if (previous == count) return;
                 changes.add(new Change(material, previous));
                 if (count <= 0) {
@@ -544,10 +539,11 @@ public final class PureDemandTreeInspector {
                 }
             }
 
-            private void add(MaterialRef material, int count) {
+            private void add(MaterialRef material, long count) {
                 if (count <= 0) return;
-                long combined = (long) stock.getOrDefault(material, 0) + count;
-                set(material, (int) Math.min(Integer.MAX_VALUE, combined));
+                long current = stock.getOrDefault(material, 0L);
+                set(material, Long.MAX_VALUE - current < count
+                        ? Long.MAX_VALUE : current + count);
             }
 
             private void rollback(int mark) {
@@ -565,7 +561,7 @@ public final class PureDemandTreeInspector {
                 ? input.count() : (long) input.count() * batches;
     }
 
-    private static int routingCount(long count) {
-        return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count));
+    private static long routingCount(long count) {
+        return Math.max(0L, count);
     }
 }

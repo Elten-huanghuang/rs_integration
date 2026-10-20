@@ -658,20 +658,14 @@ public final class WRWandCraftPacket {
         }
         if (filtered.isEmpty()) return true;
 
-        Map<StackKey, Integer> available = endpoint != null
+        Map<StackKey, Long> available = endpoint != null
                 ? MaterialSources.listAllAvailable(player, endpoint)
                 : MaterialSources.listAllAvailable(player, endpoint);
 
         List<String> missing = new ArrayList<>();
         List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForIngredients(
                 filtered,
-                available.entrySet().stream().map(e -> {
-                    ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
-                    if (e.getKey().tag() != null) {
-                        try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
-                    }
-                    return s;
-                }).toList(),
+                CraftingResolver.stacksFromKeyedCounts(available),
                 player.serverLevel(),
                 missing);
 

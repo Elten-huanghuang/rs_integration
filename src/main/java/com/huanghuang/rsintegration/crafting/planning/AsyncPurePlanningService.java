@@ -57,8 +57,8 @@ public final class AsyncPurePlanningService {
         }
         PlanningKey key = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
                 snapshot.recipeId(), snapshot.availableItems(),
-                snapshot.preciseAvailableItems(), snapshot.forcedRecipes(),
-                snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
+                snapshot.forcedRecipes(), snapshot.recipeGraph(),
+                snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
         PlanningProgressServer.queued(snapshot.playerId(), snapshot.requestGeneration(),
@@ -84,8 +84,8 @@ public final class AsyncPurePlanningService {
                              Consumer<RoutedPlan> commit, Consumer<Throwable> rollback) {
         PlanningKey planning = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
                 snapshot.recipeId(), snapshot.availableItems(),
-                snapshot.preciseAvailableItems(), snapshot.forcedRecipes(),
-                snapshot.recipeGraph(), snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
+                snapshot.forcedRecipes(), snapshot.recipeGraph(),
+                snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
         PlanningProgressServer.queued(snapshot.playerId(), snapshot.requestGeneration(),
@@ -152,8 +152,8 @@ public final class AsyncPurePlanningService {
         PlanningThreadContext.throwIfCancelled();
         setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Long> stock =
-                ImmutableRecipeGraphProjector.projectAvailabilityLong(
-                        snapshot.preciseAvailableItems());
+                ImmutableRecipeGraphProjector.projectAvailability(
+                        snapshot.availableItems());
         setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
         ImmutableRecipeGraph scopedGraph = routedGraph != null ? routedGraph
                 : ImmutableRecipeGraphProjector.restrictToDependencies(
@@ -218,7 +218,7 @@ public final class AsyncPurePlanningService {
     /** Keeps a background result inseparable from the immutable state that produced it. */
     public record CompletedPlan(PlanningSnapshot snapshot, PureRecipePlanner.Result result) {}
 
-    public record RouteInputs(Map<ImmutableRecipeGraph.MaterialRef, Integer> available,
+    public record RouteInputs(Map<ImmutableRecipeGraph.MaterialRef, Long> available,
                               int maxNodes, Set<ResourceLocation> catalystOutputs,
                               Set<ResourceLocation> catalystRecipes,
                               Set<ResourceLocation> incompatibleOutputs) {
@@ -243,12 +243,11 @@ public final class AsyncPurePlanningService {
                              boolean forcedRecipesProjected) {}
 
     private record RoutedKey(PlanningKey planning, RouteInputs routing,
-                              List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Integer>> availabilityOrder) {}
+                              List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Long>> availabilityOrder) {}
 
     private record PlanningKey(UUID playerId, long recipeRevision,
                                ResourceLocation recipeId,
-                               Map<StackKey, Integer> availableItems,
-                               Map<StackKey, Long> preciseAvailableItems,
+                               Map<StackKey, Long> availableItems,
                                Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                ImmutableRecipeGraph recipeGraph, String networkFingerprint,
                                String bindingFingerprint,

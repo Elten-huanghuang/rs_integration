@@ -193,7 +193,7 @@ final class CandidateEngine {
         // evaluated exactly once — NOT O(N log N) times inside the comparator.
         // Use an ingredient→count cache so countMatching (which iterates all
         // 546+ inventory item types) is called at most once per unique ingredient.
-        Map<Ingredient, Integer> matchCache = new HashMap<>();
+        Map<Ingredient, Long> matchCache = new HashMap<>();
         Map<CandidateKey, Integer> scoreCache = new HashMap<>();
         Map<CandidateKey, Integer> availCache = new HashMap<>();
         Map<CandidateKey, Integer> inputGroupCache = new HashMap<>();
@@ -302,7 +302,7 @@ final class CandidateEngine {
     static ItemStack findStockedSmithingOutput(
             SmithingTransformRecipe recipe,
             Predicate<ItemStack> accepts,
-            Map<CraftingResolver.StackKey, Integer> available,
+            Map<CraftingResolver.StackKey, Long> available,
             Map<Item, List<RecipeIndex.Entry>> index, RegistryAccess access,
             Set<ResourceLocation> visited, BooleanSupplier timedOut) {
         return findStockedSmithingOutput(recipe, accepts, new InventoryCandidateLookup(available),
@@ -463,7 +463,7 @@ final class CandidateEngine {
     }
 
     private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict,
-                                    @Nullable Map<Ingredient, Integer> matchCache) {
+                                  @Nullable Map<Ingredient, Long> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return scoreRecipe(cr, ctx, nbtStrict, matchCache) + (entry.modType() == ModType.GENERIC ? 10 : 0);
         }
@@ -501,7 +501,7 @@ final class CandidateEngine {
     }
 
     private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict,
-                                     @Nullable Map<Ingredient, Integer> matchCache) {
+                                   @Nullable Map<Ingredient, Long> matchCache) {
         int score = 0;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
         ResourceLocation outputKey = CraftingResolver.preferenceKey(output);
@@ -546,15 +546,15 @@ final class CandidateEngine {
         return score;
     }
 
-    private static int cachedCountMatching(ResolutionContext ctx, Ingredient ing,
-                                           @Nullable Map<Ingredient, Integer> cache) {
+    private static long cachedCountMatching(ResolutionContext ctx, Ingredient ing,
+                                            @Nullable Map<Ingredient, Long> cache) {
         if (cache == null) return ctx.countMatching(ing);
         return cache.computeIfAbsent(ing, ctx::countMatching);
     }
 
     private static int reusableCatalystPreferenceScore(
             List<IngredientSpec> recipeSpecs, Collection<IngredientDemand> demands,
-            ResolutionContext ctx, @Nullable Map<Ingredient, Integer> matchCache) {
+            ResolutionContext ctx, @Nullable Map<Ingredient, Long> matchCache) {
         if (!catalystPreferenceEnabled()) return 0;
 
         int score = 0;
@@ -576,7 +576,7 @@ final class CandidateEngine {
 
     private static boolean hasAvailableReusableCatalystProducer(
             Ingredient demanded, ResolutionContext ctx,
-            @Nullable Map<Ingredient, Integer> matchCache) {
+          @Nullable Map<Ingredient, Long> matchCache) {
         Set<ResourceLocation> checked = new HashSet<>();
         for (ItemStack option : demanded.getItems()) {
             if (option.isEmpty()) continue;
@@ -601,7 +601,7 @@ final class CandidateEngine {
 
     private static boolean reusableCatalystsAvailable(
             List<IngredientSpec> specs, ResolutionContext ctx,
-            @Nullable Map<Ingredient, Integer> matchCache) {
+          @Nullable Map<Ingredient, Long> matchCache) {
         boolean found = false;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty() || spec.role() != DemandRole.CATALYST) continue;
@@ -637,7 +637,7 @@ final class CandidateEngine {
 
     /** Returns true when every non-empty ingredient has at least one matching item available. */
     private static boolean allIngredientsAvailable(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                    @Nullable Map<Ingredient, Integer> matchCache) {
+                                                  @Nullable Map<Ingredient, Long> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             for (IngredientDemand demand : craftingDemands(cr).values()) {
                 if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) {
@@ -656,7 +656,7 @@ final class CandidateEngine {
 
     /** Count how many distinct ingredients of a recipe have matching items available. */
     private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                    @Nullable Map<Ingredient, Integer> matchCache) {
+                                                  @Nullable Map<Ingredient, Long> matchCache) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return (int) craftingDemands(cr).values().stream()
                     .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)

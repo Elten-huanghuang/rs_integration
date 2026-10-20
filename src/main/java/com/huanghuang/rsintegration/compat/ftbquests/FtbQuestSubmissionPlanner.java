@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
@@ -52,7 +53,7 @@ public final class FtbQuestSubmissionPlanner {
             displays.add(requirement.displayStack());
         }
 
-        Map<CraftingResolver.StackKey, Integer> available =
+        Map<CraftingResolver.StackKey, Long> available =
                 MaterialSources.listAllAvailable(player, endpoint);
         List<String> missing = new ArrayList<>(overflow);
         var graph = CraftingResolver.resolveGraphForSpecsWithTypes(specs, available,
@@ -63,9 +64,10 @@ public final class FtbQuestSubmissionPlanner {
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
             ItemStack display = displays.get(i).copyWithCount(1);
-            int have = available.entrySet().stream()
+            long have = available.entrySet().stream()
                     .filter(entry -> spec.ingredient().test(entry.getKey().toStack()))
-                    .mapToInt(Map.Entry::getValue).sum();
+                    .mapToLong(Map.Entry::getValue)
+                    .reduce(0L, SaturatingLongMath::add);
             materials.put(IngredientKey.of(display),
                     new PlanResponse.Availability(spec.count(), have));
         }

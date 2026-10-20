@@ -18,7 +18,7 @@ import java.util.Set;
 public final class DirectMaterialAllocator {
     private DirectMaterialAllocator() {}
 
-    public static Result allocate(List<IngredientSpec> specs, Map<StackKey, Integer> available) {
+    public static Result allocate(List<IngredientSpec> specs, Map<StackKey, Long> available) {
         List<IndexedSpec> demands = new ArrayList<>();
         long totalDemand = 0L;
         for (int i = 0; i < specs.size(); i++) {
@@ -42,7 +42,7 @@ public final class DirectMaterialAllocator {
             }
         }
         final boolean scanEveryItem = requiresFullScan;
-        List<Map.Entry<StackKey, Integer>> supplies = available.entrySet().stream()
+        List<Map.Entry<StackKey, Long>> supplies = available.entrySet().stream()
                 .filter(entry -> entry.getKey() != null
                         && entry.getValue() != null && entry.getValue() > 0
                         && (scanEveryItem || relevantItems.contains(entry.getKey().item())))
@@ -82,7 +82,7 @@ public final class DirectMaterialAllocator {
             orderedSupplyIndices.sort(Comparator
                     .comparingInt((Integer index) ->
                             preferences.rank(supplies.get(index).getKey().item()))
-                    .thenComparing(Comparator.comparingInt((Integer index) ->
+                    .thenComparing(Comparator.comparingLong((Integer index) ->
                             supplies.get(index).getValue()).reversed()));
             for (int j : orderedSupplyIndices) {
                 StackKey material = supplies.get(j).getKey();
@@ -107,11 +107,10 @@ public final class DirectMaterialAllocator {
             for (DemandEdges demand : demandEdges) {
                 if (demand.sourceEdge().capacity > 0) {
                     return new Result(false, List.of(), demand.indexed().index(),
-                            (int) Math.min(Integer.MAX_VALUE, demand.sourceEdge().capacity));
+                            demand.sourceEdge().capacity);
                 }
             }
-            return new Result(false, List.of(), -1,
-                    (int) Math.min(Integer.MAX_VALUE, totalDemand - supplied));
+            return new Result(false, List.of(), -1, totalDemand - supplied);
         }
 
         List<Allocation> result = new ArrayList<>();
@@ -120,7 +119,7 @@ public final class DirectMaterialAllocator {
                 long used = allocation.edge().originalCapacity - allocation.edge().capacity;
                 if (used > 0) {
                     result.add(new Allocation(demand.indexed().index(), allocation.material(),
-                            (int) Math.min(Integer.MAX_VALUE, used)));
+                            used));
                 }
             }
         }
@@ -135,10 +134,10 @@ public final class DirectMaterialAllocator {
         }
     }
 
-    public record Allocation(int ingredientIndex, StackKey material, int count) {}
+    public record Allocation(int ingredientIndex, StackKey material, long count) {}
 
     public record Result(boolean feasible, List<Allocation> allocations,
-                         int missingIngredientIndex, int missingCount) {
+                         int missingIngredientIndex, long missingCount) {
         public Result {
             allocations = List.copyOf(allocations);
         }

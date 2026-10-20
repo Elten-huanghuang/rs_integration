@@ -312,8 +312,8 @@ public final class CraftingPlanScreen extends Screen {
                 : OutputDestination.PLAYER_INVENTORY;
         this.storageReference = plan.storageReference();
         this.storageNetworks = plan.storageNetworks();
-        // Adaptive view routing (§2.5): non-trivial plans open in the tree; simple ones stay on the card.
-        this.viewMode = plan.steps().size() > 2 ? ViewMode.TREE : ViewMode.CARD;
+        // 规划结果默认展示递归树；卡片视图仍可通过右上角按钮切换。
+        this.viewMode = ViewMode.TREE;
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
         this.treeRenderer = new PlanTreeRenderer(Minecraft.getInstance().font);
         this.treeRenderer.setIconRenderer(recipePreview::drawCategoryIcon);

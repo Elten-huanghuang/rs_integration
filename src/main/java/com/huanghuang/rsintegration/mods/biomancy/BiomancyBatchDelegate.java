@@ -536,9 +536,9 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     private ItemStack reserveFallbackFuel(ServerPlayer player, int deficit) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, storageEndpoint());
+        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint());
         List<ItemStack> fuels = new ArrayList<>();
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             ItemStack candidate = entry.getKey().toStack();
             if (entry.getValue() > 0 && isValidFuel(candidate) && fuelValue(candidate) > 0) fuels.add(candidate);
         }

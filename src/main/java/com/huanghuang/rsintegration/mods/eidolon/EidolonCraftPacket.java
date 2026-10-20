@@ -198,20 +198,14 @@ public final class EidolonCraftPacket {
         // replaced by a later RS lookup merely because an RS API is available.
         CraftStorageEndpoint endpoint = CraftPacketUtils.resolveEndpointForCraft(
                 player, altarDim, pos).orElse(null);
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
+        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, endpoint);
 
         // Auto-craft missing intermediates
         if (RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
             List<String> missing = new ArrayList<>();
             List<ResourceLocation> autoSteps = CraftingResolver.resolveStepsForIngredients(
                     allIngredients,
-                    available.entrySet().stream().map(e -> {
-                        ItemStack s = new ItemStack(e.getKey().item(), e.getValue());
-                        if (e.getKey().tag() != null) {
-                            try { s.setTag(TagParser.parseTag(e.getKey().tag())); } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] NBT parse failed for key {}", e.getKey(), ex); }
-                        }
-                        return s;
-                    }).toList(),
+                    CraftingResolver.stacksFromKeyedCounts(available),
                     level,
                     missing);
 

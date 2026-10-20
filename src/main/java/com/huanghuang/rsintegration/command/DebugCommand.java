@@ -314,7 +314,7 @@ public final class DebugCommand {
         var network = noInventory ? null : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         CraftStorageEndpoint endpoint = network == null
                 ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
-        Map<CraftingResolver.StackKey, Integer> available = noInventory
+        Map<CraftingResolver.StackKey, Long> available = noInventory
                 ? Map.of()
                 : MaterialSources.listAllAvailable(player, endpoint);
         List<CraftingResolver.TraceEntry> diag = CraftingResolver.traceCandidates(

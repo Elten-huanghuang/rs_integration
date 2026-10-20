@@ -73,7 +73,7 @@ public final class RecipeAvailabilityChecker {
                     player, key.dimension(), key.machinePos(), type);
             if (resolved != null) endpoint = resolved;
         }
-        Map<StackKey, Integer> available = new HashMap<>(MaterialSources.countInventory(player));
+        Map<StackKey, Long> available = new HashMap<>(MaterialSources.countInventory(player));
         if (endpoint != null) {
             if (!StorageRestockSupport.canExtract(endpoint, player)) return MaterialAvailability.UNKNOWN;
             // Availability checks only need variants whose item type can satisfy
@@ -98,18 +98,18 @@ public final class RecipeAvailabilityChecker {
     }
 
     public static MaterialAvailability evaluate(@Nullable List<IngredientSpec> specs,
-                                                Map<StackKey, Integer> available) {
+                                                Map<StackKey, Long> available) {
         if (specs == null || specs.isEmpty() || specs.stream().anyMatch(spec -> spec == null || spec.count() < 0)
                 || specs.stream().noneMatch(spec -> !spec.isEmpty())) return MaterialAvailability.UNKNOWN;
         return DirectMaterialAllocator.allocate(specs, available).feasible()
                 ? MaterialAvailability.READY : MaterialAvailability.MISSING;
     }
 
-    private static void add(Map<StackKey, Integer> items, ItemStack stack, long count) {
+    private static void add(Map<StackKey, Long> items, ItemStack stack, long count) {
         if (stack.isEmpty() || count <= 0) return;
         var material = MaterialKey.of(stack);
-        items.merge(new StackKey(material.item(), material.tag()), (int) Math.min(Integer.MAX_VALUE, count),
-                (a, b) -> (int) Math.min(Integer.MAX_VALUE, (long) a + b));
+        items.merge(new StackKey(material.item(), material.tag()), count,
+                MaterialSources::saturatedAdd);
     }
 
     @Nullable

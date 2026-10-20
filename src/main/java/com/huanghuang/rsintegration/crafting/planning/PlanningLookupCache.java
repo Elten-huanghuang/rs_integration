@@ -95,14 +95,14 @@ final class PlanningLookupCache {
 
     static ImmutableRecipeGraph reusePreparation(PreparationStage stage,
                                                  ImmutableRecipeGraph graph,
-                                                 Map<MaterialRef, Integer> available,
+                                                 Map<MaterialRef, Long> available,
                                                  Supplier<ImmutableRecipeGraph> work) {
         return reusePreparation(stage, graph, available, null, work);
     }
 
     static ImmutableRecipeGraph reusePreparation(PreparationStage stage,
                                                  ImmutableRecipeGraph graph,
-                                                 Map<MaterialRef, Integer> available,
+                                                 Map<MaterialRef, Long> available,
                                                  Object discriminator,
                                                  Supplier<ImmutableRecipeGraph> work) {
         PlanningLookupCache cache = CURRENT.get();
@@ -111,7 +111,7 @@ final class PlanningLookupCache {
     }
 
     private ImmutableRecipeGraph prepare(PreparationStage stage, ImmutableRecipeGraph graph,
-                                          Map<MaterialRef, Integer> available,
+                                          Map<MaterialRef, Long> available,
                                           Object discriminator,
                                           Supplier<ImmutableRecipeGraph> work) {
         PlanningThreadContext.throwIfCancelled();
@@ -152,7 +152,7 @@ final class PlanningLookupCache {
     }
 
     private static boolean matchesAvailability(List<AvailableEntry> captured,
-                                                Map<MaterialRef, Integer> available) {
+                                                Map<MaterialRef, Long> available) {
         if (captured.size() != available.size()) return false;
         var entries = available.entrySet().iterator();
         for (AvailableEntry previous : captured) {
@@ -380,7 +380,7 @@ final class PlanningLookupCache {
     record PreparationStats(long builds, long hits, long elapsedNanos, long maxNanos,
                             int retainedGraphs, int retainedUnits) {}
 
-    private record AvailableEntry(MaterialRef material, Integer count) {}
+    private record AvailableEntry(MaterialRef material, Long count) {}
 
     private record PreparedGraph(PreparationStage stage, ImmutableRecipeGraph source,
                                   List<AvailableEntry> available, Object discriminator,

@@ -24,8 +24,8 @@ public final class PlanMaterialBill {
 
     public static Result summarize(Map<Item, ? extends Number> neededCounts,
                                    Map<Item, Ingredient> itemSources,
-                                   Map<Item, Integer> itemAvailable,
-                                   Map<StackKey, Integer> stackAvailable,
+                                   Map<Item, Long> itemAvailable,
+                                   Map<StackKey, Long> stackAvailable,
                                    ItemStack targetOutput,
                                    List<PlanStep> steps,
                                    int repeatCount,
@@ -60,8 +60,8 @@ public final class PlanMaterialBill {
     private static Map<IngredientKey, PlanResponse.Availability> buildNetMaterials(
             Map<Item, ? extends Number> neededCounts,
             Map<Item, Ingredient> itemSources,
-            Map<Item, Integer> itemAvailable,
-            Map<StackKey, Integer> stackAvailable) {
+            Map<Item, Long> itemAvailable,
+            Map<StackKey, Long> stackAvailable) {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         Set<String> mergedTagKeys = new HashSet<>();
         for (Map.Entry<Item, ? extends Number> entry : neededCounts.entrySet()) {
@@ -80,7 +80,7 @@ public final class PlanMaterialBill {
                     netNeeded = SaturatingLongMath.signedAdd(netNeeded,
                             countOf(neededCounts, optionItem));
                     totalHave = SaturatingLongMath.add(totalHave,
-                            itemAvailable.getOrDefault(optionItem, 0));
+                            itemAvailable.getOrDefault(optionItem, 0L));
                 }
                 materials.put(IngredientKey.of(new ItemStack(displayItem)),
                         new PlanResponse.Availability(Math.max(0, netNeeded), totalHave));
@@ -90,7 +90,7 @@ public final class PlanMaterialBill {
             boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
             long have = nbtStrict
                     ? countNbtMatching(source, stackAvailable)
-                    : itemAvailable.getOrDefault(displayItem, 0);
+                    : itemAvailable.getOrDefault(displayItem, 0L);
             ItemStack materialDisplay = new ItemStack(displayItem);
             if (nbtStrict && source.getItems().length > 0) {
                 materialDisplay = source.getItems()[0].copyWithCount(1);
@@ -104,8 +104,8 @@ public final class PlanMaterialBill {
     private static Map<IngredientKey, PlanResponse.Availability> buildLegacyNetMaterials(
             Map<Item, ? extends Number> neededCounts,
             Map<Item, Ingredient> itemSources,
-            Map<Item, Integer> itemAvailable,
-            Map<StackKey, Integer> stackAvailable,
+            Map<Item, Long> itemAvailable,
+            Map<StackKey, Long> stackAvailable,
             ItemStack targetOutput,
             List<PlanStep> steps,
             int repeatCount) {
@@ -198,8 +198,8 @@ public final class PlanMaterialBill {
      */
     private static Map<IngredientKey, PlanResponse.Availability> buildGraphNetMaterials(
             PlanGraphView graph,
-            Map<Item, Integer> itemAvailable,
-            Map<StackKey, Integer> stackAvailable) {
+            Map<Item, Long> itemAvailable,
+            Map<StackKey, Long> stackAvailable) {
         Map<IngredientKey, Long> needed = new LinkedHashMap<>();
         for (PlanGraphView.EdgeView edge : graph.edges()) {
             if (edge.source().initial()) {
@@ -223,7 +223,7 @@ public final class PlanMaterialBill {
             ItemStack display = key.stack(1);
             long available = display.hasTag()
                     ? countExactStack(display, stackAvailable)
-                    : itemAvailable.getOrDefault(key.item(), 0);
+                    : itemAvailable.getOrDefault(key.item(), 0L);
             result.put(key, new PlanResponse.Availability(entry.getValue(), available));
         }
         return result;
@@ -239,8 +239,8 @@ public final class PlanMaterialBill {
     private static Map<IngredientKey, PlanResponse.Availability> buildDisplayMaterials(
             Map<IngredientKey, PlanResponse.Availability> netMaterials,
             Map<Item, Ingredient> itemSources,
-            Map<Item, Integer> itemAvailable,
-            Map<StackKey, Integer> stackAvailable,
+            Map<Item, Long> itemAvailable,
+            Map<StackKey, Long> stackAvailable,
             ItemStack targetOutput,
             List<PlanStep> steps,
             int repeatCount,
@@ -272,14 +272,14 @@ public final class PlanMaterialBill {
                 // A vanilla Ingredient may expose a tagged JEI display stack while
                 // matching by item only.  Count every stored variant and collapse
                 // the material card to the semantic item identity.
-                have = itemAvailable.getOrDefault(key.item(), 0);
+                have = itemAvailable.getOrDefault(key.item(), 0L);
                 materialKey = IngredientKey.of(new ItemStack(key.item()));
             } else if (source != null) {
                 have = countNbtMatching(source, stackAvailable);
             } else {
                 have = display.hasTag()
                         ? countExactStack(display, stackAvailable)
-                        : itemAvailable.getOrDefault(key.item(), 0);
+                        : itemAvailable.getOrDefault(key.item(), 0L);
             }
             PlanResponse.Availability availability =
                     new PlanResponse.Availability(entry.getValue(), have);
@@ -300,9 +300,9 @@ public final class PlanMaterialBill {
         return displayMaterials;
     }
 
-    private static long countNbtMatching(Ingredient ingredient, Map<StackKey, Integer> available) {
+    private static long countNbtMatching(Ingredient ingredient, Map<StackKey, Long> available) {
         long total = 0L;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (IngredientMatcher.test(ingredient, entry.getKey())) {
                 total = SaturatingLongMath.add(total, entry.getValue());
             }
@@ -310,9 +310,9 @@ public final class PlanMaterialBill {
         return total;
     }
 
-    private static long countExactStack(ItemStack expected, Map<StackKey, Integer> available) {
+    private static long countExactStack(ItemStack expected, Map<StackKey, Long> available) {
         long total = 0L;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (MaterialMatcher.equivalentRuntimeFragment(entry.getKey().toStack(), expected)) {
                 total = SaturatingLongMath.add(total, entry.getValue());
             }

@@ -8,7 +8,7 @@ import java.util.Objects;
 public record UnresolvedDemand(
         InputPortId consumer,
         Ingredient ingredient,
-        int quantity,
+        long quantity,
         ItemStack displayHint
 ) {
     public UnresolvedDemand {

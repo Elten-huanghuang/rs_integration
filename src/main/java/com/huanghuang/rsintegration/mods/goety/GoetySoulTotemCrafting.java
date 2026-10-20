@@ -156,10 +156,10 @@ public final class GoetySoulTotemCrafting {
     }
 
     public static int maxAvailableSouls(
-            Map<CraftingResolver.StackKey, Integer> available) {
+            Map<CraftingResolver.StackKey, Long> available) {
         int max = 0;
         if (available == null) return max;
-        for (Map.Entry<CraftingResolver.StackKey, Integer> entry : available.entrySet()) {
+        for (Map.Entry<CraftingResolver.StackKey, Long> entry : available.entrySet()) {
             if (entry.getValue() <= 0) continue;
             max = Math.max(max, storedSouls(entry.getKey().toStack()));
         }

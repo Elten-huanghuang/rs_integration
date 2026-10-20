@@ -54,7 +54,7 @@ public final class PlanningStateValidator {
                 ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos)
                 .orElse(null)
                 : null;
-        Map<StackKey, Integer> currentAvailable;
+        Map<StackKey, Long> currentAvailable;
         if (selectedReference != null) {
             var endpoint = CraftStorageEndpoints
                     .resolve(selectedReference, player);
@@ -136,15 +136,14 @@ public final class PlanningStateValidator {
         if (graph == null) return true;
         if (!graph.unresolved().isEmpty()) return false;
         Map<StackKey, Long> required = requiredInitialSupply(graph);
-        Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
+        Map<StackKey, Long> currentAvailable = MaterialSources.listAvailableForTypes(
                 player, endpoint, itemTypes(required));
         return hasRequiredInitialSupply(required, currentAvailable);
     }
 
     /**
-     * Validates a completed preview without treating unrelated network traffic
-     * as a stale result. Failed/incomplete previews remain strict because newly
-     * inserted material may change their answer.
+     * 校验已完成预览。预览不是库存锁：有图时只核验实际初始供料，
+     * 无图或缺材料时只核验请求、网络与绑定；执行阶段会重新规划。
      */
     public static boolean revalidatePreview(ServerPlayer player, PlanningSnapshot snapshot,
                                             PlanResponseDraft draft,
@@ -162,25 +161,12 @@ public final class PlanningStateValidator {
                     selectedReference);
         }
 
-        Set<Item> dependencyTypes = dependencyItemTypes(
-                snapshot.recipeGraph());
-        if (dependencyTypes.isEmpty()) {
-            return revalidate(player, snapshot, dimension, lookupPos, requests, selectedReference);
-        }
-        if (!revalidateRelevantGraph(player, snapshot, null, dimension, lookupPos,
-                selectedReference)) return false;
-        CraftStorageEndpoint endpoint = null;
-        if (selectedReference != null) {
-            var resolved = CraftStorageEndpoints.resolve(selectedReference, player);
-            if (resolved.isEmpty()) return false;
-            endpoint = resolved.orElseThrow();
-        } else {
-            endpoint = CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos)
-                    .orElse(null);
-        }
-        Map<StackKey, Integer> currentAvailable = MaterialSources.listAvailableForTypes(
-                player, endpoint, dependencyTypes);
-        return sameRelevantInventory(snapshot.availableItems(), currentAvailable, dependencyTypes);
+        // 无图预览（尤其缺材料计划）只校验请求代次、网络身份和机器绑定。
+        // 预览不是库存锁；库存变化会在真正执行时重新规划并做原子预留。
+        // 若在这里要求完整库存相等，无关产物变化或中途补料会把已经算好的
+        // 缺材料树静默丢弃，客户端只能一直停在“规划已取消”。
+        return revalidateRelevantGraph(player, snapshot, null, dimension, lookupPos,
+                selectedReference);
     }
 
     public static boolean sameState(PlanningSnapshot left, PlanningSnapshot right) {
@@ -213,7 +199,7 @@ public final class PlanningStateValidator {
     }
 
     static boolean hasRequiredInitialSupply(PlanResponse plan,
-                                            Map<StackKey, Integer> available) {
+                                            Map<StackKey, Long> available) {
         PlanGraphView graph = plan.graph();
         if (graph == null) {
             // Pure responses intentionally do not carry a server DAG. Their
@@ -243,9 +229,9 @@ public final class PlanningStateValidator {
     }
 
     private static boolean hasRequiredInitialSupply(Map<StackKey, Long> required,
-                                                    Map<StackKey, Integer> available) {
+                                                    Map<StackKey, Long> available) {
         for (Map.Entry<StackKey, Long> entry : required.entrySet()) {
-            if (available.getOrDefault(entry.getKey(), 0) < entry.getValue()) return false;
+            if (available.getOrDefault(entry.getKey(), 0L) < entry.getValue()) return false;
         }
         return true;
     }
@@ -275,17 +261,17 @@ public final class PlanningStateValidator {
         return Set.copyOf(result);
     }
 
-    static boolean sameRelevantInventory(Map<StackKey, Integer> previous,
-                                         Map<StackKey, Integer> current,
+    static boolean sameRelevantInventory(Map<StackKey, Long> previous,
+                                         Map<StackKey, Long> current,
                                          Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return false;
-        Map<StackKey, Integer> expected = new HashMap<>();
+        Map<StackKey, Long> expected = new HashMap<>();
         previous.forEach((key, count) -> {
             if (itemTypes.contains(key.item()) && count != null && count > 0) {
                 expected.put(key, count);
             }
         });
-        Map<StackKey, Integer> actual = new HashMap<>();
+        Map<StackKey, Long> actual = new HashMap<>();
         current.forEach((key, count) -> {
             if (itemTypes.contains(key.item()) && count != null && count > 0) {
                 actual.put(key, count);
@@ -310,12 +296,12 @@ public final class PlanningStateValidator {
 
     /** Stable fingerprint for a backend-neutral selected network. */
     public static String networkFingerprint(@Nullable StorageReference reference,
-                                             Map<StackKey, Integer> available) {
+                                             Map<StackKey, Long> available) {
         int inventoryHash = 1;
-        for (Map.Entry<StackKey, Integer> entry : available.entrySet().stream()
+        for (Map.Entry<StackKey, Long> entry : available.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(Comparator.comparing(StackKey::toString))).toList()) {
             inventoryHash = 31 * inventoryHash + entry.getKey().hashCode();
-            inventoryHash = 31 * inventoryHash + entry.getValue();
+            inventoryHash = 31 * inventoryHash + Long.hashCode(entry.getValue());
         }
         return (reference == null ? "none" : reference.backendId().value() + "@" + reference.networkId())
                 + ':' + Integer.toHexString(inventoryHash);

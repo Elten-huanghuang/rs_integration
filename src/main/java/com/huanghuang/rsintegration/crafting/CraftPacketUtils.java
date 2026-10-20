@@ -1324,7 +1324,7 @@ public final class CraftPacketUtils {
     private static boolean tryResolveGenericChainInline(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
             Ingredient ingredient, int count) {
-        Map<StackKey, Integer> available = MaterialSources.listAllAvailable(player, endpoint);
+        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, endpoint);
         List<IngredientSpec> specs = List.of(new IngredientSpec(ingredient, count));
         List<String> missing = new ArrayList<>();
         List<ResourceLocation> genericSteps = CraftingResolver.resolveStepsForSpecs(

@@ -1233,9 +1233,11 @@ public final class AsyncCraftChain {
         }
         inputs = MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks);
         MaterialSources.invalidateFor(player, storageEndpoint);
-        Map<StackKey, Integer> available = new LinkedHashMap<>(MaterialSources.listAllAvailable(player, storageEndpoint));
+        Map<StackKey, Long> available =
+                new LinkedHashMap<>(MaterialSources.listAllAvailable(player, storageEndpoint));
         for (ItemStack stack : virtualInventory) {
-            available.merge(StackKey.of(stack, true), stack.getCount(), MaterialSources::saturatedAdd);
+            available.merge(StackKey.of(stack, true), (long) stack.getCount(),
+                    MaterialSources::saturatedAdd);
         }
         // 先保护后续步骤的投入，也保护已经收集的当前目标，补做不能把它们再拆掉。
         List<IngredientSpec> protectedInputs = new ArrayList<>();
@@ -1256,7 +1258,8 @@ public final class AsyncCraftChain {
                         input.consumption()));
             }
         }
-        Map<StackKey, Integer> usable = SupplementalMaterialPlan.afterProtecting(available, protectedInputs);
+        Map<StackKey, Long> usable =
+                SupplementalMaterialPlan.afterProtecting(available, protectedInputs);
         SupplementalMaterialPlan.protectProduced(available, usable, progress.target(), progress.produced());
         // 材料已齐时直接开始下一试，避免每次轮询重建递归图。
         if (SupplementalMaterialPlan.hasInputs(usable, inputs)) return true;
@@ -1765,7 +1768,7 @@ public final class AsyncCraftChain {
 
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
                                       List<IBatchDelegate.MaterialReservationScope> scopes,
-                                      Map<CraftingResolver.StackKey, Integer> available) {
+                                      Map<CraftingResolver.StackKey, Long> available) {
         if (specs == null || specs.isEmpty()) return 1;
         int capacity = Integer.MAX_VALUE;
         boolean found = false;
@@ -1774,13 +1777,14 @@ public final class AsyncCraftChain {
             IngredientSpec spec = specs.get(i);
             if (spec.isEmpty()) continue;
             found = true;
-            int matching = 0;
-            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : available.entrySet()) {
+            long matching = 0L;
+            for (Map.Entry<CraftingResolver.StackKey, Long> entry : available.entrySet()) {
                 if (IngredientMatcher.test(spec.ingredient(), entry.getKey())) {
-                    matching += entry.getValue();
+                    matching = MaterialSources.saturatedAdd(matching, entry.getValue());
                 }
             }
-            capacity = Math.min(capacity, matching / Math.max(1, spec.count()));
+            capacity = Math.min(capacity,
+                    SaturatingLongMath.clampToInt(matching / Math.max(1, spec.count())));
         }
         return found ? Math.max(1, capacity) : 1;
     }

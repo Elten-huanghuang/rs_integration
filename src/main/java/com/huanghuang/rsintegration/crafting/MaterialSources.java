@@ -27,7 +27,7 @@ public final class MaterialSources {
 
     private MaterialSources() {}
 
-    static long saturatedAdd(long left, long right) {
+    public static long saturatedAdd(long left, long right) {
         if (right <= 0) return left;
         return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
     }
@@ -64,11 +64,7 @@ public final class MaterialSources {
      * {@link StackKey} (item + NBT tag) for NBT-aware identity.
      * Only counts the main inventory (36 slots) — not armor or offhand,
      */
-    public static Map<StackKey, Integer> countInventory(Player player) {
-        return intCounts(countInventoryLong(player));
-    }
-
-    public static Map<StackKey, Long> countInventoryLong(Player player) {
+    public static Map<StackKey, Long> countInventory(Player player) {
         Map<StackKey, Long> map = new HashMap<>();
         Inventory inv = player.getInventory();
         for (ItemStack stack : inv.items) {
@@ -103,13 +99,8 @@ public final class MaterialSources {
      * <p>Cache lookup is lock-free; tick advancement uses double-checked
      * locking. Expensive network scans are performed outside any lock.</p>
      */
-    /** Backend-neutral availability view used by migrated planning callers. */
-    public static Map<StackKey, Integer> listAllAvailable(ServerPlayer player,
-                                                           @Nullable CraftStorageEndpoint endpoint) {
-        return intCounts(listAllAvailableLong(player, endpoint));
-    }
-
-    public static Map<StackKey, Long> listAllAvailableLong(
+    /** Backend-neutral exact availability view shared by every planning caller. */
+    public static Map<StackKey, Long> listAllAvailable(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         int currentTick = currentTick(player);
         String cacheKey = cacheKey(player, endpoint);
@@ -117,7 +108,7 @@ public final class MaterialSources {
         Map<StackKey, Long> cached = cache.get(cacheKey);
         if (cached != null) return cached;
 
-        Map<StackKey, Long> available = countInventoryLong(player);
+        Map<StackKey, Long> available = countInventory(player);
         if (endpoint == null) {
             Map<StackKey, Long> snapshot = Map.copyOf(available);
             cache.putIfAbsent(cacheKey, snapshot);
@@ -161,29 +152,16 @@ public final class MaterialSources {
         return snapshot;
     }
 
-    private static Map<StackKey, Integer> intCounts(Map<StackKey, Long> precise) {
-        Map<StackKey, Integer> compatible = new HashMap<>(precise.size());
-        precise.forEach((key, count) -> compatible.put(key,
-                (int) Math.min(Integer.MAX_VALUE, Math.max(0L, count))));
-        return Map.copyOf(compatible);
-    }
-
     /**
      * Fresh narrow snapshot used when a completed plan only needs its concrete
      * initial supplies revalidated. Backends that support typed snapshots avoid
      * rebuilding canonical identities for unrelated network contents.
      */
-    public static Map<StackKey, Integer> listAvailableForTypes(
-            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
-            Set<Item> itemTypes) {
-        return intCounts(listAvailableForTypesLong(player, endpoint, itemTypes));
-    }
-
-    public static Map<StackKey, Long> listAvailableForTypesLong(
+    public static Map<StackKey, Long> listAvailableForTypes(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
             Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
-        Map<StackKey, Long> available = countInventoryLong(player);
+        Map<StackKey, Long> available = countInventory(player);
         available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
         if (endpoint == null) return Map.copyOf(available);
 

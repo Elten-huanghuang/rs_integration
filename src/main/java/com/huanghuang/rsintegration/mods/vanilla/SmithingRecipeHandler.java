@@ -70,7 +70,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
     }
 
     public static ItemStack selectAvailableBase(SmithingTransformRecipe recipe,
-                                                Map<CraftingResolver.StackKey, Integer> available,
+                                                Map<CraftingResolver.StackKey, Long> available,
                                                 int needed) {
         return available.entrySet().stream()
                 .filter(entry -> entry.getValue() >= needed)

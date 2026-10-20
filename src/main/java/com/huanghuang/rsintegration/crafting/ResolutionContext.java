@@ -52,7 +52,7 @@ final class ResolutionContext {
     final Map<Item, List<RecipeIndex.Entry>> index;
     Set<ResourceLocation> excludedRecipes = Set.of();
     final Map<Item, List<RecipeIndex.ReusableCatalystRoute>> reusableCatalystRoutes;
-    final Map<CraftingResolver.StackKey, Integer> counts;
+    final Map<CraftingResolver.StackKey, Long> counts;
     final List<CraftingResolver.ResolutionStep> steps;
     final RecipeCycleGuard recipeCycles;
     final Deque<Set<Item>> activeConversionFamilies = new ArrayDeque<>();
@@ -160,7 +160,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      Map<CraftingResolver.StackKey, Long> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       boolean bestEffort,
                       @Nullable List<String> missingOut) {
@@ -170,7 +170,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      Map<CraftingResolver.StackKey, Long> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       boolean bestEffort,
                       @Nullable List<String> missingOut,
@@ -182,7 +182,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      Map<CraftingResolver.StackKey, Long> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable ServerPlayer player,
                       @Nullable CraftStorageEndpoint storageEndpoint,
@@ -194,7 +194,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      Map<CraftingResolver.StackKey, Long> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
@@ -207,7 +207,7 @@ final class ResolutionContext {
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
-                      Map<CraftingResolver.StackKey, Integer> keyedCounts,
+                      Map<CraftingResolver.StackKey, Long> keyedCounts,
                       @Nullable Map<ResourceLocation, ResourceLocation> preferredRecipes,
                       @Nullable Map<ResourceLocation, ResourceLocation> forcedRecipes,
                       @Nullable ServerPlayer player,
@@ -232,7 +232,7 @@ final class ResolutionContext {
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
         this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
-        for (Map.Entry<CraftingResolver.StackKey, Integer> entry : keyedCounts.entrySet()) {
+        for (Map.Entry<CraftingResolver.StackKey, Long> entry : keyedCounts.entrySet()) {
             if (entry.getValue() > 0) {
                 MaterialKey material = MaterialKey.of(entry.getKey().toStack());
                 addSupply(newSupply(material, new MaterialSource.InitialPool(material), entry.getValue()));
@@ -411,12 +411,16 @@ final class ResolutionContext {
     }
 
     void addProduced(ItemStack stack, MaterialSource.ProducerOutput source) {
-        if (stack.isEmpty() || stack.getCount() <= 0) return;
-        addCount(stack);
-        addSupply(newSupply(MaterialKey.of(stack), source, stack.getCount()));
+        addProduced(stack, stack.getCount(), source);
     }
 
-    private SupplyLot newSupply(MaterialKey material, MaterialSource source, int count) {
+    void addProduced(ItemStack stack, long amount, MaterialSource.ProducerOutput source) {
+        if (stack.isEmpty() || amount <= 0L) return;
+        addCount(CraftingResolver.StackKey.of(stack, true), amount);
+        addSupply(newSupply(MaterialKey.of(stack), source, amount));
+    }
+
+    private SupplyLot newSupply(MaterialKey material, MaterialSource source, long count) {
         return new SupplyLot(material, source, count);
     }
 
@@ -435,17 +439,21 @@ final class ResolutionContext {
     }
 
     private void addCount(ItemStack stack) {
-        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
+        addCount(CraftingResolver.StackKey.of(stack, true), stack.getCount());
+    }
+
+    private void addCount(CraftingResolver.StackKey key, long amount) {
+        if (amount <= 0L) return;
         if (!undoCheckpoints.isEmpty()) undoStack.push(new UndoEntry(key, counts.get(key)));
-        Integer prev = counts.get(key);
-        counts.merge(key, stack.getCount(), MaterialSources::saturatedAdd);
+        Long prev = counts.get(key);
+        counts.merge(key, amount, MaterialSources::saturatedAdd);
         if (prev == null) indexStack(key);
     }
 
     void add(Item item, int count) {
         if (count <= 0) return;
-        ItemStack stack = new ItemStack(item, count);
-        addCount(stack);
+        ItemStack stack = new ItemStack(item);
+        addCount(CraftingResolver.StackKey.of(stack, true), count);
     }
 
     NodeId allocateNodeId() {
@@ -461,7 +469,7 @@ final class ResolutionContext {
                 slice.source(), slice.material(), slice.quantity()));
     }
 
-    void addUnresolved(InputPortId consumer, Ingredient ingredient, int quantity) {
+    void addUnresolved(InputPortId consumer, Ingredient ingredient, long quantity) {
         ItemStack[] display = ingredient.getItems();
         ItemStack hint = display.length == 0 ? ItemStack.EMPTY : display[0];
         graphUnresolved.add(new UnresolvedDemand(consumer, ingredient, quantity, hint));
@@ -478,14 +486,14 @@ final class ResolutionContext {
         stacks.add(cachedStack);
     }
 
-    int countMatching(Ingredient ingredient) {
+    long countMatching(Ingredient ingredient) {
         if (ingredient.isEmpty()) return 0;
 
-        int total = 0;
+        long total = 0L;
         if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
-            for (Map.Entry<CraftingResolver.StackKey, Integer> entry : counts.entrySet()) {
+            for (Map.Entry<CraftingResolver.StackKey, Long> entry : counts.entrySet()) {
                 if (entry.getValue() > 0 && matches(ingredient, entry.getKey())) {
-                    total += entry.getValue();
+                    total = MaterialSources.saturatedAdd(total, entry.getValue());
                 }
             }
             return total;
@@ -503,38 +511,38 @@ final class ResolutionContext {
             if (candidates == null) continue; // nothing of this Item in storage
 
             for (CachedStack candidate : candidates) {
-                int count = counts.getOrDefault(candidate.key, 0);
+                long count = counts.getOrDefault(candidate.key, 0L);
                 if (count > 0 && IngredientMatcher.test(ingredient, candidate.stack)) {
-                    total += count;
+                    total = MaterialSources.saturatedAdd(total, count);
                 }
             }
         }
         return total;
     }
 
-    SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, int needed) {
+    SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, long needed) {
         return consumeMatchingDetailed(ingredient, needed, false);
     }
 
-    SupplyConsumption consumeProducedMatchingDetailed(Ingredient ingredient, int needed) {
+    SupplyConsumption consumeProducedMatchingDetailed(Ingredient ingredient, long needed) {
         return consumeMatchingDetailed(ingredient, needed, true);
     }
 
     private SupplyConsumption consumeMatchingDetailed(
-            Ingredient ingredient, int needed, boolean producedOnly) {
-        int remaining = needed;
+            Ingredient ingredient, long needed, boolean producedOnly) {
+        long remaining = needed;
         List<SupplySlice> slices = new ArrayList<>();
         List<CraftingResolver.StackKey> sortedKeys = sortedMatchingKeys(ingredient);
 
         for (CraftingResolver.StackKey key : sortedKeys) {
             if (remaining <= 0) break;
-            int available = counts.getOrDefault(key, 0);
+            long available = counts.getOrDefault(key, 0L);
             if (available <= 0 || !matches(ingredient, key)) continue;
-            int requested = Math.min(available, remaining);
+            long requested = Math.min(available, remaining);
             CachedStack cached = stacksByKey.get(key);
             MaterialKey material = cached != null
                     ? cached.material : MaterialKey.of(key.toStack());
-            int supplied = consumeSupplyLots(material, requested, slices, producedOnly);
+            long supplied = consumeSupplyLots(material, requested, slices, producedOnly);
             if (supplied <= 0) continue;
             decrement(key, supplied);
             remaining -= supplied;
@@ -544,13 +552,13 @@ final class ResolutionContext {
         return new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
     }
 
-    boolean consumeMatching(Ingredient ingredient, int needed) {
-        int remaining = needed;
+    boolean consumeMatching(Ingredient ingredient, long needed) {
+        long remaining = needed;
         for (CraftingResolver.StackKey key : sortedMatchingKeys(ingredient)) {
             if (remaining <= 0) return true;
-            int available = counts.getOrDefault(key, 0);
+            long available = counts.getOrDefault(key, 0L);
             if (available <= 0 || !matches(ingredient, key)) continue;
-            int take = Math.min(available, remaining);
+            long take = Math.min(available, remaining);
             decrement(key, take);
             remaining -= take;
             addRemainder(key, take);
@@ -624,16 +632,16 @@ final class ResolutionContext {
                 : IngredientMatcher.test(ingredient, key);
     }
 
-    private int consumeSupplyLots(MaterialKey material, int needed, List<SupplySlice> slices,
-                                  boolean producedOnly) {
-        int remaining = needed;
+    private long consumeSupplyLots(MaterialKey material, long needed, List<SupplySlice> slices,
+                                   boolean producedOnly) {
+        long remaining = needed;
         List<SupplyLot> matchingSupplies = suppliesByMaterial.get(material);
         if (matchingSupplies == null) return 0;
         for (SupplyLot supply : matchingSupplies) {
             if (remaining <= 0) break;
             if (supply.remaining <= 0) continue;
             if (producedOnly && !(supply.source instanceof MaterialSource.ProducerOutput)) continue;
-            int take = Math.min(supply.remaining, remaining);
+            long take = Math.min(supply.remaining, remaining);
             if (!supplyUndoCheckpoints.isEmpty()) {
                 supplyUndoStack.push(new SupplyUndoEntry(supply, supply.remaining));
             }
@@ -644,21 +652,23 @@ final class ResolutionContext {
         return needed - remaining;
     }
 
-    private void addRemainder(CraftingResolver.StackKey key, int count) {
+    private void addRemainder(CraftingResolver.StackKey key, long count) {
         try {
             CachedStack cached = stacksByKey.get(key);
             ItemStack source = cached != null ? cached.stack : key.toStack();
             ItemStack remainder = source.getCraftingRemainingItem();
-            if (!remainder.isEmpty()) add(remainder.copyWithCount(count));
+            if (!remainder.isEmpty()) {
+                addCount(CraftingResolver.StackKey.of(remainder, true), count);
+            }
         } catch (Exception ignored) {
             // Defensive against broken remainder implementations.
         }
     }
 
-    private void decrement(CraftingResolver.StackKey key, int amount) {
+    private void decrement(CraftingResolver.StackKey key, long amount) {
         if (!undoCheckpoints.isEmpty()) undoStack.push(new UndoEntry(key, counts.get(key)));
-        int current = counts.getOrDefault(key, 0);
-        int newCount = current - amount;
+        long current = counts.getOrDefault(key, 0L);
+        long newCount = current - amount;
         if (newCount <= 0) counts.remove(key);
         else counts.put(key, newCount);
     }
@@ -676,7 +686,7 @@ final class ResolutionContext {
 
     // ── inner types ──────────────────────────────────────────────
 
-    record SupplySlice(MaterialSource source, MaterialKey material, int quantity) {
+    record SupplySlice(MaterialSource source, MaterialKey material, long quantity) {
         SupplySlice {
             Objects.requireNonNull(source, "source");
             Objects.requireNonNull(material, "material");
@@ -684,7 +694,7 @@ final class ResolutionContext {
         }
     }
 
-    record SupplyConsumption(List<SupplySlice> slices, int requested, int supplied) {
+    record SupplyConsumption(List<SupplySlice> slices, long requested, long supplied) {
         SupplyConsumption {
             slices = List.copyOf(slices);
             if (requested < 0 || supplied < 0 || supplied > requested) {
@@ -700,16 +710,16 @@ final class ResolutionContext {
     private static final class SupplyLot {
         final MaterialKey material;
         final MaterialSource source;
-        int remaining;
+        long remaining;
 
-        SupplyLot(MaterialKey material, MaterialSource source, int remaining) {
+        SupplyLot(MaterialKey material, MaterialSource source, long remaining) {
             this.material = Objects.requireNonNull(material, "material");
             this.source = Objects.requireNonNull(source, "source");
             if (remaining <= 0) throw new IllegalArgumentException("supply amount must be positive");
             this.remaining = remaining;
         }
 
-        void consume(int amount) {
+        void consume(long amount) {
             if (amount <= 0 || amount > remaining) {
                 throw new IllegalArgumentException("invalid supply consumption: " + amount);
             }
@@ -719,9 +729,9 @@ final class ResolutionContext {
 
     private static final class SupplyUndoEntry {
         final SupplyLot supply;
-        final int oldRemaining;
+        final long oldRemaining;
 
-        SupplyUndoEntry(SupplyLot supply, int oldRemaining) {
+        SupplyUndoEntry(SupplyLot supply, long oldRemaining) {
             this.supply = supply;
             this.oldRemaining = oldRemaining;
         }
@@ -749,8 +759,8 @@ final class ResolutionContext {
 
     private static final class UndoEntry {
         final CraftingResolver.StackKey key;
-        @Nullable final Integer oldValue;
-        UndoEntry(CraftingResolver.StackKey key, Integer oldValue) {
+        @Nullable final Long oldValue;
+        UndoEntry(CraftingResolver.StackKey key, Long oldValue) {
             this.key = key;
             this.oldValue = oldValue;
         }
