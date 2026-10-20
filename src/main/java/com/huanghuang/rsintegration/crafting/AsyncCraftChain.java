@@ -121,7 +121,6 @@ import java.util.function.Predicate;
  * null-guarded via {@link #resolvePlayer()}.</p>
  */
 public final class AsyncCraftChain {
-
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
 
@@ -256,6 +255,7 @@ public final class AsyncCraftChain {
     private MagicResourceTaskReservation magicResourceTaskReservation;
     private int progressTickCounter;
     private boolean waitingForVanillaBudget;
+    private int vanillaBatchDeferredTicks;
     private final CraftProgressPublisher progressPublisher;
     private int progressSequence;
     @Nullable
@@ -3118,13 +3118,35 @@ public final class AsyncCraftChain {
                 steps, startIdx, stepRemaining, operationBudget,
                 step -> pureChain && level != null && StableRecipeBatch.isEligible(
                         level, step, targetOutput, supplementalMaterialLocks));
-        if (!slice.steps().isEmpty()
-                && !executeVanillaStepsInline(slice.steps(), online)) {
-            if (state != State.ABORTED) {
-                abort("Vanilla batch execution failed",
-                        Component.translatable("rsi.generic.error.auto_craft_failed"));
+        if (!slice.steps().isEmpty()) {
+            FlatCraftExecutor.ExecutionResult result =
+                    executeVanillaStepsInlineDetailed(slice.steps(), online,
+                            virtualInventory, ledger, true);
+            if (result.status() == FlatCraftExecutor.Status.DEFERRED) {
+                vanillaBatchDeferredTicks++;
+                waitingForVanillaBudget = true;
+                int retryLimit = configuredStableBatchRetryTicks();
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "Vanilla batch deferred ({}/{}): {}"),
+                        vanillaBatchDeferredTicks, retryLimit,
+                        result.detail());
+                if (vanillaBatchDeferredTicks >= retryLimit) {
+                    abort("Vanilla batch deferred without progress: "
+                                    + result.detail(),
+                            Component.translatable(
+                                    "rsi.async.abort.stable_batch_deferred",
+                                    retryLimit / 20));
+                }
+                return startIdx;
             }
-            return startIdx;
+            vanillaBatchDeferredTicks = 0;
+            if (result.status() == FlatCraftExecutor.Status.FAILURE) {
+                if (state != State.ABORTED) {
+                    abort("Vanilla batch execution failed: " + result.detail(),
+                            Component.translatable("rsi.generic.error.auto_craft_failed"));
+                }
+                return startIdx;
+            }
         }
         stepRemaining = slice.remainingExecutions();
         return slice.nextStepIndex();
@@ -3168,6 +3190,15 @@ public final class AsyncCraftChain {
         return BatchDispatchPlanner.configuredOperationsPerDispatch();
     }
 
+    private static int configuredStableBatchRetryTicks() {
+        try {
+            return Math.max(1,
+                    RSIntegrationConfig.CRAFTING_STABLE_BATCH_RETRY_SECONDS.get()) * 20;
+        } catch (Exception ignored) {
+            return RSIntegrationConfig.DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS * 20;
+        }
+    }
+
     static boolean requiresFlatExecutionForOversizedNode(
             List<CraftingResolver.ResolutionStep> steps, int vanillaOperationLimit,
             int dispatchOperationLimit) {
@@ -3205,9 +3236,20 @@ public final class AsyncCraftChain {
             List<CraftingResolver.ResolutionStep> vanillaSteps,
             ServerPlayer online, List<ItemStack> workingInventory,
             ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
+        return executeVanillaStepsInlineDetailed(
+                vanillaSteps, online, workingInventory, executionLedger,
+                allowPhysicalFallback).status() == FlatCraftExecutor.Status.SUCCESS;
+    }
+
+    private FlatCraftExecutor.ExecutionResult executeVanillaStepsInlineDetailed(
+            List<CraftingResolver.ResolutionStep> vanillaSteps,
+            ServerPlayer online, List<ItemStack> workingInventory,
+            ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
         ServerLevel overworld = server.overworld();
-        if (overworld == null) return false;
-        return FlatCraftExecutor.execute(vanillaSteps, online, workingInventory,
+        if (overworld == null) {
+            return FlatCraftExecutor.ExecutionResult.failure("overworld unavailable");
+        }
+        return FlatCraftExecutor.executeDetailed(vanillaSteps, online, workingInventory,
                 executionLedger, allowPhysicalFallback,
                 new FlatCraftExecutor.Context(overworld, ctx, steps, targetOutput,
                         new FlatCraftExecutor.Host() {

@@ -136,18 +136,29 @@ public final class JeiNetworkItemCache {
      * representative while a backend exposes tagged display variants.
      */
     public synchronized long amountForDisplay(ItemStack stack) {
-        long exact = amount(stack);
-        if (exact > 0L || stack == null || stack.isEmpty()
-                || (stack.getTag() != null && !stack.getTag().isEmpty())) {
-            return exact;
+        return clamped(amountForDisplayExact(stack));
+    }
+
+    public synchronized BigInteger amountForDisplayExact(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return BigInteger.ZERO;
+        Entry exact = isTagless(stack)
+                ? taglessEntries.get(stack.getItem()) : entries.get(key(stack));
+        if (exact != null || (stack.getTag() != null && !stack.getTag().isEmpty())) {
+            return exact == null ? BigInteger.ZERO : BigInteger.valueOf(exact.amount);
         }
-        return amount(stack.getItem());
+        return amountExact(stack.getItem());
     }
 
     /** Sum every stored NBT variant for a plan material that matches by item type. */
     public synchronized long amount(Item item) {
-        BigInteger amount = amountsByItem.get(item);
-        if (amount == null) return 0L;
+        return clamped(amountExact(item));
+    }
+
+    public synchronized BigInteger amountExact(Item item) {
+        return amountsByItem.getOrDefault(item, BigInteger.ZERO);
+    }
+
+    private static long clamped(BigInteger amount) {
         return amount.compareTo(MAX_AMOUNT) > 0
                 ? Long.MAX_VALUE : amount.longValue();
     }

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -29,6 +30,7 @@ final class StableRecipeBatch {
     enum Outcome {
         NOT_APPLICABLE,
         SUCCESS,
+        DEFERRED,
         FAILURE
     }
 
@@ -43,18 +45,35 @@ final class StableRecipeBatch {
     static Outcome tryExecute(ServerLevel level, CraftingResolver.ResolutionStep step,
                               ServerPlayer player, List<ItemStack> workingInventory,
                               ExtractionLedger ledger, FlatCraftExecutor.Context context) {
+        return tryExecuteDetailed(level, step, player, workingInventory, ledger, context).outcome();
+    }
+
+    static Result tryExecuteDetailed(
+            ServerLevel level, CraftingResolver.ResolutionStep step,
+            ServerPlayer player, List<ItemStack> workingInventory,
+            ExtractionLedger ledger, FlatCraftExecutor.Context context) {
         if (context.chainSteps().stream().anyMatch(value -> value.modType() != ModType.GENERIC)) {
-            return Outcome.NOT_APPLICABLE;
+            return new Result(Outcome.NOT_APPLICABLE, "mixed execution chain");
         }
-        if (ledger.hasPreferredResonanceReservations()) return Outcome.NOT_APPLICABLE;
+        if (ledger.hasPreferredResonanceReservations()) {
+            return new Result(Outcome.NOT_APPLICABLE, "resonance reservation preferred");
+        }
         BatchPlan plan = analyze(level, step, context.targetOutput(), context.materialLocks());
-        if (plan == null) return Outcome.NOT_APPLICABLE;
+        if (plan == null) return new Result(Outcome.NOT_APPLICABLE, "recipe is not stable batchable");
 
         long requested = Math.max(1, step.executions());
-        long availableBatch = maximumAvailableCrafts(
+        Availability availability = maximumAvailableCrafts(
                 plan, workingInventory, ledger, player);
-        if (availableBatch < requested) {
-            return Outcome.FAILURE;
+        if (!availability.snapshotReadable()) {
+            logBatch(context, step, "deferred", requested, availability);
+            return new Result(Outcome.DEFERRED,
+                    "storage snapshot unavailable (" + availability.detail() + ")");
+        }
+        if (availability.availableCrafts() < requested) {
+            logBatch(context, step, "insufficient", requested, availability);
+            String detail = "requested=" + requested
+                    + " available=" + availability.availableCrafts();
+            return new Result(Outcome.DEFERRED, detail);
         }
 
         long maxChunk = requested;
@@ -62,12 +81,14 @@ final class StableRecipeBatch {
         maxChunk = Math.min(maxChunk, Integer.MAX_VALUE / outputPerCraft);
         long totalInputPerCraft = 0L;
         for (SlotRequirement slot : plan.slots()) {
-            if (slot.perCraft() > Integer.MAX_VALUE) return Outcome.NOT_APPLICABLE;
+            if (slot.perCraft() > Integer.MAX_VALUE) {
+                return new Result(Outcome.NOT_APPLICABLE, "input count exceeds chunk limit");
+            }
             maxChunk = Math.min(maxChunk, Integer.MAX_VALUE / slot.perCraft());
             totalInputPerCraft = saturatedAdd(totalInputPerCraft, slot.perCraft());
         }
         maxChunk = Math.min(maxChunk, Integer.MAX_VALUE / totalInputPerCraft);
-        if (maxChunk < 1) return Outcome.NOT_APPLICABLE;
+        if (maxChunk < 1) return new Result(Outcome.NOT_APPLICABLE, "batch chunk is empty");
 
         List<ItemStack> inventoryBefore = copyInventory(workingInventory);
         long remainingBatch = requested;
@@ -77,18 +98,20 @@ final class StableRecipeBatch {
                     plan, chunk, workingInventory, ledger, player);
             if (requirements == null) {
                 restoreInventory(workingInventory, inventoryBefore);
-                return Outcome.FAILURE;
+                return new Result(Outcome.FAILURE, "stable stock changed during chunk planning");
             }
             int reservationMark = ledger.reservationMark();
             if (!executeChunk(plan, requirements, chunk, player, workingInventory, ledger)) {
                 ledger.cancelReservationsSince(reservationMark);
                 restoreInventory(workingInventory, inventoryBefore);
-                return Outcome.FAILURE;
+                logBatch(context, step, "reservation changed", requested, availability);
+                return new Result(Outcome.DEFERRED,
+                        "exact reservation changed during chunk execution");
             }
             remainingBatch -= chunk;
         }
         context.host().logVirtualInventory("after stable batch");
-        return Outcome.SUCCESS;
+        return new Result(Outcome.SUCCESS, "completed=" + requested);
     }
 
     private static boolean executeChunk(BatchPlan plan, List<Requirement> requirements,
@@ -223,7 +246,7 @@ final class StableRecipeBatch {
         return List.copyOf(selected.values());
     }
 
-    private static long maximumAvailableCrafts(
+    private static Availability maximumAvailableCrafts(
             BatchPlan plan, List<ItemStack> workingInventory,
             ExtractionLedger ledger, ServerPlayer player) {
         long available = Long.MAX_VALUE;
@@ -234,13 +257,29 @@ final class StableRecipeBatch {
                 unique.putIfAbsent(CraftingResolver.StackKey.of(candidate, true), candidate);
             }
             for (ItemStack candidate : unique.values()) {
+                ExtractionLedger.BatchAvailability backing =
+                        ledger.inspectBatchAvailability(candidate, player);
+                if (!backing.snapshotReadable()) {
+                    return new Availability(0L, false, backing.detail());
+                }
                 slotAvailable = saturatedAdd(slotAvailable,
                         countInWorkingInventory(workingInventory, candidate)
-                                + ledger.countAvailableExactForBatch(candidate, player));
+                                + backing.available());
             }
             available = Math.min(available, slotAvailable / slot.perCraft());
         }
-        return available == Long.MAX_VALUE ? 0L : available;
+        return new Availability(available == Long.MAX_VALUE ? 0L : available,
+                true, "success");
+    }
+
+    private static void logBatch(FlatCraftExecutor.Context context,
+                                 CraftingResolver.ResolutionStep step,
+                                 String outcome, long requested,
+                                 Availability availability) {
+        String message = context.logContext().format(
+                "Stable batch {} for {}: requested={} availableCrafts={} snapshot={}");
+        RSIntegrationMod.LOGGER.debug(message, outcome, step.recipeId(), requested,
+                availability.availableCrafts(), availability.detail());
     }
 
     private static long countInWorkingInventory(List<ItemStack> inventory, ItemStack template) {
@@ -303,4 +342,11 @@ final class StableRecipeBatch {
     private record Requirement(ItemStack template, long count) {}
     private record SlotRequirement(List<ItemStack> candidates, long perCraft) {}
     private record BatchPlan(ItemStack output, List<SlotRequirement> slots) {}
+    private record Availability(long availableCrafts, boolean snapshotReadable,
+                                String detail) {}
+    record Result(Outcome outcome, String detail) {
+        Result {
+            detail = detail == null ? "" : detail;
+        }
+    }
 }

@@ -4,11 +4,17 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -37,6 +43,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -283,6 +290,51 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void defersInsteadOfAbortingWhenStorageSnapshotIsTemporarilyUnavailable() {
+        ResourceLocation recipeId = new ResourceLocation("test", "deferred_storage");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        StorageSession session = mock(StorageSession.class, CALLS_REAL_METHODS);
+        when(session.reference()).thenReturn(new StorageReference(
+                new StorageBackendId("test"), "deferred-storage"));
+        when(session.snapshotItems(fixture.player()))
+                .thenReturn(StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE));
+        CraftStorageEndpoint endpoint = () -> session;
+        CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
+                recipeId, ModType.GENERIC, new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, 1024);
+        FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
+                fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
+                List.of(step), null, mock(FlatCraftExecutor.Host.class), Map.of());
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            ledger.setStorageEndpoint(endpoint);
+            FlatCraftExecutor.ExecutionResult result = FlatCraftExecutor.executeDetailed(
+                    List.of(step), fixture.player(), new ArrayList<>(), ledger, true, context);
+            assertEquals(FlatCraftExecutor.Status.DEFERRED, result.status());
+            assertTrue(result.detail().contains("storage snapshot unavailable"));
+        }
+    }
+
+    @Test
+    void defersPartialStableStockSoTheNextTickCanRecheckIt() {
+        ResourceLocation recipeId = new ResourceLocation("test", "partial_stable_stock");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.COBBLESTONE, 512)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.DEFERRED,
+                    execute(fixture, recipeId, 1024, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.COBBLESTONE));
+        assertEquals(512, inventory.get(0).getCount());
+    }
+
+    @Test
     void preservesEmptyShapedRecipeSlotsDuringBatchAssembly() {
         ResourceLocation recipeId = new ResourceLocation("test", "sparse_compression");
         NonNullList<Ingredient> ingredients = NonNullList.of(
@@ -332,6 +384,15 @@ class StableRecipeBatchTest extends BootstrapTest {
 
         ServerPlayer player = mock(ServerPlayer.class);
         when(player.getInventory()).thenReturn(new Inventory(mock(Player.class)));
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(server.getTickCount()).thenReturn(1);
+        try {
+            var field = ServerPlayer.class.getField("server");
+            field.setAccessible(true);
+            field.set(player, server);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("failed to install test server", exception);
+        }
         return new Fixture(level, player);
     }
 

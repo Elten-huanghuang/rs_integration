@@ -2,12 +2,13 @@ package com.huanghuang.rsintegration.client;
 
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.Locale;
+import java.math.BigInteger;
 
 /** Version-independent content and placement rules for JEI item overlays. */
 public final class JeiNetworkOverlayRenderer {
@@ -20,8 +21,8 @@ public final class JeiNetworkOverlayRenderer {
     public static void render(GuiGraphics graphics, ItemStack stack, int x, int y) {
         Font font = Minecraft.getInstance().font;
         if (inventoryEnabled() && JeiNetworkItemCache.INSTANCE.isConnected()) {
-            long amount = JeiNetworkItemCache.INSTANCE.amountForDisplay(stack);
-            if (amount > 0) drawRightBottom(graphics, font, format(amount), x, y);
+            var amount = JeiNetworkItemCache.INSTANCE.amountForDisplayExact(stack);
+            if (amount.signum() > 0) drawRightBottom(graphics, font, format(amount), x, y);
         }
         if (shortageEnabled()) {
             var demand = JeiCraftingPlanContext.INSTANCE.demand(stack, JeiNetworkItemCache.INSTANCE);
@@ -50,10 +51,11 @@ public final class JeiNetworkOverlayRenderer {
     }
 
     private static String format(long amount) {
-        if (amount >= 1_000_000_000L) return String.format(Locale.ROOT, "%.1fB", amount / 1_000_000_000D);
-        if (amount >= 1_000_000L) return String.format(Locale.ROOT, "%.1fM", amount / 1_000_000D);
-        if (amount >= 1_000L) return String.format(Locale.ROOT, "%.1fK", amount / 1_000D);
-        return Long.toString(amount);
+        return CompactQuantityFormat.format(amount);
+    }
+
+    private static String format(BigInteger amount) {
+        return CompactQuantityFormat.format(amount);
     }
 
     private static void drawRightBottom(GuiGraphics graphics, Font font, String text, int x, int y) {

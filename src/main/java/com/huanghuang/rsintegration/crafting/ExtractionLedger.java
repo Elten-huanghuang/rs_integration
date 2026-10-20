@@ -31,6 +31,7 @@ import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -79,6 +80,8 @@ public final class ExtractionLedger implements AutoCloseable {
     @Nullable
     private CraftStorageEndpoint reservationSnapshotEndpoint;
     @Nullable
+    private StorageSnapshotResult reservationSnapshotResult;
+    @Nullable
     private StorageSnapshot reservationSnapshot;
     private long reservationSnapshotTick = Long.MIN_VALUE;
 
@@ -95,24 +98,27 @@ public final class ExtractionLedger implements AutoCloseable {
 
     @Nullable
     private StorageSnapshot reservationSnapshot(CraftStorageEndpoint endpoint, ServerPlayer player) {
+        return reservationSnapshotResult(endpoint, player).snapshot().orElse(null);
+    }
+
+    private StorageSnapshotResult reservationSnapshotResult(
+            CraftStorageEndpoint endpoint, ServerPlayer player) {
         long currentTick = player.server.getTickCount();
-        if (reservationSnapshot != null && reservationSnapshotEndpoint == endpoint
+        if (reservationSnapshotResult != null && reservationSnapshotEndpoint == endpoint
                 && reservationSnapshotTick == currentTick) {
-            return reservationSnapshot;
+            return reservationSnapshotResult;
         }
-        StorageSnapshot loaded = endpoint.snapshot(player).snapshot().orElse(null);
-        if (loaded == null) {
-            clearReservationSnapshot();
-            return null;
-        }
+        StorageSnapshotResult loaded = endpoint.snapshot(player);
         reservationSnapshotEndpoint = endpoint;
-        reservationSnapshot = loaded;
+        reservationSnapshotResult = loaded;
+        reservationSnapshot = loaded.snapshot().orElse(null);
         reservationSnapshotTick = currentTick;
         return loaded;
     }
 
     private void clearReservationSnapshot() {
         reservationSnapshotEndpoint = null;
+        reservationSnapshotResult = null;
         reservationSnapshot = null;
         reservationSnapshotTick = Long.MIN_VALUE;
     }
@@ -128,21 +134,29 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /** 批量执行前的只读可用量探针，避免多个 int 来源相加时溢出。 */
-    public long countAvailableExactForBatch(@Nonnull ItemStack template,
-                                            @Nonnull ServerPlayer player) {
+    public BatchAvailability inspectBatchAvailability(@Nonnull ItemStack template,
+                                                       @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
-        if (template.isEmpty()) return 0L;
+        if (template.isEmpty()) return new BatchAvailability(0L, true, "empty ingredient");
         long available = countExactAvailableInInventoryLong(player, template);
         if (storageEndpoint != null) {
-            StorageSnapshot snapshot = reservationSnapshot(storageEndpoint, player);
-            if (snapshot != null) {
-                long stored = snapshot.countExact(storageEndpoint.session().itemKey(template));
-                long pending = pendingNet.getOrDefault(
-                        CraftingResolver.StackKey.of(template, true), 0L);
-                available = saturatedAdd(available, Math.max(0L, stored - pending));
+            StorageSnapshotResult snapshot = reservationSnapshotResult(storageEndpoint, player);
+            if (!snapshot.successful()) {
+                return new BatchAvailability(available, false,
+                        snapshot.status() + "/" + snapshot.diagnosticCode());
             }
+            StorageSnapshot loaded = snapshot.snapshot().orElseThrow();
+            long stored = loaded.countExact(storageEndpoint.session().itemKey(template));
+            long pending = pendingNet.getOrDefault(
+                    CraftingResolver.StackKey.of(template, true), 0L);
+            available = saturatedAdd(available, Math.max(0L, stored - pending));
         }
-        return available;
+        return new BatchAvailability(available, true, "success");
+    }
+
+    public long countAvailableExactForBatch(@Nonnull ItemStack template,
+                                            @Nonnull ServerPlayer player) {
+        return inspectBatchAvailability(template, player).available();
     }
 
     /**
@@ -781,10 +795,11 @@ public final class ExtractionLedger implements AutoCloseable {
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) {
             // Group reservations by ingredient for accurate per-type checking.
-            Map<Ingredient, Integer> neededByIngredient = new HashMap<>();
+            Map<Ingredient, Long> neededByIngredient = new HashMap<>();
             for (Entry e : entries) {
                 if (e.source == Source.NETWORK) {
-                    neededByIngredient.merge(e.originalIngredient, e.count, Integer::sum);
+                    neededByIngredient.merge(e.originalIngredient, (long) e.count,
+                            ExtractionLedger::saturatedAdd);
                 }
             }
             if (!neededByIngredient.isEmpty()) {
@@ -1092,6 +1107,14 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK }
+
+    public record BatchAvailability(long available, boolean snapshotReadable,
+                                    String detail) {
+        public BatchAvailability {
+            available = Math.max(0L, available);
+            detail = detail == null ? "" : detail;
+        }
+    }
 
     private record ResonanceReservationKey(
             String backendId, int slot, CraftingResolver.StackKey stackKey) {}

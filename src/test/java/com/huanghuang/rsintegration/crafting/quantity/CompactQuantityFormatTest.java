@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.crafting.quantity;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +22,16 @@ class CompactQuantityFormatTest {
         assertEquals("1E", CompactQuantityFormat.format(1_000_000_000_000_000_000L));
         assertEquals("9.2E", CompactQuantityFormat.format(Long.MAX_VALUE));
         assertEquals("-9.2E", CompactQuantityFormat.format(Long.MIN_VALUE));
+    }
+
+    @Test
+    void bigIntegerQuantitiesContinueThroughZettaYottaRonnaAndQuetta() {
+        assertEquals("1Z", CompactQuantityFormat.format(BigInteger.TEN.pow(21)));
+        assertEquals("1Y", CompactQuantityFormat.format(BigInteger.TEN.pow(24)));
+        assertEquals("1R", CompactQuantityFormat.format(BigInteger.TEN.pow(27)));
+        assertEquals("1Q", CompactQuantityFormat.format(BigInteger.TEN.pow(30)));
+        assertEquals("1.2Q", CompactQuantityFormat.format(
+                BigInteger.valueOf(12).multiply(BigInteger.TEN.pow(29))));
     }
 
     @Test

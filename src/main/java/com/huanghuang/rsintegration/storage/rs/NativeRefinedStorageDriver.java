@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
@@ -16,12 +17,15 @@ import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraftforge.fluids.FluidStack;
 import java.util.Set;
 import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -88,9 +92,34 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
             if (!stack.isEmpty() && stack.getCount() > 0
                     && (itemTypes == null || itemTypes.contains(stack.getItem()))) items.add(stack);
         }
+        appendMissingDiskItems(items,
+                UnifiedDiskAmountResolver.snapshot(network, FrozenKey.Kind.ITEM), itemTypes);
         items.addAll(InkFluidSupport.snapshot(network, itemTypes));
         // The response takes defensive copies before these native references leave the driver.
         return RefinedStorageSnapshotRead.available(items);
+    }
+
+    static void appendMissingDiskItems(List<ItemStack> items,
+                                       Map<FrozenKey, Long> diskAmounts,
+                                       Set<Item> itemTypes) {
+        Set<FrozenKey> nativeKeys = new HashSet<>();
+        for (ItemStack stack : items) {
+            if (stack.isEmpty()) continue;
+            try {
+                nativeKeys.add(FrozenKey.queryItem(stack));
+            } catch (RuntimeException ignored) {
+                // 单个无法冻结的缓存项仍交给后续原生 mapper 处理。
+            }
+        }
+        diskAmounts.forEach((key, amount) -> {
+            if (amount == null || amount <= 0L || nativeKeys.contains(key)
+                    || !(key.type() instanceof Item item) || item == Items.AIR) {
+                return;
+            }
+            if (itemTypes != null && !itemTypes.contains(item)) return;
+            ItemStack stack = key.itemStack(1);
+            if (!stack.isEmpty()) items.add(stack);
+        });
     }
 
     @Override

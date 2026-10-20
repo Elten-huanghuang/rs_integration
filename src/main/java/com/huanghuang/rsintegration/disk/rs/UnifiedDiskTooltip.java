@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.disk.rs;
 
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.util.DiskTooltipEffects;
 import com.huanghuang.rsintegration.util.TextBuilder;
@@ -8,7 +9,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 
 /** 展示与查询分离，便于验证摘要、展开说明和未初始化状态。 */
@@ -94,5 +94,5 @@ public final class UnifiedDiskTooltip {
         }
     }
 
-    private static String number(long value) { return String.format(Locale.ROOT, "%,d", value); }
+    private static String number(long value) { return CompactQuantityFormat.format(value); }
 }

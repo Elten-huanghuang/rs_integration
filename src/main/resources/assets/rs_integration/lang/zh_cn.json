@@ -770,6 +770,7 @@
   "rsi.async.abort.craft_timeout": "等待合成完成超时",
   "rsi.async.abort.poll_error": "轮询合成状态时发生内部错误",
   "rsi.async.abort.vanilla_commit_failed": "原版批量合成提交失败",
+  "rsi.async.abort.stable_batch_deferred": "大型工作台批处理在 %s 秒内没有获得可执行的稳定库存",
   "rsi.async.abort.machine_wait_timeout": "等待空闲多方块机器超时：%s",
   "rsi.async.abort.machine_wait_reason": "等待多方块机器就绪超时：%s（%s）",
   "rsi.async.abort.machine_start_failed": "多方块合成启动失败：%s",

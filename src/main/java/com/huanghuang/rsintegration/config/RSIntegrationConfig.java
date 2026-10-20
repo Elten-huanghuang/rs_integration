@@ -124,6 +124,7 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
     public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
+    public static final int DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS = 5;
     public static final int DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS = 8;
     public static final int DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH = 32;
     public static final int DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK = 16;
@@ -393,6 +394,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_STABLE_BATCH_RETRY_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_OPERATIONS_PER_DISPATCH;
     public static ForgeConfigSpec.IntValue CRAFTING_SETTLEMENT_STACKS_PER_TICK;
@@ -1284,6 +1286,11 @@ public final class RSIntegrationConfig {
                         "所有活动合成链共享；稳定批事务与逐次动态配方共同消耗该预算。")
                 .defineInRange("craftingGlobalVanillaOperationsPerTick",
                         DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK, 1, 1024);
+        CRAFTING_STABLE_BATCH_RETRY_SECONDS = s
+                .comment("稳定批处理库存重试时间（秒）",
+                        "大型工作台批处理遇到库存快照暂时不可读或可用量变化时，在这段时间内每 tick 重新检查；超时后终止并退款。")
+                .defineInRange("craftingStableBatchRetrySeconds",
+                        DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS, 1, 60);
         CRAFTING_SERVER_TICK_BUDGET_MS = s
                 .comment("合成推进预算（毫秒 / tick）",
                         "达到时间预算后剩余任务延到后续 tick；无法中断已开始的第三方接口调用。")

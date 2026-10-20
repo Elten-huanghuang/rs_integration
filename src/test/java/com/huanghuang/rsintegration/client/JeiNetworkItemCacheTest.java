@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -102,6 +103,8 @@ class JeiNetworkItemCacheTest extends BootstrapTest {
                     List.of(new JeiNetworkInventoryPacket.Entry(stack, Long.MAX_VALUE),
                             new JeiNetworkInventoryPacket.Entry(variant, 7L))));
             assertEquals(Long.MAX_VALUE, cache.amount(Items.DIAMOND));
+            assertEquals(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.valueOf(7L)),
+                    cache.amountExact(Items.DIAMOND));
 
             cache.accept(new JeiNetworkInventoryPacket(false, 2L, 1L, 0, 1, null,
                     List.of(new JeiNetworkInventoryPacket.Entry(stack, 1L))));

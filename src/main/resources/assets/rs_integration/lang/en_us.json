@@ -765,6 +765,7 @@
   "rsi.async.abort.craft_timeout": "Timed out waiting for craft completion",
   "rsi.async.abort.poll_error": "Internal error while polling craft completion",
   "rsi.async.abort.vanilla_commit_failed": "Commit failed after the vanilla batch",
+  "rsi.async.abort.stable_batch_deferred": "A large vanilla batch could not obtain executable storage stock within %s seconds",
   "rsi.async.abort.machine_wait_timeout": "Timed out waiting for an available multi-block machine: %s",
   "rsi.async.abort.machine_wait_reason": "Timed out waiting for multi-block machine %s: %s",
   "rsi.async.abort.machine_start_failed": "Failed to start multi-block craft: %s",

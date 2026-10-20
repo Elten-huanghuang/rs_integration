@@ -29,6 +29,30 @@ import java.util.Map;
 
 /** Executes bounded vanilla/flat recipe slices against a chain-owned inventory. */
 final class FlatCraftExecutor {
+    enum Status {
+        SUCCESS,
+        DEFERRED,
+        FAILURE
+    }
+
+    record ExecutionResult(Status status, String detail) {
+        ExecutionResult {
+            detail = detail == null ? "" : detail;
+        }
+
+        static ExecutionResult success() {
+            return new ExecutionResult(Status.SUCCESS, "");
+        }
+
+        static ExecutionResult deferred(String detail) {
+            return new ExecutionResult(Status.DEFERRED, detail);
+        }
+
+        static ExecutionResult failure(String detail) {
+            return new ExecutionResult(Status.FAILURE, detail);
+        }
+    }
+
     interface Host {
         ItemStack reserve(ExtractionLedger ledger, Ingredient ingredient, int amount,
                           ServerPlayer player);
@@ -58,6 +82,15 @@ final class FlatCraftExecutor {
                            ServerPlayer online, List<ItemStack> workingInventory,
                            ExtractionLedger executionLedger, boolean allowPhysicalFallback,
                            Context context) {
+        return executeDetailed(vanillaSteps, online, workingInventory, executionLedger,
+                allowPhysicalFallback, context).status() == Status.SUCCESS;
+    }
+
+    static ExecutionResult executeDetailed(
+            List<CraftingResolver.ResolutionStep> vanillaSteps,
+            ServerPlayer online, List<ItemStack> workingInventory,
+            ExtractionLedger executionLedger, boolean allowPhysicalFallback,
+            Context context) {
         ServerLevel level = context.level();
         RecipeManager recipeManager = level.getRecipeManager();
         RegistryAccess registryAccess = level.registryAccess();
@@ -78,10 +111,13 @@ final class FlatCraftExecutor {
             if (HistoryStagesCompat.isRecipeLocked(recipe, online)) {
                 online.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_stage_missing"));
                 RSIntegrationMod.LOGGER.debug(log.format("  step {} blocked by History Stages"), stepId);
-                return false;
+                return ExecutionResult.failure("history stage blocked " + stepId);
             }
             RSIntegrationMod.LOGGER.debug(log.format("  processing step: {} x{}"), stepId, executions);
-            if (recipe instanceof FluidContainerRecipe conversion && !FluidContainerCatalog.isValid(conversion)) return false;
+            if (recipe instanceof FluidContainerRecipe conversion
+                    && !FluidContainerCatalog.isValid(conversion)) {
+                return ExecutionResult.failure("invalid fluid container recipe " + stepId);
+            }
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
@@ -92,14 +128,23 @@ final class FlatCraftExecutor {
                     specs = specs.stream().map(spec -> SelfAmplifyingRecipePolicy
                             .excludeNonProductiveSelfCandidate(spec, terminalOutput)).toList();
                 }
-                StableRecipeBatch.Outcome stableBatch = StableRecipeBatch.tryExecute(
+                StableRecipeBatch.Result stableBatch = StableRecipeBatch.tryExecuteDetailed(
                         level, step, online, workingInventory, executionLedger, context);
-                if (stableBatch == StableRecipeBatch.Outcome.SUCCESS) continue;
-                if (stableBatch == StableRecipeBatch.Outcome.FAILURE) return false;
+                if (stableBatch.outcome() == StableRecipeBatch.Outcome.SUCCESS) continue;
+                if (stableBatch.outcome() == StableRecipeBatch.Outcome.DEFERRED) {
+                    return ExecutionResult.deferred(
+                            stepId + ": " + stableBatch.detail());
+                }
+                if (stableBatch.outcome() == StableRecipeBatch.Outcome.FAILURE) {
+                    return ExecutionResult.failure(
+                            stepId + ": " + stableBatch.detail());
+                }
                 for (int execution = 0; execution < executions; execution++) {
                     if (!executeCraftingOnce(craftingRecipe, specs, stepId, online,
                             workingInventory, executionLedger, allowPhysicalFallback,
-                            registryAccess, context)) return false;
+                            registryAccess, context)) {
+                        return ExecutionResult.failure("ingredient reservation failed for " + stepId);
+                    }
                 }
                 continue;
             }
@@ -142,7 +187,7 @@ final class FlatCraftExecutor {
                 if (reserved.isEmpty()) {
                     context.host().onMissing(spec.ingredient(), stepId,
                             executionLedger, allowPhysicalFallback);
-                    return false;
+                    return ExecutionResult.failure("ingredient reservation failed for " + stepId);
                 }
                 if (!captured) consumedInputs.add(reserved.copyWithCount(1));
             }
@@ -181,7 +226,7 @@ final class FlatCraftExecutor {
                 }
             }
         }
-        return true;
+        return ExecutionResult.success();
     }
 
     private static ItemStack terminalOutputFor(ResourceLocation stepId,
