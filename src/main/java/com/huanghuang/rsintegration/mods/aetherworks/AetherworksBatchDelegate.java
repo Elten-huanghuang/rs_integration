@@ -383,12 +383,6 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public BlockPos getOperationMachinePos(@NotNull BlockPos boundPos) {
-        // 锻座可以并行，但同一熔炉的热量与结构状态必须保持单操作独占。
-        return forgePos != null ? forgePos : boundPos.immutable();
-    }
-
-    @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.machineSlot();
     }
