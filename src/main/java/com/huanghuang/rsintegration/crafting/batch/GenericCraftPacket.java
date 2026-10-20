@@ -1031,13 +1031,11 @@ public final class GenericCraftPacket {
         PlanCache.Key exactKey = planCacheKey(player.getUUID(), recipeId,
                 forcedRecipes, repeatCount, targetOutput, modType, materialLocks);
         PlanCache.Entry entry = PLAN_CACHE.takeForExecution(exactKey);
-        if (entry == null) entry = PLAN_CACHE.get(exactKey, System.nanoTime());
         if (entry == null && (targetOutput == null || targetOutput.isEmpty()
                 || !targetOutput.hasTag())) {
             PlanCache.Key fallbackKey = planCacheKey(player.getUUID(), recipeId,
                     forcedRecipes, repeatCount, null, modType, materialLocks);
             entry = PLAN_CACHE.takeForExecution(fallbackKey);
-            if (entry == null) entry = PLAN_CACHE.get(fallbackKey, System.nanoTime());
         }
         if (entry == null || !entry.plan().success() || stampStateAffectsPlan(modType, entry.plan())) {
             return null;
@@ -3978,10 +3976,12 @@ public final class GenericCraftPacket {
         if (cached != null && cached.plan().success() && cached.plan().graph() != null
                 && PlanningStateValidator.revalidateForExecution(player, cached.snapshot(),
                 cached.plan(), planDimKey, planLookupPos, planStorageReference)) {
-            RSIntegrationMod.debug(
-                    "[RSI-tryBuildPlan] Relevant-state cache hit: recipeId={}", recipeId);
-            sink.success(cached.plan(), cached.snapshot());
-            return;
+            if (PLAN_CACHE.grantExecutionLease(cacheKey, System.nanoTime())) {
+                RSIntegrationMod.debug(
+                        "[RSI-tryBuildPlan] Relevant-state cache hit: recipeId={}", recipeId);
+                sink.success(cached.plan(), cached.snapshot());
+                return;
+            }
         }
 
         Map<ResourceLocation, ResourceLocation> effectiveOverrides =

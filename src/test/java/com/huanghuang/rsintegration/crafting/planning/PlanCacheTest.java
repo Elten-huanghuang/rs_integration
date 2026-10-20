@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanCacheTest extends BootstrapTest {
     @Test
@@ -99,6 +100,31 @@ class PlanCacheTest extends BootstrapTest {
         PlanCache.Entry leased = cache.takeForExecution(key);
         assertNotNull(leased);
         assertSame(typedGraph, leased.resolvedGraph());
+        assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void previewLookupDoesNotRenewAConsumedExecutionLease() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("consumed_lease");
+        cache.put(key, plan(), snapshot(key), 100);
+
+        assertNotNull(cache.takeForExecution(key));
+        // Preview data remains available for display deduplication, but the
+        // execution lease must stay consumed.
+        assertNotNull(cache.get(key, 100));
+        assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void aNewPreviewResponseGrantsAnotherSingleExecutionLease() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("reissued_lease");
+        cache.put(key, plan(), snapshot(key), 100);
+
+        assertNotNull(cache.takeForExecution(key));
+        assertTrue(cache.grantExecutionLease(key, 100));
+        assertNotNull(cache.takeForExecution(key));
         assertNull(cache.takeForExecution(key));
     }
 

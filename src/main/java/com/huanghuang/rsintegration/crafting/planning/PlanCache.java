@@ -96,6 +96,17 @@ public final class PlanCache {
         return executionLeases.remove(key.playerId(), lease) ? lease.entry() : null;
     }
 
+    /**
+     * 为一次新的预览响应重新授予一次性执行租约。该方法只允许在服务端
+     * 已完成状态复验、准备把缓存方案再次展示给客户端时调用。
+     */
+    public boolean grantExecutionLease(Key key, long now) {
+        Entry entry = get(key, now);
+        if (entry == null) return false;
+        executionLeases.put(key.playerId(), new ExecutionLease(key, entry));
+        return true;
+    }
+
     public void clear() {
         entries.clear();
         executionLeases.clear();
