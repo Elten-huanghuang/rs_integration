@@ -4992,9 +4992,11 @@ public final class GenericCraftPacket {
         // CrockPot: any burnable item (coal, charcoal, etc.)
         // Aether: machine-specific fuel — fuel type depends on the machine BE,
         //   so we skip it here and rely on getPlanWarnings() to inform the user.
+        long requiredFuelBurnUnits =
+                CraftPacketUtils.estimatedFuelBurnUnits(recipe, repeatCount);
         CrockPotBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,
-                itemAvailable, itemSource, neededCounts, repeatCount);
+                itemAvailable, itemSource, neededCounts, requiredFuelBurnUnits);
         // EnchantalCooler: lapis lazuli or fuel tag items
         EnchantalCoolerBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,

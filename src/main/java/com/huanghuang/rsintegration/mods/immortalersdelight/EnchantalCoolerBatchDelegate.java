@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.FuelMath;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -60,6 +61,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private static final int CONTAINER_SLOT = 4;
     private static final int OUTPUT_SLOT = 5;
     private static final int FUEL_SLOT = 6;
+    private static final int LAPIS_OPERATIONS_PER_ITEM = 4;
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -390,10 +392,12 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
         be.setChanged();
 
-        // Phase 2: Ensure fuel (lapis lazuli) in slot 6, top up to a full stack
+        // Phase 2: Ensure enough lapis lazuli for this logical batch.
         ItemStack fuelSlot = itemHandler.getStackInSlot(FUEL_SLOT);
         int existingFuel = fuelSlot.is(Items.LAPIS_LAZULI) ? fuelSlot.getCount() : 0;
-        int needed = 64 - existingFuel;
+        int requiredFuel = FuelMath.requiredItemsForOperations(
+                operations, LAPIS_OPERATIONS_PER_ITEM, 64);
+        int needed = Math.max(0, requiredFuel - existingFuel);
         if (needed > 0) {
             int inserted = tryInsertFuelFromStorage(itemHandler, needed);
             if (inserted > 0) {
@@ -777,7 +781,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!"immortalers_delight".equals(recipeModTypeId)) return;
-        int fuelNeeded = Math.max(1, repeatCount / 4);
+        int fuelNeeded = FuelMath.requiredItemsForOperations(
+                repeatCount, LAPIS_OPERATIONS_PER_ITEM, Integer.MAX_VALUE);
         neededCounts.merge(Items.LAPIS_LAZULI, (long) fuelNeeded,
                 SaturatingLongMath::signedAdd);
         // Include lapis blocks as an acceptable source — RS recursive

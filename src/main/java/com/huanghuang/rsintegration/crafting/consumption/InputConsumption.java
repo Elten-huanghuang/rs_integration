@@ -93,7 +93,9 @@ public record InputConsumption(Kind kind, long unitsPerOperation) {
             }
             long requiredUnits = DurabilityMath.multiplySaturating(
                     operations, unitsPerOperation);
-            long requiredItems = DurabilityMath.ceilDiv(requiredUnits, unitsPerItem);
+            long requiredItems = kind == Kind.FUEL
+                    ? FuelMath.requiredItems(requiredUnits, unitsPerItem)
+                    : DurabilityMath.ceilDiv(requiredUnits, unitsPerItem);
             return kind == Kind.DURABILITY
                     ? Math.min(operations, requiredItems) : requiredItems;
         }

@@ -1,13 +1,17 @@
 package com.huanghuang.rsintegration.mods.immortalersdelight;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -80,5 +84,17 @@ class EnchantalCoolerInventoryPolicyTest extends BootstrapTest {
                 handler, 1, returned::add));
         assertTrue(returned.isEmpty());
         assertEquals(Items.APPLE, handler.getStackInSlot(0).getItem());
+    }
+
+    @Test
+    void plannedLapisUsesTheSharedFuelCalculation() {
+        Map<Item, Ingredient> sources = new LinkedHashMap<>();
+        Map<Item, Long> needed = new LinkedHashMap<>();
+
+        EnchantalCoolerBatchDelegate.addFuelIfNeeded(
+                "immortalers_delight", Map.of(), sources, needed, 9);
+
+        assertEquals(3L, needed.get(Items.LAPIS_LAZULI));
+        assertTrue(sources.containsKey(Items.LAPIS_LAZULI));
     }
 }

@@ -30,6 +30,8 @@ class InputConsumptionTest {
         assertEquals(5L,
                 InputConsumption.fuel(1L).requiredPhysicalAmount(
                         1_000L, 1L, 200L));
+        assertEquals(16,
+                FuelMath.requiredItemsForOperations(64L, 4, 64));
     }
 
     @Test

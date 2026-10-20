@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
@@ -321,13 +322,14 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             suppliedInputCount = toInsert.getCount();
         }
 
-        // ── Phase 2: Ensure fuel (slot 1 for all three machines) ──
-        // Fill the fuel slot rather than inserting a single item: Aether machines
-        // consume fuel lazily over the recipe's processing time, and one unit (an
-        // Icestone, Ambrosium, etc.) rarely lasts a whole craft. Any unconsumed
-        // remainder is refunded to RS when the batch finishes.
+        // ── Phase 2: Ensure enough fuel (slot 1 for all three machines) ──
+        // Aether machines use machine-specific burn values, so calculate the
+        // count from the recipe burn units and that value.
         if (hasStorageAccess()) {
-            ItemStack insertedFuel = fillFuelSlot(be, handler, player);
+            long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(
+                    recipe, Math.max(1, plannedOperations));
+            ItemStack insertedFuel = fillFuelSlot(
+                    be, handler, player, requiredBurnUnits);
             if (!insertedFuel.isEmpty()) {
                 suppliedFuel = insertedFuel.copyWithCount(1);
                 suppliedFuelCount += insertedFuel.getCount();
@@ -505,20 +507,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
      * maps; Incubator uses its own static {@code getIncubatingMap()}.
      */
     private static boolean isValidFuelForMachine(BlockEntity be, ItemStack stack) {
-        if (stack.isEmpty()) return false;
-
-        if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            try {
-                return ((AbstractFurnaceAccessor) furnace).rsi$callGetBurnDuration(stack) > 0;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] getBurnDuration probe failed, falling back to ForgeHooks", e);
-                return ForgeHooks.getBurnTime(stack, null) > 0;
-            }
-        }
-
-        // Incubator — cached map lookup
-        Map<Item, Integer> map = getIncubatorFuelMap();
-        return map != null && map.containsKey(stack.getItem());
+        return fuelBurnDuration(be, stack) > 0;
     }
 
     /** Resolve the incubator fuel map once, caching the result. */
@@ -537,14 +526,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    /**
-     * Fill fuel slot 1 to a full stack of a single valid fuel type, drawn from RS.
-     * Aether machines consume fuel lazily over the recipe's processing time, so a
-     * single unit (an Icestone, Ambrosium, etc.) rarely lasts a whole craft. We top
-     * the slot up to its stack limit; any unconsumed remainder is refunded to RS when
-     * the batch finishes via {@link #refundLeftoverFuel}.
-     */
-    private ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler, ServerPlayer player) {
+    /** Fill slot 1 with enough of one valid fuel type for the requested burn units. */
+    private ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler,
+                                   ServerPlayer player, long requiredBurnUnits) {
         ItemStack fuelSlot = handler.getStackInSlot(1);
 
         // Slot occupied by a non-fuel item — leave it alone.
@@ -558,6 +542,14 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         int room = slotLimit - fuelSlot.getCount();
         if (room <= 0) return ItemStack.EMPTY;
 
+        int burnDuration = Math.max(1, fuelBurnDuration(be, fuelType));
+        int required = (int) Math.min(Integer.MAX_VALUE,
+                InputConsumption.fuel(1L).requiredPhysicalAmount(
+                        requiredBurnUnits, 1L, burnDuration));
+        int missing = Math.max(0, required - fuelSlot.getCount());
+        if (missing <= 0) return ItemStack.EMPTY;
+        room = Math.min(room, missing);
+
         ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), room, false);
         if (extracted.isEmpty()) return ItemStack.EMPTY;
 
@@ -567,6 +559,22 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
         int inserted = extracted.getCount() - remainder.getCount();
         return inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
+    }
+
+    private static int fuelBurnDuration(BlockEntity be, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        if (be instanceof AbstractFurnaceBlockEntity furnace) {
+            try {
+                return ((AbstractFurnaceAccessor) furnace).rsi$callGetBurnDuration(stack);
+            } catch (Exception e) {
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-Batch-Aether] getBurnDuration probe failed, falling back to ForgeHooks",
+                        e);
+                return ForgeHooks.getBurnTime(stack, null);
+            }
+        }
+        Map<Item, Integer> map = getIncubatorFuelMap();
+        return map == null ? 0 : map.getOrDefault(stack.getItem(), 0);
     }
 
     /** Find the first valid fuel type for this machine present in the RS network. */

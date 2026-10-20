@@ -1506,20 +1506,20 @@ public final class CraftPacketUtils {
     public static void addFuelToMaterials(Map<Item, Integer> itemAvailable,
                                            Map<Item, Ingredient> itemSource,
                                            Map<Item, Long> neededCounts,
-                                           int repeatCount) {
+                                           long requiredBurnUnits) {
+        if (requiredBurnUnits <= 0L) return;
         Item bestFuel = null;
-        int bestScore = 0;
+        int bestBurnTime = 0;
+        long bestCoverage = -1L;
         for (var entry : itemAvailable.entrySet()) {
             try {
-                if (ForgeHooks.getBurnTime(
-                        new ItemStack(entry.getKey()), null) > 0) {
-                    int score = entry.getValue();
-                    ResourceLocation rl = ForgeRegistries.ITEMS.getKey(entry.getKey());
-                    if (rl != null && "minecraft".equals(rl.getNamespace())) score += 64;
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestFuel = entry.getKey();
-                    }
+                int burnTime = ForgeHooks.getBurnTime(
+                        new ItemStack(entry.getKey()), null);
+                long coverage = Math.max(0, entry.getValue()) * (long) burnTime;
+                if (burnTime > 0 && coverage > bestCoverage) {
+                    bestCoverage = coverage;
+                    bestBurnTime = burnTime;
+                    bestFuel = entry.getKey();
                 }
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI] Fuel detection failed", e);
@@ -1527,9 +1527,48 @@ public final class CraftPacketUtils {
         }
         if (bestFuel == null) {
             bestFuel = Items.COAL;
+            bestBurnTime = Math.max(1, ForgeHooks.getBurnTime(
+                    new ItemStack(bestFuel), null));
         }
-        int fuelNeeded = Math.max(1, repeatCount / 4);
+        int fuelNeeded = (int) Math.min(Integer.MAX_VALUE,
+                InputConsumption.fuel(1L).requiredPhysicalAmount(
+                        requiredBurnUnits, 1L, Math.max(1, bestBurnTime)));
         neededCounts.merge(bestFuel, (long) fuelNeeded, SaturatingLongMath::signedAdd);
         itemSource.putIfAbsent(bestFuel, Ingredient.of(bestFuel));
+    }
+
+    /** 估算一次或多次配方操作需要消耗多少燃烧值。 */
+    public static long estimatedFuelBurnUnits(@Nullable Recipe<?> recipe, int executions) {
+        int perOperation = fuelBurnUnitsPerOperation(recipe);
+        return SaturatingLongMath.multiply(
+                Math.max(1, executions), Math.max(1, perOperation));
+    }
+
+    private static int fuelBurnUnitsPerOperation(@Nullable Recipe<?> recipe) {
+        if (recipe == null) return 200;
+        for (String methodName : List.of("getCookTime", "getCookingTime")) {
+            try {
+                Object value = recipe.getClass().getMethod(methodName).invoke(recipe);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Fall through to known field names.
+            }
+        }
+        for (String fieldName : List.of("cookingTime", "cookTime")) {
+            Optional<Field> field = Reflect.findField(recipe.getClass(), fieldName);
+            if (field.isEmpty()) continue;
+            try {
+                field.get().setAccessible(true);
+                Object value = field.get().get(recipe);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (IllegalAccessException | RuntimeException ignored) {
+                // Try the next known field name.
+            }
+        }
+        return 200;
     }
 }

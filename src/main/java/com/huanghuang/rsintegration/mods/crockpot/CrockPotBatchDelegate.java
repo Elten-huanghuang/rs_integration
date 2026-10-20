@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
@@ -605,7 +606,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Integer> itemAvailable,
                                        Map<Item, Ingredient> itemSource,
                                        Map<Item, Long> neededCounts,
-                                       int repeatCount) {
+                                       long requiredBurnUnits) {
         if (!"crockpot".equals(recipeModTypeId)) return;
 
         // Match recursive-plan fuel selection to runtime auto-refueling.
@@ -621,12 +622,17 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             }
         }
         if (preferred != null) {
-            int fuelNeeded = Math.max(1, repeatCount / 4);
+            int burnTime = Math.max(1,
+                    ForgeHooks.getBurnTime(new ItemStack(preferred), null));
+            int fuelNeeded = (int) Math.min(Integer.MAX_VALUE,
+                    InputConsumption.fuel(1L).requiredPhysicalAmount(
+                            requiredBurnUnits, 1L, burnTime));
             neededCounts.merge(preferred, (long) fuelNeeded, SaturatingLongMath::signedAdd);
             itemSource.putIfAbsent(preferred, Ingredient.of(preferred));
             return;
         }
-        CraftPacketUtils.addFuelToMaterials(itemAvailable, itemSource, neededCounts, repeatCount);
+        CraftPacketUtils.addFuelToMaterials(
+                itemAvailable, itemSource, neededCounts, requiredBurnUnits);
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,
@@ -762,6 +768,15 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         int room = CrockPotFuelPolicy.insertionRoom(
                 current, fuelType, handler.getSlotLimit(fuelSlot));
         if (room <= 0) return isFuel(current);
+
+        int burnTime = Math.max(1, ForgeHooks.getBurnTime(fuelType, null));
+        long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(recipe, 1);
+        int required = (int) Math.min(Integer.MAX_VALUE,
+                InputConsumption.fuel(1L).requiredPhysicalAmount(
+                        requiredBurnUnits, 1L, burnTime));
+        int missing = Math.max(0, required - current.getCount());
+        if (missing <= 0) return isFuel(current);
+        room = Math.min(room, missing);
 
         ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), room, false);
         if (extracted.isEmpty()) return isFuel(current);
