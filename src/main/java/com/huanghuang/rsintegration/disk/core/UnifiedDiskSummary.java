@@ -4,15 +4,17 @@ import com.huanghuang.rsintegration.magic.MagicResourceKind;
 
 import java.util.Arrays;
 
-/** 展示用摘要，不参与库存读写；汇总允许超过单种资源的 int 上限。 */
+/** 展示用摘要，不参与库存读写；每个条目和汇总都允许达到 long 上限。 */
 public record UnifiedDiskSummary(long items, long fluids, long[] magicAmounts, int itemTypes, int fluidTypes,
                                  int itemCapacity, int fluidCapacity) {
     public UnifiedDiskSummary {
         magicAmounts = magicAmounts.clone();
         if (itemCapacity < 1 || itemCapacity > 262144 || fluidCapacity < 1 || fluidCapacity > 262144
                 || itemTypes < 0 || itemTypes > itemCapacity || fluidTypes < 0 || fluidTypes > fluidCapacity
-                || items < itemTypes || items > (long) itemTypes * Integer.MAX_VALUE
-                || fluids < fluidTypes || fluids > (long) fluidTypes * Integer.MAX_VALUE
+                || items < itemTypes
+                || fluids < fluidTypes
+                || items > 0L && itemTypes == 0
+                || fluids > 0L && fluidTypes == 0
                 || magicAmounts.length != MagicResourceKind.values().length) {
             throw new IllegalArgumentException("统一盘展示摘要非法");
         }

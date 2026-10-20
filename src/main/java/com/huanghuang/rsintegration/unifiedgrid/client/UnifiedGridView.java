@@ -18,8 +18,6 @@ import com.refinedmods.refinedstorage.integration.jei.IngredientTracker;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.filtering.GridFilterParser;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
-import com.refinedmods.refinedstorage.screen.grid.stack.ItemGridStack;
-import com.refinedmods.refinedstorage.screen.grid.stack.FluidGridStack;
 import com.refinedmods.refinedstorage.screen.grid.sorting.IGridSorter;
 import com.refinedmods.refinedstorage.screen.grid.sorting.IdGridSorter;
 import com.refinedmods.refinedstorage.screen.grid.sorting.SortingDirection;
@@ -131,8 +129,8 @@ public final class UnifiedGridView implements IGridView {
                 } else if (old != null) {
                     long before = old.primary.isCraftable() ? 0 : getQuantity(old.primary);
                     if (update.amount() > 0) {
-                        if (old.primary instanceof ItemGridStack item) item.setZeroed(false);
-                        if (old.primary instanceof FluidGridStack fluid) fluid.setZeroed(false);
+                        if (old.primary instanceof LongItemGridStack item) item.setZeroed(false);
+                        if (old.primary instanceof LongFluidGridStack fluid) fluid.setZeroed(false);
                     }
                     if (!old.primary.isCraftable()) {
                         // 跨过 0 的增减要重排：空资源不占格，有量时才需要出现。
@@ -167,13 +165,14 @@ public final class UnifiedGridView implements IGridView {
         UUID other = crafting ? entry.storedId() : entry.craftableId();
         IGridStack stack;
         if (kind == GridResourceKind.item()) {
-            ItemStack template = ((ItemStack) entry.template()).copyWithCount(crafting ? 1
-                    : Math.max(1, Math.toIntExact(entry.amount())));
-            stack = new ItemGridStack(id, other, template, crafting, entry.tracker());
+            ItemStack template = ((ItemStack) entry.template()).copyWithCount(1);
+            stack = new LongItemGridStack(id, other, template, crafting,
+                    entry.tracker(), entry.amount());
         } else if (kind == GridResourceKind.fluid()) {
             FluidStack template = ((FluidStack) entry.template()).copy();
-            template.setAmount(crafting ? 1 : Math.max(1, Math.toIntExact(entry.amount())));
-            stack = new FluidGridStack(id, other, template, entry.tracker(), crafting);
+            template.setAmount(1);
+            stack = new LongFluidGridStack(id, other, template,
+                    entry.tracker(), crafting, entry.amount());
         } else {
             long amount = crafting ? 1 : Math.max(1, entry.amount());
             stack = new MagicStackGridStack(kind.magicKind(), id, other, amount,
@@ -185,11 +184,16 @@ public final class UnifiedGridView implements IGridView {
 
     private static void setQuantity(IGridStack stack, long quantity) {
         if (stack instanceof MagicStackGridStack magic) magic.setLongQuantity(quantity);
+        else if (stack instanceof LongItemGridStack item) item.setLongQuantity(quantity);
+        else if (stack instanceof LongFluidGridStack fluid) fluid.setLongQuantity(quantity);
         else stack.setQuantity(clampToInt(quantity));
     }
 
     private static long getQuantity(IGridStack stack) {
-        return stack instanceof MagicStackGridStack magic ? magic.getLongQuantity() : stack.getQuantity();
+        if (stack instanceof MagicStackGridStack magic) return magic.getLongQuantity();
+        if (stack instanceof LongItemGridStack item) return item.getLongQuantity();
+        if (stack instanceof LongFluidGridStack fluid) return fluid.getLongQuantity();
+        return stack.getQuantity();
     }
 
     private void removeAliases(Row row) {

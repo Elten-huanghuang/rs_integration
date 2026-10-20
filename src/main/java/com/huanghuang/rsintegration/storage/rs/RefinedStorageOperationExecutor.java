@@ -137,11 +137,6 @@ final class RefinedStorageOperationExecutor {
             return StorageOperationResult.failedExtraction(mode, requestedAmount,
                     StorageOperationStatus.INVALID_REQUEST, extracted, recovery);
         }
-        if (simulate && target > Integer.MAX_VALUE) {
-            return StorageOperationResult.failedExtraction(mode, requestedAmount,
-                    StorageOperationStatus.UNAVAILABLE, extracted, recovery,
-                    StorageDiagnosticCode.NATIVE_LIMIT_EXCEEDED);
-        }
         long remaining = target;
         while (remaining > 0) {
             int request = (int) Math.min(remaining, Integer.MAX_VALUE);
@@ -202,7 +197,7 @@ final class RefinedStorageOperationExecutor {
             }
             extracted.add(result.copy());
             remaining -= result.getCount();
-            if (result.getCount() < request || simulate) break;
+            if (result.getCount() < request) break;
         }
         return StorageOperationResult.extracted(mode, requestedAmount, extracted);
     }

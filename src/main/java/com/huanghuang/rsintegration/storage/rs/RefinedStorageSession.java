@@ -93,6 +93,7 @@ final class RefinedStorageSession implements StorageSession {
         }
         try {
             return RefinedStorageSnapshotMapper.map(driver.snapshotItems(itemTypes),
+                    stack -> driver.exactStoredAmount(stack, stack.getCount()),
                     (stack, failure) -> warnSkippedItem(stack, failure));
         } catch (RefinedStorageUnavailableException e) {
             return StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE);

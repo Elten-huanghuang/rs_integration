@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.disk.core;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -22,7 +23,7 @@ public final class ResourceTable {
     public static final int PAGE_SIZE = 512;
     public record Handle(long epoch, int slot, int generation) {}
     public record PageSnapshot(int index, long keyRevision, long amountRevision,
-                               byte[][] keys, int[] generations, long[] orders, int[] amounts) {}
+                               byte[][] keys, int[] generations, long[] orders, long[] amounts) {}
     /** 缺失注册项只保留原始身份，不进入可用库存索引。 */
     public record QuarantinedResource(FrozenKey.Kind kind, ResourceLocation resource, byte[] payload) {
         public QuarantinedResource { payload = payload.clone(); }
@@ -31,7 +32,7 @@ public final class ResourceTable {
     public record DuplicateRepair(int keptSlot, int mergedSlot, FrozenKey.Kind kind, ResourceLocation resource) {}
     private static final class Page {
         final FrozenKey[] keys = new FrozenKey[PAGE_SIZE];
-        final int[] amounts = new int[PAGE_SIZE];
+        final long[] amounts = new long[PAGE_SIZE];
         final int[] generations = new int[PAGE_SIZE];
         final long[] orders = new long[PAGE_SIZE];
         final int[] previous = new int[PAGE_SIZE];
@@ -55,7 +56,7 @@ public final class ResourceTable {
     private final int maxEntries;
     private final long epoch;
     private int allocated;
-    // 仅用于全盘展示的汇总；每个槽的库存和 RS 接口仍是 int。
+    // 精确库存按槽保存 long；RS 原生存储接口仍在适配层饱和到 int。
     private long displayTotal;
     private long quarantinedTotal;
     private long revision, nextOrder;
@@ -77,15 +78,15 @@ public final class ResourceTable {
     public List<ResourceLocation> quarantinedIds() {
         return quarantined.values().stream().map(QuarantinedResource::resource).distinct().toList();
     }
-    // 最大条目数乘以单项 int 上限仍远小于 long 上限；从精确展示汇总截断即可。
-    public int total() { return (int) Math.min(Integer.MAX_VALUE, displayTotal); }
+    /** RS 原生存储数量接口仍为 int，只在该边界饱和。 */
+    public int total() { return SaturatingLongMath.clampToInt(displayTotal); }
     public long displayTotal() { return displayTotal; }
-    public long storedTotal() { return displayTotal + quarantinedTotal; }
+    public long storedTotal() { return SaturatingLongMath.add(displayTotal, quarantinedTotal); }
     public int capacity() { return maxEntries; }
     public long revision() { return revision; }
     public int pageCount() { return pages.size(); }
-    public int amount(FrozenKey key) { int slot = exact.getInt(key); return slot < 0 ? 0 : amount(slot); }
-    public int amount(int slot) { return page(slot).amounts[offset(slot)]; }
+    public long amount(FrozenKey key) { int slot = exact.getInt(key); return slot < 0 ? 0L : amount(slot); }
+    public long amount(int slot) { return page(slot).amounts[offset(slot)]; }
     public FrozenKey key(int slot) { return page(slot).keys[offset(slot)]; }
     public int first(Object type) { Bucket bucket = types.get(type); return bucket == null ? -1 : bucket.head; }
     public int next(int slot) { return page(slot).next[offset(slot)]; }
@@ -106,16 +107,16 @@ public final class ResourceTable {
     }
     public boolean canCreate() { return !free.isEmpty() || allocated < maxEntries; }
 
-    public int insert(FrozenKey key, int requested, boolean perform) {
+    public long insert(FrozenKey key, long requested, boolean perform) {
         if (!key.stored()) throw new IllegalArgumentException("查询身份不能作为库存模板");
         return insert(key, exact.getInt(key), requested, perform);
     }
 
-    int insert(FrozenKey key, int slot, int requested, boolean perform) {
-        if (requested <= 0) return 0;
-        if (slot < 0 && !canCreate()) return 0;
-        int accepted = Math.min(requested, Integer.MAX_VALUE - (slot < 0 ? 0 : amount(slot)));
-        if (!perform || accepted == 0) return accepted;
+    long insert(FrozenKey key, int slot, long requested, boolean perform) {
+        if (requested <= 0L) return 0L;
+        if (slot < 0 && !canCreate()) return 0L;
+        long accepted = Math.min(requested, Long.MAX_VALUE - (slot < 0 ? 0L : amount(slot)));
+        if (!perform || accepted == 0L) return accepted;
         if (slot < 0) {
             nextOrder = Math.incrementExact(nextOrder);
             slot = allocate();
@@ -125,17 +126,17 @@ public final class ResourceTable {
         return accepted;
     }
 
-    int insertExisting(int slot, int requested, boolean perform) {
-        if (requested <= 0 || key(slot) == null) return 0;
-        int accepted = Math.min(requested, Integer.MAX_VALUE - amount(slot));
-        if (perform && accepted > 0) setAmount(slot, amount(slot) + accepted);
+    long insertExisting(int slot, long requested, boolean perform) {
+        if (requested <= 0L || key(slot) == null) return 0L;
+        long accepted = Math.min(requested, Long.MAX_VALUE - amount(slot));
+        if (perform && accepted > 0L) setAmount(slot, amount(slot) + accepted);
         return accepted;
     }
 
-    public int extract(int slot, int requested, boolean perform) {
-        if (slot < 0 || requested <= 0 || key(slot) == null) return 0;
-        int taken = Math.min(requested, amount(slot));
-        if (!perform || taken == 0) return taken;
+    public long extract(int slot, long requested, boolean perform) {
+        if (slot < 0 || requested <= 0L || key(slot) == null) return 0L;
+        long taken = Math.min(requested, amount(slot));
+        if (!perform || taken == 0L) return taken;
         setAmount(slot, amount(slot) - taken);
         if (amount(slot) == 0) removeKey(slot);
         return taken;
@@ -151,7 +152,7 @@ public final class ResourceTable {
                 && key(handle.slot) != null && page(handle.slot).generations[offset(handle.slot)] == handle.generation;
     }
 
-    public void forEach(BiConsumer<FrozenKey, Integer> consumer) {
+    public void forEach(BiConsumer<FrozenKey, Long> consumer) {
         for (int i = 0; i < live.size(); i++) { int slot = live.getInt(i); consumer.accept(key(slot), amount(slot)); }
     }
 
@@ -196,7 +197,7 @@ public final class ResourceTable {
         }
     }
 
-    public boolean restore(int slot, FrozenKey key, int generation, long order, int amount) {
+    public boolean restore(int slot, FrozenKey key, int generation, long order, long amount) {
         if (!key.stored()) throw new IllegalArgumentException("查询身份不能恢复为库存模板");
         if (slot < 0 || slot >= maxEntries || amount <= 0 || generation <= 0 || order <= 0) {
             throw new IllegalArgumentException("统一盘槽记录非法");
@@ -205,8 +206,8 @@ public final class ResourceTable {
         if (key(slot) != null || quarantined.containsKey(slot)) throw new IllegalArgumentException("统一盘槽记录重复");
         int keptSlot = exact.getInt(key);
         if (keptSlot >= 0) {
-            int keptAmount = amount(keptSlot);
-            if (amount > Integer.MAX_VALUE - keptAmount) {
+            long keptAmount = amount(keptSlot);
+            if (amount > Long.MAX_VALUE - keptAmount) {
                 throw new IllegalArgumentException("统一盘重复资源数量汇总超过单条上限");
             }
             setAmount(keptSlot, keptAmount + amount);
@@ -225,7 +226,7 @@ public final class ResourceTable {
         return true;
     }
 
-    public void restoreQuarantined(int slot, QuarantinedResource resource, int generation, long order, int amount) {
+    public void restoreQuarantined(int slot, QuarantinedResource resource, int generation, long order, long amount) {
         if (slot < 0 || slot >= maxEntries || amount <= 0 || generation <= 0 || order <= 0
                 || resource.payload.length == 0 || resource.payload.length > FrozenKey.MAX_BYTES) {
             throw new IllegalArgumentException("统一盘隔离记录非法");
@@ -239,7 +240,7 @@ public final class ResourceTable {
         page.orders[at] = order;
         page.amounts[at] = amount;
         quarantined.put(slot, resource);
-        quarantinedTotal += amount;
+        quarantinedTotal = SaturatingLongMath.add(quarantinedTotal, amount);
         nextOrder = Math.max(nextOrder, order);
         page.keyRevision = ++revision;
         page.amountRevision = ++revision;
@@ -329,9 +330,10 @@ public final class ResourceTable {
         markDirty(slot / PAGE_SIZE, page);
     }
 
-    private void setAmount(int slot, int value) {
+    private void setAmount(int slot, long value) {
         Page page = page(slot);
-        displayTotal += (long) value - page.amounts[offset(slot)];
+        displayTotal = SaturatingLongMath.signedAdd(displayTotal,
+                value - page.amounts[offset(slot)]);
         page.amounts[offset(slot)] = value;
         page.amountRevision = ++revision;
         markDirty(slot / PAGE_SIZE, page);

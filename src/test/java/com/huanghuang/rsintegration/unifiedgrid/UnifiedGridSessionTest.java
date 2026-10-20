@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -16,6 +20,7 @@ import com.refinedmods.refinedstorage.api.util.StackListEntry;
 import com.refinedmods.refinedstorage.api.util.StackListResult;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -38,6 +43,46 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class UnifiedGridSessionTest extends BootstrapTest {
+    @Test
+    void exactDiskTotalsOverrideTheRsIntCacheWithoutDoubleCounting() {
+        long exact = Integer.MAX_VALUE + 2_000_000_000L;
+        assertEquals(exact,
+                UnifiedGridSession.mergeExactAmount(exact, Integer.MAX_VALUE));
+        assertEquals(2_000_000_000L,
+                UnifiedGridSession.mergeExactAmount(1_000_000_000L, 2_000_000_000L));
+        assertEquals(Integer.MAX_VALUE,
+                UnifiedGridSession.mergeExactAmount(null, Integer.MAX_VALUE));
+    }
+
+    @Test
+    void itemSnapshotUsesExactSingleKeyAmountAboveInt() {
+        Fixture f = new Fixture();
+        UnifiedDiskCore disk = new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(),
+                new UnifiedDiskCore.Limits(8, 8, 1048576, 268435456));
+        FrozenKey diamond = FrozenKey.item(new ItemStack(Items.DIAMOND));
+        FrozenKey water = FrozenKey.fluid(new FluidStack(Fluids.WATER, 1));
+        long exact = Integer.MAX_VALUE + 2_000_000_000L;
+        long exactFluid = Integer.MAX_VALUE + 3_000_000_000L;
+        disk.insert(diamond, exact, true);
+        disk.insert(water, exactFluid, true);
+        UnifiedDiskManager manager = mock(UnifiedDiskManager.class);
+        UnifiedMountCoordinator mounts = mock(UnifiedMountCoordinator.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getServer()).thenReturn(f.player.server);
+        when(f.network.getLevel()).thenReturn(level);
+        when(manager.mounts()).thenReturn(mounts);
+        when(mounts.disksForNetwork(f.network)).thenReturn(List.of(disk));
+
+        try (MockedStatic<UnifiedDiskManager> managers = mockStatic(UnifiedDiskManager.class)) {
+            managers.when(() -> UnifiedDiskManager.existing(any())).thenReturn(manager);
+            f.session.tick();
+        }
+
+        assertEquals(exact, f.entry(GridResourceKind.item()).amount());
+        assertEquals(exactFluid, f.entry(GridResourceKind.fluid()).amount());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"NORMAL", "CRAFTING", "PATTERN", "FLUID"})
     void mixedSessionOnlySupportsNormalAndCraftingGrids(String typeName) {

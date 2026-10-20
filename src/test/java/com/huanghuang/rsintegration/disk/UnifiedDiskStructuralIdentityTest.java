@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.disk;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.core.SaturatedTree;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.StorageIdentityBytes;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
@@ -130,17 +130,24 @@ class UnifiedDiskStructuralIdentityTest extends BootstrapTest {
 
     @Test void stackPathRandomBatchesSimulationAndDeletionMatchReference() {
         var core = UnifiedDiskCoreTest.core(64);
-        var reference = new HashMap<Integer, Integer>();
+        var reference = new HashMap<Integer, Long>();
         Random random = new Random(22102026);
         for (int step = 0; step < 15000; step++) {
-            int id = random.nextInt(96), before = reference.getOrDefault(id, 0);
-            int requested = switch (random.nextInt(4)) { case 0 -> 1; case 1 -> 64; case 2 -> 1000; default -> Integer.MAX_VALUE; };
+            int id = random.nextInt(96);
+            long before = reference.getOrDefault(id, 0L);
+            long requested = switch (random.nextInt(4)) {
+                case 0 -> 1L;
+                case 1 -> 64L;
+                case 2 -> 1000L;
+                default -> Integer.MAX_VALUE + 1L + random.nextInt(1_000_000);
+            };
             boolean perform = random.nextBoolean();
             ItemStack item = new ItemStack(Items.STONE); item.getOrCreateTag().putInt("variant", id);
             FluidStack fluid = new FluidStack(Fluids.WATER, 1000); fluid.setTag(item.getTag().copy());
-            int expected;
+            long expected;
             if (random.nextBoolean()) {
-                expected = before == 0 && reference.size() >= 64 ? 0 : Math.min(requested, Integer.MAX_VALUE - before);
+                expected = before == 0 && reference.size() >= 64 ? 0
+                        : Math.min(requested, Long.MAX_VALUE - before);
                 assertEquals(expected, core.insertItem(item, requested, perform));
                 assertEquals(expected, core.insertFluid(fluid, requested, perform));
                 if (perform && expected > 0) reference.put(id, before + expected);
@@ -150,9 +157,11 @@ class UnifiedDiskStructuralIdentityTest extends BootstrapTest {
                 assertEquals(expected, core.extract(FrozenKey.Kind.FLUID, core.fluids.exactSlot(fluid), requested, perform));
                 if (perform) { if (expected == before) reference.remove(id); else reference.put(id, before - expected); }
             }
-            int total = 0; for (int amount : reference.values()) total = SaturatedTree.add(total, amount);
+            long total = 0L;
+            for (long amount : reference.values()) total = SaturatingLongMath.add(total, amount);
             assertEquals(reference.size(), core.items.size()); assertEquals(reference.size(), core.fluids.size());
-            assertEquals(total, core.items.total()); assertEquals(total, core.fluids.total());
+            assertEquals(SaturatingLongMath.clampToInt(total), core.items.total());
+            assertEquals(SaturatingLongMath.clampToInt(total), core.fluids.total());
         }
     }
 

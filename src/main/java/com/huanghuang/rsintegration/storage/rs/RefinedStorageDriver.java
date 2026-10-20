@@ -25,6 +25,11 @@ interface RefinedStorageDriver {
         return snapshotItems();
     }
 
+    /** 返回同一 Key 在宽库存后端上的精确数量；原生 RS 不足时由驱动补充。 */
+    default long exactStoredAmount(ItemStack stack, long nativeAmount) {
+        return nativeAmount;
+    }
+
     boolean hasPermission(ServerPlayer player, StoragePermission permission);
 
     ItemStack extract(ItemStack template, int amount, boolean simulate);

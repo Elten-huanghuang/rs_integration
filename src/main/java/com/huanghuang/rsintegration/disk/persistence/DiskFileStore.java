@@ -285,7 +285,7 @@ public final class DiskFileStore {
             }
             if (keys == null) throw new IOException("新页面缺少资源身份");
             String amounts = writePage(directory, kind, page.index(), "amount", bytes(output -> {
-                for (int amount : page.amounts()) output.writeInt(amount);
+                for (long amount : page.amounts()) output.writeLong(amount);
             }));
             writes[1]++;
             result.set(page.index(), new PageFiles(keys, amounts));
@@ -294,7 +294,7 @@ public final class DiskFileStore {
         return result;
     }
 
-    private record Record(int slot, int generation, long order, FrozenKey key, QuarantinedResource missing, int amount) {}
+    private record Record(int slot, int generation, long order, FrozenKey key, QuarantinedResource missing, long amount) {}
 
     private int loadPages(ResourceTable table, FrozenKey.Kind kind, List<PageFiles> pages, Path directory,
                           Limits limits) throws IOException {
@@ -306,11 +306,8 @@ public final class DiskFileStore {
         int totalBytes = 0;
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
             PageFiles page = pages.get(pageIndex);
-            int[] amounts = new int[ResourceTable.PAGE_SIZE];
-            try (DataInputStream input = input(readChecked(reference(directory, page.amounts), ResourceTable.PAGE_SIZE * 4))) {
-                for (int i = 0; i < amounts.length; i++) amounts[i] = input.readInt();
-                if (input.available() != 0) throw new IOException("数量页布局非法");
-            }
+            long[] amounts = readAmounts(readChecked(reference(directory, page.amounts),
+                    ResourceTable.PAGE_SIZE * Long.BYTES));
             BitSet seen = new BitSet(ResourceTable.PAGE_SIZE);
             for (String name : page.keys) {
                 try (DataInputStream input = input(readChecked(reference(directory, name), SEGMENT_BYTES))) {
@@ -323,7 +320,7 @@ public final class DiskFileStore {
                         seen.set(offset);
                         int slot = pageIndex * ResourceTable.PAGE_SIZE + offset;
                         if (slot < slots) generations[slot] = generation;
-                        int amount = amounts[offset];
+                        long amount = amounts[offset];
                         if (length == 0) {
                             if (amount != 0) throw new IOException("无身份的数量记录");
                             continue;
@@ -362,6 +359,22 @@ public final class DiskFileStore {
             throw new IOException("磁盘资源记录非法: " + e.getMessage(), e);
         }
         return totalBytes;
+    }
+
+    public static long[] readAmounts(byte[] body) throws IOException {
+        int legacyBytes = ResourceTable.PAGE_SIZE * Integer.BYTES;
+        int currentBytes = ResourceTable.PAGE_SIZE * Long.BYTES;
+        boolean legacy = body.length == legacyBytes;
+        if (!legacy && body.length != currentBytes) throw new IOException("数量页布局非法");
+        long[] amounts = new long[ResourceTable.PAGE_SIZE];
+        try (DataInputStream input = input(body)) {
+            for (int index = 0; index < amounts.length; index++) {
+                amounts[index] = legacy ? input.readInt() : input.readLong();
+                if (amounts[index] < 0L) throw new IOException("数量页记录非法");
+            }
+            if (input.available() != 0) throw new IOException("数量页尾部非法");
+        }
+        return amounts;
     }
 
     private byte[] encodeManifest(Manifest manifest) throws IOException {

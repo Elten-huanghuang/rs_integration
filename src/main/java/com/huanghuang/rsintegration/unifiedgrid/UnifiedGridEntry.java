@@ -25,12 +25,8 @@ public record UnifiedGridEntry(int serial, long amount, long capacity, boolean m
 
     public void write(FriendlyByteBuf buf, GridResourceKind kind) {
         buf.writeVarInt(serial);
-        if (kind.isMagic()) {
-            buf.writeVarLong(amount);
-            buf.writeVarLong(capacity);
-        } else {
-            buf.writeVarInt(Math.toIntExact(amount));
-        }
+        buf.writeVarLong(amount);
+        if (kind.isMagic()) buf.writeVarLong(capacity);
         buf.writeBoolean(metadata);
         if (metadata) {
             writeId(buf, storedId);
@@ -50,7 +46,7 @@ public record UnifiedGridEntry(int serial, long amount, long capacity, boolean m
 
     public static UnifiedGridEntry read(FriendlyByteBuf buf, GridResourceKind kind) {
         int serial = buf.readVarInt();
-        long amount = kind.isMagic() ? buf.readVarLong() : buf.readVarInt();
+        long amount = buf.readVarLong();
         long capacity = kind.isMagic() ? buf.readVarLong() : 0;
         boolean metadata = buf.readBoolean();
         UUID stored = metadata ? readId(buf) : null;

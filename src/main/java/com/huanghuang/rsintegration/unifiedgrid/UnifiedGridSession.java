@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.unifiedgrid;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.magic.MagicResourceDirty;
 import com.huanghuang.rsintegration.magic.MagicResourceEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
@@ -247,6 +249,29 @@ public final class UnifiedGridSession {
         UnifiedGridFluidTransfer.apply(player, network, result, filling, shift);
     }
 
+    private Map<FrozenKey, Long> exactDiskAmounts(GridResourceKind kind) {
+        return UnifiedDiskAmountResolver.snapshot(network, kind == GridResourceKind.item()
+                ? FrozenKey.Kind.ITEM : FrozenKey.Kind.FLUID);
+    }
+
+    private long displayAmount(GridResourceKind kind, Object stack, long cachedAmount) {
+        return kind == GridResourceKind.item()
+                ? UnifiedDiskAmountResolver.itemAmount(network,
+                        (ItemStack) stack, cachedAmount)
+                : UnifiedDiskAmountResolver.fluidAmount(network,
+                        (FluidStack) stack, cachedAmount);
+    }
+
+    static long mergeExactAmount(@Nullable Long exact, long cachedAmount) {
+        return UnifiedDiskAmountResolver.mergeWithNative(exact, cachedAmount);
+    }
+
+    @Nullable
+    private static FrozenKey storedKey(GridResourceKind kind, Object stack) {
+        return UnifiedDiskAmountResolver.key(kind == GridResourceKind.item()
+                ? FrozenKey.Kind.ITEM : FrozenKey.Kind.FLUID, stack);
+    }
+
     private final class Channel<T> implements IStorageCacheListener<T> {
         private final GridResourceKind kind;
         private IStorageCache<T> cache;
@@ -309,13 +334,17 @@ public final class UnifiedGridSession {
             bySerial.clear();
             keysById.clear();
             deferred = null;
+            Map<FrozenKey, Long> exactAmounts = exactDiskAmounts(kind);
             if (cache != null) {
                 // 初始合并直接遍历两个集合；不为每条再扫描同类型 NBT 桶。
                 for (StackListEntry<T> stored : cache.getList().getStacks()) {
                     ServerEntry row = rowFor(stored.getStack());
                     row.storedId = stored.getId();
                     keysById.put(stored.getId(), row.key);
-                    row.amount = Math.max(0, kind.amount(stored.getStack()));
+                    long cached = Math.max(0L, kind.amount(stored.getStack()));
+                    FrozenKey key = storedKey(kind, stored.getStack());
+                    row.amount = key == null ? cached
+                            : mergeExactAmount(exactAmounts.get(key), cached);
                     row.tracker = tracker(stored.getStack());
                 }
                 for (StackListEntry<T> craftable : cache.getCraftablesList().getStacks()) {
@@ -382,7 +411,8 @@ public final class UnifiedGridSession {
             }
             row.storedId = storedId;
             row.craftableId = craftableId;
-            row.amount = stored == null ? 0 : Math.max(0, kind.amount(stored));
+            row.amount = stored == null ? 0L
+                    : displayAmount(kind, stored, Math.max(0L, kind.amount(stored)));
             row.tracker = tracker(update.template);
             return row.update(metadata);
         }

@@ -61,4 +61,17 @@ class RefinedStorageSnapshotMapperTest extends BootstrapTest {
         assertEquals(StorageSnapshotStatus.SUCCESS, result.status());
         assertEquals(3, result.snapshot().orElseThrow().items().get(0).amount());
     }
+
+    @Test
+    void wideBackendAmountReplacesTheNativeIntCacheValue() {
+        ItemStack source = new ItemStack(Items.DIAMOND, Integer.MAX_VALUE);
+        long exact = Integer.MAX_VALUE + 5_000_000_000L;
+
+        var result = RefinedStorageSnapshotMapper.map(
+                RefinedStorageSnapshotRead.available(List.of(source)),
+                stack -> exact,
+                (stack, failure) -> { });
+
+        assertEquals(exact, result.snapshot().orElseThrow().items().get(0).amount());
+    }
 }

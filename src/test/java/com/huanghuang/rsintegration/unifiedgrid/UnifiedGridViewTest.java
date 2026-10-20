@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridView;
 import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridJeiTracker;
+import com.huanghuang.rsintegration.unifiedgrid.client.LongItemGridStack;
+import com.huanghuang.rsintegration.unifiedgrid.client.LongFluidGridStack;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
@@ -75,22 +77,33 @@ class UnifiedGridViewTest extends BootstrapTest {
             search.when(() -> RSGridSearchCache.beforeForceSort(any(), any())).thenReturn(true);
             Fixture f = new Fixture();
             f.view.apply(f.packet(GridResourceKind.item(), 1, 0, true, true, f.item(1, 5)));
+            long largeFluid = Integer.MAX_VALUE + 456L;
             f.view.apply(f.packet(GridResourceKind.fluid(), 1, 0, true, true,
-                    new UnifiedGridEntry(2, 1000, true, UUID.randomUUID(), null, new FluidStack(Fluids.WATER, 1), null)));
+                    new UnifiedGridEntry(2, largeFluid, true, UUID.randomUUID(), null,
+                            new FluidStack(Fluids.WATER, 1), null)));
             f.view.forceSort();
             assertEquals(2, f.view.getStacks().size());
             IGridStack item = f.view.get(f.stored);
             assertTrue(item.getIngredient() instanceof ItemStack);
             assertTrue(f.view.getAllStacks().stream().anyMatch(stack -> stack.getIngredient() instanceof FluidStack));
+            LongFluidGridStack fluid = (LongFluidGridStack) f.view.getAllStacks().stream()
+                    .filter(stack -> stack instanceof LongFluidGridStack)
+                    .findFirst().orElseThrow();
+            assertEquals(largeFluid, fluid.getLongQuantity());
+            assertEquals(Integer.MAX_VALUE, fluid.getQuantity());
             assertEquals(f.craftable, f.view.get(f.stored).getOtherId());
             assertTrue(f.view.get(f.craftable).isCraftable());
             assertEquals(3, f.view.getAllStacks().size());
             List<IGridStack> ordered = f.view.getStacks();
+            long largeAmount = Integer.MAX_VALUE + 123L;
             f.view.apply(f.packet(GridResourceKind.item(), 1, 1, false, false,
-                    new UnifiedGridEntry(1, Integer.MAX_VALUE, false, null, null, null, null)));
+                    new UnifiedGridEntry(1, largeAmount, false, null, null, null, null)));
             assertSame(item, f.view.get(f.stored));
             assertSame(ordered, f.view.getStacks());
             assertEquals(Integer.MAX_VALUE, item.getQuantity());
+            assertInstanceOf(LongItemGridStack.class, item);
+            assertEquals(largeAmount, ((LongItemGridStack) item).getLongQuantity());
+            assertEquals(String.format("%,d", largeAmount), item.getFormattedFullQuantity());
             assertEquals(1, f.view.row(item).serial());
             f.view.cycleFilter();
             assertEquals(1, f.view.getStacks().size());

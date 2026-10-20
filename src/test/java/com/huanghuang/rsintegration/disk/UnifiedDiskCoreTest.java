@@ -2,8 +2,8 @@ package com.huanghuang.rsintegration.disk;
 
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.ResourceTable;
-import com.huanghuang.rsintegration.disk.core.SaturatedTree;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -110,15 +110,17 @@ class UnifiedDiskCoreTest extends BootstrapTest {
         assertNotEquals(plain, FrozenKey.fluid(water));
     }
 
-    @Test void intLimitsSimulationAndSaturationRecovery() {
+    @Test void longSlotsAndRsIntDisplaySaturationRecovery() {
         UnifiedDiskCore core = core(2);
         FrozenKey stone = variant(1), other = variant(2), third = variant(3);
         assertEquals(Integer.MAX_VALUE, core.insert(stone, Integer.MAX_VALUE, false));
         assertEquals(0, core.items.size()); assertEquals(0, core.items.revision()); assertEquals(0, core.payloadBytes());
         core.insert(stone, Integer.MAX_VALUE, true); core.insert(other, 20, true);
         assertEquals(Integer.MAX_VALUE, core.items.total());
-        assertEquals(0, core.insert(stone, 10, true)); assertEquals(0, core.insert(third, 1, true));
-        core.extract(FrozenKey.Kind.ITEM, core.items.exactSlot(stone), Integer.MAX_VALUE, true);
+        assertEquals(10, core.insert(stone, 10, true)); assertEquals(0, core.insert(third, 1, true));
+        assertEquals(Integer.MAX_VALUE + 10L, core.items.amount(stone));
+        assertEquals(Integer.MAX_VALUE + 30L, core.items.displayTotal());
+        core.extract(FrozenKey.Kind.ITEM, core.items.exactSlot(stone), Long.MAX_VALUE, true);
         assertEquals(20, core.items.total()); assertEquals(1, core.items.size());
         assertEquals(1, core.insert(third, 1, true));
         assertEquals(21, core.items.total());
@@ -164,27 +166,30 @@ class UnifiedDiskCoreTest extends BootstrapTest {
 
     @Test void randomOperationsMatchReferenceModel() {
         UnifiedDiskCore core = core(128);
-        Map<FrozenKey, Integer> reference = new HashMap<>();
+        Map<FrozenKey, Long> reference = new HashMap<>();
         FrozenKey[] keys = new FrozenKey[64]; for (int i = 0; i < keys.length; i++) keys[i] = variant(i);
         Random random = new Random(7102026);
         for (int step = 0; step < 20000; step++) {
             FrozenKey key = keys[random.nextInt(keys.length)];
-            int amount = random.nextBoolean() ? random.nextInt(500) + 1 : Integer.MAX_VALUE;
-            int before = reference.getOrDefault(key, 0);
+            long amount = random.nextBoolean() ? random.nextInt(500) + 1L
+                    : Integer.MAX_VALUE + 1L + random.nextInt(1_000_000);
+            long before = reference.getOrDefault(key, 0L);
             boolean perform = random.nextInt(5) != 0;
             if (random.nextBoolean()) {
-                int expected = Math.min(amount, Integer.MAX_VALUE - before);
+                long expected = Math.min(amount, Long.MAX_VALUE - before);
                 assertEquals(expected, core.insert(key, amount, perform));
                 if (perform && expected > 0) reference.put(key, before + expected);
             } else {
-                int expected = Math.min(amount, before);
+                long expected = Math.min(amount, before);
                 assertEquals(expected, core.extract(FrozenKey.Kind.ITEM, core.items.exactSlot(key), amount, perform));
                 if (perform) { if (before == expected) reference.remove(key); else reference.put(key, before - expected); }
             }
             assertEquals(reference.size(), core.items.size());
-            int total = 0; for (int value : reference.values()) total = SaturatedTree.add(total, value);
-            assertEquals(total, core.items.total()); assertEquals(reference.getOrDefault(key, 0), core.items.amount(key));
-            assertEquals(reference.values().stream().mapToLong(Integer::longValue).sum(), core.items.displayTotal());
+            long total = 0L;
+            for (long value : reference.values()) total = SaturatingLongMath.add(total, value);
+            assertEquals(SaturatingLongMath.clampToInt(total), core.items.total());
+            assertEquals(reference.getOrDefault(key, 0L), core.items.amount(key));
+            assertEquals(total, core.items.displayTotal());
         }
     }
 

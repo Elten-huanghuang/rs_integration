@@ -126,19 +126,19 @@ public final class UnifiedDiskCore {
         }
     }
 
-    public int insert(FrozenKey key, int amount, boolean perform) {
+    public long insert(FrozenKey key, long amount, boolean perform) {
         checkThread();
         if (!key.stored()) throw new IllegalArgumentException("查询身份不能作为库存模板");
         ResourceTable table = table(key.kind());
         int slot = table.exactSlot(key);
         boolean newKey = slot < 0;
         if (newKey && (key.payloadBytes() > limits.entryBytes || key.payloadBytes() > limits.payloadBytes - payloadBytes)) return 0;
-        int accepted = table.insert(key, slot, amount, perform);
+        long accepted = table.insert(key, slot, amount, perform);
         if (perform && accepted > 0 && newKey) payloadBytes += key.payloadBytes();
         return accepted;
     }
 
-    public int insertItem(ItemStack source, int amount, boolean perform) {
+    public long insertItem(ItemStack source, long amount, boolean perform) {
         checkThread();
         if (amount <= 0 || source.isEmpty()) return 0;
         source = ItemStackUtils.normalizeEmptyTag(source);
@@ -153,7 +153,7 @@ public final class UnifiedDiskCore {
         return insert(query.freezeItem(source), amount, perform);
     }
 
-    public int insertFluid(FluidStack source, int amount, boolean perform) {
+    public long insertFluid(FluidStack source, long amount, boolean perform) {
         checkThread();
         if (amount <= 0 || source.isEmpty()) return 0;
         if (source.getTag() == null) {
@@ -167,12 +167,12 @@ public final class UnifiedDiskCore {
         return insert(query.freezeFluid(source), amount, perform);
     }
 
-    public int extract(FrozenKey.Kind kind, int slot, int amount, boolean perform) {
+    public long extract(FrozenKey.Kind kind, int slot, long amount, boolean perform) {
         checkThread();
         if (slot < 0) return 0;
         ResourceTable table = table(kind);
         FrozenKey key = table.key(slot);
-        int taken = table.extract(slot, amount, perform);
+        long taken = table.extract(slot, amount, perform);
         if (perform && taken > 0 && table.key(slot) == null) payloadBytes -= key.payloadBytes();
         return taken;
     }

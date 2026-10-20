@@ -36,11 +36,11 @@ class UnifiedDiskDuplicateRepairTest extends BootstrapTest {
     private record Fixture(DiskFileStore files, UnifiedDiskCore core, DiskFileStore.Saved saved,
                            FrozenKey duplicate) {}
 
-    private Fixture duplicateDisk(int firstAmount, int secondAmount) throws Exception {
+    private Fixture duplicateDisk(long firstAmount, long secondAmount) throws Exception {
         return duplicateDisk(root, firstAmount, secondAmount);
     }
 
-    private Fixture duplicateDisk(Path filesRoot, int firstAmount, int secondAmount) throws Exception {
+    private Fixture duplicateDisk(Path filesRoot, long firstAmount, long secondAmount) throws Exception {
         DiskFileStore files = new DiskFileStore(filesRoot);
         UUID worldId = files.worldIdentity();
         UnifiedDiskCore core = new UnifiedDiskCore(worldId, UUID.randomUUID(), UUID.randomUUID(),
@@ -93,7 +93,7 @@ class UnifiedDiskDuplicateRepairTest extends BootstrapTest {
 
     @Test
     void unsafeDuplicateOverflowStillFailsWithoutChangingCheckpoint() throws Exception {
-        Fixture fixture = duplicateDisk(Integer.MAX_VALUE, 1);
+        Fixture fixture = duplicateDisk(Long.MAX_VALUE, 1);
         Path manifest = root.resolve(fixture.core.diskId.toString()).resolve("manifest.bin");
         byte[] original = Files.readAllBytes(manifest);
 

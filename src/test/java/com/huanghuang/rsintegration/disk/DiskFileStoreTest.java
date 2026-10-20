@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -234,6 +236,36 @@ class DiskFileStoreTest extends BootstrapTest {
         assertEquals(0, changed.keySegmentsWritten()); assertEquals(1, changed.amountPagesWritten());
         assertEquals(saved.manifest().items().get(0).keys(), changed.manifest().items().get(0).keys());
         assertEquals(Integer.MAX_VALUE - 3, files.load(core.worldId, core.diskId).items.amount(stone));
+    }
+
+    @Test void bothTablesRoundTripAmountsAboveIntAndReadLegacyAmountPages() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UnifiedDiskCore core = UnifiedDiskCoreTest.core(1024);
+        FrozenKey stone = FrozenKey.item(new ItemStack(Items.STONE));
+        FrozenKey water = FrozenKey.fluid(new FluidStack(Fluids.WATER, 1));
+        long itemAmount = Integer.MAX_VALUE + 123L;
+        long fluidAmount = Integer.MAX_VALUE + 456L;
+        core.insert(stone, itemAmount, true);
+        core.insert(water, fluidAmount, true);
+
+        files.save(Snapshot.freeze(core), null);
+        UnifiedDiskCore loaded = files.load(core.worldId, core.diskId);
+
+        assertEquals(itemAmount, loaded.items.amount(stone));
+        assertEquals(fluidAmount, loaded.fluids.amount(water));
+
+        ByteArrayOutputStream legacy = new ByteArrayOutputStream();
+        ByteArrayOutputStream modern = new ByteArrayOutputStream();
+        try (DataOutputStream oldOutput = new DataOutputStream(legacy);
+             DataOutputStream newOutput = new DataOutputStream(modern)) {
+            for (int index = 0; index < ResourceTable.PAGE_SIZE; index++) {
+                oldOutput.writeInt(index + 1);
+                newOutput.writeLong(Integer.MAX_VALUE + (long) index + 1L);
+            }
+        }
+        assertEquals(1L, DiskFileStore.readAmounts(legacy.toByteArray())[0]);
+        assertEquals(Integer.MAX_VALUE + 1L,
+                DiskFileStore.readAmounts(modern.toByteArray())[0]);
     }
 
     @Test void failedManifestCommitKeepsBothOldTables() throws Exception {

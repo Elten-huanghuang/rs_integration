@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.disk.rs.DiskManipulatorBudget;
@@ -142,12 +143,12 @@ public abstract class DiskManipulatorThroughputMixin {
             int position = session.livePosition;
             int slot = table.liveSlot(position);
             FrozenKey key = table.key(slot);
-            int amount = table.amount(slot);
+            long amount = table.amount(slot);
             if (key == null || amount <= 0) {
                 session.livePosition++;
                 return Step.SKIP;
             }
-            int request = Math.min(amount, maxItems);
+            int request = Math.min(SaturatingLongMath.clampToInt(amount), maxItems);
             ItemStack extracted = disk.extract(key.itemStack(request), request, compare, Action.PERFORM);
             if (extracted.isEmpty()) {
                 session.livePosition++;
@@ -319,12 +320,12 @@ public abstract class DiskManipulatorThroughputMixin {
             int position = session.livePosition;
             int slot = table.liveSlot(position);
             FrozenKey key = table.key(slot);
-            int amount = table.amount(slot);
+            long amount = table.amount(slot);
             if (key == null || amount <= 0) {
                 session.livePosition++;
                 return Step.SKIP;
             }
-            int request = Math.min(amount, maxItems);
+            int request = Math.min(SaturatingLongMath.clampToInt(amount), maxItems);
             FluidStack extracted = disk.extract(key.fluidStack(request), request, compare, Action.PERFORM);
             if (extracted.isEmpty()) {
                 session.livePosition++;

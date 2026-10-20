@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
@@ -92,6 +94,11 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     }
 
     @Override
+    public long exactStoredAmount(ItemStack stack, long nativeAmount) {
+        return UnifiedDiskAmountResolver.itemAmount(network, stack, nativeAmount);
+    }
+
+    @Override
     public Optional<StorageItemSubscription> subscribeItemChanges(StorageItemChangeListener listener) {
         Objects.requireNonNull(listener, "listener");
         requireAvailable();
@@ -117,7 +124,10 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
                             var entry = list.getEntry(changed, IComparer.COMPARE_NBT);
                             cached = entry == null ? null : entry.getStack();
                         }
-                        if (cached != null && !cached.isEmpty()) absolute = Math.max(0, cached.getCount());
+                        if (cached != null && !cached.isEmpty()) {
+                            absolute = exactStoredAmount(cached,
+                                    SaturatingLongMath.clampToInt(cached.getCount()));
+                        }
                     }
                     listener.onChanged(changed.copyWithCount(1), absolute);
                 } catch (RuntimeException | LinkageError failure) {

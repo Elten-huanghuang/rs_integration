@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.disk.rs;
 
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
@@ -49,7 +50,8 @@ public final class UnifiedBoundDisk<T> implements IStorageDisk<T> {
     @Override public Collection<T> getStacks() {
         if (!ready()) return List.of();
         List<T> result = new ArrayList<>(table().size());
-        table().forEach((key, amount) -> result.add(stack(key, amount)));
+        table().forEach((key, amount) -> result.add(
+                stack(key, SaturatingLongMath.clampToInt(amount))));
         return result;
     }
 
@@ -58,13 +60,13 @@ public final class UnifiedBoundDisk<T> implements IStorageDisk<T> {
         if (!ready() || getAccessType() == AccessType.EXTRACT || amount(source) <= 0
                 || kind == FrozenKey.Kind.ITEM && ((ItemStack) source).getItem() instanceof UnifiedDiskItem) return copy(source, size);
         if (kind == FrozenKey.Kind.ITEM) source = cast(ItemStackUtils.normalizeEmptyTag((ItemStack) source));
-        int accepted;
+        long accepted;
         try { accepted = kind == FrozenKey.Kind.ITEM
                 ? core.insertItem((ItemStack) source, size, action == Action.PERFORM)
                 : core.insertFluid((FluidStack) source, size, action == Action.PERFORM); }
         catch (IllegalArgumentException e) { return copy(source, size); }
         if (accepted > 0 && action == Action.PERFORM && listener != null) listener.onChanged();
-        return copy(source, size - accepted);
+        return copy(source, Math.toIntExact(size - accepted));
     }
 
     @Override public T extract(T source, int size, int flags, Action action) {
@@ -83,7 +85,8 @@ public final class UnifiedBoundDisk<T> implements IStorageDisk<T> {
         }
         if (slot < 0) return empty();
         FrozenKey key = table().key(slot);
-        int taken = core.extract(kind, slot, size, action == Action.PERFORM);
+        int taken = Math.toIntExact(core.extract(
+                kind, slot, size, action == Action.PERFORM));
         if (taken > 0 && action == Action.PERFORM && listener != null) listener.onChanged();
         return stack(key, taken);
     }
