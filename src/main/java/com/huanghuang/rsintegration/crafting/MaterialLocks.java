@@ -75,7 +75,7 @@ public final class MaterialLocks {
                 narrowed.add(spec);
             } else {
                 narrowed.add(new IngredientSpec(narrow(recipeId, spec.ingredient(), locks),
-                        spec.count(), spec.role()));
+                        spec.count(), spec.consumption()));
             }
         }
         return List.copyOf(narrowed);

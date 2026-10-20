@@ -44,10 +44,9 @@ final class MaterialReservationPlanner {
         List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
-            boolean reusable = i < scopes.size()
-                    && scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE;
-            int count = reusable ? spec.count() : StepExecutor.mulCount(spec.count(), multiplier);
-            scaledSpecs.add(new IngredientSpec(spec.ingredient(), count, spec.role()));
+            int count = CraftPacketUtils.requiredCount(spec, multiplier);
+            scaledSpecs.add(new IngredientSpec(
+                    spec.ingredient(), count, spec.consumption()));
         }
         return List.copyOf(scaledSpecs);
     }

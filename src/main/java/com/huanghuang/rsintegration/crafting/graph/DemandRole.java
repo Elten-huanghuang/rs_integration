@@ -4,5 +4,7 @@ public enum DemandRole {
     CONSUMED,
     CATALYST,
     TRANSFORMED,
-    CONTAINER_RETURNING
+    CONTAINER_RETURNING,
+    FUEL,
+    DURABILITY
 }

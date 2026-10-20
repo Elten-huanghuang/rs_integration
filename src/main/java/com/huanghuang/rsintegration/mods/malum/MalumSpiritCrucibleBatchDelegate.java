@@ -432,10 +432,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
             if (spec == null || spec.isEmpty()) continue;
-            boolean catalyst = i == 0 && spec.role() == DemandRole.CATALYST;
+            boolean primarySlot = i == 0;
+            boolean reusable = primarySlot && spec.consumption().reusableWithinWorkerBatch();
             entries.add(new MaterialPlan.Entry(
-                    catalyst ? CATALYST_ENTRY_ID : spiritEntryId(Math.max(0, i - 1)),
-                    spec, MaterialPlan.Allocation.GRAPH, catalyst, i));
+                    primarySlot ? CATALYST_ENTRY_ID : spiritEntryId(i - 1),
+                    spec, MaterialPlan.Allocation.GRAPH, reusable, i));
         }
         return new MaterialPlan(entries);
     }
@@ -558,7 +559,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (specs == null || specs.isEmpty()) return List.of();
         List<IBatchDelegate.MaterialReservationScope> scopes =
                 new ArrayList<>(specs.size());
-        scopes.add(specs.get(0).role() == DemandRole.CATALYST
+        scopes.add(specs.get(0).consumption().reusableWithinWorkerBatch()
                 ? IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE
                 : IBatchDelegate.MaterialReservationScope.PER_OPERATION);
         for (int i = 1; i < specs.size(); i++) {

@@ -102,7 +102,10 @@ public record PlanStep(
     public long totalInputCount(int index, long executions) {
         if (index < 0 || index >= inputs.size()) return 0L;
         int count = Math.max(0, inputs.get(index).getCount());
-        if (inputRole(index) == DemandRole.CATALYST) return count;
+        DemandRole role = inputRole(index);
+        if (role == DemandRole.CATALYST
+                || role == DemandRole.FUEL
+                || role == DemandRole.DURABILITY) return count;
         if (isSelfAmplifying() && MaterialMatcher.equivalentRuntimeFragment(inputs.get(index), output)) {
             return count;
         }
@@ -112,7 +115,10 @@ public record PlanStep(
     private boolean isSelfAmplifying() {
         long selfConsumed = 0L;
         for (int i = 0; i < inputs.size(); i++) {
-            if (inputRole(i) == DemandRole.CATALYST) continue;
+            DemandRole role = inputRole(i);
+            if (role == DemandRole.CATALYST
+                    || role == DemandRole.FUEL
+                    || role == DemandRole.DURABILITY) continue;
             ItemStack input = inputs.get(i);
             if (MaterialMatcher.equivalentRuntimeFragment(input, output)) selfConsumed += input.getCount();
         }

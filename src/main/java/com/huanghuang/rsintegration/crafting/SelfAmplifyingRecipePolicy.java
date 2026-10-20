@@ -48,7 +48,8 @@ public final class SelfAmplifyingRecipePolicy {
                     ? spec : excludeNonProductiveSelfCandidate(spec, output);
             int count = amplification && isConsumedSelfInput(spec, output)
                     ? spec.count() : CraftPacketUtils.requiredCount(spec, multiplier);
-            scaled.add(new IngredientSpec(effective.ingredient(), count, spec.role()));
+            scaled.add(new IngredientSpec(
+                    effective.ingredient(), count, spec.consumption()));
         }
         return List.copyOf(scaled);
     }
@@ -73,7 +74,7 @@ public final class SelfAmplifyingRecipePolicy {
         if (filtered.isEmpty() || filtered.size() == candidates.length) return spec;
         return new IngredientSpec(
                 Ingredient.of(filtered.stream()),
-                spec.count(), spec.role());
+                spec.count(), spec.consumption());
     }
 
     public static boolean isSelfAmplifying(RecipeNode recipe) {

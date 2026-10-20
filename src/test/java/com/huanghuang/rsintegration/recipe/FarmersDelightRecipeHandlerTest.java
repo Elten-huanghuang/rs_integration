@@ -52,14 +52,14 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
     }
 
     @Test
-    void cuttingBoardTreatsInputAsConsumedAndToolAsReusableCatalyst() {
+    void cuttingBoardTreatsInputAsConsumedAndToolAsDurabilityState() {
         List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
                 Ingredient.of(Items.CARROT), Ingredient.of(Items.IRON_SWORD));
 
         assertEquals(2, specs.size());
         assertEquals(DemandRole.CONSUMED, specs.get(0).role());
         assertTrue(specs.get(0).ingredient().test(new ItemStack(Items.CARROT)));
-        assertEquals(DemandRole.CATALYST, specs.get(1).role());
+        assertEquals(DemandRole.DURABILITY, specs.get(1).role());
         assertTrue(specs.get(1).ingredient().test(new ItemStack(Items.IRON_SWORD)));
     }
 

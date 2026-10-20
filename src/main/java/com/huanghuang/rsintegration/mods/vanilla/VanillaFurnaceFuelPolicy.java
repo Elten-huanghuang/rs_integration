@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.consumption.FuelMath;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -95,7 +96,8 @@ public final class VanillaFurnaceFuelPolicy {
     public static int requiredAmount(int requiredTicks, int singleBurnTime) {
         if (requiredTicks <= 0) return 0;
         if (singleBurnTime <= 0) return Integer.MAX_VALUE;
-        return Math.max(1, (requiredTicks + singleBurnTime - 1) / singleBurnTime);
+        return Math.max(1, (int) Math.min(Integer.MAX_VALUE,
+                FuelMath.requiredItems(requiredTicks, singleBurnTime)));
     }
 
     public static boolean isSafeAutoFuel(ItemStack stack, RecipeType<?> recipeType) {

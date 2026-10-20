@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.biomancy;
 
+import com.huanghuang.rsintegration.crafting.consumption.FuelMath;
+
 final class BiomancyFuelPolicy {
     private BiomancyFuelPolicy() {}
 
@@ -10,6 +12,6 @@ final class BiomancyFuelPolicy {
 
     static int requiredItems(int deficit, int value, int limit) {
         if (deficit <= 0 || value <= 0 || limit <= 0) return 0;
-        return (int) Math.min(limit, ((long) deficit + value - 1) / value);
+        return FuelMath.requiredItems(deficit, value, limit);
     }
 }

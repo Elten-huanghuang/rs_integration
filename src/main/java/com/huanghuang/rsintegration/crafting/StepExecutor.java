@@ -419,7 +419,7 @@ final class StepExecutor {
                 long total = (long) existing.count() + spec.count();
                 return new IngredientSpec(existing.ingredient(),
                         total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total,
-                        existing.role());
+                        existing.consumption());
             });
         }
         return List.copyOf(merged.values());

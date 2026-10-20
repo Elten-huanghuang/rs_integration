@@ -553,7 +553,8 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
             if (pick.isEmpty()) return null;
             if (availableNow) {
                 avail.merge(MaterialKey.of(pick), -spec.count(), Integer::sum);
-                fixedSpecs.add(new IngredientSpec(concreteIngredient(pick), spec.count(), spec.role()));
+                fixedSpecs.add(new IngredientSpec(
+                        concreteIngredient(pick), spec.count(), spec.consumption()));
             } else {
                 // Preserve the requirement so CraftingResolver can recursively produce it.
                 fixedSpecs.add(spec);

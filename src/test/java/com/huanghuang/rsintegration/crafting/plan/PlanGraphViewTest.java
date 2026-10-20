@@ -90,6 +90,16 @@ class PlanGraphViewTest extends BootstrapTest {
     }
 
     @Test
+    void durabilitySlotIsNotMultipliedAgainByTheDisplayStep() {
+        PlanStep step = new PlanStep(new ResourceLocation("test", "cutting_board"),
+                new ItemStack(Items.CARROT), 64,
+                List.of(new ItemStack(Items.IRON_SWORD)), List.of(), null,
+                0, false, 0, 0, List.of(), List.of(DemandRole.DURABILITY));
+
+        assertEquals(1, step.totalInputCount());
+    }
+
+    @Test
     void packetRoundTripPreservesGraphView() {
         PlanGraphView graph = PlanGraphView.from(sharedProducerGraph());
         CompoundTag tag = new CompoundTag();

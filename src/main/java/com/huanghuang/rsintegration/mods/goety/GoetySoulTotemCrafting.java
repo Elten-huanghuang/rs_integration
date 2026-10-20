@@ -177,7 +177,7 @@ public final class GoetySoulTotemCrafting {
                     && isSoulTotemIngredient(spec.ingredient())) {
                 result.add(new IngredientSpec(
                         new ChargedSoulTotemIngredient(spec.ingredient(), minimum),
-                        spec.count(), spec.role()));
+                        spec.count(), spec.consumption()));
             } else {
                 result.add(spec);
             }

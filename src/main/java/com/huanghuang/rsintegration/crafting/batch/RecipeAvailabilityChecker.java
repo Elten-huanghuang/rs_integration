@@ -152,7 +152,8 @@ public final class RecipeAvailabilityChecker {
                 if (previous.isEmpty() || specs.isEmpty()) return null;
                 specs = new ArrayList<>(specs);
                 IngredientSpec center = specs.get(0);
-                specs.set(0, new IngredientSpec(StrictNBTIngredient.of(previous), center.count(), center.role()));
+                specs.set(0, new IngredientSpec(
+                        StrictNBTIngredient.of(previous), center.count(), center.consumption()));
             }
         }
         return specs;

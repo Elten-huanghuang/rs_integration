@@ -330,7 +330,8 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
                     ? spec.count() : (long) spec.count() * executions;
             while (total > 0L) {
                 int chunk = (int) Math.min(Integer.MAX_VALUE, total);
-                result.add(new IngredientSpec(spec.ingredient(), chunk, spec.role()));
+                result.add(new IngredientSpec(
+                        spec.ingredient(), chunk, spec.consumption()));
                 total -= chunk;
             }
         }

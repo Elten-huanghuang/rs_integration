@@ -63,7 +63,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     private int preparedExecutions = 1;
     private boolean craftDone;
     private final List<ItemStack> pendingResults = new ArrayList<>();
-    private ItemStack reusableTool = ItemStack.EMPTY;
+    private final List<ItemStack> reusableTools = new ArrayList<>();
     @Nullable
     private ResonanceStorageView resonanceToolView;
     private int resonanceToolSlot = -1;
@@ -100,7 +100,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.preparedExecutions = 1;
         this.craftDone = false;
         this.pendingResults.clear();
-        this.reusableTool = ItemStack.EMPTY;
+        this.reusableTools.clear();
         this.resonanceToolView = null;
         this.resonanceToolSlot = -1;
         this.toolReturnEndpoint = null;
@@ -114,7 +114,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
-        int limit = supportsRepeatedRolls() ? MAX_INSTANT_BATCH : 1;
+        int limit = supportsRepeatedRolls()
+                ? Math.min(MAX_INSTANT_BATCH, selectedToolOperationCapacity()) : 1;
         this.preparedExecutions = Math.min(limit, Math.max(0, remainingOperations));
         return preparedExecutions;
     }
@@ -135,7 +136,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
         if (!supportsRepeatedRolls()) return 1;
         return ParallelBatchSizing.boundedEvenShare(
-                totalOperations, workerCount, MAX_INSTANT_BATCH);
+                totalOperations, workerCount,
+                Math.min(MAX_INSTANT_BATCH, selectedToolOperationCapacity()));
     }
 
     @Override
@@ -171,7 +173,9 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.size() != 2) return List.of();
         return List.of(MaterialReservationScope.PER_OPERATION,
-                MaterialReservationScope.PER_WORKER_REUSABLE);
+                specs.get(1).consumption().reusableWithinWorkerBatch()
+                        ? MaterialReservationScope.PER_WORKER_REUSABLE
+                        : MaterialReservationScope.PER_OPERATION);
     }
 
     @Override
@@ -244,7 +248,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         pendingResults.clear();
-        reusableTool = ItemStack.EMPTY;
+        reusableTools.clear();
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = sharedLedger.storageEndpoint();
@@ -261,20 +265,25 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 || !specs.get(0).ingredient().test(materials.get(0))
                 || !specs.get(1).ingredient().test(materials.get(1))) return false;
 
-        ItemStack tool = materials.get(1).copyWithCount(1);
+        ItemStack toolTemplate = materials.get(1).copyWithCount(1);
+        int toolUnits = materials.get(1).getCount();
+        if (toolUnits <= 0 || toolTemplate.isEmpty()) return false;
         if (sharedLedger != null) {
             if (toolReturnEndpoint == null) toolReturnEndpoint = sharedLedger.storageEndpoint();
             ExtractionLedger.ResonanceReturnTarget target = sharedLedger
-                    .resonanceReturnTarget(tool, specs.get(1).ingredient());
+                    .resonanceReturnTarget(toolTemplate, specs.get(1).ingredient());
             if (target != null) {
                 resonanceToolView = target.view();
                 resonanceToolSlot = target.slot();
             }
         }
-        if (!CuttingBoardToolSemantics.canPerformOperations(tool, executions)) {
+        long availableUses = CuttingBoardToolSemantics.remainingDurability(toolTemplate);
+        if (toolTemplate.isDamageableItem()
+                && availableUses < (long) executions
+                && availableUses * toolUnits < (long) executions) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.farmersdelight.cutting_board.tool_durability_insufficient",
-                    tool.getHoverName(), CuttingBoardToolSemantics.remainingDurability(tool), executions));
+                    toolTemplate.getHoverName(), availableUses * toolUnits, executions));
             return false;
         }
 
@@ -282,9 +291,17 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             Method rollMethod = findRollResultsMethod(recipe.getClass());
             List<ItemStack> stagedResults = new ArrayList<>();
             ItemStackHandler inputInventory = new ItemStackHandler(1);
-            Component toolName = tool.getHoverName().copy();
+            Component toolName = toolTemplate.getHoverName().copy();
             boolean toolBroke = false;
+            int unusedToolUnits = toolUnits;
+            ItemStack tool = toolTemplate.copy();
+            unusedToolUnits--;
             for (int operation = 0; operation < executions; operation++) {
+                if (tool.isEmpty()) {
+                    if (unusedToolUnits <= 0) return false;
+                    tool = toolTemplate.copy();
+                    unusedToolUnits--;
+                }
                 ItemStack input = materials.get(0).copyWithCount(1);
                 inputInventory.setStackInSlot(0, input);
                 stagedResults.addAll(rollResults(recipe, rollMethod, myLevel.getRandom(),
@@ -292,7 +309,10 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 CuttingBoardToolSemantics.damageOnce(tool, myLevel.getRandom(), player);
                 toolBroke |= tool.isEmpty();
             }
-            if (!tool.isEmpty()) reusableTool = tool.copy();
+            if (!tool.isEmpty()) reusableTools.add(tool.copy());
+            if (unusedToolUnits > 0) {
+                reusableTools.add(toolTemplate.copyWithCount(unusedToolUnits));
+            }
             pendingResults.addAll(stagedResults);
             craftDone = true;
             if (toolBroke) {
@@ -326,20 +346,24 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
-        if (reusableTool.isEmpty()) return;
-        ItemStack leftover = reusableTool.copy();
-        if (resonanceToolView != null && resonanceToolSlot >= 0) {
-            leftover = resonanceToolView.insertView(
-                    resonanceToolSlot, leftover, leftover.getCount(), false);
-            resonanceToolView.markDirty(player);
+        if (reusableTools.isEmpty()) return;
+        boolean resonanceAvailable = resonanceToolView != null && resonanceToolSlot >= 0;
+        for (ItemStack stored : List.copyOf(reusableTools)) {
+            ItemStack leftover = stored.copy();
+            if (resonanceAvailable) {
+                leftover = resonanceToolView.insertView(
+                        resonanceToolSlot, leftover, leftover.getCount(), false);
+                resonanceToolView.markDirty(player);
+                resonanceAvailable = false;
+            }
+            CraftStorageEndpoint endpoint = toolReturnEndpoint;
+            if (!leftover.isEmpty() && endpoint != null) {
+                leftover = endpoint.insert(player, leftover, false)
+                        .remainder().orElse(ItemStack.EMPTY);
+            }
+            if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
         }
-        CraftStorageEndpoint endpoint = toolReturnEndpoint;
-        if (!leftover.isEmpty() && endpoint != null) {
-            leftover = endpoint.insert(player, leftover, false)
-                    .remainder().orElse(ItemStack.EMPTY);
-        }
-        if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
-        reusableTool = ItemStack.EMPTY;
+        reusableTools.clear();
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
@@ -360,7 +384,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         // Execution is staged in memory. On failure the ledger refunds the
         // original inputs, so unpublished staged outputs must be discarded.
         pendingResults.clear();
-        reusableTool = ItemStack.EMPTY;
+        reusableTools.clear();
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
@@ -418,7 +442,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
             for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
                 ItemStack stack = stored.stack();
-                if (!stack.isEmpty() && IngredientMatcher.test(toolIngredient, stack)) {
+                if (!stack.isEmpty() && IngredientMatcher.test(toolIngredient, stack)
+                        && CuttingBoardToolSemantics.remainingDurability(stack) > 0) {
                     return new ToolSelection(stack.copyWithCount(1), true);
                 }
             }
@@ -427,7 +452,10 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         if (snapshot == null) return null;
         for (var stored : snapshot.match(toolIngredient).items()) {
             ItemStack stack = stored.stack();
-            if (!stack.isEmpty()) return new ToolSelection(stack.copyWithCount(1), false);
+            if (!stack.isEmpty()
+                    && CuttingBoardToolSemantics.remainingDurability(stack) > 0) {
+                return new ToolSelection(stack.copyWithCount(1), false);
+            }
         }
         return null;
     }
@@ -437,8 +465,16 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.size() != 2) return -1;
         int executions = Math.max(1, preparedExecutions);
         if (materials.get(0).isEmpty() || materials.get(1).isEmpty()) return -1;
-        if (materials.get(0).getCount() != executions || materials.get(1).getCount() != 1) return -1;
+        if (materials.get(0).getCount() != executions || materials.get(1).getCount() <= 0) return -1;
         return executions;
+    }
+
+    private int selectedToolOperationCapacity() {
+        if (player == null || recipe == null) return 1;
+        ToolSelection selection = selectTool(player, recipe, storageEndpoint());
+        if (selection == null) return 1;
+        int remaining = CuttingBoardToolSemantics.remainingDurability(selection.stack());
+        return Math.max(1, Math.min(MAX_INSTANT_BATCH, remaining));
     }
 
     private static boolean isBoard(BlockEntity be) {

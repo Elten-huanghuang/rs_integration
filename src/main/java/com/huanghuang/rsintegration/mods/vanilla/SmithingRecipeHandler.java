@@ -113,7 +113,7 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         List<IngredientSpec> exact = new ArrayList<>(specs);
         IngredientSpec original = exact.get(1);
         exact.set(1, new IngredientSpec(StrictNBTIngredient.of(base.copyWithCount(1)),
-                original.count(), original.role()));
+                original.count(), original.consumption()));
         return List.copyOf(exact);
     }
 

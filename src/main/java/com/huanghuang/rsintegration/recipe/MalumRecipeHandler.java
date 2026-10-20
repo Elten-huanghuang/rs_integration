@@ -4,6 +4,7 @@ import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
@@ -145,10 +146,14 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
                         Ingredient ing = (Ingredient) ingField.get(iwc);
                         int count = countField.getInt(iwc);
                         if (ing != null && count > 0) result.add(new IngredientSpec(ing, count,
-                                focusingRecipe ? focusingInputRole(recipe, ing) : DemandRole.CONSUMED));
+                                focusingRecipe
+                                        ? focusingInputConsumption(recipe, ing)
+                                        : InputConsumption.consumed()));
                     } else if (iwc instanceof Ingredient plain && !plain.isEmpty()) {
                         result.add(new IngredientSpec(plain, 1,
-                                focusingRecipe ? focusingInputRole(recipe, plain) : DemandRole.CONSUMED));
+                                focusingRecipe
+                                        ? focusingInputConsumption(recipe, plain)
+                                        : InputConsumption.consumed()));
                     }
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
             });
@@ -196,18 +201,25 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
      * multi-use tools remain installed and reusable by the physical worker.
      */
     public static DemandRole focusingInputRole(Object recipe, Ingredient input) {
+        return focusingInputConsumption(recipe, input).demandRole();
+    }
+
+    public static InputConsumption focusingInputConsumption(Object recipe, Ingredient input) {
         int durabilityCost = focusingDurabilityCost(recipe);
-        if (durabilityCost <= 0) return DemandRole.CATALYST;
+        if (durabilityCost <= 0) return InputConsumption.catalyst();
 
         ItemStack[] candidates = input == null ? new ItemStack[0] : input.getItems();
-        if (candidates.length == 0) return DemandRole.CATALYST;
+        if (candidates.length == 0) return InputConsumption.catalyst();
+        boolean sawDamageable = false;
         for (ItemStack candidate : candidates) {
-            if (candidate != null && !candidate.isEmpty() && candidate.isDamageableItem()
-                    && durabilityCost >= candidate.getMaxDamage() - candidate.getDamageValue()) {
-                return DemandRole.CONTAINER_RETURNING;
+            if (candidate == null || candidate.isEmpty() || !candidate.isDamageableItem()) {
+                continue;
             }
+            sawDamageable = true;
         }
-        return DemandRole.CATALYST;
+        return sawDamageable
+                ? InputConsumption.durability(durabilityCost)
+                : InputConsumption.catalyst();
     }
 
     private static int focusingDurabilityCost(Object recipe) {

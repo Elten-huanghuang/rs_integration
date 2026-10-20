@@ -3216,7 +3216,8 @@ public final class GenericCraftPacket {
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
             scaled.add(new IngredientSpec(spec.ingredient(),
-                    CraftPacketUtils.requiredCount(spec, executions), spec.role()));
+                    CraftPacketUtils.requiredCount(spec, executions),
+                    spec.consumption()));
         }
         return List.copyOf(scaled);
     }
@@ -3231,7 +3232,7 @@ public final class GenericCraftPacket {
             if (spec.isEmpty()) continue;
             scaled.add(new IngredientSpec(spec.ingredient(),
                     handler.requiredIngredientCount(recipe, spec, inputIndex++, executions),
-                    spec.role()));
+                    spec.consumption()));
         }
         return List.copyOf(scaled);
     }
@@ -3259,7 +3260,7 @@ public final class GenericCraftPacket {
             adjusted.add(handlerCount == ordinaryCount
                     ? terminalSpec
                     : new IngredientSpec(terminalSpec.ingredient(), handlerCount,
-                            terminalSpec.role()));
+                            terminalSpec.consumption()));
         }
         return List.copyOf(adjusted);
     }

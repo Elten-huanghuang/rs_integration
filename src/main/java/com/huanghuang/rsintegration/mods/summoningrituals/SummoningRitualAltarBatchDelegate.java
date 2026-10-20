@@ -529,7 +529,8 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         for (int index = 0; index < requested.size(); index++) {
             IngredientSpec spec = requested.get(index);
             if (spec != null && !spec.isEmpty() && remaining[index] > 0) {
-                missing.add(new IngredientSpec(spec.ingredient(), remaining[index], spec.role()));
+                missing.add(new IngredientSpec(
+                        spec.ingredient(), remaining[index], spec.consumption()));
             }
         }
         return List.copyOf(missing);

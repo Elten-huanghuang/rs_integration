@@ -155,7 +155,9 @@ public record PlanGraphView(
         public InputView { display = display.copyWithCount(1); }
 
         private long perExecutionQuantity(int executions) {
-            if (roleOrdinal == DemandRole.CATALYST.ordinal()) return quantity;
+            if (roleOrdinal == DemandRole.CATALYST.ordinal()
+                    || roleOrdinal == DemandRole.FUEL.ordinal()
+                    || roleOrdinal == DemandRole.DURABILITY.ordinal()) return quantity;
             return Math.max(1L, SaturatingLongMath.ceilDiv(quantity, executions));
         }
 

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.recipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -176,7 +177,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         if (input == null || input.isEmpty() || tool == null || tool.isEmpty()) return List.of();
         return List.of(
                 new IngredientSpec(input, 1, DemandRole.CONSUMED),
-                new IngredientSpec(tool, 1, DemandRole.CATALYST));
+                new IngredientSpec(tool, 1, InputConsumption.durability(1L)));
     }
 
     @Nullable
@@ -197,7 +198,9 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             List<IngredientSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
         return specs.stream()
-                .filter(spec -> !spec.isEmpty() && spec.role() != DemandRole.CATALYST)
+                .filter(spec -> !spec.isEmpty()
+                        && spec.role() != DemandRole.CATALYST
+                        && spec.role() != DemandRole.DURABILITY)
                 .toList();
     }
 

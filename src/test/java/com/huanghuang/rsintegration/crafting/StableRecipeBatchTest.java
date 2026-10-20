@@ -161,6 +161,24 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void statefulToolRemainderFallsBackToPerExecutionDamage() {
+        ResourceLocation recipeId = new ResourceLocation("test", "stateful_tool_recipe");
+        StatefulToolRecipe recipe = new StatefulToolRecipe(recipeId);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.IRON_SWORD)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.NOT_APPLICABLE, execute(
+                    fixture, recipeId, 64, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.IRON_SWORD));
+        assertEquals(0, inventory.get(0).getDamageValue());
+    }
+
+    @Test
     void acceptsExplicitlyDeclaredStableRecipeImplementations() {
         ResourceLocation recipeId = new ResourceLocation("test", "opted_in_compression");
         OptedInRecipe recipe = new OptedInRecipe(recipeId);
@@ -321,6 +339,24 @@ class StableRecipeBatchTest extends BootstrapTest {
 
         private int assembleCalls() {
             return assembleCalls;
+        }
+    }
+
+    private static final class StatefulToolRecipe extends ShapelessRecipe
+            implements StableBatchRecipe {
+        private StatefulToolRecipe(ResourceLocation id) {
+            super(id, "", CraftingBookCategory.MISC, new ItemStack(Items.STONE),
+                    NonNullList.of(Ingredient.of(Items.IRON_SWORD)));
+        }
+
+        @Override
+        public NonNullList<ItemStack> getRemainingItems(CraftingContainer container) {
+            NonNullList<ItemStack> remainders =
+                    NonNullList.withSize(container.getContainerSize(), ItemStack.EMPTY);
+            ItemStack tool = container.getItem(0).copy();
+            if (!tool.isEmpty()) tool.setDamageValue(tool.getDamageValue() + 1);
+            remainders.set(0, tool);
+            return remainders;
         }
     }
 }

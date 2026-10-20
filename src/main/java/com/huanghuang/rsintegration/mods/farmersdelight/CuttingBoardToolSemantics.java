@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.consumption.DurabilityMath;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
@@ -13,7 +14,8 @@ final class CuttingBoardToolSemantics {
     static boolean canPerformOperations(ItemStack tool, int operations) {
         if (tool == null || tool.isEmpty() || operations <= 0) return false;
         return !tool.isDamageableItem()
-                || tool.getMaxDamage() - tool.getDamageValue() >= operations;
+                || DurabilityMath.usesForRemainingDurability(
+                        remainingDurability(tool), 1L) >= operations;
     }
 
     static int remainingDurability(ItemStack tool) {

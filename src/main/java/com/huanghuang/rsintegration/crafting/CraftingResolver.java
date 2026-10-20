@@ -513,7 +513,8 @@ public final class CraftingResolver {
                 if (spec.isEmpty()) continue;
                 if (activeRoot != null) {
                     spec = new IngredientSpec(ctx.lockedIngredient(
-                            activeRoot.recipeId(), spec.ingredient()), spec.count(), spec.role());
+                            activeRoot.recipeId(), spec.ingredient()),
+                            spec.count(), spec.consumption());
                 }
                 List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
                 Ingredient resolvedIngredient = spec.ingredient();

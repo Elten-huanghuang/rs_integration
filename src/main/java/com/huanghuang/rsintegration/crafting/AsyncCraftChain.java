@@ -1250,8 +1250,10 @@ public final class AsyncCraftChain {
             if (pendingInputs == null) continue;
             for (IngredientSpec input : MaterialLocks.narrowSpecs(pending.recipeId(),
                     pendingInputs, supplementalMaterialLocks)) {
-                if (!input.isEmpty()) protectedInputs.add(new IngredientSpec(input.ingredient(),
-                        CraftPacketUtils.requiredCount(input, pending.executions()), input.role()));
+                if (!input.isEmpty()) protectedInputs.add(new IngredientSpec(
+                        input.ingredient(),
+                        CraftPacketUtils.requiredCount(input, pending.executions()),
+                        input.consumption()));
             }
         }
         Map<StackKey, Integer> usable = SupplementalMaterialPlan.afterProtecting(available, protectedInputs);
@@ -4117,7 +4119,7 @@ public final class AsyncCraftChain {
             IngredientSpec spec = specs.get(i);
             for (int worker = 0; worker < effectiveWorkers; worker++) {
                 List<IngredientSpec> one = List.of(new IngredientSpec(
-                        spec.ingredient(), spec.count(), spec.role()));
+                        spec.ingredient(), spec.count(), spec.consumption()));
                 int reusableMark = ledger.reservationMark();
                 List<ItemStack> material = preReserveStepMaterials(one, online, null, false);
                 if (material == null) {

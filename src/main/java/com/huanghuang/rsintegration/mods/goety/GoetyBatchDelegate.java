@@ -422,7 +422,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     if (specItems.length > 0 && specItems[0].getItem() == actBase) {
                         if (spec.count() > 1) {
                             specList.set(i, new IngredientSpec(
-                                    spec.ingredient(), spec.count() - 1, spec.role()));
+                                    spec.ingredient(), spec.count() - 1, spec.consumption()));
                         } else {
                             specList.remove(i);
                         }

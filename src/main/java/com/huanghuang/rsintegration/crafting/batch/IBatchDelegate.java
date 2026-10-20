@@ -9,7 +9,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nonnull;
@@ -281,7 +280,7 @@ public interface IBatchDelegate {
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return List.of();
         return specs.stream()
-                .map(spec -> spec.role() == DemandRole.CATALYST
+                .map(spec -> spec.consumption().reusableWithinWorkerBatch()
                         ? MaterialReservationScope.PER_WORKER_REUSABLE
                         : MaterialReservationScope.PER_OPERATION)
                 .toList();

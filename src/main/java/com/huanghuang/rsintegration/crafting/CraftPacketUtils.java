@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -1049,14 +1050,42 @@ public final class CraftPacketUtils {
     }
 
     public static int requiredCount(IngredientSpec spec, int executions) {
-        return spec.role() == DemandRole.CATALYST
-                ? spec.count() : mulCount(spec.count(), Math.max(1, executions));
+        return (int) Math.min(Integer.MAX_VALUE,
+                requiredCountLong(spec, Math.max(1, executions)));
     }
 
     public static long requiredCount(IngredientSpec spec, long executions) {
-        return spec.role() == DemandRole.CATALYST
-                ? spec.count()
-                : SaturatingLongMath.multiply(spec.count(), Math.max(1L, executions));
+        return requiredCountLong(spec, Math.max(1L, executions));
+    }
+
+    private static long requiredCountLong(IngredientSpec spec, long executions) {
+        return spec.consumption().requiredPhysicalAmount(
+                executions, spec.count(), capacityPerItem(spec));
+    }
+
+    /** 规划阶段对未知具体变体采用保守的最小容量。 */
+    private static long capacityPerItem(IngredientSpec spec) {
+        InputConsumption.Kind kind = spec.consumption().kind();
+        if (kind != InputConsumption.Kind.DURABILITY
+                && kind != InputConsumption.Kind.FUEL) {
+            return 1L;
+        }
+
+        long minimum = Long.MAX_VALUE;
+        ItemStack[] candidates = spec.ingredient().getItems();
+        for (ItemStack candidate : candidates) {
+            if (candidate == null || candidate.isEmpty()) continue;
+            if (kind == InputConsumption.Kind.DURABILITY) {
+                if (!candidate.isDamageableItem()) continue;
+                long remaining = Math.max(0L,
+                        (long) candidate.getMaxDamage() - candidate.getDamageValue());
+                if (remaining > 0L) minimum = Math.min(minimum, remaining);
+            } else {
+                int burnTime = ForgeHooks.getBurnTime(candidate, null);
+                if (burnTime > 0) minimum = Math.min(minimum, burnTime);
+            }
+        }
+        return minimum == Long.MAX_VALUE ? 1L : minimum;
     }
 
     public static int remainderExecutions(ItemStack remainder, List<IngredientSpec> specs,

@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
@@ -171,6 +172,19 @@ class MalumSpiritCrucibleRecipeRefreshTest extends BootstrapTest {
                 plan.entries().stream().map(MaterialPlan.Entry::reusable).toList());
         assertEquals(List.of(0, 1, 2),
                 plan.entries().stream().map(MaterialPlan.Entry::inputSlot).toList());
+    }
+
+    @Test
+    void durabilityInputKeepsThePrimarySlotAndWorkerReuseSemantics() {
+        MaterialPlan plan = MalumSpiritCrucibleBatchDelegate.materialPlanForSpecs(List.of(
+                new IngredientSpec(Ingredient.of(Items.IRON_PICKAXE), 1,
+                        InputConsumption.durability(1L)),
+                new IngredientSpec(Ingredient.of(Items.BLAZE_POWDER), 1,
+                        DemandRole.CONSUMED)));
+
+        assertEquals("malum:catalyst", plan.entries().get(0).id());
+        assertTrue(plan.entries().get(0).reusable());
+        assertEquals(DemandRole.DURABILITY, plan.entries().get(0).spec().role());
     }
 
     @Test

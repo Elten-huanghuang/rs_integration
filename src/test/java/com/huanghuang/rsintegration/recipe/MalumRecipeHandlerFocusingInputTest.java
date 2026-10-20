@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Items;
@@ -15,11 +16,12 @@ class MalumRecipeHandlerFocusingInputTest extends BootstrapTest {
     @Test
     void durabilityBearingInputIsAPerOperationReplacement() {
         Ingredient input = Ingredient.of(Items.IRON_PICKAXE);
-        DemandRole role = MalumRecipeHandler.focusingInputRole(
+        InputConsumption consumption = MalumRecipeHandler.focusingInputConsumption(
                 new FakeFocusingRecipe(60_000), input);
 
-        assertEquals(DemandRole.CONTAINER_RETURNING, role);
-        assertEquals(2, CraftPacketUtils.requiredCount(new IngredientSpec(input, 1, role), 2));
+        assertEquals(DemandRole.DURABILITY, consumption.demandRole());
+        assertEquals(2,
+                CraftPacketUtils.requiredCount(new IngredientSpec(input, 1, consumption), 2));
     }
 
     @Test
@@ -30,14 +32,15 @@ class MalumRecipeHandlerFocusingInputTest extends BootstrapTest {
     }
 
     @Test
-    void threeUseToolNeedsOnlyOneCatalystForThreeOperations() {
+    void threeUseToolNeedsOnlyOneDurabilityItemForThreeOperations() {
         Ingredient input = Ingredient.of(Items.IRON_PICKAXE);
         int maxDamage = input.getItems()[0].getMaxDamage();
-        DemandRole role = MalumRecipeHandler.focusingInputRole(
-                new FakeFocusingRecipe(Math.max(1, (maxDamage + 2) / 3)), input);
+        InputConsumption consumption = MalumRecipeHandler.focusingInputConsumption(
+                new FakeFocusingRecipe(Math.max(1, maxDamage / 3)), input);
 
-        assertEquals(DemandRole.CATALYST, role);
-        assertEquals(1, CraftPacketUtils.requiredCount(new IngredientSpec(input, 1, role), 3));
+        assertEquals(DemandRole.DURABILITY, consumption.demandRole());
+        assertEquals(1,
+                CraftPacketUtils.requiredCount(new IngredientSpec(input, 1, consumption), 3));
     }
 
     @Test

@@ -232,7 +232,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (base == null || base.isEmpty()) return null;
         Ingredient ing = base.get(0).ingredient();
         if (ing == null || ing.isEmpty()) return null;
-        return List.of(new IngredientSpec(ing, executions, base.get(0).role()));
+        return List.of(new IngredientSpec(ing, executions, base.get(0).consumption()));
     }
 
     @Override

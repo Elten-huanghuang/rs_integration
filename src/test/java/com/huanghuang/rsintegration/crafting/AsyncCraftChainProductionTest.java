@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
@@ -121,7 +122,8 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     void graphReservationScalesConsumablesButNotReusableWorkerMaterials() {
         List<IngredientSpec> scaled = AsyncCraftChain.scaleGraphSpecsForExecutions(
                 List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2),
-                        new IngredientSpec(Ingredient.of(Items.BUCKET), 1)),
+                        new IngredientSpec(Ingredient.of(Items.BUCKET), 1,
+                                InputConsumption.catalyst())),
                 List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
                         IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE),
                 3);
