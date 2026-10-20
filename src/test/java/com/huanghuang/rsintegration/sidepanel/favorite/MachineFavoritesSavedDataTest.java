@@ -5,6 +5,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,6 +92,21 @@ class MachineFavoritesSavedDataTest {
         assertTrue(data.removeAt(player, blocked.dimension(), blocked.pos()));
         assertFalse(data.isBlocked(player, blocked));
         assertEquals(java.util.List.of(favorite), data.getFavorites(player));
+    }
+
+    @Test
+    void batchBlocklistUpdatesOnlyChangedEntriesAndSavesOncePerOperation() {
+        MachineFavoritesSavedData data = new MachineFavoritesSavedData();
+        UUID player = UUID.randomUUID();
+        MachineFavoriteKey first = key(10);
+        MachineFavoriteKey second = key(11);
+        data.toggleBlocked(player, first);
+
+        assertEquals(1, data.setBlocked(player, List.of(first, second), true));
+        assertEquals(List.of(first, second), data.getBlocked(player));
+        assertEquals(0, data.setBlocked(player, List.of(first, second), true));
+        assertEquals(2, data.setBlocked(player, List.of(first, second), false));
+        assertTrue(data.getBlocked(player).isEmpty());
     }
 
     private static MachineFavoriteKey key(int index) {

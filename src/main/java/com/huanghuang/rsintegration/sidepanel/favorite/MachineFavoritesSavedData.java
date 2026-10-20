@@ -9,6 +9,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -152,6 +153,32 @@ public final class MachineFavoritesSavedData extends SavedData {
         blocked.add(key);
         setDirty();
         return ToggleResult.ADDED;
+    }
+
+    /** 批量设置自动化黑名单，只在内容变化时标脏。 */
+    public int setBlocked(UUID playerId, Collection<MachineFavoriteKey> keys,
+                          boolean shouldBlock) {
+        if (keys == null || keys.isEmpty()) return 0;
+        if (!shouldBlock) {
+            Set<MachineFavoriteKey> blocked = blockedByPlayer.get(playerId);
+            if (blocked == null) return 0;
+            int before = blocked.size();
+            blocked.removeAll(keys);
+            int changed = before - blocked.size();
+            if (changed > 0) {
+                if (blocked.isEmpty()) blockedByPlayer.remove(playerId);
+                setDirty();
+            }
+            return changed;
+        }
+
+        Set<MachineFavoriteKey> blocked = blockedByPlayer.computeIfAbsent(
+                playerId, ignored -> new LinkedHashSet<>());
+        int before = blocked.size();
+        blocked.addAll(keys);
+        int changed = blocked.size() - before;
+        if (changed > 0) setDirty();
+        return changed;
     }
 
     private boolean removeBlocked(UUID playerId, MachineFavoriteKey key) {

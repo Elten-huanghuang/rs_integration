@@ -6,11 +6,13 @@ import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
 import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
 import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
 import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockTogglePacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockBatchPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** Client-neutral machine favorite and automation-block state. */
@@ -81,6 +83,27 @@ public final class MachinePreferenceClient {
         blocked = List.copyOf(optimistic);
         RSSidePanelNetworkHandler.CHANNEL.sendToServer(
                 new MachineAutomationBlockTogglePacket(key));
+    }
+
+    /** 批量设置状态，一次网络包完成框选拉黑。 */
+    public static void requestAutomationBlocked(List<BindingInfo> infos,
+                                                boolean shouldBlock) {
+        if (infos == null || infos.isEmpty()) return;
+        LinkedHashSet<MachineFavoriteKey> updated = new LinkedHashSet<>(blocked);
+        List<MachineFavoriteKey> changed = new ArrayList<>();
+        for (BindingInfo info : infos) {
+            if (info == null) continue;
+            MachineFavoriteKey key = MachineFavoriteKey.from(info);
+            boolean present = updated.contains(key);
+            if (present == shouldBlock) continue;
+            if (shouldBlock) updated.add(key);
+            else updated.remove(key);
+            changed.add(key);
+        }
+        if (changed.isEmpty()) return;
+        blocked = List.copyOf(updated);
+        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                new MachineAutomationBlockBatchPacket(changed, shouldBlock));
     }
 
     public static void clear() {

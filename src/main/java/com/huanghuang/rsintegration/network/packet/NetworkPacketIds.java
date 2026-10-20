@@ -142,4 +142,5 @@ public final class NetworkPacketIds {
     /** 完整 PlanResponse 的业务载荷分页传输。 */
     public static final int PLAN_RESPONSE_PAGE = 155;
     public static final int BD_BINDING_SYNC_REQUEST = 156;
+    public static final int MACHINE_AUTOMATION_BLOCK_BATCH = 157;
 }

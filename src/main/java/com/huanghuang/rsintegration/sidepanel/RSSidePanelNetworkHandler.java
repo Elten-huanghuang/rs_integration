@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.sidepanel.network.MachineInsertPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoriteTogglePacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineFavoritesSyncPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockTogglePacket;
+import com.huanghuang.rsintegration.sidepanel.network.MachineAutomationBlockBatchPacket;
 import com.huanghuang.rsintegration.sidepanel.network.MachineStatusDeltaPacket;
 import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
@@ -152,6 +153,12 @@ public final class RSSidePanelNetworkHandler {
                 MachineAutomationBlockTogglePacket::encode,
                 MachineAutomationBlockTogglePacket::decode,
                 MachineAutomationBlockTogglePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.MACHINE_AUTOMATION_BLOCK_BATCH,
+                MachineAutomationBlockBatchPacket.class,
+                MachineAutomationBlockBatchPacket::encode,
+                MachineAutomationBlockBatchPacket::decode,
+                MachineAutomationBlockBatchPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.PLACEBO_REMOTE_MENU_SNAPSHOT,
                 PlaceboRemoteMenuSnapshotPacket.class,
