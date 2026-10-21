@@ -1243,8 +1243,6 @@ public final class CraftingPlanScreen extends Screen {
         int labelW = font.width(label);
         UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
         gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
-        int bookmarkActionW = bookmarkAllActionWidth(font);
-        renderBookmarkAllAction(gfx, font, rowX + rowW - bookmarkActionW, repeatRowY);
 
         // ── Button card ──
         int cardY = repeatRowY + font.lineHeight + 4;
@@ -1275,6 +1273,12 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.rounded(gfx, countPillX, countPillY, pillW, pillH,
                 pillH / 2f, 0xCC1B5E20);
         renderRepeatCountInput(gfx, font);
+        int bookmarkActionW = bookmarkAllActionWidth(font);
+        int bookmarkX = 20;
+        if (bookmarkX + bookmarkActionW >= rowX - 4) {
+            bookmarkX = Math.max(8, rowX - bookmarkActionW - 4);
+        }
+        renderBookmarkAllAction(gfx, font, bookmarkX, countPillY, countPillH);
 
         // ── Right buttons: +, +5, +10, +64 ──
         bx = pillX + pillW + innerGap - gap;
@@ -2004,33 +2008,29 @@ public final class CraftingPlanScreen extends Screen {
 
     private int bookmarkAllActionWidth(Font font) {
         if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return 0;
-        return 3 + 6 + font.width(
+        return 12 + font.width(
                 Component.translatable("rsi.plan.bookmark_all.action").getString());
     }
 
-    private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y) {
+    private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y, int height) {
         if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return;
 
         String action = Component.translatable("rsi.plan.bookmark_all.action").getString();
-        int accentW = 3;
-        int accentGap = 6;
-        int textX = x + accentW + accentGap;
+        int width = 12 + font.width(action);
         bookmarkAllActionX = x;
-        bookmarkAllActionY = y - 2;
-        bookmarkAllActionW = accentW + accentGap + font.width(action);
-        bookmarkAllActionH = font.lineHeight + 4;
+        bookmarkAllActionY = y;
+        bookmarkAllActionW = width;
+        bookmarkAllActionH = height;
         boolean hovered = mouseX >= bookmarkAllActionX
                 && mouseX < bookmarkAllActionX + bookmarkAllActionW
                 && mouseY >= bookmarkAllActionY
                 && mouseY < bookmarkAllActionY + bookmarkAllActionH;
-        gfx.fill(x, y - 2, x + accentW, y + font.lineHeight + 2,
-                hovered ? 0xFF69D98A : C_ACCENT_NEUTRAL);
-        gfx.drawString(font, action, textX, y,
+        UIRenderer.rounded(gfx, x, y, width, height, height / 2f,
+                hovered ? 0xCC338855 : 0xCC1B5E20);
+        gfx.drawString(font, action,
+                x + (width - font.width(action)) / 2,
+                y + (height - font.lineHeight) / 2,
                 hovered ? 0xFFA8E6B5 : 0xFF78B889, false);
-        if (hovered) {
-            gfx.fill(textX, y + font.lineHeight + 1,
-                    textX + font.width(action), y + font.lineHeight + 2, 0xCC78D891);
-        }
     }
 
     // ── Scrolling ─────────────────────────────────────────────────
@@ -2945,9 +2945,8 @@ public final class CraftingPlanScreen extends Screen {
                     } else if (node != null && node.hasAlternatives()) {
                         openRecipeCandidates(node);
                     } else if (node != null && node.step != null) {
-                        // No alternatives → open recipe in JEI directly.
-                        closeMaterialDropdown();
-                        openRecipeInJei(node.step.recipeId());
+                        // 单一配方也打开卡片集合，保证“仅使用库存”和偏好操作可见。
+                        openRecipeCandidates(node);
                     } else {
                         closeMaterialDropdown();
                     }
