@@ -991,13 +991,13 @@ public final class GenericCraftPacket {
             return isRecipeAvailableForPlanning(player, recipe);
         }, node -> {
             ModType type = ModType.byId(node.modTypeId());
-            if (!requiresBoundMachine(type)) return true;
+            if (!CraftExecutionPolicy.requiresBoundMachine(type)) return true;
             Recipe<?> recipe = resolve.apply(node.recipeId());
-            if (recipe == null || !requiresBoundMachine(recipe, type)) return true;
+            if (recipe == null || !CraftExecutionPolicy.requiresBoundMachine(recipe, type)) return true;
             // Keep vanilla smithing nodes in the planning graph so recursive
             // previews can show the complete upgrade chain. Execution still
             // requires a bound smithing table at the terminal entry point.
-            if (isSmithingRecipe(recipe)) return true;
+            if (CraftExecutionPolicy.isSmithingRecipe(recipe)) return true;
             return hasBindingForExecutionType(player, recipe, type);
         });
     }
@@ -1743,7 +1743,7 @@ public final class GenericCraftPacket {
         List<String> missing = new ArrayList<>();
         CraftPlanGraph graph;
         try {
-            graph = isPhysicalMachineRecipe(recipe, modType)
+            graph = CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                     ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                             specs, available, player.serverLevel(), player, storageEndpoint, missing,
                             forcedOverrides, true, compatibilityResolverBudgetMs(),
@@ -2386,7 +2386,7 @@ public final class GenericCraftPacket {
                     "rsi.goety.error.manual_single_only"));
             return;
         }
-        if (requiresBoundMachine(recipe, modType)
+        if (CraftExecutionPolicy.requiresBoundMachine(recipe, modType)
                 && !hasBindingForExecutionType(player, recipe, modType)) {
             logBindingRejection("execute-entry", player, recipe, modType, dim, pos);
             // A wrapped smithing recipe can still reach this guard if a
@@ -2395,7 +2395,7 @@ public final class GenericCraftPacket {
             // constructing the error message.
             String bindingTypeId = modType != null
                     ? modType.id()
-                    : isSmithingRecipe(recipe) ? "smithing" : "unknown";
+                    : CraftExecutionPolicy.isSmithingRecipe(recipe) ? "smithing" : "unknown";
             player.sendSystemMessage(Component.translatable(
                     "rsi.generic.error.no_bound_machine", bindingTypeId));
             return;
@@ -2482,7 +2482,7 @@ public final class GenericCraftPacket {
             effectiveDim = player.level().dimension().location();
             effectivePos = player.blockPosition();
         } else if ((effectiveDim == null || effectivePos == null)
-                && isPhysicalMachineRecipe(recipe, modType)) {
+                && CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)) {
             String reqKeyword = getMachineKeywordForRecipe(recipe);
             List<AltarBindingRegistry.BoundMachine> boundMachines = new ArrayList<>(
                     AltarBindingRegistry.getBoundMachinesForRecipe(player, modType, recipeId));
@@ -2562,7 +2562,7 @@ public final class GenericCraftPacket {
         // inputs (for example Malum void favor consuming a craftable relic).
         // The auto-crafting flag controls intermediate resolution, not whether
         // the terminal may fall through to the direct-extraction compatibility loop.
-        if (requiresTypedTerminalExecution(recipe, modType)
+        if (CraftExecutionPolicy.requiresTypedTerminalExecution(recipe, modType)
                 && effectiveDim != null && effectivePos != null
                 && modType != ModType.byId("smithing")) {
             if (modType != null) {
@@ -2645,7 +2645,7 @@ public final class GenericCraftPacket {
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph inputGraph;
                 try {
-                    inputGraph = usesPhysicalMachineInputSlots(recipe)
+                    inputGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
                             ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                                     graphSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
                                     forcedOverrides, false, compatibilityResolverBudgetMs(),
@@ -2682,7 +2682,7 @@ public final class GenericCraftPacket {
                         TerminalGraphExecutionPolicy.decide(
                                 inferMode, !graphSpecs.isEmpty(), recipeOutput,
                                 deterministicPrimary,
-                                isSelfAmplifyingRecipe(
+                                CraftExecutionPolicy.isSelfAmplifyingRecipe(
                                         recipe, player.serverLevel().registryAccess()));
                 if (graphDecision.composable()) {
                     try {
@@ -2730,8 +2730,8 @@ public final class GenericCraftPacket {
         // deep CraftTweaker graphs and reusable catalysts that the pure graph
         // intentionally cannot represent.
         if (recipe instanceof CraftingRecipe craftingRecipe
-                && !isPhysicalMachineRecipe(recipe, modType)) {
-            if (canUseDirectCraftingReservation(
+                && !CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)) {
+            if (CraftExecutionPolicy.canUseDirectCraftingReservation(
                     recipe, player.serverLevel().registryAccess())) {
                 ItemStack directOutput = ModRecipeHandlers.tryGetResultItem(
                         recipe, player.serverLevel().registryAccess());
@@ -2778,7 +2778,7 @@ public final class GenericCraftPacket {
         // network and are filtered by the resolver as usual.
         if (RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && recipe instanceof CraftingRecipe cr
-                && !isPhysicalMachineRecipe(recipe, modType)
+                && !CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                 && forcedRecipes.isEmpty() && materialLocks.isEmpty()
                 && safePreferences.isEmpty()) {
             ItemStack recipeOutput = cr.getResultItem(
@@ -2820,7 +2820,7 @@ public final class GenericCraftPacket {
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
                 boolean physicalSteps = allSteps.stream().anyMatch(
                         step -> step.modType() != ModType.GENERIC);
-                boolean selfAmplifying = isSelfAmplifyingRecipe(
+                boolean selfAmplifying = CraftExecutionPolicy.isSelfAmplifyingRecipe(
                         recipe, player.serverLevel().registryAccess());
                 if (physicalSteps && storageEndpoint == null) {
                     player.sendSystemMessage(Component.translatable(
@@ -2871,7 +2871,7 @@ public final class GenericCraftPacket {
         // execute path sees the same recipe chain the preview showed. Only for
         // CraftingRecipe (the typed resolver works with shaped/shapeless ingredients).
         if (recipe instanceof CraftingRecipe cr2
-                && !isPhysicalMachineRecipe(recipe, modType)
+                && !CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                 && RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
             PlanCache.Entry cachedExecutionPlan = findValidatedExecutionPlan(player, recipeId,
                     forcedRecipes, repeatCount, targetOutput, modType, effectiveDim, effectivePos,
@@ -2914,7 +2914,7 @@ public final class GenericCraftPacket {
                         step -> step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
                 boolean physicalSteps = planSteps.stream().anyMatch(
                         step -> step.modType() != ModType.GENERIC);
-                boolean selfAmplifying = isSelfAmplifyingRecipe(
+                boolean selfAmplifying = CraftExecutionPolicy.isSelfAmplifyingRecipe(
                         recipe, player.serverLevel().registryAccess());
                 List<ResolutionStep> execSteps2 = new ArrayList<>(planSteps);
                 ResolutionStep terminalStep = genericTerminalStep(recipeId, repeatCount);
@@ -2967,7 +2967,7 @@ public final class GenericCraftPacket {
         // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
         // Falling through to grouped extraction would consume items without
         // actually running the machine crafting.
-        if (isPhysicalMachineRecipe(recipe, modType)
+        if (CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                 && (effectiveDim == null || effectivePos == null)) {
             logBindingRejection("execute-context", player, recipe, modType,
                     effectiveDim, effectivePos);
@@ -3036,7 +3036,7 @@ public final class GenericCraftPacket {
                                         CraftingResolver.TAINT_EARTH_HEART_STEP));
                         boolean physicalSteps = interSteps.stream().anyMatch(
                                 step -> step.modType() != ModType.GENERIC);
-                        boolean selfAmplifying = isSelfAmplifyingRecipe(
+                        boolean selfAmplifying = CraftExecutionPolicy.isSelfAmplifyingRecipe(
                                 recipe, player.serverLevel().registryAccess());
                         if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
                             ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
@@ -3073,7 +3073,7 @@ public final class GenericCraftPacket {
         }
 
         if (storageEndpoint != null && recipe instanceof CraftingRecipe
-                && !isPhysicalMachineRecipe(recipe, modType)) {
+                && !CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)) {
             launchAsyncChain(player,
                     List.of(genericTerminalStep(recipeId, repeatCount)),
                     LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
@@ -3331,11 +3331,6 @@ public final class GenericCraftPacket {
                 .getKey(clicked.getItem()).toString();
         CompoundTag tag = clicked.getTag();
         return tag != null ? key + "#" + tag : key;
-    }
-
-    static boolean canUseDirectCraftingReservation(Recipe<?> recipe,
-                                                   RegistryAccess registryAccess) {
-        return !isSelfAmplifyingRecipe(recipe, registryAccess);
     }
 
     static boolean hasSelectedCraftingPlanner(boolean pure, boolean directTerminal,
@@ -3720,8 +3715,8 @@ public final class GenericCraftPacket {
             return;
         }
         ModType previewModType = resolveExecutionModType(player, recipe, dim, pos);
-        if (requiresBoundMachine(recipe, previewModType)
-                && !isSmithingRecipe(recipe)
+        if (CraftExecutionPolicy.requiresBoundMachine(recipe, previewModType)
+                && !CraftExecutionPolicy.isSmithingRecipe(recipe)
                 && !hasBindingForExecutionType(player, recipe, previewModType)) {
             logBindingRejection("preview-entry", player, recipe, previewModType, dim, pos);
             sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
@@ -4243,7 +4238,7 @@ public final class GenericCraftPacket {
 
         boolean hasFixedTerminalInputs = recipeSpecs.stream()
                 .anyMatch(spec -> spec != null && !spec.isEmpty());
-        boolean executionMachineAvailable = !requiresBoundMachine(recipe, recipeModType)
+        boolean executionMachineAvailable = !CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
                 || hasBindingForExecutionType(player, recipe, recipeModType);
         DirectMaterialAllocator.Result directPreviewAllocation =
                 executionMachineAvailable && effectiveOverrides.isEmpty()
@@ -4537,7 +4532,7 @@ public final class GenericCraftPacket {
             try {
                 CraftingResolver.ActiveRootRecipe activeRoot =
                         new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
-                planGraph = usesPhysicalMachineInputSlots(recipe)
+                planGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
                         ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
                                 recursiveRecipeSpecs, available, player.serverLevel(),
                                 player, planningEndpoint, missing, forcedOverrides, true, typedTimeoutMs,
@@ -4688,9 +4683,9 @@ public final class GenericCraftPacket {
         // duplicates never crosses depth boundaries.
         List<PlanStep> steps = new ArrayList<>();
 
-        List<PreviewStep> mergedSteps = mergePreviewSteps(resolutionSteps,
+        List<CraftPreviewSteps.PreviewStep> mergedSteps = CraftPreviewSteps.merge(resolutionSteps,
                 id -> resolveRecipe(player.serverLevel(), id), player.serverLevel().registryAccess());
-        for (PreviewStep previewStep : mergedSteps) {
+        for (CraftPreviewSteps.PreviewStep previewStep : mergedSteps) {
             ResolutionStep mergedRs = previewStep.step();
             ResourceLocation stepId = mergedRs.recipeId();
             int batches = previewStep.batches();
@@ -4829,7 +4824,7 @@ public final class GenericCraftPacket {
                     boolean runtimeAvailable = isRecipeAvailableForPlanning(player, altRecipe);
                     RSIntegrationMod.debug("[RSI-OR]   alt {}: hasMachine={} runtimeAvailable={}",
                             altId, hasMachine, runtimeAvailable);
-                    if (runtimeAvailable && (isSmithingRecipe(altRecipe) || hasMachine)) {
+                    if (runtimeAvailable && (CraftExecutionPolicy.isSmithingRecipe(altRecipe) || hasMachine)) {
                         alternatives.add(altId);
                         alternativeModTypes.add(altMod);
                     }
@@ -5034,7 +5029,7 @@ public final class GenericCraftPacket {
                     // forge ritual, spirit crucible…) that the player can't actually run.
                     // Selecting this branch performs a fresh recursive plan, so
                     // current inventory must not decide whether the button exists.
-                    if (isSmithingRecipe(e.recipe())
+                    if (CraftExecutionPolicy.isSmithingRecipe(e.recipe())
                             || AltarBindingRegistry.hasBindingForRecipe(
                                     player, e.recipe(), e.modType())) {
                         if (!isRecipeAvailableForPlanning(player, e.recipe())) continue;
@@ -5135,7 +5130,7 @@ public final class GenericCraftPacket {
                 // A self-amplifying terminal needs one seed before its first
                 // execution. Its later outputs may feed later executions, but
                 // the final output cannot erase that startup requirement.
-                if (!isSelfAmplifyingRecipe(recipe, player.serverLevel().registryAccess())) {
+                if (!CraftExecutionPolicy.isSelfAmplifyingRecipe(recipe, player.serverLevel().registryAccess())) {
                     neededCounts.merge(step.output().getItem(), -step.totalOutputCount(),
                             SaturatingLongMath::signedAdd);
                 }
@@ -5265,7 +5260,7 @@ public final class GenericCraftPacket {
             if (stepRecipe == null) continue;
             ModType stepType = step.modType() != null
                     ? step.modType() : ModType.classifyRecipe(stepRecipe);
-            if (requiresBoundMachine(stepRecipe, stepType)
+            if (CraftExecutionPolicy.requiresBoundMachine(stepRecipe, stepType)
                     && !hasBindingForExecutionType(player, stepRecipe, stepType)) {
                 missingExecutionBinding = true;
                 break;
@@ -5669,47 +5664,6 @@ public final class GenericCraftPacket {
                 });
     }
 
-    record PreviewStep(ResolutionStep step, int batches) {}
-
-    /** 两种规划器都已携带执行次数，预览必须保留这些次数才能正确抵扣中间产物。 */
-    static List<PreviewStep> mergePreviewSteps(
-            @Nullable List<ResolutionStep> steps,
-            Function<ResourceLocation, Recipe<?>> recipes, RegistryAccess access) {
-        if (steps == null) return List.of();
-        Map<String, PreviewStep> merged = new LinkedHashMap<>();
-        for (int i = 0; i < steps.size(); i++) {
-            ResolutionStep step = steps.get(i);
-            String key = step.recipeId().toString();
-            Recipe<?> recipe = recipes.apply(step.recipeId());
-            // 自增配方的各阶段依赖前一阶段产出，不能合并启动种子需求。
-            if (recipe != null && isSelfAmplifyingRecipe(recipe, access)) {
-                key += "|amplification-stage:" + i;
-            }
-            if (step.syntheticInput() != null && step.syntheticOutput() != null) {
-                key += "|" + IngredientKey.of(step.syntheticInput()).hashCode()
-                        + "|" + IngredientKey.of(step.syntheticOutput()).hashCode();
-            } else if (step.syntheticOutput() != null) {
-                key += "|state:" + step.syntheticOutput().getTag();
-            }
-            PreviewStep previous = merged.get(key);
-            int batches = step.executions();
-            if (previous != null) {
-                long combined = (long) previous.batches() + batches;
-                if (combined > Integer.MAX_VALUE) {
-                    // Wire and PlanStep counts are int-sized. Keep a follow-up segment
-                    // distinct instead of silently truncating a long batch.
-                    key += "|batch-segment:" + i;
-                    previous = null;
-                } else {
-                    batches = (int) combined;
-                }
-                if (previous != null) step = previous.step();
-            }
-            merged.put(key, new PreviewStep(step, batches));
-        }
-        return List.copyOf(merged.values());
-    }
-
     /** Sends a planner failure without discarding the exact shortage and quantity. */
     private static void sendPurePlanningFailure(
             ServerPlayer player, PureRecipePlanner.Result result,
@@ -6072,34 +6026,6 @@ public final class GenericCraftPacket {
                 .sameSpellScroll(left, right));
     }
 
-    /**
-     * Some machine recipes (notably Malum SpiritFocusingRecipe) implement
-     * CraftingRecipe for JEI/recipe-manager compatibility.  That interface
-     * does not mean they can be executed in a vanilla crafting grid.
-     */
-    static boolean isPhysicalMachineRecipe(Recipe<?> recipe, @Nullable ModType modType) {
-        return modType != null
-                && modType != ModType.GENERIC
-                && !modType.isVirtual()
-                && modType != ModType.byId("smithing");
-    }
-
-    static boolean usesPhysicalMachineInputSlots(Recipe<?> recipe) {
-        ModType type = ModType.classifyRecipe(recipe);
-        if (recipe instanceof CraftingRecipe && type == ModType.CUSTOM_GUI) return false;
-        return isPhysicalMachineRecipe(recipe, type) && recipe.getType() != null;
-    }
-
-    static boolean requiresTypedTerminalExecution(Recipe<?> recipe,
-                                                   @Nullable ModType modType) {
-        return modType != null
-                && (modType.isVirtual() || isPhysicalMachineRecipe(recipe, modType));
-    }
-
-    static boolean requiresBoundMachine(@Nullable ModType modType) {
-        return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
-    }
-
     static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                                     @Nullable ResourceLocation dim,
                                                     @Nullable BlockPos pos) {
@@ -6137,7 +6063,7 @@ public final class GenericCraftPacket {
                 phase, recipe.getId(), recipe.getClass().getName(), recipeTypeId, serializerId,
                 executionType == null ? "null" : executionType.id(),
                 recipe instanceof CraftingRecipe,
-                isPhysicalMachineRecipe(recipe, executionType),
+                CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, executionType),
                 player.getGameProfile().getName(), dim, pos);
     }
 
@@ -6145,32 +6071,6 @@ public final class GenericCraftPacket {
         return executionType != null && ModIds.ID_MD_COPPER_POT.equals(executionType.id())
                 ? MinersDelightCopperPotSupport.convertResult(output)
                 : output;
-    }
-
-    static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
-        // Config-classified custom GUI recipes can still be ordinary vanilla
-        // CraftingRecipe instances (for example a mod's helper recipe).  They
-        // must remain logical crafting; only the actual custom machine recipe
-        // needs a binding context.
-        if (recipe instanceof CraftingRecipe && modType == ModType.CUSTOM_GUI) return false;
-        if (recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)) return false;
-        return recipe instanceof SmithingTransformRecipe
-                || recipe instanceof SmithingTrimRecipe
-                || requiresBoundMachine(modType);
-    }
-
-    private static boolean isSmithingRecipe(Recipe<?> recipe) {
-        return recipe instanceof SmithingTransformRecipe || recipe instanceof SmithingTrimRecipe;
-    }
-
-    static boolean isSelfAmplifyingRecipe(Recipe<?> recipe,
-                                          RegistryAccess access) {
-        ItemStack output = RecipeIndex.tryGetResultItem(recipe, access);
-        if (output.isEmpty()) return false;
-        List<IngredientSpec> specs = recipe instanceof CraftingRecipe crafting
-                ? CraftPacketUtils.extractCraftingIngredientSpecs(crafting)
-                : CraftPacketUtils.extractIngredientSpecs(recipe);
-        return specs != null && SelfAmplifyingRecipePolicy.isSelfAmplifying(specs, output);
     }
 
     static boolean matchesAsyncRequest(PlanningSnapshot snapshot, UUID playerId,

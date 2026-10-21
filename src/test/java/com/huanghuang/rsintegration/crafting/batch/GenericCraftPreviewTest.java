@@ -85,9 +85,9 @@ class GenericCraftPreviewTest extends BootstrapTest {
         assertTrue(planned.feasible(), planned.toString());
         List<ResolutionStep> projected = PurePlanAdapter.toResolutionSteps(planned, graph);
         Map<ResourceLocation, Recipe<?>> recipes = Map.of(producerId, producer, fill.getId(), fill);
-        var preview = GenericCraftPacket.mergePreviewSteps(projected, recipes::get, RegistryAccess.EMPTY);
+        var preview = CraftPreviewSteps.merge(projected, recipes::get, RegistryAccess.EMPTY);
         assertEquals(production > 0 ? List.of(production, executions) : List.of(executions),
-                preview.stream().map(GenericCraftPacket.PreviewStep::batches).toList());
+                preview.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
 
         List<PlanStep> steps = new ArrayList<>();
         Map<Item, Long> needed = new LinkedHashMap<>();
@@ -163,11 +163,11 @@ class GenericCraftPreviewTest extends BootstrapTest {
                         List.of(), List.of(), false, runs))
                 .toList();
 
-        var preview = GenericCraftPacket.mergePreviewSteps(stages,
+        var preview = CraftPreviewSteps.merge(stages,
                 ignored -> recipe, RegistryAccess.EMPTY);
 
         assertEquals(List.of(1, 2, 4),
-                preview.stream().map(GenericCraftPacket.PreviewStep::batches).toList());
+                preview.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
     }
 
     @Test
@@ -181,9 +181,9 @@ class GenericCraftPreviewTest extends BootstrapTest {
                 List.of(), List.of(), false, 2, null, first);
         var secondStep = new ResolutionStep(id, ModType.GENERIC, null,
                 List.of(), List.of(), false, 3, null, second);
-        var merged = GenericCraftPacket.mergePreviewSteps(List.of(firstStep, firstStep, secondStep),
+        var merged = CraftPreviewSteps.merge(List.of(firstStep, firstStep, secondStep),
                 ignored -> null, RegistryAccess.EMPTY);
-        assertEquals(List.of(4, 3), merged.stream().map(GenericCraftPacket.PreviewStep::batches).toList());
+        assertEquals(List.of(4, 3), merged.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
         assertEquals(first.getTag(), merged.get(0).step().syntheticOutput().getTag());
         assertEquals(second.getTag(), merged.get(1).step().syntheticOutput().getTag());
         assertFalse(first.getTag().equals(second.getTag()));

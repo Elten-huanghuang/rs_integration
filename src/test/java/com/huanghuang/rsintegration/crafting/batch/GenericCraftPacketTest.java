@@ -623,9 +623,9 @@ class GenericCraftPacketTest extends BootstrapTest {
                 net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
                         Ingredient.of(Items.PAPER), Ingredient.of(Items.STONE)));
 
-        assertTrue(GenericCraftPacket.isSelfAmplifyingRecipe(
+        assertTrue(CraftExecutionPolicy.isSelfAmplifyingRecipe(
                 duplicate, net.minecraft.core.RegistryAccess.EMPTY));
-        assertFalse(GenericCraftPacket.canUseDirectCraftingReservation(
+        assertFalse(CraftExecutionPolicy.canUseDirectCraftingReservation(
                 duplicate, net.minecraft.core.RegistryAccess.EMPTY));
     }
 
@@ -637,9 +637,9 @@ class GenericCraftPacketTest extends BootstrapTest {
                 net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
                         Ingredient.of(Items.SUGAR_CANE)));
 
-        assertFalse(GenericCraftPacket.isSelfAmplifyingRecipe(
+        assertFalse(CraftExecutionPolicy.isSelfAmplifyingRecipe(
                 ordinary, net.minecraft.core.RegistryAccess.EMPTY));
-        assertTrue(GenericCraftPacket.canUseDirectCraftingReservation(
+        assertTrue(CraftExecutionPolicy.canUseDirectCraftingReservation(
                 ordinary, net.minecraft.core.RegistryAccess.EMPTY));
     }
 
@@ -648,7 +648,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         MarketRecipeWrapper market = new MarketRecipeWrapper(UUID.randomUUID(),
                 new ItemStack(Items.DIAMOND), new ItemStack(Items.EMERALD));
 
-        assertFalse(GenericCraftPacket.usesPhysicalMachineInputSlots(market));
+        assertFalse(CraftExecutionPolicy.usesPhysicalMachineInputSlots(market));
     }
 
     @Test
@@ -662,8 +662,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
                         Ingredient.of(Items.EMERALD)));
 
-        assertTrue(GenericCraftPacket.requiresTypedTerminalExecution(recipe, virtual));
-        assertFalse(GenericCraftPacket.requiresTypedTerminalExecution(recipe, ModType.GENERIC));
+        assertTrue(CraftExecutionPolicy.requiresTypedTerminalExecution(recipe, virtual));
+        assertFalse(CraftExecutionPolicy.requiresTypedTerminalExecution(recipe, ModType.GENERIC));
     }
 
     @Test
@@ -815,9 +815,9 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void physicalMachineRecipesRequireABindingContext() {
-        assertTrue(GenericCraftPacket.requiresBoundMachine(ModType.CUSTOM_GUI));
-        assertFalse(GenericCraftPacket.requiresBoundMachine(ModType.GENERIC));
-        assertFalse(GenericCraftPacket.requiresBoundMachine(null));
+        assertTrue(CraftExecutionPolicy.requiresBoundMachine(ModType.CUSTOM_GUI));
+        assertFalse(CraftExecutionPolicy.requiresBoundMachine(ModType.GENERIC));
+        assertFalse(CraftExecutionPolicy.requiresBoundMachine(null));
 
         SmithingTransformRecipe smithing = new SmithingTransformRecipe(
                 new ResourceLocation("test", "smithing_gate"),
@@ -825,14 +825,14 @@ class GenericCraftPacketTest extends BootstrapTest {
                 Ingredient.of(Items.DIAMOND_CHESTPLATE),
                 Ingredient.of(Items.NETHERITE_INGOT),
                 new ItemStack(Items.NETHERITE_CHESTPLATE));
-        assertTrue(GenericCraftPacket.requiresBoundMachine(smithing, ModType.GENERIC));
+        assertTrue(CraftExecutionPolicy.requiresBoundMachine(smithing, ModType.GENERIC));
 
         ShapelessRecipe customCrafting = new ShapelessRecipe(
                 new ResourceLocation("slashblade", "custom_crafting_gate"), "",
                 net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
                 new ItemStack(Items.DIAMOND),
                 net.minecraft.core.NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK)));
-        assertFalse(GenericCraftPacket.requiresBoundMachine(customCrafting, ModType.CUSTOM_GUI));
+        assertFalse(CraftExecutionPolicy.requiresBoundMachine(customCrafting, ModType.CUSTOM_GUI));
     }
 
     @Test

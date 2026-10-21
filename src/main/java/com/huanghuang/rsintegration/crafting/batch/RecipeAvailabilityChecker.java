@@ -54,7 +54,7 @@ public final class RecipeAvailabilityChecker {
         ModType type = GenericCraftPacket.resolveExecutionModType(player, recipe, key.dimension(), key.machinePos());
         var dimension = ResourceKey.create(Registries.DIMENSION, key.dimension());
         var machineLevel = player.server.getLevel(dimension);
-        if (GenericCraftPacket.requiresBoundMachine(recipe, type)
+        if (CraftExecutionPolicy.requiresBoundMachine(recipe, type)
                 && (machineLevel == null || !machineLevel.hasChunkAt(key.machinePos())
                     || !AltarBindingRegistry.isBound(dimension, key.machinePos(), player))) {
             return MaterialAvailability.UNKNOWN;

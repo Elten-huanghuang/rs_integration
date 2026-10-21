@@ -27,6 +27,6 @@ class SlashBladeLogicalCraftingTest extends BootstrapTest {
                 NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.BAMBOO)));
 
         assertTrue(slashBlade.isVirtual());
-        assertFalse(GenericCraftPacket.requiresBoundMachine(craftingRecipe, slashBlade));
+        assertFalse(CraftExecutionPolicy.requiresBoundMachine(craftingRecipe, slashBlade));
     }
 }
