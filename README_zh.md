@@ -13,7 +13,7 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 **当前版本：1.5.2 | Minecraft 1.20.1**
 
-[1.5.2 更新公告](docs/RELEASE_NOTES_1.5.2.md)
+[1.5.2 更新公告](docs/announcements/RELEASE_NOTES_1.5.2.md)
 
 [MC百科介绍](https://www.mcmod.cn/class/29199.html)
 

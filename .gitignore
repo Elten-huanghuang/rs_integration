@@ -41,3 +41,6 @@ libs/
 !/docs/announcements/**
 !/docs/api/
 !/docs/api/**
+
+# 公告 TXT 版本仅保留在本地
+/docs/announcements/*.txt

@@ -13,7 +13,7 @@ RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursiv
 
 **Current version: 1.5.2 | Minecraft 1.20.1**
 
-[1.5.2 release notes (Chinese)](docs/RELEASE_NOTES_1.5.2.md)
+[1.5.2 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.2.md)
 
 [MC百科介绍](https://www.mcmod.cn/class/29199.html)
 

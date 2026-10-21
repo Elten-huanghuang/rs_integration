@@ -1,10 +1,23 @@
 # RS Integration 1.5.2 更新公告
 
-- 更新日期：2026 年 10 月 20 日
+- 发布版本：1.5.2
+- 初始发布：2026 年 10 月 20 日
+- 公告修订：2026 年 10 月 21 日
 - 适用环境：Minecraft 1.20.1 / Forge 47+
 - 上一版本：1.5.1
+- 纯文本完善补充：[RELEASE_NOTES_1.5.2_SUPPLEMENT.txt](RELEASE_NOTES_1.5.2_SUPPLEMENT.txt)
 
 本次是 1.5.1 之后的一次大型功能更新，新增完整的魔法资源存取与递归合成链路、共振魔力池与共振魔源罐、多套料理机器兼容、服务端权威机器绑定索引和磁盘操纵器分片搬运，并集中修复了存储、终端、机器、批量执行与开发环境问题。以下内容仅涵盖 1.5.1 之后的变化，不再重复 1.5.1 已发布内容。
+
+## 版本亮点
+
+- 万界归墟盘现在可以同时保存物品、流体、魔力、魔源和灵魂，并继续兼容旧版磁盘数据。
+- 物品、流体与魔法资源的主要链路改用 `long`，支持单条目超大批量；原生只接收 `int` 的接口会在边界安全分片，不再静默截断。
+- 新增稳定批处理、即时逻辑配方执行契约、统一委托启动入口和多产物结算，大量工作台、纯兑换和机器任务可以更快完成。
+- 新增容量预检查、执行租约、离线物品退款、跨来源材料预留和精确退款，降低取消、断线或库存变化时的丢料风险。
+- 新增服务端权威机器绑定索引、P 控制中心、机器卡片和自动合成黑名单，终端与执行阶段共用同一套机器状态。
+- 新增共振魔力池、共振魔源罐，以及暮色乐事、BOSSes' Delight、随意乐事、田园乐事、烛火晚宴和烘焙屋等料理机器兼容。
+- 公告修订轮次补齐了长数量库存、超大稳定批处理、自增配方、催化剂复用、共享锅具子类型和存储端点复用等后续修复。
 
 ## 魔法资源统一存取
 
@@ -92,6 +105,10 @@
 - 修复配方分支选择可能泄漏到下一次计划、计划租约被旧缓存重放、以及纯规划与 typed 规划回退重复计算的问题。
 - 优化大型配方图的后台规划、输入快照缓存、进度增量上报、内存节点限制和切换性能；慢索引与超预算阶段会输出可定位的诊断信息。
 - 后台规划完成提示不再在进入后台时立刻刷聊天栏，只在计划真正完成后提供可点击的恢复入口。
+- 稳定批处理遇到库存快照暂时不可读或可用量变化时，会在可配置时间内继续重试；超时后终止并执行退款，不再因一次瞬时读取失败直接丢失任务。
+- 普通配方与实体机器的后台规划已统一提交、回退和复验流程；通用补料只处理可安全倍乘的候选，机器中间产物继续交给外层 DAG 规划。
+- 每次预览都会从当前计划树重新导出强制配方与材料选择，避免上一棵配方树的分支选择污染下一次计划。
+- 材料统计、预览缓存和计划租约统一按实际执行口径计算，单纯查表不会消耗一次性执行租约，新的预览响应才会重新授权执行。
 
 ## 燃料、耐久与退款
 
@@ -128,6 +145,46 @@
 - 修复已连接磁盘仓在区块或网络重连后显示空库存的问题。
 - 补充语言键一致性检查和多项回归测试，降低中英文缺失与可选依赖加载错误。
 
+## 1.5.2 后续修订补充
+
+- 修复超大稳定批处理读取库存时的数量边界问题；材料统计、缺料提示和配方树数量显示统一使用同一套长数量口径。
+- 修复无图或缺材料预览在库存快照变化后被静默丢弃的问题；关闭计划界面后仍可继续后台规划，并在完成后恢复查看。
+- 修复配方预览取消、缓存命中与一次性租约之间的冲突，避免同一计划被旧缓存重复执行。
+- 统一 RS 与 BD 的物料读取和精确提取口径；跨来源预留失败时只返还本轮实际提取的片段，不会重复退款。
+- 修复稳定批量多产物结算、虚拟兑换整批执行速度、余烬锻座并行租约范围和共享烹饪锅配方子类型过滤。
+- 修复自增配方快捷执行与催化剂复用安全问题；可重复使用的催化剂不会随倍增次数被错误消耗。
+- 修复自增模板规划与存储端点复用，避免重复创建无效端点或把不同网络的材料混入同一批次。
+- 修复魔法终端刷新和长数量显示不一致，创造魔法容器卸货、终端库存、配方树和机器 HUD 现在使用相同格式。
+- 修复 RS、BD、磁盘与玩家背包同时参与预留时的来源隔离问题，计划、执行、退款和诊断使用同一份端点快照。
+- 修复自定义机器卡片、无 GUI 机器、收藏状态和黑名单在不同界面显示不一致的问题。
+
+## 配置变化
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `storage.diskManipulator.enabled` | `true` | 开启磁盘操纵器分片搬运；关闭后恢复 RS 原版逻辑。 |
+| `storage.diskManipulator.budgetMicros` | `1000` | 所有磁盘操纵器共享的单 tick 时间预算，单位微秒。 |
+| `storage.diskManipulator.maxOperationsPerTick` | `1024` | 单台磁盘操纵器每 tick 的最大操作次数。 |
+| `storage.diskManipulator.maxItemsPerOperation` | 不限 | 单次操作允许搬运的最大资源数量。 |
+| `storage.diskManipulator.noProgressCooldownTicks` | `20` | 网络或磁盘暂时无法接收时的无进展冷却。 |
+| `magicResources.pinnedBackend` | 空 | 没有空间管辖时使用的兜底魔法资源后端，不会覆盖当前终端所属网络。 |
+| `magicResources.creativeMagicDepositAmount` | `2100000000` | 创造魔力石板或创造魔源罐单次卸货数量。 |
+| `integrations.enableGoetySoulReverseRefill` | `false` | 允许灵魂方舟从绑定 RS 网络反向补充灵魂。 |
+| `integrations.goetyBrazierVirtualCandleCount` | `64` | 亡灵火炉递归合成使用的虚拟烛台数量。 |
+| `craftingMaxGraphNodes` | `16384` | 单次计划允许生成的配方图节点上限。 |
+| `craftingPlanCacheMaxNodes` | `131072` | 服务端计划缓存的总节点预算。 |
+| `craftingStableBatchRetrySeconds` | `5` | 稳定批处理遇到临时库存异常时的重试时间。 |
+| `craftingVirtualExchangeBatchLimit` | `0` | 纯兑换单批操作上限；`0` 表示按剩余次数分片且不额外限制。 |
+| `machineTabThreshold` | `5` | 有 GUI 的机器超过该数量时改用机器中心；`0` 表示始终使用机器中心。 |
+| `integrations.enableTwilightDelight` | `true` | 启用暮色乐事炽铁锅兼容。 |
+| `integrations.enableBossesDelight` | `true` | 启用 BOSSes' Delight 灵魂锅兼容。 |
+| `integrations.enableCasualnessDelight` | `true` | 启用随意乐事炸锅兼容。 |
+| `integrations.enableFarmAndCharm` | `true` | 启用田园乐事烹饪锅与烘焙机兼容。 |
+| `integrations.enableCandlelight` | `true` | 启用烛火晚宴汤锅兼容。 |
+| `integrations.enableBakery` | `true` | 启用烘焙屋小烹饪锅兼容。 |
+
+新增料理机器还可以在 `server.toml` 中分别关闭输入预载并调整上限，包括 `enableTwilightDelightFieryPotInputBuffer`、`enableYoukaisHomecomingCookingPotInputBuffer`、`enableYoukaisHomecomingSteamerInputBuffer`、`enableLetsDoCookingPotInputBuffer`、`enableBossesDelightSoulCookingPotInputBuffer` 和 `enableCasualnessDelightDeepFryingPanInputBuffer`。默认上限均为 `64`，实际批次仍受原料、容器、输出槽和配方耗时限制。
+
 ## 开发者 API
 
 - 新增 RS 魔法资源公开入口 `RsiMagicApi`，可按服务端或指定 RS 网络查询 `amount`、`available`、`insert`、`extract` 和 `reserve`。
@@ -144,4 +201,8 @@
 - 首次启动会生成新的 `storage.diskManipulator`、`magicResources.pinnedBackend` 和相关 Goety 配置项；已有配置通常会保留。
 - 新增的魔法资源只有在对应 Botania、Ars Nouveau 或 Goety 已安装且兼容开关启用时才会出现在终端中。
 - 若服务器更重视 tick 稳定性，可先降低 `budgetMicros` 或 `maxOperationsPerTick`；若外部存储较慢，可调低 `maxItemsPerOperation`。
+- 长数量会保留在 RSI 的聚合、计划和显示层，但原版 RS、流体接口和单次 `ItemStack` 操作仍可能需要按 `int` 分批；不要把单次原生接口返回值误认为整盘真实上限。
+- RS 与 BD 库存仍相互独立。终端所属网络决定当前权威来源，`magicResources.pinnedBackend` 只用于没有空间管辖的场景。
+- Goety 虚拟烛台只影响 RSI 递归合成，玩家手动点火仍必须满足原模组结构要求。
+- 当前 `docs/api` 目录保持为空，开发者接口说明暂放在本公告与 README 中。
 - 发布文件名：`rs_integration-1.5.2.jar`。
