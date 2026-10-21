@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.avaritia.CraftingTableBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -93,6 +94,18 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
             RSIntegrationMod.LOGGER.warn("[RSI-Avaritia] Failed to reflect smithing ingredients", e);
         }
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    public InstantRecipePolicy instantRecipePolicy(Recipe<?> recipe) {
+        return stableBatchPolicy(recipe == null ? null : recipe.getClass().getName());
+    }
+
+    static InstantRecipePolicy stableBatchPolicy(@Nullable String recipeClassName) {
+        return CraftingTableBatchDelegate.supportsStableBatchClass(recipeClassName)
+                ? InstantRecipePolicy.simulatedAssembly(
+                        CraftingTableBatchDelegate.stableBatchLimit())
+                : InstantRecipePolicy.none();
     }
 
     /**

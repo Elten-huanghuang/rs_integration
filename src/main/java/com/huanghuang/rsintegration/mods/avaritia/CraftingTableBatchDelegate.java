@@ -411,4 +411,8 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
                 || isReAvaritiaExtremeRecipeClass(className);
     }
 
+    static int stableBatchLimit() {
+        return MAX_INSTANT_BATCH;
+    }
+
 }

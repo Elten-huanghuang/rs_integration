@@ -984,7 +984,8 @@ public final class GenericCraftPacket {
         recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
         try {
             CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                    cached.resolvedGraph(), terminalStep, recipeOutput);
+                    cached.resolvedGraph(), terminalStep, recipeOutput,
+                    player.serverLevel());
             List<ResolutionStep> steps = ExecutionEquivalence.projectFlatSteps(completeGraph);
             RSIntegrationMod.debug(
                     "[RSI-Generic] Executing revalidated typed preview graph for {} nodes={}",
@@ -1740,7 +1741,8 @@ public final class GenericCraftPacket {
                 if (graphDecision.composable()) {
                     try {
                         CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput);
+                                inputGraph, terminalStep, recipeOutput,
+                                player.serverLevel());
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                                 inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
@@ -1887,7 +1889,8 @@ public final class GenericCraftPacket {
                     recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                     try {
                         CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput);
+                                inputGraph, terminalStep, recipeOutput,
+                                player.serverLevel());
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                                 inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
@@ -1983,7 +1986,8 @@ public final class GenericCraftPacket {
                     recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                     try {
                         CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput);
+                                inputGraph, terminalStep, recipeOutput,
+                                player.serverLevel());
                         launchGraphAsyncChain(player, completeGraph, terminalStep,
                                 storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                                 inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
@@ -2099,7 +2103,8 @@ public final class GenericCraftPacket {
                             recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
                             try {
                                 CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                        smithingInputGraph, terminalStep, recipeOutput);
+                                        smithingInputGraph, terminalStep, recipeOutput,
+                                        player.serverLevel());
                                 launchGraphAsyncChain(player, completeGraph, terminalStep,
                                         storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
                                         inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);

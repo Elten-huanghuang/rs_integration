@@ -7,12 +7,14 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraphCompactor;
+import com.huanghuang.rsintegration.crafting.graph.CraftNodeMergePolicy;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -60,7 +62,8 @@ final class CraftTerminalSteps {
     }
 
     static CraftPlanGraph composeEquivalentTerminalGraph(
-            CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output) {
+            CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
+            Level level) {
         CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
                 inputGraph, terminalStep, output);
         List<ResolutionStep> expectedFlat = new ArrayList<>(
@@ -72,7 +75,8 @@ final class CraftTerminalSteps {
             throw new IllegalArgumentException(
                     "terminal graph execution mismatch: " + equivalence.mismatches());
         }
-        return CraftPlanGraphCompactor.compact(completeGraph);
+        return CraftPlanGraphCompactor.compact(completeGraph,
+                CraftNodeMergePolicy.forLevel(level));
     }
 
     static ItemStack selectTerminalGraphOutput(

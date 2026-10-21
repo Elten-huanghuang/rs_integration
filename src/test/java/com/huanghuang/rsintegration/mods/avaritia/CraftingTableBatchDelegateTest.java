@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.avaritia;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
@@ -74,6 +75,18 @@ class CraftingTableBatchDelegateTest extends BootstrapTest {
                 "committee.nova.mods.avaritia.common.crafting.recipe.NoConsumeCatalystShapedRecipe"));
         assertEquals(false, CraftingTableBatchDelegate.supportsStableBatchClass(
                 "example.CustomTableRecipe"));
+    }
+
+    @Test
+    void exportsStableBatchPolicyOnlyForSupportedTableRecipes() {
+        InstantRecipePolicy supported = AvaritiaRecipeHandler.stableBatchPolicy(
+                "committee.nova.mods.avaritia.common.crafting.recipe.ShapedTableCraftingRecipe");
+        InstantRecipePolicy catalystOnly = AvaritiaRecipeHandler.stableBatchPolicy(
+                "committee.nova.mods.avaritia.common.crafting.recipe.NoConsumeCatalystShapedRecipe");
+
+        assertEquals(InstantRecipePolicy.Mode.SIMULATED_ASSEMBLY, supported.mode());
+        assertEquals(CraftingTableBatchDelegate.stableBatchLimit(), supported.maxExecutions());
+        assertEquals(InstantRecipePolicy.none(), catalystOnly);
     }
 
     @Test

@@ -19,10 +19,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
- * 合并结构完全相同的重复通用合成节点。只压缩可在不改变材料、NBT、端口和
- * 替代配方语义时安全合并的节点；任何校验失败都会保留原图。
+ * 合并结构完全相同、且执行契约允许的重复配方节点。只压缩可在不改变
+ * 材料、NBT、端口、依赖和替代配方语义时安全合并的节点；任何校验失败
+ * 都会保留原图。
  */
 public final class CraftPlanGraphCompactor {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -30,7 +32,17 @@ public final class CraftPlanGraphCompactor {
     private CraftPlanGraphCompactor() {}
 
     public static CraftPlanGraph compact(CraftPlanGraph graph) {
+        return compact(graph, node -> ModType.GENERIC.id().equals(node.modTypeId()));
+    }
+
+    /**
+     * 使用配方执行契约判断节点是否允许合并。默认入口只合并无机器状态的
+     * GENERIC 节点，服务端规划会额外传入显式声明即时批次能力的配方。
+     */
+    public static CraftPlanGraph compact(CraftPlanGraph graph,
+                                         Predicate<CraftNode> mergeEligible) {
         if (graph == null || graph.nodes().size() < 2) return graph;
+        if (mergeEligible == null) throw new IllegalArgumentException("mergeEligible");
 
         Map<NodeSignature, List<CraftNode>> groups = new LinkedHashMap<>();
         for (CraftNode node : graph.nodes()) {
@@ -40,7 +52,7 @@ public final class CraftPlanGraphCompactor {
 
         Map<NodeId, NodeId> remap = new LinkedHashMap<>();
         for (List<CraftNode> group : groups.values()) {
-            if (!canMerge(group, graph.allocations())) {
+            if (!canMerge(group, graph.allocations(), mergeEligible)) {
                 for (CraftNode node : group) remap.put(node.id(), node.id());
                 continue;
             }
@@ -141,10 +153,12 @@ public final class CraftPlanGraphCompactor {
         return List.copyOf(ordered);
     }
 
-    private static boolean canMerge(List<CraftNode> group, List<MaterialAllocation> allocations) {
+    private static boolean canMerge(List<CraftNode> group,
+                                    List<MaterialAllocation> allocations,
+                                    Predicate<CraftNode> mergeEligible) {
         if (group.size() < 2) return false;
         CraftNode first = group.get(0);
-        if (!ModType.GENERIC.id().equals(first.modTypeId())) return false;
+        if (!mergeEligible.test(first)) return false;
         if (first.inputs().stream().anyMatch(input -> input.role() == DemandRole.CATALYST)) {
             return false;
         }

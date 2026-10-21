@@ -116,6 +116,35 @@ class CraftPlanGraphCompactorTest extends BootstrapTest {
     }
 
     @Test
+    void mergesEquivalentNodesWhenExecutionPolicyAuthorizesThem() {
+        MaterialKey ingot = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        List<CraftNode> nodes = new ArrayList<>();
+        List<MaterialAllocation> allocations = new ArrayList<>();
+        List<RootDemand> roots = new ArrayList<>();
+        List<NodeId> order = new ArrayList<>();
+        for (int i = 0; i < 56; i++) {
+            NodeId nodeId = new NodeId(i);
+            InputPortId input = new InputPortId(nodeId, 0);
+            OutputPortId output = new OutputPortId(nodeId, 0);
+            nodes.add(node(nodeId, input, output, 9, null,
+                    ModType.FLUID_CONTAINER.id()));
+            allocations.add(new MaterialAllocation(new AllocationId(i), input,
+                    new MaterialSource.InitialPool(ingot), ingot, 9));
+            roots.add(root(output, 9));
+            order.add(nodeId);
+        }
+        CraftPlanGraph graph = new CraftPlanGraph(1, nodes, allocations, roots,
+                List.of(), order);
+
+        CraftPlanGraph compacted = CraftPlanGraphCompactor.compact(graph, ignored -> true);
+
+        assertEquals(1, compacted.nodes().size());
+        assertEquals(56 * 9, compacted.nodes().get(0).executions());
+        assertEquals(56 * 9, compacted.allocations().get(0).quantity());
+        CraftPlanValidator.validate(compacted);
+    }
+
+    @Test
     void doesNotMergeNodesConnectedByAnInternalDependency() {
         MaterialKey ingot = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         NodeId firstId = new NodeId(0);
