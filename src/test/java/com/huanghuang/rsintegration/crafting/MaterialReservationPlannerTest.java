@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialReservationPlannerTest extends BootstrapTest {
     @Test
@@ -38,6 +39,24 @@ class MaterialReservationPlannerTest extends BootstrapTest {
                 64);
 
         assertEquals(1, scaled.get(0).count());
+    }
+
+    @Test
+    void preservesEmptyPhysicalSlotsWhileScalingRealInputs() {
+        IngredientSpec emptySlot = new IngredientSpec(Ingredient.EMPTY, 0);
+        IngredientSpec iron = new IngredientSpec(Ingredient.of(Items.IRON_BLOCK), 1);
+
+        List<IngredientSpec> scaled = MaterialReservationPlanner.scaleGraphSpecsForExecutions(
+                List.of(emptySlot, iron, emptySlot),
+                List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
+                        IBatchDelegate.MaterialReservationScope.PER_OPERATION,
+                        IBatchDelegate.MaterialReservationScope.PER_OPERATION),
+                3);
+
+        assertEquals(3, scaled.size());
+        assertTrue(scaled.get(0).isEmpty());
+        assertEquals(3, scaled.get(1).count());
+        assertTrue(scaled.get(2).isEmpty());
     }
 
 }

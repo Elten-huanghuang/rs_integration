@@ -44,6 +44,11 @@ final class MaterialReservationPlanner {
         List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);
+            if (spec.isEmpty()) {
+                // 定型配方的空槽必须保留，后续按原始索引恢复物理布局。
+                scaledSpecs.add(spec);
+                continue;
+            }
             int count = CraftPacketUtils.requiredCount(spec, multiplier);
             scaledSpecs.add(new IngredientSpec(
                     spec.ingredient(), count, spec.consumption()));
