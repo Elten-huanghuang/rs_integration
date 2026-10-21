@@ -133,7 +133,7 @@ public final class RecipeCandidatePanel {
     }
 
     public void open(PlanTreeNode node, Set<String> machines) {
-        if (node.step == null) return;
+        if (node == null) return;
         this.node = node;
         this.boundMachines = Set.copyOf(machines);
         ResourceLocation preference = CraftingResolver.preferenceKey(node.key.stack(1));
@@ -146,11 +146,14 @@ public final class RecipeCandidatePanel {
         this.noRecipeSelected = defaultChoice == RecipeChoice.NoRecipe.INSTANCE;
         this.excludedRecipes = new LinkedHashSet<>(preferences.excludedRecipes());
         var options = new LinkedHashMap<ResourceLocation, String>();
-        options.put(node.step.recipeId(),
-                node.step.modType() == null ? "generic" : node.step.modType().id());
-        for (int i = 0; i < node.step.alternatives().size(); i++) {
-            String mod = i < node.step.alternativeModTypes().size() ? node.step.alternativeModTypes().get(i) : "generic";
-            options.putIfAbsent(node.step.alternatives().get(i), mod);
+        if (node.step != null) {
+            options.put(node.step.recipeId(),
+                    node.step.modType() == null ? "generic" : node.step.modType().id());
+            for (int i = 0; i < node.step.alternatives().size(); i++) {
+                String mod = i < node.step.alternativeModTypes().size()
+                        ? node.step.alternativeModTypes().get(i) : "generic";
+                options.putIfAbsent(node.step.alternatives().get(i), mod);
+            }
         }
         List<Candidate> candidates = new ArrayList<>();
         int widestPreview = 0;
@@ -171,10 +174,13 @@ public final class RecipeCandidatePanel {
                 defaultRecipeId = null;
             }
         }
-        widestPreview = Math.max(widestPreview,
-                preview.previewBounds(node.step.recipeId()).width());
+        if (node.step != null) {
+            widestPreview = Math.max(widestPreview,
+                    preview.previewBounds(node.step.recipeId()).width());
+        }
         preferredWidth = widestPreview <= 0 ? 0 : widestPreview + 34;
-        model = new RecipeCandidatePickerModel(candidates, node.step.recipeId());
+        model = new RecipeCandidatePickerModel(candidates,
+                node.step == null ? null : node.step.recipeId());
         search.setValue("");
         search.visible = search.active = true;
         search.setFocused(false);
@@ -554,7 +560,7 @@ public final class RecipeCandidatePanel {
         }
 
         int selectedIndex = -1;
-        if (!noRecipeSelected) {
+        if (!noRecipeSelected && node.step != null) {
             // “current” 永远表示服务端这一次实际采用的配方。持久偏好只作为
             // default 徽标，不能在失败预览后被误画成已经生效。
             selectedIndex = indexOfRecipe(filtered, node.step.recipeId());

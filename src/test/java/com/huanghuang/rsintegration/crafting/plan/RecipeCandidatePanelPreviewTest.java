@@ -165,6 +165,37 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
         assertFalse(panel.stockOnlySelected());
     }
 
+    @Test
+    void stockOnlyCanBeSelectedForARecursiveLeafWithoutCandidates() {
+        Font font = mock(Font.class);
+        RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);
+        when(font.width(anyString())).thenReturn(0);
+        when(font.plainSubstrByWidth(anyString(), anyInt()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        Path preferences = tempDir.resolve("no_candidate_leaf.json");
+        AtomicReference<ResourceLocation> selected = new AtomicReference<>(CURRENT);
+        RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
+                (node, recipe) -> selected.set(recipe), (node, recipe) -> {},
+                node -> {}, node -> {}, preferences, () -> {}, () -> true);
+        PlanTreeNode leaf = new PlanTreeNode(
+                IngredientKey.of(new ItemStack(Items.DIAMOND)),
+                new ItemStack(Items.DIAMOND), 1, 1, null);
+        String preferenceKey = CraftingResolver.preferenceKey(leaf.key.stack(1)).toString();
+
+        panel.open(leaf, Set.of());
+
+        assertTrue(panel.isOpen());
+        assertTrue(panel.visibleCandidates().isEmpty());
+        panel.selectNoRecipe();
+
+        assertFalse(panel.isOpen());
+        assertNull(selected.get());
+        assertEquals(RecipeChoice.NoRecipe.INSTANCE,
+                CraftingPlanPreferences.load(preferences).recipeChoices().get(preferenceKey));
+    }
+
     private static ResourceLocation id(String path) {
         return new ResourceLocation("test", path);
     }

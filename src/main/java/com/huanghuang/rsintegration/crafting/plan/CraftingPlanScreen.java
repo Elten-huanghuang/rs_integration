@@ -2328,7 +2328,8 @@ public final class CraftingPlanScreen extends Screen {
     private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId,
                                   boolean persistPreference) {
         closeRecipeCandidates();
-        if (node.step == null || node.containsCycle()) return;
+        if (node == null || node.containsCycle()
+                || node.step == null && recipeId != null) return;
 
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
@@ -2472,7 +2473,9 @@ public final class CraftingPlanScreen extends Screen {
             return node;
         }
         PlanStep retained = candidateStepHistory.get(node.key);
-        if (retained == null) return null;
+        if (retained == null) {
+            return canConfigureRecipeBranch(node) ? node : null;
+        }
         PlanTreeNode candidateNode = new PlanTreeNode(
                 node.key, node.displayStack, node.amount, node.depth,
                 retained, node.graphNodeId, node.demandRole);
@@ -2483,6 +2486,13 @@ public final class CraftingPlanScreen extends Screen {
         candidateNode.materialOptions = node.materialOptions;
         candidateNode.ingredient = node.ingredient;
         return candidateNode;
+    }
+
+    private boolean canConfigureRecipeBranch(PlanTreeNode node) {
+        if (node == null || node.containsCycle()) return false;
+        if (node.step != null) return true;
+        return node.depth > 0
+                && CraftingResolver.preferenceKey(node.key.stack(1)) != null;
     }
 
     /** 底部缺料/警告摘要统一作为诊断入口。 */
@@ -3106,10 +3116,7 @@ public final class CraftingPlanScreen extends Screen {
                     if (node != null && node.materialLockKey != null
                             && node.materialOptions.size() > 1) {
                         openMaterialDropdown(node);
-                    } else if (node != null && node.hasAlternatives()) {
-                        openRecipeCandidates(node);
-                    } else if (node != null && (node.step != null
-                            || candidateStepHistory.containsKey(node.key))) {
+                    } else if (node != null && canConfigureRecipeBranch(node)) {
                         // 单一配方也打开卡片集合，保证“仅使用库存”和偏好操作可见。
                         openRecipeCandidates(node);
                     } else {

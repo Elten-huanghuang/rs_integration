@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import net.minecraft.resources.ResourceLocation;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,7 +22,7 @@ public final class RecipeCandidatePickerModel {
     private int firstRow;
     private int visibleRows = 1;
 
-    public RecipeCandidatePickerModel(List<Candidate> candidates, ResourceLocation selected) {
+    public RecipeCandidatePickerModel(List<Candidate> candidates, @Nullable ResourceLocation selected) {
         var unique = new LinkedHashMap<ResourceLocation, Candidate>();
         for (Candidate candidate : candidates) unique.putIfAbsent(candidate.recipeId(), candidate);
         this.candidates = List.copyOf(unique.values());
@@ -81,7 +82,11 @@ public final class RecipeCandidatePickerModel {
     public int maxScroll() { return Math.max(0, filtered.size() - visibleRows); }
 
     private int indexOf(ResourceLocation id) {
-        for (int i = 0; i < filtered.size(); i++) if (filtered.get(i).recipeId().equals(id)) return i;
+        if (id != null) {
+            for (int i = 0; i < filtered.size(); i++) {
+                if (filtered.get(i).recipeId().equals(id)) return i;
+            }
+        }
         return 0;
     }
 
