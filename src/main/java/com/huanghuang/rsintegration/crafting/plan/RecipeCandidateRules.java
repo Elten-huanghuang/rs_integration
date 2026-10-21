@@ -4,12 +4,12 @@ package com.huanghuang.rsintegration.crafting.plan;
 public final class RecipeCandidateRules {
     private RecipeCandidateRules() {}
 
-    /** 根节点永远不允许禁用；单候选节点禁用没有意义，但零候选叶子仍可切到仅库存。 */
+    /** 根节点永远不允许禁用；非根节点即使只有一个候选，也可以切到仅库存。 */
     public static boolean canExclude(int nodeDepth, int candidateCount) {
-        return nodeDepth > 0 && candidateCount != 1;
+        return nodeDepth > 0;
     }
 
-    /** “仅使用库存”本质上是禁用该节点产出，根节点和单候选节点都不能选择。 */
+    /** “仅使用库存”本质上是禁用该节点产出，只禁止根节点选择。 */
     public static boolean canChooseStockOnly(int nodeDepth, int candidateCount) {
         return canExclude(nodeDepth, candidateCount);
     }

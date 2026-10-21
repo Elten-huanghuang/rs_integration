@@ -17,15 +17,15 @@ class RecipeCandidateRulesTest {
     @Test
     void intermediateNodeCanBeDisabledWithZeroOrMultipleCandidates() {
         assertTrue(RecipeCandidateRules.canExclude(1, 0));
-        assertFalse(RecipeCandidateRules.canExclude(1, 1));
+        assertTrue(RecipeCandidateRules.canExclude(1, 1));
         assertTrue(RecipeCandidateRules.canExclude(1, 2));
     }
 
     @Test
-    void stockOnlyDisableSupportsZeroCandidateLeavesButNotRootsOrSingleCandidates() {
+    void stockOnlyDisableSupportsEveryNonRootCandidateCount() {
         assertFalse(RecipeCandidateRules.canChooseStockOnly(0, 2));
         assertFalse(RecipeCandidateRules.canChooseStockOnly(0, 0));
-        assertFalse(RecipeCandidateRules.canChooseStockOnly(1, 1));
+        assertTrue(RecipeCandidateRules.canChooseStockOnly(1, 1));
         assertTrue(RecipeCandidateRules.canChooseStockOnly(1, 0));
         assertTrue(RecipeCandidateRules.canChooseStockOnly(1, 2));
     }

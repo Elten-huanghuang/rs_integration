@@ -10,11 +10,14 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -64,13 +67,18 @@ public final class CraftPlanGraphCompactor {
                 .map(demand -> new UnresolvedDemand(remapConsumer(demand.consumer(), remap),
                         demand.ingredient(), demand.quantity(), demand.displayHint()))
                 .toList();
-        Set<NodeId> ordered = new LinkedHashSet<>();
-        for (NodeId nodeId : graph.topologicalOrder()) ordered.add(remap.get(nodeId));
-
-        CraftPlanGraph result = new CraftPlanGraph(graph.version(), nodes, allocations, roots,
-                unresolved, List.copyOf(ordered), graph.planningRevision());
         try {
+            List<NodeId> ordered = compactedTopologicalOrder(
+                    nodes, allocations, graph.topologicalOrder(), remap);
+            CraftPlanGraph result = new CraftPlanGraph(graph.version(), nodes, allocations, roots,
+                    unresolved, ordered, graph.planningRevision());
             CraftPlanValidator.validate(result);
+            if (result.nodes().size() == graph.nodes().size()) return graph;
+            LOGGER.debug(
+                    "[RSI-GraphCompactor] compacted nodes {} -> {}, allocations {} -> {}, roots {} -> {}",
+                    graph.nodes().size(), result.nodes().size(), graph.allocations().size(),
+                    result.allocations().size(), graph.rootDemands().size(), result.rootDemands().size());
+            return result;
         } catch (RuntimeException failure) {
             LOGGER.warn(
                     "[RSI-GraphCompactor] rejected unsafe compaction nodes={} -> {}, allocations={} -> {}",
@@ -78,12 +86,59 @@ public final class CraftPlanGraphCompactor {
                     allocations.size(), failure);
             return graph;
         }
-        if (result.nodes().size() == graph.nodes().size()) return graph;
-        LOGGER.debug(
-                "[RSI-GraphCompactor] compacted nodes {} -> {}, allocations {} -> {}, roots {} -> {}",
-                graph.nodes().size(), result.nodes().size(), graph.allocations().size(),
-                result.allocations().size(), graph.rootDemands().size(), result.rootDemands().size());
-        return result;
+    }
+
+    /**
+     * 合并节点会把多个 NodeId 映射到同一个规范节点。直接对旧拓扑序去重会让
+     * 规范节点沿用较早、但可能位于其依赖之前的旧位置，因此必须按合并后的
+     * 分配关系重新生成拓扑序。
+     */
+    private static List<NodeId> compactedTopologicalOrder(
+            List<CraftNode> nodes, List<MaterialAllocation> allocations,
+            List<NodeId> previousOrder, Map<NodeId, NodeId> remap) {
+        Map<NodeId, Integer> preference = new HashMap<>();
+        int sequence = 0;
+        for (NodeId nodeId : previousOrder) {
+            preference.putIfAbsent(remap.getOrDefault(nodeId, nodeId), sequence++);
+        }
+
+        Map<NodeId, Set<NodeId>> outgoing = new LinkedHashMap<>();
+        Map<NodeId, Integer> indegree = new LinkedHashMap<>();
+        for (CraftNode node : nodes) {
+            outgoing.put(node.id(), new LinkedHashSet<>());
+            indegree.put(node.id(), 0);
+        }
+        for (MaterialAllocation allocation : allocations) {
+            if (!(allocation.source() instanceof MaterialSource.ProducerOutput producer)) continue;
+            NodeId producerId = producer.outputPort().nodeId();
+            NodeId consumerId = allocation.consumer().nodeId();
+            if (producerId.equals(consumerId)) continue;
+            if (outgoing.get(producerId).add(consumerId)) {
+                indegree.merge(consumerId, 1, Integer::sum);
+            }
+        }
+
+        Comparator<NodeId> stableOrder = Comparator
+                .comparingInt((NodeId nodeId) -> preference.getOrDefault(nodeId, Integer.MAX_VALUE))
+                .thenComparingInt(NodeId::value);
+        PriorityQueue<NodeId> ready = new PriorityQueue<>(stableOrder);
+        indegree.forEach((nodeId, count) -> {
+            if (count == 0) ready.add(nodeId);
+        });
+
+        List<NodeId> ordered = new ArrayList<>(nodes.size());
+        while (!ready.isEmpty()) {
+            NodeId current = ready.remove();
+            ordered.add(current);
+            for (NodeId dependent : outgoing.get(current)) {
+                int remaining = indegree.merge(dependent, -1, Integer::sum);
+                if (remaining == 0) ready.add(dependent);
+            }
+        }
+        if (ordered.size() != nodes.size()) {
+            throw new IllegalArgumentException("compacted graph contains a dependency cycle");
+        }
+        return List.copyOf(ordered);
     }
 
     private static boolean canMerge(List<CraftNode> group, List<MaterialAllocation> allocations) {

@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 
 class CraftPlanGraphCompactorTest extends BootstrapTest {
     private static final ResourceLocation RECIPE = ResourceLocation.parse("test:compressed");
@@ -140,6 +141,42 @@ class CraftPlanGraphCompactorTest extends BootstrapTest {
     }
 
     @Test
+    void recomputesTopologicalOrderAfterMergingNodes() {
+        MaterialKey ingot = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        NodeId firstId = new NodeId(0);
+        NodeId dependentId = new NodeId(1);
+        NodeId producerId = new NodeId(2);
+        InputPortId firstInput = new InputPortId(firstId, 0);
+        InputPortId dependentInput = new InputPortId(dependentId, 0);
+        InputPortId producerInput = new InputPortId(producerId, 0);
+        OutputPortId firstOutput = new OutputPortId(firstId, 0);
+        OutputPortId dependentOutput = new OutputPortId(dependentId, 0);
+        OutputPortId producerOutput = new OutputPortId(producerId, 0);
+        CraftPlanGraph graph = new CraftPlanGraph(1,
+                List.of(node(firstId, firstInput, firstOutput, 1),
+                        node(dependentId, dependentInput, dependentOutput, 1),
+                        node(producerId, producerInput, producerOutput, 1,
+                                null, ModType.GENERIC.id(),
+                                ResourceLocation.parse("test:producer"))),
+                List.of(
+                        new MaterialAllocation(new AllocationId(0), firstInput,
+                                new MaterialSource.InitialPool(ingot), ingot, 1),
+                        new MaterialAllocation(new AllocationId(1), dependentInput,
+                                new MaterialSource.ProducerOutput(producerOutput), ingot, 1),
+                        new MaterialAllocation(new AllocationId(2), producerInput,
+                                new MaterialSource.InitialPool(ingot), ingot, 1)),
+                List.of(root(dependentOutput, 1)), List.of(),
+                List.of(firstId, producerId, dependentId));
+
+        CraftPlanGraph compacted = CraftPlanGraphCompactor.compact(graph);
+
+        assertNotSame(graph, compacted);
+        assertEquals(2, compacted.nodes().size());
+        assertEquals(List.of(producerId, firstId), compacted.topologicalOrder());
+        CraftPlanValidator.validate(compacted);
+    }
+
+    @Test
     void keepsDifferentNbtOutputsSeparate() {
         MaterialKey ingot = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         NodeId firstId = new NodeId(0);
@@ -177,13 +214,19 @@ class CraftPlanGraphCompactorTest extends BootstrapTest {
 
     private static CraftNode node(NodeId nodeId, InputPortId input, OutputPortId output,
                                   int executions, String variant, String modTypeId) {
+        return node(nodeId, input, output, executions, variant, modTypeId, RECIPE);
+    }
+
+    private static CraftNode node(NodeId nodeId, InputPortId input, OutputPortId output,
+                                  int executions, String variant, String modTypeId,
+                                  ResourceLocation recipeId) {
         ItemStack result = new ItemStack(Items.IRON_INGOT, 1);
         if (variant != null) {
             CompoundTag tag = new CompoundTag();
             tag.putString("variant", variant);
             result.setTag(tag);
         }
-        return new CraftNode(nodeId, RECIPE, modTypeId,
+        return new CraftNode(nodeId, recipeId, modTypeId,
                 ResourceLocation.parse("minecraft:crafting"), executions, List.of(), List.of(),
                 false, null, null,
                 List.of(new InputDemand(input, Ingredient.of(Items.IRON_INGOT), executions,
