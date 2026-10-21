@@ -80,6 +80,22 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
     }
 
     @Test
+    void oversizedNineByNinePreviewIsConstrainedToTheThreeByThreeCardBudget() {
+        RecipePreviewRenderer.PreviewBounds capped =
+                RecipeCandidatePanel.constrainPreviewBounds(
+                        new RecipePreviewRenderer.PreviewBounds(240, 240));
+        RecipePreviewRenderer.PreviewBounds ordinary =
+                RecipeCandidatePanel.constrainPreviewBounds(
+                        new RecipePreviewRenderer.PreviewBounds(80, 40));
+
+        assertEquals(new RecipePreviewRenderer.PreviewBounds(
+                        RecipeCandidatePanel.MAX_PREVIEW_WIDTH,
+                        RecipeCandidatePanel.MAX_PREVIEW_HEIGHT),
+                capped);
+        assertEquals(new RecipePreviewRenderer.PreviewBounds(80, 40), ordinary);
+    }
+
+    @Test
     void selectingThePlanCurrentRecipeStillNotifiesTheScreenAndDoesNotCommitEarly() {
         Font font = mock(Font.class);
         RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);

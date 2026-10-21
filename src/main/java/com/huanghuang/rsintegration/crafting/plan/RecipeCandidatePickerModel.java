@@ -12,7 +12,8 @@ import java.util.Locale;
 public final class RecipeCandidatePickerModel {
     public static final int HEADER_HEIGHT = 44;
     public static final int FOOTER_HEIGHT = 18;
-    private static final int PREFERRED_ROW_HEIGHT = 92;
+    /** 对应 3×3 预览卡片的头部、112px 预览区、底部留白和卡片间距。 */
+    private static final int PREFERRED_ROW_HEIGHT = 150;
     public record Candidate(ResourceLocation recipeId, String modTypeId, String name,
                             String machine, String searchText) {}
 
@@ -111,7 +112,7 @@ public final class RecipeCandidatePickerModel {
         return layout(screenWidth, screenHeight, contentTop, contentBottom, 0);
     }
 
-    /** 面板宽度优先保证 JEI 配方按原尺寸显示，屏幕过窄时才限制到可用宽度。 */
+    /** 面板宽度受候选卡片的 3×3 预览预算约束，屏幕过窄时继续收缩。 */
     public static Bounds layout(int screenWidth, int screenHeight, int contentTop,
                                 int contentBottom, int preferredWidth) {
         int maxWidth = Math.max(176, Math.min(screenWidth * 45 / 100, 420));

@@ -40,6 +40,12 @@ public final class RecipeCandidatePanel {
     private static final int CARD_HEADER_HEIGHT = 30;
     private static final int CARD_BOTTOM_PADDING = 5;
     private static final int CARD_GAP = 3;
+    /**
+     * 候选卡片只保留约 3×3 原版配方的预览预算。更大的 JEI 布局在固定区域内等比缩放，
+     * 避免 9×9 工作台或大型机器配方把整张卡片撑高。
+     */
+    static final int MAX_PREVIEW_WIDTH = 116;
+    static final int MAX_PREVIEW_HEIGHT = 112;
 
     private final Font font;
     private final RecipePreviewRenderer preview;
@@ -166,7 +172,8 @@ public final class RecipeCandidatePanel {
                     ? title.getString()
                     : PlanRenderEngine.formatModTypeLabel(mod);
             candidates.add(new Candidate(id, mod, details.name(), machine, details.searchText()));
-            widestPreview = Math.max(widestPreview, preview.previewWidthHint(id));
+            widestPreview = Math.max(widestPreview,
+                    Math.min(MAX_PREVIEW_WIDTH, preview.previewWidthHint(id)));
         }
         if (!RecipeCandidateRules.canChooseStockOnly(node.depth, candidates.size())) {
             noRecipeSelected = false;
@@ -176,7 +183,8 @@ public final class RecipeCandidatePanel {
         }
         if (node.step != null) {
             widestPreview = Math.max(widestPreview,
-                    preview.previewBounds(node.step.recipeId()).width());
+                    constrainPreviewBounds(
+                            preview.previewBounds(node.step.recipeId())).width());
         }
         preferredWidth = widestPreview <= 0 ? 0 : widestPreview + 34;
         model = new RecipeCandidatePickerModel(candidates,
@@ -531,14 +539,22 @@ public final class RecipeCandidatePanel {
         return -1;
     }
 
-    /** 每张候选卡片都按配方原始高度撑开，选中状态只负责高亮。 */
+    /** 每张候选卡片使用统一上限内的预览区域，超出部分由 JEI 绘制阶段等比缩放。 */
     int cardHeight(Candidate candidate) {
         RecipePreviewRenderer.PreviewBounds size = previewSizeCache.get(candidate.recipeId());
         if (size == null || size.height() <= 1) {
-            size = preview.previewBounds(candidate.recipeId());
+            size = constrainPreviewBounds(preview.previewBounds(candidate.recipeId()));
             if (size.height() > 1) previewSizeCache.put(candidate.recipeId(), size);
         }
         return CARD_HEADER_HEIGHT + size.height() + CARD_BOTTOM_PADDING;
+    }
+
+    static RecipePreviewRenderer.PreviewBounds constrainPreviewBounds(
+            RecipePreviewRenderer.PreviewBounds bounds) {
+        if (bounds == null) return new RecipePreviewRenderer.PreviewBounds(1, 1);
+        return new RecipePreviewRenderer.PreviewBounds(
+                Math.max(1, Math.min(MAX_PREVIEW_WIDTH, bounds.width())),
+                Math.max(1, Math.min(MAX_PREVIEW_HEIGHT, bounds.height())));
     }
 
     private void renderCandidateCards(GuiGraphics graphics, int mouseX, int mouseY) {
