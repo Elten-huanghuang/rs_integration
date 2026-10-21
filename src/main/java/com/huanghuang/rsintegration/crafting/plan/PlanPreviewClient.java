@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import net.minecraft.client.Minecraft;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -85,12 +86,14 @@ public final class PlanPreviewClient {
         // Send preview request to server via the batch-craft channel.
         // preview=true → server computes and returns a PlanResponse without executing.
         long requestId = PlanningRequestIds.next();
-        PlanningProgressTracker.start(
-                requestId, recipeId);
-        BatchCraftNetworkHandler.CHANNEL.sendToServer(
+        GenericCraftPacket packet = ClientPlanningPreferences.apply(
                 new GenericCraftPacket(recipeId, true,
                         pendingForcedSlots != null ? pendingForcedSlots : Map.of(),
-                        null, null, pendingRepeatCount, false, null, null, requestId));
+                        null, null, pendingRepeatCount, false, null, null, requestId),
+                Minecraft.getInstance().level);
+        PlanningProgressTracker.start(requestId, packet.recipeId());
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                packet);
     }
 
     /** Cancel any pending debounce (e.g. when the screen is closed). */

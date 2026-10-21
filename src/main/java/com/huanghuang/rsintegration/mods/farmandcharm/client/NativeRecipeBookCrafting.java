@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.farmandcharm.client;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import net.minecraft.client.Minecraft;
@@ -42,12 +43,16 @@ public final class NativeRecipeBookCrafting {
         if (minecraft.player == null || minecraft.level == null) return;
 
         long requestId = PlanningRequestIds.next();
-        PlanningProgressTracker.start(requestId, recipeId);
-        BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
-                recipeId, true, Map.of(), null, null, 1, false,
-                null, null, requestId));
+        GenericCraftPacket packet = ClientPlanningPreferences.apply(
+                new GenericCraftPacket(
+                        recipeId, true, Map.of(), null, null, 1, false,
+                        null, null, requestId),
+                minecraft.level);
+        PlanningProgressTracker.start(requestId, packet.recipeId());
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                packet);
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-LetsDo] Native recipe-book craft requested: recipe={}", recipeId);
+                "[RSI-LetsDo] Native recipe-book craft requested: recipe={}", packet.recipeId());
     }
 
     public static void tellSelectionRequired() {

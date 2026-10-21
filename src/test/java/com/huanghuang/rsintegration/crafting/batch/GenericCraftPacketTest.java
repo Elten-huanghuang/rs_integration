@@ -29,6 +29,8 @@ import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -243,6 +245,37 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertEquals(1, decoded.materialLocks().get("test:planks#abc").getCount());
         selected.setCount(1);
         assertEquals(1, packet.materialLocks().get("test:planks#abc").getCount());
+    }
+
+    @Test
+    void planningPreferencesRoundTripSeparatelyFromSessionOverrides() {
+        ItemStack ingredientChoice = new ItemStack(Items.OAK_LOG);
+        ingredientChoice.getOrCreateTag().putString("variant", "preferred");
+        ResourceLocation excluded = new ResourceLocation("minecraft", "stick");
+        var preferences = new PlanningPreferences(
+                Map.of("minecraft:oak_planks",
+                        RecipeChoice.NoRecipe.INSTANCE),
+                Map.of("minecraft:oak_planks#slot", ingredientChoice),
+                Set.of(excluded));
+        GenericCraftPacket packet = new GenericCraftPacket(
+                new ResourceLocation("test", "preferences"), true,
+                Map.of("minecraft:oak_planks", "minecraft:oak_planks"),
+                null, null, 1, false, null, null)
+                .withPlanningPreferences(preferences);
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        packet.encode(buffer);
+        GenericCraftPacket decoded = GenericCraftPacket.decode(buffer);
+
+        assertEquals(preferences.recipeChoices(), decoded.planningPreferences().recipeChoices());
+        assertEquals(preferences.excludedRecipes(),
+                decoded.planningPreferences().excludedRecipes());
+        assertTrue(ItemStack.isSameItemSameTags(
+                preferences.ingredientChoices().get("minecraft:oak_planks#slot"),
+                decoded.planningPreferences().ingredientChoices()
+                        .get("minecraft:oak_planks#slot")));
+        assertEquals("minecraft:oak_planks",
+                decoded.forcedRecipes().get("minecraft:oak_planks"));
     }
 
     @Test

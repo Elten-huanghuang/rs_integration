@@ -81,7 +81,8 @@ public final class PlanCache {
                     PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph, long now) {
         Entry entry = new Entry(plan, snapshot, purePlan, resolvedGraph, now);
         entries.put(key, entry);
-        executionLeases.put(key.playerId(), new ExecutionLease(key, entry));
+        Key executionKey = key.withoutPreferences();
+        executionLeases.put(key.playerId(), new ExecutionLease(executionKey, entry));
         prune(now);
     }
 
@@ -91,8 +92,9 @@ public final class PlanCache {
      * snapshot before executing it.
      */
     public Entry takeForExecution(Key key) {
-        ExecutionLease lease = executionLeases.get(key.playerId());
-        if (lease == null || !lease.key().equals(key)) return null;
+        Key executionKey = key.withoutPreferences();
+        ExecutionLease lease = executionLeases.get(executionKey.playerId());
+        if (lease == null || !lease.key().equals(executionKey)) return null;
         return executionLeases.remove(key.playerId(), lease) ? lease.entry() : null;
     }
 
@@ -103,7 +105,8 @@ public final class PlanCache {
     public boolean grantExecutionLease(Key key, long now) {
         Entry entry = get(key, now);
         if (entry == null) return false;
-        executionLeases.put(key.playerId(), new ExecutionLease(key, entry));
+        Key executionKey = key.withoutPreferences();
+        executionLeases.put(key.playerId(), new ExecutionLease(executionKey, entry));
         return true;
     }
 
@@ -172,16 +175,33 @@ public final class PlanCache {
 
     public record Key(UUID playerId, ResourceLocation recipeId,
                       Map<String, String> forcedRecipes, int repeatCount,
-                      String clickedOutputToken, Map<String, String> materialLocks) {
+                      String clickedOutputToken, Map<String, String> materialLocks,
+                      PlanningPreferences preferences) {
         public Key(UUID playerId, ResourceLocation recipeId,
                    Map<String, String> forcedRecipes, int repeatCount,
                    String clickedOutputToken) {
-            this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken, Map.of());
+            this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken,
+                    Map.of(), PlanningPreferences.empty());
+        }
+
+        public Key(UUID playerId, ResourceLocation recipeId,
+                   Map<String, String> forcedRecipes, int repeatCount,
+                   String clickedOutputToken, Map<String, String> materialLocks) {
+            this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken,
+                    materialLocks, PlanningPreferences.empty());
         }
 
         public Key {
             forcedRecipes = Map.copyOf(forcedRecipes);
             materialLocks = Map.copyOf(materialLocks);
+            preferences = preferences == null
+                    ? PlanningPreferences.empty() : preferences;
+        }
+
+        private Key withoutPreferences() {
+            if (preferences.isEmpty()) return this;
+            return new Key(playerId, recipeId, forcedRecipes, repeatCount,
+                    clickedOutputToken, materialLocks, PlanningPreferences.empty());
         }
     }
 

@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -86,6 +87,7 @@ final class ResolutionContext {
     @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
     @Nullable final Map<ResourceLocation, ResourceLocation> forcedRecipes;
     private Map<String, ItemStack> materialLocks = Map.of();
+    private PlanningPreferences preferences = PlanningPreferences.empty();
     final Set<ResourceLocation> activeForcedRecipes = new HashSet<>();
     @Nullable final ServerPlayer player;
     @Nullable final CraftStorageEndpoint storageEndpoint;
@@ -254,12 +256,72 @@ final class ResolutionContext {
         return this;
     }
 
+    ResolutionContext withPreferences(@Nullable PlanningPreferences values) {
+        preferences = values == null ? PlanningPreferences.empty() : values;
+        excludedRecipes = preferences.excludedRecipes();
+        return this;
+    }
+
     Ingredient lockedIngredient(ResourceLocation recipeId, Ingredient ingredient) {
-        return MaterialLocks.narrow(recipeId, ingredient, materialLocks);
+        Ingredient hardLocked = MaterialLocks.narrow(recipeId, ingredient, materialLocks);
+        if (hardLocked != ingredient) return hardLocked;
+        return preferredIngredient(recipeId, ingredient);
     }
 
     List<IngredientSpec> lockedSpecs(ResourceLocation recipeId, List<IngredientSpec> specs) {
-        return MaterialLocks.narrowSpecs(recipeId, specs, materialLocks);
+        List<IngredientSpec> hardLocked =
+                MaterialLocks.narrowSpecs(recipeId, specs, materialLocks);
+        List<IngredientSpec> preferred = new ArrayList<>(hardLocked.size());
+        for (IngredientSpec spec : hardLocked) {
+            if (spec == null || spec.isEmpty()) {
+                preferred.add(spec);
+            } else {
+                preferred.add(new IngredientSpec(
+                        preferredIngredient(recipeId, spec.ingredient()),
+                        spec.count(), spec.consumption()));
+            }
+        }
+        return List.copyOf(preferred);
+    }
+
+    private Ingredient preferredIngredient(ResourceLocation recipeId, Ingredient ingredient) {
+        if (ingredient == null || ingredient.isEmpty()) return ingredient;
+        ItemStack requested = preferences.ingredientChoice(
+                MaterialLocks.key(recipeId, ingredient));
+        if (requested == null) return ingredient;
+        ItemStack canonical = MaterialLocks.canonicalCandidate(ingredient, requested);
+        return canonical == null ? ingredient
+                : CraftingResolver.ingredientOf(canonical,
+                IngredientMatcher.requiresNbt(ingredient));
+    }
+
+    boolean isNoRecipe(Ingredient ingredient) {
+        if (ingredient == null || ingredient.isEmpty()) return false;
+        boolean found = false;
+        for (ItemStack option : ingredient.getItems()) {
+            if (option.isEmpty()) continue;
+            found = true;
+            if (!preferences.isNoRecipe(option)) return false;
+        }
+        return found;
+    }
+
+    boolean isNoRecipe(ItemStack item) {
+        return item != null && !item.isEmpty() && preferences.isNoRecipe(item);
+    }
+
+    @Nullable
+    ResourceLocation preferredRecipeFor(ItemStack output) {
+        if (output == null || output.isEmpty()) return null;
+        ResourceLocation stored = preferences.preferredRecipe(output);
+        if (stored != null) return stored;
+        if (preferredRecipes == null) return null;
+        ResourceLocation key = CraftingResolver.preferenceKey(output);
+        ResourceLocation preferred = key == null ? null : preferredRecipes.get(key);
+        if (preferred == null) {
+            preferred = preferredRecipes.get(ForgeRegistries.ITEMS.getKey(output.getItem()));
+        }
+        return preferred;
     }
 
     @Nullable

@@ -72,11 +72,12 @@ public final class ForcedRecipeGraphProjector {
     }
 
     private static boolean matchesOutput(MaterialRef output, ResourceLocation preferenceKey) {
-        if (!CraftingResolver.isStackPreferenceKey(preferenceKey)) {
-            return output.itemId().equals(preferenceKey);
-        }
-        return !output.nbt().isEmpty()
-                && stackPreferenceKey(output.itemId(), output.nbt()).equals(preferenceKey);
+        return preferenceKey(output).equals(preferenceKey);
+    }
+
+    public static ResourceLocation preferenceKey(MaterialRef output) {
+        return output.nbt().isEmpty()
+                ? output.itemId() : stackPreferenceKey(output.itemId(), output.nbt());
     }
 
     private static ResourceLocation stackPreferenceKey(ResourceLocation itemId, String nbt) {

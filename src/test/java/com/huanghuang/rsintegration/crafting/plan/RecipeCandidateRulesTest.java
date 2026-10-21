@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,5 +37,13 @@ class RecipeCandidateRulesTest {
     void bookmarkAllBelongsToDiagnosticsOnly() {
         assertFalse(RecipeCandidateRules.showsBookmarkAll(false));
         assertTrue(RecipeCandidateRules.showsBookmarkAll(true));
+    }
+
+    @Test
+    void jeiIdentityHashBookmarkIdsAreNeverStableRecipePreferences() {
+        assertFalse(ClientRecipeExclusions.isStableRecipeId(
+                new ResourceLocation("minecraft", "rsi_bookmark/crafting/123")));
+        assertTrue(ClientRecipeExclusions.isStableRecipeId(
+                new ResourceLocation("minecraft", "crystal_matrix_ingot")));
     }
 }

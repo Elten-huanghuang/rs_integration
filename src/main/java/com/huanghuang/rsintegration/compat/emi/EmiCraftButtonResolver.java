@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.compat.jei.WishingFountainRecipeIdResolver;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
@@ -393,11 +394,14 @@ final class EmiCraftButtonResolver {
         if ("generic".equals(filter)) {
             return () -> {
                 long requestId = PlanningRequestIds.next();
-                PlanningProgressTracker.start(
-                        requestId, recipeId);
-                BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
-                        recipeId, true, Map.of(), null, null, 1, false,
-                        null, null, requestId));
+                GenericCraftPacket packet = ClientPlanningPreferences.apply(
+                        new GenericCraftPacket(
+                                recipeId, true, Map.of(), null, null, 1, false,
+                                null, null, requestId),
+                        Minecraft.getInstance().level);
+                PlanningProgressTracker.start(requestId, packet.recipeId());
+                BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                        packet);
             };
         }
         if ("block.minecraft.anvil".equals(filter)) {
@@ -407,11 +411,14 @@ final class EmiCraftButtonResolver {
         ItemStack capturedOutput = targetOutput.isEmpty() ? null : targetOutput.copy();
         return () -> {
             long requestId = PlanningRequestIds.next();
-            PlanningProgressTracker.start(
-                    requestId, recipeId);
-            BatchCraftNetworkHandler.CHANNEL.sendToServer(new GenericCraftPacket(
-                    recipeId, true, Map.of(), dimension, machinePos, 1, false,
-                    capturedBase, capturedOutput, requestId));
+            GenericCraftPacket packet = ClientPlanningPreferences.apply(
+                    new GenericCraftPacket(
+                            recipeId, true, Map.of(), dimension, machinePos, 1, false,
+                            capturedBase, capturedOutput, requestId),
+                    Minecraft.getInstance().level);
+            PlanningProgressTracker.start(requestId, packet.recipeId());
+            BatchCraftNetworkHandler.CHANNEL.sendToServer(
+                    packet);
         };
     }
 

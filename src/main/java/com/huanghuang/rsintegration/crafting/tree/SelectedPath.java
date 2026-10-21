@@ -98,6 +98,13 @@ public final class SelectedPath {
         recalculatePending();
     }
 
+    public void clearBranch(IngredientKey nodeKey) {
+        branchSelections.remove(nodeKey);
+        explicitSelections.remove(nodeKey);
+        dirty = true;
+        recalculatePending();
+    }
+
     public boolean isDirty() {
         return dirty;
     }

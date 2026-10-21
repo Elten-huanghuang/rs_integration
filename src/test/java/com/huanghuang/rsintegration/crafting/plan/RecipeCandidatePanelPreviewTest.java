@@ -2,9 +2,11 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.client.gui.Font;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -50,18 +53,19 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
                 .thenAnswer(invocation -> new RecipePreviewRenderer.CandidateDetails(
                         invocation.<ResourceLocation>getArgument(0).getPath(), ""));
         when(preview.categoryTitle(any())).thenReturn(
-                java.util.Optional.of(net.minecraft.network.chat.Component.literal("machine")));
+                Optional.of(Component.literal("machine")));
         when(preview.previewWidthHint(any())).thenReturn(80);
         when(preview.previewBounds(any()))
                 .thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
 
         RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
-                (node, recipe) -> {}, tempDir.resolve("crafting_plan.json"),
+                (node, recipe) -> {}, (node, recipe) -> {}, node -> {}, node -> {},
+                tempDir.resolve("crafting_plan.json"),
                 () -> {}, () -> true);
         PlanStep step = new PlanStep(CURRENT, new ItemStack(Items.DIAMOND), 1, List.of(),
                 List.of(FIRST_ALTERNATIVE, SECOND_ALTERNATIVE), null, 0, true);
         PlanTreeNode node = new PlanTreeNode(
-                com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
+                IngredientKey.of(
                         new ItemStack(Items.DIAMOND)),
                 new ItemStack(Items.DIAMOND), 1, 0, step);
 
@@ -88,18 +92,19 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
                 .thenAnswer(invocation -> new RecipePreviewRenderer.CandidateDetails(
                         invocation.<ResourceLocation>getArgument(0).getPath(), ""));
         when(preview.categoryTitle(any())).thenReturn(
-                java.util.Optional.of(net.minecraft.network.chat.Component.literal("machine")));
+                Optional.of(Component.literal("machine")));
         when(preview.previewWidthHint(any())).thenReturn(80);
         when(preview.previewBounds(any()))
                 .thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
         Path preferences = tempDir.resolve("node_preferences.json");
         AtomicReference<ResourceLocation> selected = new AtomicReference<>();
         RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
-                (node, recipe) -> selected.set(recipe), preferences, () -> {}, () -> true);
+                (node, recipe) -> selected.set(recipe), (node, recipe) -> {},
+                node -> {}, node -> {}, preferences, () -> {}, () -> true);
         PlanStep step = new PlanStep(CURRENT, new ItemStack(Items.DIAMOND), 1, List.of(),
                 List.of(FIRST_ALTERNATIVE), null, 0, true);
         PlanTreeNode node = new PlanTreeNode(
-                com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
+                IngredientKey.of(
                         new ItemStack(Items.DIAMOND)),
                 new ItemStack(Items.DIAMOND), 1, 0, step);
 
@@ -124,17 +129,20 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
                 .thenAnswer(invocation -> new RecipePreviewRenderer.CandidateDetails(
                         invocation.<ResourceLocation>getArgument(0).getPath(), ""));
         when(preview.categoryTitle(any())).thenReturn(
-                java.util.Optional.of(net.minecraft.network.chat.Component.literal("machine")));
+                Optional.of(Component.literal("machine")));
         when(preview.previewWidthHint(any())).thenReturn(80);
         when(preview.previewBounds(any()))
                 .thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
         Path preferences = tempDir.resolve("stock_only_toggle.json");
+        AtomicReference<ResourceLocation> cancelledTo = new AtomicReference<>();
         RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
-                (node, recipe) -> {}, preferences, () -> {}, () -> true);
+                (node, recipe) -> {}, (node, recipe) -> cancelledTo.set(recipe),
+                node -> {}, node -> {},
+                preferences, () -> {}, () -> true);
         PlanStep step = new PlanStep(CURRENT, new ItemStack(Items.DIAMOND), 1, List.of(),
                 List.of(FIRST_ALTERNATIVE), null, 1, true);
         PlanTreeNode node = new PlanTreeNode(
-                com.huanghuang.rsintegration.crafting.tree.IngredientKey.of(
+                IngredientKey.of(
                         new ItemStack(Items.DIAMOND)),
                 new ItemStack(Items.DIAMOND), 1, 1, step);
         String preferenceKey = CraftingResolver.preferenceKey(node.key.stack(1)).toString();
@@ -142,14 +150,19 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
         panel.open(node, Set.of());
         panel.selectNoRecipe();
 
-        assertTrue(panel.stockOnlySelected());
-        assertEquals(CraftingPlanPreferences.NO_RECIPE,
+        assertFalse(panel.isOpen());
+        assertEquals(RecipeChoice.NoRecipe.INSTANCE,
                 CraftingPlanPreferences.load(preferences).recipeChoices().get(preferenceKey));
 
+        panel.open(node, Set.of());
+        assertTrue(panel.stockOnlySelected());
         panel.selectNoRecipe();
 
-        assertFalse(panel.stockOnlySelected());
+        assertFalse(panel.isOpen());
         assertNull(CraftingPlanPreferences.load(preferences).recipeChoices().get(preferenceKey));
+        assertEquals(CURRENT, cancelledTo.get());
+        panel.open(node, Set.of());
+        assertFalse(panel.stockOnlySelected());
     }
 
     private static ResourceLocation id(String path) {

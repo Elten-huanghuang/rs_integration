@@ -221,18 +221,24 @@ public final class CraftingPlanScreen extends Screen {
     private int contentLayoutWidth = -1;
     private ViewMode contentLayoutMode;
     private final Map<String, ItemStack> materialLocks = new LinkedHashMap<>();
+    /** 从偏好文件载入的软材料选择，只用于回显，不进入本次会话的硬锁。 */
+    private final Map<String, ItemStack> preferredMaterials = new LinkedHashMap<>();
+    /** NoRecipe 会把步骤变成叶子；保留最近步骤作为当场撤回的候选上下文。 */
+    private final Map<IngredientKey, PlanStep> candidateStepHistory = new LinkedHashMap<>();
     @Nullable
     private PlanTreeNode materialDropdownNode;
     private int materialDropdownScroll;
     @Nullable
     private EditBox materialSearchBox;
     private int materialPanelX, materialPanelY, materialPanelW, materialPanelH;
+    private int materialForgetX, materialForgetY, materialForgetW, materialForgetH;
     private final List<MaterialDropHit> materialDropHits = new ArrayList<>();
     private record MaterialDropHit(int x, int y, int w, int h, ItemStack option) {}
     private record PendingCandidateSwitch(IngredientKey key,
                                           SelectedPath.BranchSnapshot previous,
-                                          ResourceLocation requestedRecipe,
-                                          @Nullable ResourceLocation preferenceKey) {}
+                                          @Nullable ResourceLocation requestedRecipe,
+                                          @Nullable ResourceLocation preferenceKey,
+                                          boolean persistPreference) {}
 
     // Hover intent: the full JEI recipe preview only pops after the mouse rests on the same
     // target for HOVER_INTENT_MS, so a quick pass across nodes/candidates doesn't spam previews.
@@ -327,6 +333,7 @@ public final class CraftingPlanScreen extends Screen {
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
         this.treeRenderer = new PlanTreeRenderer(Minecraft.getInstance().font);
         this.treeRenderer.setIconRenderer(recipePreview::drawCategoryIcon);
+        loadStoredMaterialChoices();
         rebuildTreeModel(true);
         JeiCraftingPlanContext.INSTANCE.activate(plan);
     }
@@ -408,6 +415,7 @@ public final class CraftingPlanScreen extends Screen {
         this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
         this.dropdownNode = null;
         this.materialScroll = 0;
+        loadStoredMaterialChoices();
         rebuildTreeModel(false);
         this.orHitboxes.clear();
         closeMaterialDropdown();
@@ -448,7 +456,7 @@ public final class CraftingPlanScreen extends Screen {
 
         treeModel = PlanTreeModel.from(plan);
         PlanTreeModel.applyCollapsedNodes(treeModel.root, collapsed);
-        JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialLocks);
+        JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialDisplayLocks());
         recipePreview.clear();
 
         selectedPath.bindTree(treeModel);
@@ -485,7 +493,8 @@ public final class CraftingPlanScreen extends Screen {
         Font font = minecraft.font;
         if (recipeCandidatePanel == null) {
             recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview,
-                    this::selectTreeBranch, PLAN_PREFS_PATH,
+                    this::selectTreeBranch, this::cancelStockOnly,
+                    this::forgetRecipePreference, this::recipeExclusionChanged, PLAN_PREFS_PATH,
                     this::bookmarkAllMissingMaterials,
                     () -> !MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty());
         }
@@ -828,6 +837,8 @@ public final class CraftingPlanScreen extends Screen {
                         requestTarget, requestId,
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
                 .withMaterialLocks(materialLocks)
+                .withPlanningPreferences(CraftingPlanPreferences.load(PLAN_PREFS_PATH)
+                        .toPlanningPreferences())
                 .withStorageReference(storageReference);
         if (preview) {
             PlanningProgressTracker.start(
@@ -2310,26 +2321,61 @@ public final class CraftingPlanScreen extends Screen {
      * flows through {@link #updatePlan}, which rebuilds the tree. Target-node switches replace the
      * root recipe; intermediate switches go into the forced map keyed by item id.
      */
-    private void selectTreeBranch(PlanTreeNode node, ResourceLocation recipeId) {
+    private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId) {
+        selectTreeBranch(node, recipeId, recipeId != null);
+    }
+
+    private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId,
+                                  boolean persistPreference) {
         closeRecipeCandidates();
         if (node.step == null || node.containsCycle()) return;
 
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
         pendingCandidateSwitch = new PendingCandidateSwitch(
-                node.key, selectedPath.snapshotBranch(node.key), recipeId, preferenceKey);
-        int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
-        selectedPath.selectBranch(node.key, idx, recipeId);
+                node.key, selectedPath.snapshotBranch(node.key), recipeId, preferenceKey,
+                persistPreference);
+        if (recipeId == null) {
+            selectedPath.clearBranch(node.key);
+        } else {
+            int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
+            selectedPath.selectBranch(node.key, idx, recipeId);
+        }
 
         Map<String, String> forced = exportForcedSelections();
         ResourceLocation rootRid = ResourceLocation.tryParse(plan.recipeId());
         boolean isTarget = node.depth == 0;
-        if (isTarget) {
+        if (isTarget && recipeId != null) {
             rootRid = recipeId;
             if (preferenceKey != null) forced.remove(preferenceKey.toString());
+        } else if (recipeId == null && preferenceKey != null) {
+            forced.remove(preferenceKey.toString());
         }
 
         sendCraftPacket(rootRid, true, forced, currentRepeat, false);
+    }
+
+    private void cancelStockOnly(PlanTreeNode node, ResourceLocation fallbackRecipe) {
+        selectTreeBranch(node, fallbackRecipe, false);
+    }
+
+    private void recipeExclusionChanged(PlanTreeNode node) {
+        if (node == null || node.step == null) return;
+        ResourceLocation preferenceKey = CraftingResolver
+                .preferenceKey(node.key.stack(1));
+        pendingCandidateSwitch = new PendingCandidateSwitch(
+                node.key, selectedPath.snapshotBranch(node.key),
+                node.step.recipeId(), preferenceKey, false);
+        Set<String> excluded = CraftingPlanPreferences.load(PLAN_PREFS_PATH).excludedRecipes();
+        if (excluded.contains(node.step.recipeId().toString())) {
+            selectedPath.clearBranch(node.key);
+        }
+        Map<String, String> forced = exportForcedSelections();
+        if (preferenceKey != null && excluded.contains(node.step.recipeId().toString())) {
+            forced.remove(preferenceKey.toString());
+        }
+        sendCraftPacket(ResourceLocation.tryParse(plan.recipeId()), true, forced,
+                currentRepeat, false);
     }
 
     /** 配方切换响应重建树后，重新打开原节点的候选卡片，便于继续切换。 */
@@ -2338,14 +2384,15 @@ public final class CraftingPlanScreen extends Screen {
         pendingCandidateSwitch = null;
         if (pending == null || treeModel == null) return;
         PlanTreeNode node = treeModel.findByKey(pending.key());
-        if (node == null || node.step == null) return;
+        if (node == null) return;
         openRecipeCandidates(node);
     }
 
     private void commitPendingCandidateSwitch() {
         PendingCandidateSwitch pending = pendingCandidateSwitch;
         if (pending == null) return;
-        if (pending.preferenceKey() != null) {
+        if (pending.persistPreference()
+                && pending.requestedRecipe() != null && pending.preferenceKey() != null) {
             String recipeId = pending.requestedRecipe().toString();
             CraftingPlanPreferences.saveRecipeChoice(
                     PLAN_PREFS_PATH, pending.preferenceKey().toString(), recipeId);
@@ -2356,7 +2403,21 @@ public final class CraftingPlanScreen extends Screen {
     private void rollbackPendingCandidateSwitch() {
         PendingCandidateSwitch pending = pendingCandidateSwitch;
         if (pending == null) return;
+        if (pending.requestedRecipe() == null) return;
         selectedPath.restoreBranch(pending.key(), pending.previous());
+    }
+
+    private void forgetRecipePreference(PlanTreeNode node) {
+        if (node == null || node.step == null) return;
+        ResourceLocation preferenceKey = CraftingResolver.preferenceKey(node.key.stack(1));
+        pendingCandidateSwitch = new PendingCandidateSwitch(
+                node.key, selectedPath.snapshotBranch(node.key),
+                node.step.recipeId(), preferenceKey, false);
+        selectedPath.clearBranch(node.key);
+        Map<String, String> forced = exportForcedSelections();
+        if (preferenceKey != null) forced.remove(preferenceKey.toString());
+        sendCraftPacket(ResourceLocation.tryParse(plan.recipeId()), true, forced,
+                currentRepeat, false);
     }
 
     /**
@@ -2387,6 +2448,8 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void openRecipeCandidates(PlanTreeNode node) {
+        node = candidateNodeFor(node);
+        if (node == null) return;
         if (node == dropdownNode) {
             closeRecipeCandidates();
             return;
@@ -2399,6 +2462,27 @@ public final class CraftingPlanScreen extends Screen {
         recipeCandidatePanel.setPlanDiagnostics(
                 MissingMaterialBookmarkList.textEntries(plan), displayWarnings(plan));
         resetHoverIntent();
+    }
+
+    @Nullable
+    private PlanTreeNode candidateNodeFor(PlanTreeNode node) {
+        if (node == null) return null;
+        if (node.step != null) {
+            candidateStepHistory.put(node.key, node.step);
+            return node;
+        }
+        PlanStep retained = candidateStepHistory.get(node.key);
+        if (retained == null) return null;
+        PlanTreeNode candidateNode = new PlanTreeNode(
+                node.key, node.displayStack, node.amount, node.depth,
+                retained, node.graphNodeId, node.demandRole);
+        candidateNode.cycle = node.cycle;
+        candidateNode.limited = node.limited;
+        candidateNode.lockedMaterial = node.lockedMaterial;
+        candidateNode.materialLockKey = node.materialLockKey;
+        candidateNode.materialOptions = node.materialOptions;
+        candidateNode.ingredient = node.ingredient;
+        return candidateNode;
     }
 
     /** 底部缺料/警告摘要统一作为诊断入口。 */
@@ -2466,6 +2550,25 @@ public final class CraftingPlanScreen extends Screen {
         gfx.fill(sx, sy, sx + panelW, sy + panelH, 0xF00A140E);
         gfx.fill(sx, sy, sx + panelW, sy + 1, 0xFF55D080);
         gfx.fill(sx + 4, sy + 3, sx + panelW - 4, sy + searchAreaH - 3, 0xFF15231A);
+        String forgetLabel = I18n.get("rsi.plan.material.forget");
+        boolean canForget = preferredMaterials.containsKey(node.materialLockKey)
+                || materialLocks.containsKey(node.materialLockKey);
+        materialForgetW = canForget ? font.width(forgetLabel) + 10 : 0;
+        materialForgetH = 16;
+        materialForgetX = sx + panelW - materialForgetW - 5;
+        materialForgetY = sy + 4;
+        if (canForget) {
+            boolean hover = mouseX >= materialForgetX
+                    && mouseX < materialForgetX + materialForgetW
+                    && mouseY >= materialForgetY
+                    && mouseY < materialForgetY + materialForgetH;
+            gfx.fill(materialForgetX, materialForgetY,
+                    materialForgetX + materialForgetW,
+                    materialForgetY + materialForgetH,
+                    hover ? 0xFF355D45 : 0xFF223D2D);
+            gfx.drawString(font, forgetLabel, materialForgetX + 5,
+                    materialForgetY + 4, hover ? 0xFFFFFFFF : 0xFFB9D7C3, false);
+        }
 
         int firstRowY = sy + searchAreaH;
         renderMaterialOption(gfx, font, mouseX, mouseY, node, ItemStack.EMPTY,
@@ -2479,7 +2582,8 @@ public final class CraftingPlanScreen extends Screen {
 
         if (materialSearchBox != null) {
             materialSearchBox.setPosition(sx + 7, sy + 5);
-            materialSearchBox.setWidth(panelW - 14);
+            materialSearchBox.setWidth(Math.max(1,
+                    panelW - 14 - (canForget ? materialForgetW + 4 : 0)));
             materialSearchBox.visible = true;
             materialSearchBox.active = true;
             materialSearchBox.render(gfx, mouseX, mouseY, 0f);
@@ -2494,7 +2598,7 @@ public final class CraftingPlanScreen extends Screen {
         if (hovered) gfx.fill(sx, ry, sx + panelW, ry + rowH, 0x33FFFFFF);
 
         boolean selected = option.isEmpty()
-                ? !materialLocks.containsKey(node.materialLockKey)
+                ? node.lockedMaterial == null
                 : node.lockedMaterial != null
                 && ItemStack.isSameItemSameTags(node.lockedMaterial, option);
         if (!option.isEmpty()) InkFluidRenderer.render(gfx, option, sx + 2, ry + 2);
@@ -2525,12 +2629,31 @@ public final class CraftingPlanScreen extends Screen {
         if (node.materialLockKey == null) return;
         if (option.isEmpty()) {
             materialLocks.remove(node.materialLockKey);
+            preferredMaterials.remove(node.materialLockKey);
+            CraftingPlanPreferences.saveIngredientChoice(
+                    PLAN_PREFS_PATH, node.materialLockKey, null);
         } else {
             materialLocks.put(node.materialLockKey, option.copyWithCount(1));
+            preferredMaterials.put(node.materialLockKey, option.copyWithCount(1));
+            CraftingPlanPreferences.saveIngredientChoice(
+                    PLAN_PREFS_PATH, node.materialLockKey, option);
         }
         closeMaterialDropdown();
         ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
         sendCraftPacket(rootRecipe, true, exportForcedSelections(), currentRepeat, false);
+    }
+
+    private void loadStoredMaterialChoices() {
+        preferredMaterials.clear();
+        preferredMaterials.putAll(
+                CraftingPlanPreferences.load(PLAN_PREFS_PATH).ingredientChoices());
+    }
+
+    private Map<String, ItemStack> materialDisplayLocks() {
+        if (preferredMaterials.isEmpty()) return materialLocks;
+        Map<String, ItemStack> merged = new LinkedHashMap<>(preferredMaterials);
+        merged.putAll(materialLocks);
+        return merged;
     }
 
     private void openMaterialDropdown(PlanTreeNode node) {
@@ -2557,6 +2680,8 @@ public final class CraftingPlanScreen extends Screen {
         materialDropHits.clear();
         materialPanelW = 0;
         materialPanelH = 0;
+        materialForgetW = 0;
+        materialForgetH = 0;
         hideMaterialSearchInput();
     }
 
@@ -2800,6 +2925,12 @@ public final class CraftingPlanScreen extends Screen {
         if (materialDropdownNode != null && materialPanelW > 0
                 && mx >= materialPanelX && mx < materialPanelX + materialPanelW
                 && my >= materialPanelY && my < materialPanelY + materialPanelH) {
+            if (button == 0 && materialForgetW > 0
+                    && mx >= materialForgetX && mx < materialForgetX + materialForgetW
+                    && my >= materialForgetY && my < materialForgetY + materialForgetH) {
+                selectMaterial(materialDropdownNode, ItemStack.EMPTY);
+                return true;
+            }
             if (button == 0 && materialSearchBox != null
                     && mx >= materialSearchBox.getX()
                     && mx < materialSearchBox.getX() + materialSearchBox.getWidth()
@@ -2977,7 +3108,8 @@ public final class CraftingPlanScreen extends Screen {
                         openMaterialDropdown(node);
                     } else if (node != null && node.hasAlternatives()) {
                         openRecipeCandidates(node);
-                    } else if (node != null && node.step != null) {
+                    } else if (node != null && (node.step != null
+                            || candidateStepHistory.containsKey(node.key))) {
                         // 单一配方也打开卡片集合，保证“仅使用库存”和偏好操作可见。
                         openRecipeCandidates(node);
                     } else {

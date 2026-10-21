@@ -20,7 +20,8 @@ public record PlanningSnapshot(
         String networkFingerprint,
         String bindingFingerprint,
         Set<ResourceLocation> bindingBlockedOutputIds,
-        boolean mainThreadOnly) {
+        boolean mainThreadOnly,
+        PlanningPreferences preferences) {
 
     public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
                             ResourceLocation recipeId, Map<StackKey, Long> availableItems,
@@ -30,7 +31,18 @@ public record PlanningSnapshot(
         this(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
                 forcedRecipes, recipeGraph,
                 networkFingerprint, bindingFingerprint,
-                Set.of(), mainThreadOnly);
+                Set.of(), mainThreadOnly, PlanningPreferences.empty());
+    }
+
+    public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
+                            ResourceLocation recipeId, Map<StackKey, Long> availableItems,
+                            Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                            ImmutableRecipeGraph recipeGraph, String networkFingerprint,
+                            String bindingFingerprint, Set<ResourceLocation> bindingBlockedOutputIds,
+                            boolean mainThreadOnly) {
+        this(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
+                forcedRecipes, recipeGraph, networkFingerprint, bindingFingerprint,
+                bindingBlockedOutputIds, mainThreadOnly, PlanningPreferences.empty());
     }
 
     public PlanningSnapshot {
@@ -43,6 +55,7 @@ public record PlanningSnapshot(
         bindingFingerprint = Objects.requireNonNullElse(bindingFingerprint, "");
         bindingBlockedOutputIds = bindingBlockedOutputIds == null
                 ? Set.of() : Set.copyOf(bindingBlockedOutputIds);
+        preferences = preferences == null ? PlanningPreferences.empty() : preferences;
     }
 
 }

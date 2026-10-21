@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -32,6 +33,22 @@ class PlanCacheTest extends BootstrapTest {
                 Map.of("test:planks#tag", "minecraft:birch_planks"));
 
         assertNotEquals(oak, birch);
+    }
+
+    @Test
+    void planningPreferencesPartitionPreviewCacheKeys() {
+        UUID player = UUID.randomUUID();
+        ResourceLocation recipe = new ResourceLocation("test", "crystal_matrix_ingot");
+        PlanningPreferences preferences = new PlanningPreferences(
+                Map.of("avaritia:crystal_matrix_ingot",
+                        RecipeChoice.NoRecipe.INSTANCE),
+                Map.of(), Set.of());
+        PlanCache.Key automatic = new PlanCache.Key(
+                player, recipe, Map.of(), 1, "", Map.of(), PlanningPreferences.empty());
+        PlanCache.Key stockOnly = new PlanCache.Key(
+                player, recipe, Map.of(), 1, "", Map.of(), preferences);
+
+        assertNotEquals(automatic, stockOnly);
     }
 
     @Test

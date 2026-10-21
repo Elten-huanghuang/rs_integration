@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -14,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class CraftingPlanPreferencesTest {
+class CraftingPlanPreferencesTest extends BootstrapTest {
 
     @TempDir
     Path directory;
@@ -44,7 +48,10 @@ class CraftingPlanPreferencesTest {
         Path file = directory.resolve("crafting_plan.json");
         assertTrue(CraftingPlanPreferences.save(file,
                 new CraftingPlanPreferences.Snapshot(OutputDestination.RS_NETWORK,
-                        Map.of("minecraft:oak_planks", "minecraft:oak_planks"),
+                        Map.of("minecraft:oak_planks",
+                                new RecipeChoice.Normal(new ResourceLocation(
+                                        "minecraft", "oak_planks"))),
+                        Map.of(),
                         Set.of("minecraft:oak_planks"))));
 
         assertTrue(CraftingPlanPreferences.saveOutputDestination(
@@ -52,7 +59,8 @@ class CraftingPlanPreferencesTest {
         CraftingPlanPreferences.Snapshot loaded = CraftingPlanPreferences.load(file);
 
         assertEquals(OutputDestination.PLAYER_INVENTORY, loaded.outputDestination());
-        assertEquals("minecraft:oak_planks",
+        assertEquals(new RecipeChoice.Normal(new ResourceLocation(
+                        "minecraft", "oak_planks")),
                 loaded.recipeChoices().get("minecraft:oak_planks"));
         assertTrue(loaded.excludedRecipes().contains("minecraft:oak_planks"));
     }
@@ -63,12 +71,28 @@ class CraftingPlanPreferencesTest {
         String key = "rs_integration:stack/test";
 
         assertTrue(CraftingPlanPreferences.saveRecipeChoice(
-                file, key, CraftingPlanPreferences.NO_RECIPE));
-        assertEquals(CraftingPlanPreferences.NO_RECIPE,
+                file, key, RecipeChoice.NoRecipe.INSTANCE));
+        assertEquals(RecipeChoice.NoRecipe.INSTANCE,
                 CraftingPlanPreferences.load(file).recipeChoices().get(key));
 
-        assertTrue(CraftingPlanPreferences.saveRecipeChoice(file, key, null));
+        assertTrue(CraftingPlanPreferences.saveRecipeChoice(file, key, (RecipeChoice) null));
         assertFalse(CraftingPlanPreferences.load(file).recipeChoices().containsKey(key));
+    }
+
+    @Test
+    void ingredientChoicePreservesNbtAndCanBeCleared() {
+        Path file = directory.resolve("crafting_plan.json");
+        String key = "minecraft:oak_planks#slot";
+        ItemStack chosen = new ItemStack(Items.OAK_LOG);
+        chosen.getOrCreateTag().putString("variant", "fine");
+
+        assertTrue(CraftingPlanPreferences.saveIngredientChoice(file, key, chosen));
+        ItemStack loaded = CraftingPlanPreferences.load(file)
+                .ingredientChoices().get(key);
+        assertTrue(ItemStack.isSameItemSameTags(chosen, loaded));
+
+        assertTrue(CraftingPlanPreferences.saveIngredientChoice(file, key, null));
+        assertFalse(CraftingPlanPreferences.load(file).ingredientChoices().containsKey(key));
     }
 
     @Test

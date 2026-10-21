@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
@@ -113,9 +114,110 @@ class PureRecipePlannerTest extends BootstrapTest {
 
         assertFalse(result.feasible(), result.toString());
         assertEquals(PureRecipePlanner.FailureReason.MISSING_INPUTS,
-                result.failureReason());
+                result.failureReason(), result.toString());
         assertTrue(result.steps().stream().noneMatch(step ->
                 step.recipeId().equals(fallback.recipeId())), result.steps().toString());
+    }
+
+    @Test
+    void noRecipeConsumesStockAndNeverFallsBackToARecursiveProducer() {
+        MaterialRef target = material("stock_only_target");
+        MaterialRef input = material("stock_only_input");
+        RecipeNode producer = recipe("stock_only_producer", target, 1,
+                ingredient(input, 1));
+        PlanningPreferences preferences = new PlanningPreferences(
+                Map.of(target.itemId().toString(), RecipeChoice.NoRecipe.INSTANCE),
+                Map.of(), Set.of());
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(producer))),
+                Map.of(target, 1, input, 1), List.of(ingredient(target, 2)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(),
+                preferences);
+
+        assertFalse(result.feasible(), result.toString());
+        assertTrue(result.steps().isEmpty(), result.steps().toString());
+        assertEquals(1, result.missing().get(0).count());
+    }
+
+    @Test
+    void savedNormalRecipeIsSoftAndFallsBackWhenItsInputsAreMissing() {
+        MaterialRef target = material("saved_soft_target");
+        MaterialRef availableInput = material("saved_soft_available");
+        MaterialRef missingInput = material("saved_soft_missing");
+        RecipeNode fallback = recipe("saved_soft_fallback", target, 1,
+                ingredient(availableInput, 1));
+        RecipeNode preferred = recipe("saved_soft_preferred", target, 1,
+                ingredient(missingInput, 1));
+        PlanningPreferences preferences = new PlanningPreferences(
+                Map.of(target.itemId().toString(),
+                        new RecipeChoice.Normal(preferred.recipeId())),
+                Map.of(), Set.of());
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(fallback, preferred))),
+                Map.of(availableInput, 1), List.of(ingredient(target, 1)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(),
+                preferences);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                fallback.recipeId(), 1)), result.steps());
+    }
+
+    @Test
+    void excludedRecipeKeepsAlternativeAvailableToThePlanner() {
+        MaterialRef target = material("excluded_target");
+        MaterialRef input = material("excluded_input");
+        RecipeNode excluded = recipe("excluded_recipe", target, 1,
+                ingredient(input, 1));
+        RecipeNode usable = recipe("usable_alternative", target, 1,
+                ingredient(input, 1));
+        PlanningPreferences preferences = new PlanningPreferences(Map.of(), Map.of(),
+                Set.of(excluded.recipeId()));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                new ImmutableRecipeGraph(Map.of(target, List.of(excluded, usable))),
+                Map.of(input, 1), List.of(ingredient(target, 1)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(),
+                preferences);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(usable.recipeId(), 1)),
+                result.steps());
+    }
+
+    @Test
+    void missingFallbackIsNotReportedAsCycleBecauseAnExcludedRecipeWouldHaveLooped() {
+        MaterialRef ingot = material("crystal_matrix_ingot");
+        MaterialRef block = material("crystal_matrix");
+        MaterialRef lattice = material("diamond_lattice");
+        MaterialRef star = material("nether_star");
+        RecipeNode excludedNormal = recipe("crystal_matrix_ingot_normal", ingot, 1,
+                ingredient(lattice, 3), ingredient(star, 3));
+        RecipeNode decompression = recipe("crystal_matrix_ingot_from_block", ingot, 9,
+                ingredient(block, 1));
+        RecipeNode compression = recipe("crystal_matrix", block, 1,
+                ingredient(ingot, 9));
+        RecipeNode tableFallback = recipe("crystal_matrix_ingot_table", ingot, 1,
+                ingredient(lattice, 6), ingredient(star, 2));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                ingot, List.of(excludedNormal, decompression, tableFallback),
+                block, List.of(compression)));
+        PlanningPreferences preferences = new PlanningPreferences(
+                Map.of(ingot.itemId().toString(),
+                        new RecipeChoice.Normal(decompression.recipeId())),
+                Map.of(), Set.of(excludedNormal.recipeId()));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(lattice, 6), List.of(ingredient(ingot, 1)),
+                20, 256, 256, Long.MAX_VALUE, System::nanoTime,
+                Set.of(), Map.of(), preferences);
+
+        assertFalse(result.feasible(), result.toString());
+        assertFalse(result.missing().isEmpty(), result.toString());
+        assertEquals(PureRecipePlanner.FailureReason.MISSING_INPUTS,
+                result.failureReason(), result.missing().toString());
     }
 
     @Test

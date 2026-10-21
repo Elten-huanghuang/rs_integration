@@ -174,6 +174,7 @@ public final class PlanningStateValidator {
                 && left.recipeId().equals(right.recipeId())
                 && left.availableItems().equals(right.availableItems())
                 && left.forcedRecipes().equals(right.forcedRecipes())
+                && left.preferences().equals(right.preferences())
                 && left.networkFingerprint().equals(right.networkFingerprint())
                 && left.bindingFingerprint().equals(right.bindingFingerprint());
     }
@@ -188,6 +189,7 @@ public final class PlanningStateValidator {
         if (cached.recipeRevision() != current.recipeRevision()
                 || !cached.recipeId().equals(current.recipeId())
                 || !cached.forcedRecipes().equals(current.forcedRecipes())
+                || !cached.preferences().equals(current.preferences())
                 || !cached.bindingFingerprint().equals(current.bindingFingerprint())
                 || !networkIdentity(cached.networkFingerprint())
                 .equals(networkIdentity(current.networkFingerprint()))) {

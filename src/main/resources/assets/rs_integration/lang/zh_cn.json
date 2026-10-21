@@ -723,6 +723,12 @@
   "rsi.planning.detail.no_update": "长时间未收到规划状态更新",
   "rsi.plan.failure.missing_materials": "失败原因：缺少合成所需材料",
   "rsi.plan.failure.cyclic_dependency": "失败原因：所选配方形成不可增长的材料循环",
+  "rsi.plan.failure.no_recipe": "该材料已设置为仅使用库存，不进行递归制造",
+  "rsi.plan.failure.recipe_excluded": "该配方已被设置为不参与递归合成",
+  "rsi.jei.bookmark.tooltip.add_and_exclude": "右键：加入配方书签并禁用该配方参与递归合成",
+  "rsi.jei.bookmark.tooltip.exclude": "右键：禁用该配方参与递归合成",
+  "rsi.jei.bookmark.tooltip.restore": "左键：移除书签并恢复递归合成；右键：仅恢复递归合成",
+  "rsi.jei.bookmark.tooltip.unavailable": "该配方缺少稳定 ID，无法设置递归禁用",
   "rsi.plan.dynamic_brewing_recipe": "动态炼药配方：%s",
   "rsi.plan.failure.no_bound_machine": "失败原因：没有可用的已绑定机器",
   "rsi.plan.failure.machines_leased": "失败原因：所有已绑定机器都被其他合成订单占用",
@@ -1546,5 +1552,6 @@
   "types.rs_integration.mana.name": "魔力",
   "types.rs_integration.source.name": "魔源",
   "gui.rs_integration.unified_grid.magic_amount_capacity": "储量：%s / %s",
-  "item.rs_integration.unified_storage_disk.stored_magic": "已存储%s：%s"
+  "item.rs_integration.unified_storage_disk.stored_magic": "已存储%s：%s",
+  "rsi.plan.material.forget": "忘记材料"
 }

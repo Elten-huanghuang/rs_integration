@@ -67,7 +67,10 @@ public final class JeiSubtreeBuilder {
                                     .filter(stack -> stack != null && !stack.isEmpty())
                                     .map(stack -> stack.copyWithCount(1)).toList();
                             ItemStack locked = materialLocks.get(child.materialLockKey);
-                            child.lockedMaterial = locked == null ? null : locked.copyWithCount(1);
+                            child.lockedMaterial = locked == null
+                                    || !ItemStack.isSameItemSameTags(locked, child.displayStack)
+                                    || !ing.test(locked)
+                                    ? null : locked.copyWithCount(1);
                             used[i] = true;
                             break;
                         }

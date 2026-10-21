@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /** 固定在右侧的候选配方面板；只构建可见行的 JEI 布局。 */
 @OnlyIn(Dist.CLIENT)
@@ -43,6 +44,9 @@ public final class RecipeCandidatePanel {
     private final Font font;
     private final RecipePreviewRenderer preview;
     private final BiConsumer<PlanTreeNode, ResourceLocation> onSelect;
+    private final BiConsumer<PlanTreeNode, ResourceLocation> onCancelStockOnly;
+    private final Consumer<PlanTreeNode> onForgetPreference;
+    private final Consumer<PlanTreeNode> onExclusionChanged;
     private final Path preferencesPath;
     private final Runnable onBookmarkAll;
     private final BooleanSupplier canBookmarkAll;
@@ -82,11 +86,17 @@ public final class RecipeCandidatePanel {
 
     public RecipeCandidatePanel(Font font, RecipePreviewRenderer preview,
                                 BiConsumer<PlanTreeNode, ResourceLocation> onSelect,
+                                BiConsumer<PlanTreeNode, ResourceLocation> onCancelStockOnly,
+                                Consumer<PlanTreeNode> onForgetPreference,
+                                Consumer<PlanTreeNode> onExclusionChanged,
                                 Path preferencesPath, Runnable onBookmarkAll,
                                 BooleanSupplier canBookmarkAll) {
         this.font = font;
         this.preview = preview;
         this.onSelect = onSelect;
+        this.onCancelStockOnly = onCancelStockOnly;
+        this.onForgetPreference = onForgetPreference;
+        this.onExclusionChanged = onExclusionChanged;
         this.preferencesPath = preferencesPath;
         this.onBookmarkAll = onBookmarkAll;
         this.canBookmarkAll = canBookmarkAll;
@@ -130,9 +140,10 @@ public final class RecipeCandidatePanel {
         this.preferenceKey = preference == null ? null : preference.toString();
         CraftingPlanPreferences.Snapshot preferences =
                 CraftingPlanPreferences.load(preferencesPath);
-        this.defaultRecipeId = preferenceKey == null ? null
+        RecipeChoice defaultChoice = preferenceKey == null ? null
                 : preferences.recipeChoices().get(preferenceKey);
-        this.noRecipeSelected = CraftingPlanPreferences.NO_RECIPE.equals(defaultRecipeId);
+        this.defaultRecipeId = defaultChoice == null ? null : defaultChoice.serialize();
+        this.noRecipeSelected = defaultChoice == RecipeChoice.NoRecipe.INSTANCE;
         this.excludedRecipes = new LinkedHashSet<>(preferences.excludedRecipes());
         var options = new LinkedHashMap<ResourceLocation, String>();
         options.put(node.step.recipeId(),
@@ -156,7 +167,7 @@ public final class RecipeCandidatePanel {
         }
         if (!RecipeCandidateRules.canChooseStockOnly(node.depth, candidates.size())) {
             noRecipeSelected = false;
-            if (CraftingPlanPreferences.NO_RECIPE.equals(defaultRecipeId)) {
+            if (RecipeChoice.NoRecipe.INSTANCE.serialize().equals(defaultRecipeId)) {
                 defaultRecipeId = null;
             }
         }
@@ -680,6 +691,7 @@ public final class RecipeCandidatePanel {
                 if (excluded) excludedRecipes.add(recipeId);
                 else excludedRecipes.remove(recipeId);
                 CraftingPlanPreferences.setExcluded(preferencesPath, recipeId, excluded);
+                onExclusionChanged.accept(node);
             }
             return true;
         }
@@ -818,14 +830,27 @@ public final class RecipeCandidatePanel {
         if (!RecipeCandidateRules.canChooseStockOnly(node.depth, model.total())) return;
         boolean cancel = noRecipeSelected;
         noRecipeSelected = !cancel;
-        defaultRecipeId = cancel ? null : CraftingPlanPreferences.NO_RECIPE;
+        defaultRecipeId = cancel ? null : RecipeChoice.NoRecipe.INSTANCE.serialize();
         CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey,
-                cancel ? null : CraftingPlanPreferences.NO_RECIPE);
+                cancel ? null : RecipeChoice.NoRecipe.INSTANCE);
+        PlanTreeNode owner = node;
+        ResourceLocation fallbackRecipe = owner.step == null
+                ? null : owner.step.recipeId();
+        close();
+        if (cancel && fallbackRecipe != null) {
+            onCancelStockOnly.accept(owner, fallbackRecipe);
+        } else {
+            onSelect.accept(owner, null);
+        }
     }
 
     private void forgetPreference() {
+        PlanTreeNode owner = node;
         defaultRecipeId = null;
         noRecipeSelected = false;
-        CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey, null);
+        CraftingPlanPreferences.saveRecipeChoice(
+                preferencesPath, preferenceKey, (RecipeChoice) null);
+        close();
+        onForgetPreference.accept(owner);
     }
 }

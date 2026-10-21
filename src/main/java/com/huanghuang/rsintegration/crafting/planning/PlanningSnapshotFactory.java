@@ -22,10 +22,27 @@ public final class PlanningSnapshotFactory {
                                             String bindingFingerprint,
                                             Set<ResourceLocation> bindingBlockedOutputIds,
                                             boolean mainThreadOnly) {
+        return capture(playerId, requestGeneration, recipeId, availableItems, forcedRecipes,
+                recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
+                mainThreadOnly, PlanningPreferences.empty());
+    }
+
+    public static PlanningSnapshot capture(UUID playerId,
+                                            long requestGeneration,
+                                            ResourceLocation recipeId,
+                                            Map<StackKey, Long> availableItems,
+                                            Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                                            ImmutableRecipeGraph recipeGraph,
+                                            String networkFingerprint,
+                                            String bindingFingerprint,
+                                            Set<ResourceLocation> bindingBlockedOutputIds,
+                                            boolean mainThreadOnly,
+                                            PlanningPreferences preferences) {
         return new PlanningSnapshot(playerId, requestGeneration,
                 CraftPlanningRevision.current(), recipeId, availableItems,
                 forcedRecipes, recipeGraph,
-                networkFingerprint, bindingFingerprint, bindingBlockedOutputIds, mainThreadOnly);
+                networkFingerprint, bindingFingerprint, bindingBlockedOutputIds, mainThreadOnly,
+                preferences);
     }
 
     public static PlanningSnapshot capture(UUID playerId,
@@ -39,6 +56,7 @@ public final class PlanningSnapshotFactory {
                                             boolean mainThreadOnly) {
         return capture(playerId, requestGeneration, recipeId, availableItems,
                 forcedRecipes, recipeGraph,
-                networkFingerprint, bindingFingerprint, Set.of(), mainThreadOnly);
+                networkFingerprint, bindingFingerprint, Set.of(), mainThreadOnly,
+                PlanningPreferences.empty());
     }
 }

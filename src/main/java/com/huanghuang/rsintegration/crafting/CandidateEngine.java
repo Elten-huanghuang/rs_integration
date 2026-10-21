@@ -77,6 +77,13 @@ final class CandidateEngine {
             if (ctx.timedOut()) break;
             ItemStack stack = items[idx];
             if (stack.isEmpty()) continue;
+            if (ctx.isNoRecipe(stack)) {
+                if (diag != null) {
+                    logDiag(diag, stack.getItem(), null, 0, null, true,
+                            "NoRecipe preference disables this material");
+                }
+                continue;
+            }
             Item item = stack.getItem();
 
             List<RecipeIndex.Entry> recipes = semanticSpellRecipes(stack, ctx);
@@ -453,13 +460,9 @@ final class CandidateEngine {
     }
 
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {
-        if (ctx.preferredRecipes == null) return false;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (output.isEmpty()) return false;
-        ResourceLocation itemKey = CraftingResolver.preferenceKey(output);
-        if (itemKey == null) return false;
-        ResourceLocation pref = ctx.preferredRecipes.get(itemKey);
-        if (pref == null) pref = ctx.preferredRecipes.get(ForgeRegistries.ITEMS.getKey(output.getItem()));
+        ResourceLocation pref = ctx.preferredRecipeFor(output);
         return pref != null && pref.equals(entry.recipe().getId());
     }
 
@@ -506,14 +509,9 @@ final class CandidateEngine {
                                    @Nullable Map<Ingredient, Long> matchCache) {
         int score = 0;
         ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
-        ResourceLocation outputKey = CraftingResolver.preferenceKey(output);
-        if (outputKey != null && ctx.preferredRecipes != null) {
-            ResourceLocation preferred = ctx.preferredRecipes.get(outputKey);
-            if (preferred == null) preferred = ctx.preferredRecipes.get(
-                    ForgeRegistries.ITEMS.getKey(output.getItem()));
-            if (preferred != null && preferred.equals(recipe.getId())) {
-                score += PREFERRED_RECIPE_BONUS;
-            }
+        ResourceLocation preferred = ctx.preferredRecipeFor(output);
+        if (preferred != null && preferred.equals(recipe.getId())) {
+            score += PREFERRED_RECIPE_BONUS;
         }
 
         List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 /** 可跨版本传递的诊断代码；客户端按此映射本地化文本。 */
 public enum IntegrationDiagnosticCode {
     RECIPE_NOT_FOUND("rsi.generic.error.recipe_not_found"),
+    RECIPE_EXCLUDED("rsi.plan.failure.recipe_excluded"),
     RECIPE_STAGE_MISSING("rsi.generic.error.recipe_stage_missing"),
     NO_BOUND_MACHINE("rsi.plan.failure.no_bound_machine"),
     SMITHING_BASE_REQUIRED("rsi.generic.error.fa_open_smithing"),

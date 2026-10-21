@@ -718,6 +718,12 @@
   "rsi.planning.detail.no_update": "No progress update received",
   "rsi.plan.failure.missing_materials": "Failure reason: required crafting materials are missing",
   "rsi.plan.failure.cyclic_dependency": "Failure reason: the selected recipes form a non-growing material loop",
+  "rsi.plan.failure.no_recipe": "This material is set to stock-only and will not be crafted recursively",
+  "rsi.plan.failure.recipe_excluded": "This recipe is excluded from recursive crafting",
+  "rsi.jei.bookmark.tooltip.add_and_exclude": "Right-click: bookmark and exclude this recipe from recursive crafting",
+  "rsi.jei.bookmark.tooltip.exclude": "Right-click: exclude this recipe from recursive crafting",
+  "rsi.jei.bookmark.tooltip.restore": "Left-click: remove bookmark and restore recursion; Right-click: restore recursion only",
+  "rsi.jei.bookmark.tooltip.unavailable": "This recipe has no stable ID and cannot be excluded",
   "rsi.plan.dynamic_brewing_recipe": "Dynamic brewing recipe: %s",
   "rsi.plan.failure.no_bound_machine": "Failure reason: no bound machine is available",
   "rsi.plan.failure.machines_leased": "Failure reason: all bound machines are occupied by active crafting orders",
@@ -1546,5 +1552,6 @@
   "types.rs_integration.mana.name": "Mana",
   "types.rs_integration.source.name": "Source",
   "gui.rs_integration.unified_grid.magic_amount_capacity": "Stored: %s / %s",
-  "item.rs_integration.unified_storage_disk.stored_magic": "Stored %s: %s"
+  "item.rs_integration.unified_storage_disk.stored_magic": "Stored %s: %s",
+  "rsi.plan.material.forget": "Forget material"
 }

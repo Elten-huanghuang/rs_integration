@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.command.PerformanceMonitor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -370,6 +371,19 @@ public final class CraftingResolver {
                 missingOut, forcedOverrides, bestEffort, false, timeoutMs, activeRoot, materialLocks);
     }
 
+    public static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, false, timeoutMs,
+                activeRoot, materialLocks, preferences.excludedRecipes(), preferences);
+    }
+
     /**
      * Resolve the root inputs of one machine recipe. Each {@link IngredientSpec}
      * represents one physical machine slot, so a tag demand must be backed by one
@@ -429,6 +443,19 @@ public final class CraftingResolver {
                 missingOut, forcedOverrides, bestEffort, true, timeoutMs, activeRoot, materialLocks);
     }
 
+    public static CraftPlanGraph resolveMachineGraphForSpecsWithTypes(
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, true, timeoutMs,
+                activeRoot, materialLocks, preferences.excludedRecipes(), preferences);
+    }
+
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
             List<IngredientSpec> needed,
             Map<StackKey, ? extends Number> availableKeyed,
@@ -463,6 +490,20 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes) {
+        return resolveGraphForSpecsWithTypes(needed, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, singleVariantRoots,
+                timeoutMs, activeRoot, materialLocks, excludedRecipes,
+                PlanningPreferences.empty());
+    }
+
+    private static CraftPlanGraph resolveGraphForSpecsWithTypes(
+            List<IngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
+            PlanningPreferences preferences) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         ResolutionContext ctx = timeoutMs > 0
@@ -473,6 +514,7 @@ public final class CraftingResolver {
                         prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut);
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         ctx.withMaterialLocks(materialLocks);
+        ctx.withPreferences(preferences);
         EdgeTracker edges = new EdgeTracker();
         List<RootDemand> roots = new ArrayList<>();
 
@@ -684,6 +726,23 @@ public final class CraftingResolver {
             ResolutionContext.SupplyConsumption existing = ctx.consumeMatchingDetailed(ingredient, count);
             if (existing.complete()) recordSupplyConsumption(ctx, consumer, consumedOut, existing);
             return existing.complete();
+        }
+        if (ctx.isNoRecipe(ingredient)) {
+            ctx.beginUndo();
+            edges.beginUndo();
+            ResolutionContext.SupplyConsumption stocked =
+                    ctx.consumeMatchingDetailed(ingredient, count);
+            recordSupplyConsumption(ctx, consumer, consumedOut, stocked);
+            ctx.commitUndo();
+            edges.commitUndo();
+            ctx.diag("ensureIngredient stop: no_recipe for "
+                    + describeFirstItem(ingredient) + " missing="
+                    + Math.max(0L, count - stocked.supplied()));
+            if (recordBestEffortUnresolved(
+                    ctx, consumer, ingredient, count, "no-recipe")) {
+                return true;
+            }
+            return false;
         }
 
         long candStart = System.nanoTime();

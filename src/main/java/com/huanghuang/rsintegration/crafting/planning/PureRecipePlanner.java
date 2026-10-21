@@ -95,9 +95,21 @@ public final class PureRecipePlanner {
                           int maxMemoizedFailures, long deadlineNanos,
                           LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                           Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs,
+                forcedRecipes, PlanningPreferences.empty());
+    }
+
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                          int maxMemoizedFailures, long deadlineNanos,
+                          LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
+                          Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                          PlanningPreferences preferences) {
         return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime,
-                activeRootOutputs, forcedRecipes));
+                activeRootOutputs, forcedRecipes, preferences));
     }
 
     private static Result resolveInScope(ImmutableRecipeGraph graph,
@@ -105,13 +117,15 @@ public final class PureRecipePlanner {
                                         List<IngredientRef> roots, int maxSteps, int maxSearchStates,
                                         int maxMemoizedFailures, long deadlineNanos,
                                         LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
-                                        Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+                                        Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                                        PlanningPreferences preferences) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
                 graph, preciseAvailable, normalizedRoots);
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
-                maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes);
+                maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes,
+                preferences);
         List<Task> pending = normalizedRoots.stream()
                 .map(DemandTask::new).map(Task.class::cast).toList();
         Status status;
@@ -138,7 +152,7 @@ public final class PureRecipePlanner {
                     status == Status.UNRESOLVABLE
                             ? search::checkBudget
                             : new DiagnosticBudget(MAX_DIAGNOSTIC_OPERATIONS),
-                    forcedRecipes);
+                    forcedRecipes, preferences);
             try {
                 PartialTrace partial = partialBuilder.build(normalizedRoots);
                 if (!partial.missing().isEmpty()
@@ -160,7 +174,10 @@ public final class PureRecipePlanner {
         Map<MaterialRef, Long> resultStock = status == Status.SUCCESS
                 ? search.stock : search.initialStock;
         FailureReason failureReason = status == Status.UNRESOLVABLE
-                ? search.deepestFailureReason : FailureReason.NONE;
+                ? search.sawMissingInputFailure
+                        ? FailureReason.MISSING_INPUTS
+                        : search.deepestFailureReason
+                : FailureReason.NONE;
         return new Result(Feasibility.from(status), resultSteps, missing, resultStock,
                 aggregateMagicCosts(graph, resultSteps), status,
                 search.expandedStates, search.backtracks, search.memoHits,
@@ -319,6 +336,7 @@ public final class PureRecipePlanner {
         private final long deadlineNanos;
         private final LongSupplier nanoTime;
         private final Map<ResourceLocation, ResourceLocation> forcedRecipes;
+        private final PlanningPreferences preferences;
         private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         private final List<PlannedStep> steps = new ArrayList<>();
@@ -347,6 +365,7 @@ public final class PureRecipePlanner {
         private int bestFailureStepCount = -1;
         private List<PlannedStep> bestFailureSteps = List.of();
         private FailureReason deepestFailureReason = FailureReason.MISSING_INPUTS;
+        private boolean sawMissingInputFailure;
         private boolean stepLimitReached;
         private int callDepth;
 
@@ -354,7 +373,8 @@ public final class PureRecipePlanner {
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
                        long deadlineNanos, LongSupplier nanoTime,
                        Set<MaterialRef> activeRootOutputs,
-                       Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+                       Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                       PlanningPreferences preferences) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) {
@@ -371,6 +391,8 @@ public final class PureRecipePlanner {
             this.deadlineNanos = deadlineNanos;
             this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
             this.forcedRecipes = Map.copyOf(forcedRecipes);
+            this.preferences = preferences == null
+                    ? PlanningPreferences.empty() : preferences;
             this.variantPreferences = MaterialVariantPreferences.snapshot();
 
         }
@@ -412,6 +434,7 @@ public final class PureRecipePlanner {
                                     List<Task> pending) {
             boolean catalyst = ingredient.role() == DemandRole.CATALYST;
             boolean cycleBlocked = false;
+            boolean noRecipeBlocked = false;
             List<MaterialRef> stockAlternatives = inventoryFirst(ingredient.alternatives());
             if (catalyst) {
                 if (stockAcross(ingredient) >= ingredient.count()) {
@@ -449,6 +472,10 @@ public final class PureRecipePlanner {
 
             for (MaterialRef wanted : productionFirst(ingredient.alternatives())) {
                 checkBudget();
+                if (preferences.isNoRecipe(wanted)) {
+                    noRecipeBlocked = true;
+                    continue;
+                }
                 if (resolving.contains(wanted)) {
                     cycleBlocked = true;
                     continue;
@@ -516,13 +543,17 @@ public final class PureRecipePlanner {
                     backtracks++;
                 }
             }
-            recordFailure(ingredient, pending, cycleBlocked
-                    ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
+            recordFailure(ingredient, pending,
+                    cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
+                            ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
             return false;
         }
 
         private void recordFailure(IngredientRef ingredient, List<Task> pending,
                                    FailureReason reason) {
+            if (reason == FailureReason.MISSING_INPUTS) {
+                sawMissingInputFailure = true;
+            }
             int depth = resolving.size();
             List<PlannedStep> partial = new ArrayList<>(steps);
             for (Task task : pending) {
@@ -706,14 +737,29 @@ public final class PureRecipePlanner {
          */
         private List<RecipeNode> preferForcedCandidate(MaterialRef wanted,
                                                        List<RecipeNode> candidates) {
-            if (forcedRecipes.isEmpty()) return candidates;
+            if (forcedRecipes.isEmpty()) return preferSavedCandidate(wanted, candidates);
             ResourceLocation forced = ForcedRecipeGraphProjector
                     .forcedRecipeFor(wanted, forcedRecipes);
-            if (forced == null) return candidates;
+            if (forced == null) return preferSavedCandidate(wanted, candidates);
             for (RecipeNode candidate : candidates) {
                 if (candidate.recipeId().equals(forced)) return List.of(candidate);
             }
             return List.of();
+        }
+
+        private List<RecipeNode> preferSavedCandidate(MaterialRef wanted,
+                                                      List<RecipeNode> candidates) {
+            ResourceLocation preferred = preferences.preferredRecipe(wanted);
+            if (preferred == null || candidates.size() < 2) return candidates;
+            for (int i = 0; i < candidates.size(); i++) {
+                if (!candidates.get(i).recipeId().equals(preferred)) continue;
+                if (i == 0) return candidates;
+                List<RecipeNode> reordered = new ArrayList<>(candidates);
+                RecipeNode selected = reordered.remove(i);
+                reordered.add(0, selected);
+                return reordered;
+            }
+            return candidates;
         }
 
         private boolean isForcedCandidate(MaterialRef wanted, RecipeNode candidate) {
@@ -741,7 +787,9 @@ public final class PureRecipePlanner {
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
                                                            boolean pruneUnseeded,
                                                            NbtMatchMode mode) {
-            List<RecipeNode> candidates = candidates(wanted, mode);
+            List<RecipeNode> candidates = candidates(wanted, mode).stream()
+                    .filter(candidate -> !preferences.excludes(candidate.recipeId()))
+                    .toList();
             // Tiny producer sets are cheaper to explore directly. Constructing
             // seeded reachability scans the complete scoped graph before the
             // first branch, which dominates equipment and upgrade chains.
@@ -761,7 +809,15 @@ public final class PureRecipePlanner {
                             : hasLocalSeedPath(candidate, new HashSet<>(),
                             new int[] { MAX_LOCAL_SEED_PROBE_NODES })))
                     .collect(Collectors.toCollection(ArrayList::new));
-            if (ordered.isEmpty() && useReachability && !candidates.isEmpty()) {
+            // Seeded reachability is only an ordering hint. A partially stocked direct
+            // recipe must still be attempted so its concrete missing inputs can be
+            // reported instead of letting a sibling reverse conversion mark the whole
+            // search as cyclic.
+            candidates.stream()
+                    .filter(this::hasAnyInputInStock)
+                    .filter(candidate -> !ordered.contains(candidate))
+                    .forEach(ordered::add);
+            if (ordered.isEmpty() && !candidates.isEmpty()) {
                 // A conservative escape hatch for stale reachability results:
                 // require at least one concrete stock seed before reopening a
                 // candidate.  A recipe whose inputs are all absent would only
@@ -1182,13 +1238,15 @@ public final class PureRecipePlanner {
                 new IdentityHashMap<>();
         private final Runnable budgetCheck;
         private final Map<ResourceLocation, ResourceLocation> forcedRecipes;
+        private final PlanningPreferences preferences;
         private final Map<MissingKey, IngredientRef> missing = new LinkedHashMap<>();
 
         private PartialPlanBuilder(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Long> available,
                                    int maxSteps, Set<MaterialRef> activeRootOutputs,
                                    Runnable budgetCheck,
-                                   Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+                                   Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                                   PlanningPreferences preferences) {
             this.graph = graph;
             available.forEach((material, count) -> {
                 if (material != null && count != null && count > 0) stock.put(material, count);
@@ -1197,6 +1255,8 @@ public final class PureRecipePlanner {
             visiting.addAll(activeRootOutputs);
             this.budgetCheck = Objects.requireNonNull(budgetCheck, "budgetCheck");
             this.forcedRecipes = Map.copyOf(forcedRecipes);
+            this.preferences = preferences == null
+                    ? PlanningPreferences.empty() : preferences;
         }
 
         private PartialTrace build(List<IngredientRef> roots) {
@@ -1295,13 +1355,17 @@ public final class PureRecipePlanner {
             for (MaterialRef alternative : ingredient.alternatives()) {
                 budgetCheck.run();
                 List<RecipeNode> candidates = partialCandidates(alternative,
-                        ingredient.nbtMatchMode());
+                        ingredient.nbtMatchMode()).stream()
+                        .filter(recipe -> !preferences.excludes(recipe.recipeId()))
+                        .toList();
                 ResourceLocation forced = ForcedRecipeGraphProjector
                         .forcedRecipeFor(alternative, forcedRecipes);
                 if (forced != null) {
                     candidates = candidates.stream()
                             .filter(recipe -> recipe.recipeId().equals(forced))
                             .toList();
+                } else if (preferences.isNoRecipe(alternative)) {
+                    candidates = List.of();
                 }
                 for (RecipeNode recipe : candidates) {
                     budgetCheck.run();
@@ -1312,6 +1376,7 @@ public final class PureRecipePlanner {
             }
             choices.sort(Comparator
                     .comparingInt((PartialChoice choice) -> isForced(choice) ? 0 : 1)
+                    .thenComparingInt(choice -> isSavedPreference(choice) ? 0 : 1)
                     .thenComparing(Comparator.comparingDouble(
                             (PartialChoice choice) -> inputStockCoverage(choice.recipe()))
                     .reversed()
@@ -1323,6 +1388,11 @@ public final class PureRecipePlanner {
             ResourceLocation forced = ForcedRecipeGraphProjector
                     .forcedRecipeFor(choice.output(), forcedRecipes);
             return forced != null && forced.equals(choice.recipe().recipeId());
+        }
+
+        private boolean isSavedPreference(PartialChoice choice) {
+            ResourceLocation preferred = preferences.preferredRecipe(choice.output());
+            return preferred != null && preferred.equals(choice.recipe().recipeId());
         }
 
         private boolean isZeroGainVisitingCycle(RecipeNode candidate) {

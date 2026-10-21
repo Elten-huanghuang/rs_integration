@@ -57,7 +57,7 @@ public final class AsyncPurePlanningService {
         }
         PlanningKey key = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
                 snapshot.recipeId(), snapshot.availableItems(),
-                snapshot.forcedRecipes(), snapshot.recipeGraph(),
+                snapshot.forcedRecipes(), snapshot.preferences(), snapshot.recipeGraph(),
                 snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
@@ -84,7 +84,7 @@ public final class AsyncPurePlanningService {
                              Consumer<RoutedPlan> commit, Consumer<Throwable> rollback) {
         PlanningKey planning = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),
                 snapshot.recipeId(), snapshot.availableItems(),
-                snapshot.forcedRecipes(), snapshot.recipeGraph(),
+                snapshot.forcedRecipes(), snapshot.preferences(), snapshot.recipeGraph(),
                 snapshot.networkFingerprint(), snapshot.bindingFingerprint(),
                 snapshot.bindingBlockedOutputIds(), snapshot.mainThreadOnly(), repeatCount,
                 maxSteps, maxSearchStates, maxMemoizedFailures, timeoutMs);
@@ -178,7 +178,7 @@ public final class AsyncPurePlanningService {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos, System::nanoTime,
-                planningRootGuard(target), snapshot.forcedRecipes());
+                planningRootGuard(target), snapshot.forcedRecipes(), snapshot.preferences());
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
@@ -255,6 +255,7 @@ public final class AsyncPurePlanningService {
                                ResourceLocation recipeId,
                                Map<StackKey, Long> availableItems,
                                Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                               PlanningPreferences preferences,
                                ImmutableRecipeGraph recipeGraph, String networkFingerprint,
                                String bindingFingerprint,
                                Set<ResourceLocation> bindingBlockedOutputIds,
