@@ -417,14 +417,27 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasField(targetClassName, "area");
         }
         if (mixinClassName.contains("jei.IngredientListOverlayAccessor")) {
-            return isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
+            return isClassPresent("mezz.jei.gui.elements.GuiIconToggleButton")
+                    && isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
                     && hasField(targetClassName, "searchField")
                     && hasField(targetClassName, "configButton");
         }
         if (mixinClassName.contains("jei.IngredientListOverlayTetraSortMixin")) {
-            return isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
+            return isClassPresent("mezz.jei.gui.input.handlers.CombinedInputHandler")
+                    && isClassPresent("mezz.jei.gui.overlay.IngredientListOverlay")
                     && hasMethod(targetClassName, "drawScreen")
                     && hasMethod(targetClassName, "createInputHandler");
+        }
+        if (mixinClassName.endsWith("jei.RecipeBookmarkButtonControllerMixin")) {
+            return isClassPresent("mezz.jei.gui.recipes.RecipeBookmarkButtonController")
+                    && isClassPresent("mezz.jei.api.gui.inputs.IJeiUserInput")
+                    && isClassPresent("mezz.jei.api.gui.builder.ITooltipBuilder");
+        }
+        if (mixinClassName.endsWith("jei.RecipeBookmarkButtonAccess")
+                || mixinClassName.endsWith("jei.RecipeBookmarkButtonMixin")
+                || mixinClassName.endsWith("jei.GuiIconToggleButtonInputHandlerMixin")) {
+            return isClassPresent("mezz.jei.gui.recipes.RecipeBookmarkButton")
+                    && isClassPresent("mezz.jei.gui.elements.GuiIconToggleButton");
         }
         if (mixinClassName.contains("tetra.WorkbenchScreenJeiPreviewMixin")) {
             return isClassPresent("se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen")

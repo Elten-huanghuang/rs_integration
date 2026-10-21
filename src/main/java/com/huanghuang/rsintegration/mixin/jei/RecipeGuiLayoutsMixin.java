@@ -52,6 +52,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
@@ -625,13 +626,7 @@ public class RecipeGuiLayoutsMixin {
         try {
             Method method = layout.getClass().getMethod("transferButton");
             Object transferButton = method.invoke(layout);
-            if (transferButton instanceof GuiIconToggleButtonAccessor accessor) {
-                ImmutableRect2i area = accessor.getButton().getArea();
-                if (area != null && area.getWidth() > 0 && area.getHeight() > 0) {
-                    cachedButtonArea = new Rect2i(
-                            area.getX(), area.getY(), area.getWidth(), area.getHeight());
-                }
-            }
+            cachedButtonArea = rsi$readButtonArea(transferButton);
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // Errored layouts may not expose transferButton().
         }
@@ -643,6 +638,45 @@ public class RecipeGuiLayoutsMixin {
                 recipeArea,
                 declaredArea,
                 cachedButtonArea);
+    }
+
+    @Unique
+    private static Rect2i rsi$readButtonArea(Object transferButton) {
+        if (transferButton == null) return null;
+        Rect2i direct = rsi$invokeArea(transferButton);
+        if (direct != null) return direct;
+        Class<?> type = transferButton.getClass();
+        while (type != null) {
+            try {
+                Field field = type.getDeclaredField("button");
+                field.setAccessible(true);
+                Rect2i area = rsi$invokeArea(field.get(transferButton));
+                if (area != null) return area;
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Continue through the superclass chain.
+            }
+            type = type.getSuperclass();
+        }
+        return null;
+    }
+
+    @Unique
+    private static Rect2i rsi$invokeArea(Object value) {
+        if (value == null) return null;
+        try {
+            Method method = value.getClass().getMethod("getArea");
+            Object area = method.invoke(value);
+            if (area == null) return null;
+            Method x = area.getClass().getMethod("getX");
+            Method y = area.getClass().getMethod("getY");
+            Method width = area.getClass().getMethod("getWidth");
+            Method height = area.getClass().getMethod("getHeight");
+            return new Rect2i(
+                    (Integer) x.invoke(area), (Integer) y.invoke(area),
+                    (Integer) width.invoke(area), (Integer) height.invoke(area));
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return null;
+        }
     }
 
     @Inject(method = "draw", at = @At("RETURN"))
@@ -1573,8 +1607,10 @@ public class RecipeGuiLayoutsMixin {
                     RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
                     return;
                 }
-                RSIntegrationMod.LOGGER.debug("[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", recipeId);
-                rsi$showPlanRequestStarted(requestId, recipeId);
+                pkt = ClientPlanningPreferences.apply(pkt, Minecraft.getInstance().level);
+                RSIntegrationMod.LOGGER.debug(
+                        "[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", pkt.recipeId());
+                rsi$showPlanRequestStarted(requestId, pkt.recipeId());
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
@@ -1625,12 +1661,13 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
+            pkt = ClientPlanningPreferences.apply(pkt, Minecraft.getInstance().level);
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={} targetOutput={}",
-                    recipeId, dim, machinePos,
+                    pkt.recipeId(), dim, machinePos,
                     finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null",
                     finalTargetOutput != null ? finalTargetOutput.getHoverName().getString() : "null");
-            rsi$showPlanRequestStarted(requestId, recipeId);
+            rsi$showPlanRequestStarted(requestId, pkt.recipeId());
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
     }
