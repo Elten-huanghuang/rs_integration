@@ -50,6 +50,8 @@ public final class PlanResponsePacket {
     private static final int MAX_MESSAGE_LENGTH = 2048;
     private static final int MAX_BACKEND_ID_LENGTH = 64;
     private static final int MAX_NETWORK_ID_LENGTH = StorageReference.MAX_NETWORK_ID_LENGTH;
+    private static final int MAX_DIAGNOSTIC_CODE_LENGTH = 64;
+    private static final int MAX_DIAGNOSTIC_ARGUMENT_LENGTH = 256;
 
     /** Reject corrupt counts before allocation or field decoding. */
     private static int readBoundedCount(FriendlyByteBuf buf) {
@@ -251,6 +253,17 @@ public final class PlanResponsePacket {
                 buf.writeVarInt(capability.ordinal());
             }
         }
+        // 稳定终态与结构化诊断。诊断只发送代码和参数，客户端负责本地化。
+        buf.writeUtf(plan.outcome().name(), MAX_DIAGNOSTIC_CODE_LENGTH);
+        buf.writeVarInt(plan.diagnostics().size());
+        for (IntegrationDiagnostic diagnostic : plan.diagnostics()) {
+            buf.writeUtf(diagnostic.code().name(), MAX_DIAGNOSTIC_CODE_LENGTH);
+            buf.writeVarInt(diagnostic.severity().ordinal());
+            buf.writeVarInt(diagnostic.arguments().size());
+            for (String argument : diagnostic.arguments()) {
+                buf.writeUtf(argument, MAX_DIAGNOSTIC_ARGUMENT_LENGTH);
+            }
+        }
         buf.writeBoolean(requestId != 0L);
         if (requestId != 0L) buf.writeVarLong(requestId);
         PerformanceMonitor.recordPlanPacketBytes(buf.writerIndex() - startIndex);
@@ -432,6 +445,36 @@ public final class PlanResponsePacket {
                 throw new DecoderException("invalid storage network descriptor", e);
             }
         }
+        String outcomeName = buf.readUtf(MAX_DIAGNOSTIC_CODE_LENGTH);
+        PlanOutcome outcome;
+        try {
+            outcome = PlanOutcome.valueOf(outcomeName);
+        } catch (IllegalArgumentException ignored) {
+            throw new DecoderException("invalid plan outcome: " + outcomeName);
+        }
+        int diagnosticCount = readBoundedCount(buf);
+        List<IntegrationDiagnostic> diagnostics = new ArrayList<>(diagnosticCount);
+        IntegrationDiagnostic.Severity[] severities = IntegrationDiagnostic.Severity.values();
+        for (int i = 0; i < diagnosticCount; i++) {
+            String codeName = buf.readUtf(MAX_DIAGNOSTIC_CODE_LENGTH);
+            IntegrationDiagnosticCode code;
+            try {
+                code = IntegrationDiagnosticCode.valueOf(codeName);
+            } catch (IllegalArgumentException ignored) {
+                throw new DecoderException("invalid integration diagnostic code: " + codeName);
+            }
+            int severityOrdinal = buf.readVarInt();
+            if (severityOrdinal < 0 || severityOrdinal >= severities.length) {
+                throw new DecoderException("invalid diagnostic severity: " + severityOrdinal);
+            }
+            int argumentCount = readBoundedCount(buf);
+            List<String> arguments = new ArrayList<>(argumentCount);
+            for (int j = 0; j < argumentCount; j++) {
+                arguments.add(buf.readUtf(MAX_DIAGNOSTIC_ARGUMENT_LENGTH));
+            }
+            diagnostics.add(new IntegrationDiagnostic(
+                    code, severities[severityOrdinal], arguments));
+        }
         // requestId follows the per-step diagnostics and is a required protocol field.
         long requestId = 0L;
         if (buf.readBoolean()) {
@@ -450,7 +493,7 @@ public final class PlanResponsePacket {
                 embersCode, embersAspectNames, embersInputNames, embersSeed, embersCanInfer,
                 embersCodeFromCache, executionMachineSupportsGui, baseItem, boundMachineTypes,
                 leftovers, clickedOutput, graph, executionBlocked, machineCandidates,
-                stepIssues, storageReference, storageNetworks), requestId);
+                stepIssues, storageReference, storageNetworks, outcome, diagnostics), requestId);
     }
 
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {

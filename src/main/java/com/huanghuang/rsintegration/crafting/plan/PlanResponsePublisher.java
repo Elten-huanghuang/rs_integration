@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.PacketDistributor;
@@ -26,8 +25,10 @@ public final class PlanResponsePublisher {
             RSIntegrationMod.LOGGER.error(
                     "[RSI-plan] plan graph exceeds configured node limit request={} nodes={} limit={}",
                     requestId, graphNodes, maxGraphNodes);
-            sendError(player, Component.translatable("rsi.plan.failure.graph_too_large",
-                    graphNodes, maxGraphNodes), requestId);
+            sendError(player, PlanOutcome.BUDGET_EXHAUSTED,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.GRAPH_TOO_LARGE,
+                            String.valueOf(graphNodes), String.valueOf(maxGraphNodes)),
+                    requestId);
             return;
         }
         byte[] payload;
@@ -36,14 +37,20 @@ public final class PlanResponsePublisher {
         } catch (RuntimeException failure) {
             RSIntegrationMod.LOGGER.error("[RSI-plan] failed to encode plan response request={}",
                     requestId, failure);
-            sendError(player, Component.translatable("rsi.generic.error.craft_failed"), requestId);
+            sendError(player, PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.INTERNAL_ERROR),
+                    requestId);
             return;
         }
         if (payload.length > PlanResponsePagePacket.MAX_TOTAL_BYTES) {
             RSIntegrationMod.LOGGER.error(
                     "[RSI-plan] plan response exceeds paging limit request={} bytes={} limit={}",
                     requestId, payload.length, PlanResponsePagePacket.MAX_TOTAL_BYTES);
-            sendError(player, Component.translatable("rsi.generic.error.craft_failed"), requestId);
+            sendError(player, PlanOutcome.BUDGET_EXHAUSTED,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.RESPONSE_TOO_LARGE,
+                            String.valueOf(payload.length),
+                            String.valueOf(PlanResponsePagePacket.MAX_TOTAL_BYTES)),
+                    requestId);
             return;
         }
         long sessionId = nextSessionId();
@@ -58,12 +65,13 @@ public final class PlanResponsePublisher {
         }
     }
 
-    public static void sendError(ServerPlayer player, Component message, long requestId) {
+    public static void sendError(ServerPlayer player, PlanOutcome outcome,
+                                 IntegrationDiagnostic diagnostic, long requestId) {
         RSIntegrationMod.LOGGER.warn("[RSI-plan] plan error: msg={} player={}",
-                message.getString(), player.getGameProfile().getName());
+                diagnostic.code(), player.getGameProfile().getName());
         send(player, new PlanResponse(false, "", ItemStack.EMPTY,
-                List.of(), Map.of(), List.of(), "", null, null, 0, 0, 0,
-                List.of(message), 1), requestId);
+                List.of(), Map.of(), List.of(), "", List.of(), 1,
+                outcome, List.of(diagnostic)), requestId);
     }
 
     private static long nextSessionId() {

@@ -347,8 +347,11 @@ public final class CraftingPlanScreen extends Screen {
             return false;
         }
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
-            if (minecraft != null && minecraft.player != null && !newPlan.modWarnings().isEmpty()) {
-                minecraft.player.displayClientMessage(newPlan.modWarnings().get(0), false);
+            if (minecraft != null && minecraft.player != null) {
+                List<Component> warnings = displayWarnings(newPlan);
+                if (!warnings.isEmpty()) {
+                    minecraft.player.displayClientMessage(warnings.get(0), false);
+                }
             }
             return true;
         }
@@ -1069,9 +1072,10 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         // Missing items + mod warnings
+        List<Component> planWarnings = displayWarnings(plan);
         if (missingAreaHeight > 0 && (
                 !MissingMaterialBookmarkList.textEntries(plan).isEmpty() ||
-                (plan.modWarnings() != null && !plan.modWarnings().isEmpty()) ||
+                !planWarnings.isEmpty() ||
                 (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()))) {
             renderMissingArea(gfx, font, left, missingAreaTop, contentW);
         }
@@ -1729,11 +1733,22 @@ public final class CraftingPlanScreen extends Screen {
 
     // ── Missing area ──────────────────────────────────────────────
 
+    private static List<Component> displayWarnings(PlanResponse plan) {
+        LinkedHashSet<Component> warnings = new LinkedHashSet<>();
+        if (plan.modWarnings() != null) warnings.addAll(plan.modWarnings());
+        for (IntegrationDiagnostic diagnostic : plan.diagnostics()) {
+            if (diagnostic.severity() == IntegrationDiagnostic.Severity.INFO) continue;
+            warnings.add(diagnostic.clientMessage());
+        }
+        return List.copyOf(warnings);
+    }
+
     private void renderMissingArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
         List<MissingMaterialBookmarkList.TextEntry> missingEntries =
                 MissingMaterialBookmarkList.textEntries(plan);
         boolean hasMissing = !missingEntries.isEmpty();
-        boolean hasModWarnings = plan.modWarnings() != null && !plan.modWarnings().isEmpty();
+        List<Component> planWarnings = displayWarnings(plan);
+        boolean hasModWarnings = !planWarnings.isEmpty();
 
         // Background — dark warm tone, red accent
         UIRenderer.roundedGradient(gfx, left, top, contentW, missingAreaHeight, 6f,
@@ -1759,7 +1774,7 @@ public final class CraftingPlanScreen extends Screen {
         // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {
             if (!hasMissing) my += 4;
-            for (Component warn : plan.modWarnings()) {
+            for (Component warn : planWarnings) {
                 String display = font.plainSubstrByWidth(warn.getString(), maxLineW);
                 UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
                 gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
@@ -2453,7 +2468,7 @@ public final class CraftingPlanScreen extends Screen {
         contentLayoutWidth = contentWidth;
         contentLayoutMode = viewMode;
         var missingEntries = MissingMaterialBookmarkList.textEntries(plan);
-        int warningCount = plan.modWarnings() == null ? 0 : plan.modWarnings().size();
+        int warningCount = displayWarnings(plan).size();
         boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
         if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
             int lines = warningCount;

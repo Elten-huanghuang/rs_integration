@@ -15,6 +15,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 
 @OnlyIn(Dist.CLIENT)
 final class PlanResponseClientPacketHandler {
@@ -24,6 +25,8 @@ final class PlanResponseClientPacketHandler {
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                 plan.recipeId());
+        // 成功、失败和取消都必须结束本地 loading，不能只处理成功响应。
+        PlanningProgressTracker.responseReceived(requestId);
         // Error responses intentionally carry an empty target stack. Do not
         // open a normal plan screen for those packets: ItemStack.EMPTY's
         // hover name is "Air", which makes a failed request look like an
@@ -34,14 +37,14 @@ final class PlanResponseClientPacketHandler {
                 && plan.targetResult().isEmpty()) {
             var mc = Minecraft.getInstance();
             if (mc.player != null) {
-                Component message = plan.modWarnings().isEmpty()
-                        ? Component.translatable("rsi.generic.error.craft_failed")
-                        : plan.modWarnings().get(0);
+                Component message = firstDiagnosticMessage(plan)
+                        .orElseGet(() -> plan.modWarnings().isEmpty()
+                                ? Component.translatable("rsi.generic.error.craft_failed")
+                                : plan.modWarnings().get(0));
                 mc.player.displayClientMessage(message, false);
             }
             return;
         }
-        PlanningProgressTracker.responseReceived(requestId);
         List<String> missing = localizeItemNames(plan.missing());
         String targetName = plan.targetResult().isEmpty()
                 ? plan.targetName()
@@ -54,8 +57,17 @@ final class PlanResponseClientPacketHandler {
                 plan.embersCanInfer(), plan.embersCodeFromCache(), plan.executionMachineSupportsGui(),
                 plan.baseItem(), plan.boundMachineTypes(), plan.leftovers(), plan.clickedOutput(), plan.graph(),
                 plan.executionBlocked(), plan.machineCandidates(), plan.stepIssues(),
-                plan.storageReference(), plan.storageNetworks());
+                plan.storageReference(), plan.storageNetworks(),
+                plan.outcome(), plan.diagnostics());
         openScreen(localized, requestId);
+    }
+
+    private static Optional<Component> firstDiagnosticMessage(PlanResponse plan) {
+        return plan.diagnostics().stream()
+                .filter(diagnostic -> diagnostic.severity()
+                        == IntegrationDiagnostic.Severity.ERROR)
+                .map(IntegrationDiagnostic::clientMessage)
+                .findFirst();
     }
 
     static List<String> localizeItemNames(List<String> names) {

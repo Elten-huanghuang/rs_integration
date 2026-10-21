@@ -51,7 +51,9 @@ public record PlanResponseDraft(
         List<MachineCandidateView> machineCandidates,
         Map<ResourceLocation, PlanResponse.StepIssue> stepIssues,
         @Nullable StorageReference storageReference,
-        List<StorageNetworkDescriptor> storageNetworks
+        List<StorageNetworkDescriptor> storageNetworks,
+        PlanOutcome outcome,
+        List<IntegrationDiagnostic> diagnostics
 ) {
     /** Backward-compat: drafts without per-step prerequisite diagnostics. */
     public PlanResponseDraft(boolean success, String targetName, ItemStack targetResult,
@@ -141,6 +143,36 @@ public record PlanResponseDraft(
         stepIssues = stepIssues == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(stepIssues));
         storageNetworks = storageNetworks == null ? List.of() : List.copyOf(storageNetworks);
+        diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
+        if (outcome == null) {
+            outcome = inferOutcome(success, materials, missing, executionBlocked);
+        }
+    }
+
+    /** 兼容旧调用：根据现有布尔字段和缺料信息推断终态。 */
+    public PlanResponseDraft(boolean success, String targetName, ItemStack targetResult,
+                             List<PlanStep> steps,
+                             Map<IngredientKey, PlanResponse.Availability> materials,
+                             List<String> missing, String recipeId,
+                             @Nullable String executionModTypeId, @Nullable String executionDim,
+                             int executionPosX, int executionPosY, int executionPosZ,
+                             List<Component> modWarnings, int repeatCount,
+                             @Nullable int[] embersCode, @Nullable Component[] embersAspectNames,
+                             @Nullable Component[] embersInputNames, long embersSeed,
+                             boolean embersCanInfer, boolean embersCodeFromCache,
+                             boolean executionMachineSupportsGui, @Nullable ItemStack baseItem,
+                             Set<String> boundMachineTypes, Map<IngredientKey, Long> leftovers,
+                             @Nullable ItemStack clickedOutput, @Nullable PlanGraphView graph,
+                             boolean executionBlocked, List<MachineCandidateView> machineCandidates,
+                             Map<ResourceLocation, PlanResponse.StepIssue> stepIssues,
+                             @Nullable StorageReference storageReference,
+                             List<StorageNetworkDescriptor> storageNetworks) {
+        this(success, targetName, targetResult, steps, materials, missing, recipeId,
+                executionModTypeId, executionDim, executionPosX, executionPosY, executionPosZ,
+                modWarnings, repeatCount, embersCode, embersAspectNames, embersInputNames,
+                embersSeed, embersCanInfer, embersCodeFromCache, executionMachineSupportsGui,
+                baseItem, boundMachineTypes, leftovers, clickedOutput, graph, executionBlocked,
+                machineCandidates, stepIssues, storageReference, storageNetworks, null, List.of());
     }
 
     @Override
@@ -200,7 +232,23 @@ public record PlanResponseDraft(
                 embersSeed, embersCanInfer, embersCodeFromCache,
                 executionMachineSupportsGui, copyNullable(baseItem), boundMachineTypes,
                 leftovers, copyNullable(clickedOutput), graph == null ? null : copyGraph(graph),
-                executionBlocked, machineCandidates, stepIssues, storageReference, storageNetworks);
+                executionBlocked, machineCandidates, stepIssues, storageReference, storageNetworks,
+                outcome, diagnostics);
+    }
+
+    private static PlanOutcome inferOutcome(boolean success,
+                                            Map<IngredientKey, PlanResponse.Availability> materials,
+                                            List<String> missing,
+                                            boolean executionBlocked) {
+        if (success) return PlanOutcome.READY;
+        if (materials != null && materials.values().stream()
+                .anyMatch(availability -> availability != null
+                        && availability.missingCount() > 0)) {
+            return PlanOutcome.MISSING_INPUTS;
+        }
+        if (missing != null && !missing.isEmpty()) return PlanOutcome.MISSING_INPUTS;
+        if (executionBlocked) return PlanOutcome.RUNTIME_UNAVAILABLE;
+        return PlanOutcome.NO_RECIPE;
     }
 
     private static PlanStep copyStep(PlanStep step) {

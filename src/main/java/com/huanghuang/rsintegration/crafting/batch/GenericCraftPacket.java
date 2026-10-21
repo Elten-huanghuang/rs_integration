@@ -15,6 +15,9 @@ import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
@@ -3363,7 +3366,7 @@ public final class GenericCraftPacket {
 
     private interface PlanResultSink {
         void success(PlanResponse plan, PlanningSnapshot snapshot);
-        void error(Component message);
+        void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic);
         default void cancelled(Component message) {}
         default void notice(Component message) {}
     }
@@ -3391,11 +3394,12 @@ public final class GenericCraftPacket {
             }
 
             @Override
-            public void error(Component message) {
+            public void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic) {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 PLAN_RESULT_GATES.remove(key, gate);
+                Component message = diagnostic.clientMessage();
                 PlanningProgressServer.fail(player, previewGeneration, message);
-                PlanResponsePublisher.sendError(player, message, requestId);
+                PlanResponsePublisher.sendError(player, outcome, diagnostic, requestId);
             }
 
             @Override
@@ -3403,6 +3407,9 @@ public final class GenericCraftPacket {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 PLAN_RESULT_GATES.remove(key, gate);
                 PlanningProgressServer.fail(player, previewGeneration, message);
+                PlanResponsePublisher.sendError(player, PlanOutcome.CANCELLED,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLAN_CANCELLED),
+                        requestId);
             }
 
             @Override
@@ -3472,8 +3479,9 @@ public final class GenericCraftPacket {
                                 result -> {
                                     if (!result.determined()) {
                                         networkSink(player, packet.requestId, previewGeneration).error(
-                                                Component.translatable(
-                                                        "rsi.plan.failure.max_craftable_unknown"));
+                                                PlanOutcome.BUDGET_EXHAUSTED,
+                                                IntegrationDiagnostic.error(
+                                                        IntegrationDiagnosticCode.MAX_CRAFTABLE_UNKNOWN));
                                     } else if (result.maximum() <= 0) {
                                         MaxCraftableSearch fallback = new MaxCraftableSearch(
                                                 RSIntegrationConfig.REPEAT_COUNT_MAX.get());
@@ -3486,12 +3494,15 @@ public final class GenericCraftPacket {
                                     }
                                 },
                                 failure -> networkSink(player, packet.requestId, previewGeneration).error(
-                                        buildFailureMessage(failure, packet.recipeId)));
+                                        PlanOutcome.RUNTIME_UNAVAILABLE,
+                                        IntegrationDiagnostic.error(
+                                                IntegrationDiagnosticCode.INTERNAL_ERROR)));
                     }
 
                     @Override
-                    public void error(Component message) {
-                        networkSink(player, packet.requestId, previewGeneration).error(message);
+                    public void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic) {
+                        networkSink(player, packet.requestId, previewGeneration)
+                                .error(outcome, diagnostic);
                     }
                 }, packet.storageReference, packet.materialLocks);
     }
@@ -3543,8 +3554,9 @@ public final class GenericCraftPacket {
             }
 
             @Override
-            public void error(Component message) {
-                networkSink(player, packet.requestId, previewGeneration).error(message);
+            public void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic) {
+                networkSink(player, packet.requestId, previewGeneration)
+                        .error(outcome, diagnostic);
             }
         };
         tryBuildPlan(player, packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
@@ -3662,16 +3674,20 @@ public final class GenericCraftPacket {
         }
         Recipe<?> recipe = resolveRecipe(player.serverLevel(), recipeId);
         if (recipe == null) {
-            sink.error(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
+            sink.error(PlanOutcome.NO_RECIPE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.RECIPE_NOT_FOUND,
+                            recipeId.toString()));
             return;
         }
         if (HistoryStagesCompat.isRecipeLocked(recipe, player)) {
-            sink.error(Component.translatable("rsi.generic.error.recipe_stage_missing"));
+            sink.error(PlanOutcome.NO_RECIPE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.RECIPE_STAGE_MISSING));
             return;
         }
         if (recipe instanceof CraftingRecipe craftingRecipe
                 && !CraftPacketUtils.isCraftingRecipeAvailable(craftingRecipe, player)) {
-            sink.error(Component.translatable("rsi.generic.error.recipe_stage_missing"));
+            sink.error(PlanOutcome.NO_RECIPE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.RECIPE_STAGE_MISSING));
             return;
         }
         ModType previewModType = resolveExecutionModType(player, recipe, dim, pos);
@@ -3679,7 +3695,8 @@ public final class GenericCraftPacket {
                 && !isSmithingRecipe(recipe)
                 && !hasBindingForExecutionType(player, recipe, previewModType)) {
             logBindingRejection("preview-entry", player, recipe, previewModType, dim, pos);
-            sink.error(Component.translatable("rsi.plan.failure.no_bound_machine"));
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.NO_BOUND_MACHINE));
             return;
         }
 
@@ -3689,19 +3706,22 @@ public final class GenericCraftPacket {
         // smithing table GUI instead.
         boolean faRecipe = OpenBoundMachineGuiPacket.isFaApplyModifier(recipe);
         if (faRecipe && (baseItem == null || baseItem.isEmpty())) {
-            sink.error(Component.translatable("rsi.generic.error.fa_open_smithing"));
+            sink.error(PlanOutcome.NO_RECIPE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.SMITHING_BASE_REQUIRED));
             return;
         }
         boolean arsDynamic = ArsDynamicApparatusRecipe.isSupported(recipe);
         boolean goetyDynamic = GoetyDynamicRitualRecipe.isSupported(recipe);
         if ((arsDynamic || goetyDynamic) && (clickedOutput == null || clickedOutput.isEmpty())) {
-            sink.error(Component.translatable(
-                    "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+            sink.error(PlanOutcome.NO_RECIPE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.UNSUPPORTED_RECIPE,
+                            recipe.getClass().getSimpleName()));
             return;
         }
 
         if (!RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) {
-            sink.error(Component.translatable("rsi.generic.error.auto_craft_disabled"));
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.AUTO_CRAFT_DISABLED));
             return;
         }
 
@@ -3776,15 +3796,18 @@ public final class GenericCraftPacket {
                 recipeModType = ModType.byId("smithing");
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-tryBuildPlan] FA reflection failed", e);
-                sink.error(Component.translatable("rsi.generic.error.fa_open_smithing"));
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(
+                                IntegrationDiagnosticCode.SMITHING_BASE_REQUIRED));
                 return;
             }
         } else if (arsDynamic) {
             ItemStack validated = ArsDynamicApparatusRecipe.validatedOutput(recipe, clickedOutput);
             List<IngredientSpec> specs = ArsDynamicApparatusRecipe.buildMaterials(recipe, clickedOutput);
             if (validated.isEmpty() || specs.isEmpty()) {
-                sink.error(Component.translatable(
-                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.UNSUPPORTED_RECIPE,
+                                recipe.getClass().getSimpleName()));
                 return;
             }
             displayIngredients = specs.stream()
@@ -3799,8 +3822,9 @@ public final class GenericCraftPacket {
             ItemStack validated = GoetyDynamicRitualRecipe.validatedOutput(recipe, clickedOutput);
             List<IngredientSpec> specs = GoetyDynamicRitualRecipe.buildMaterials(recipe, clickedOutput);
             if (validated.isEmpty() || specs.isEmpty()) {
-                sink.error(Component.translatable(
-                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.UNSUPPORTED_RECIPE,
+                                recipe.getClass().getSimpleName()));
                 return;
             }
             displayIngredients = specs.stream()
@@ -3857,11 +3881,14 @@ public final class GenericCraftPacket {
                 specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
                         recipe, cpEndpoint, player, player.serverLevel(), cpPos);
                 if (specs == null || specs.isEmpty()) {
-                    sink.error(Component.translatable("rsi.crockpot.error.food_values"));
+                    sink.error(PlanOutcome.NO_RECIPE,
+                            IntegrationDiagnostic.error(
+                                    IntegrationDiagnosticCode.FOOD_VALUES_UNAVAILABLE));
                     return;
                 }
             } else if (specs == null || specs.isEmpty()) {
-                sink.error(Component.translatable("rsi.generic.error.no_ingredients"));
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.NO_INGREDIENTS));
                 return;
             }
             List<Ingredient> perRecipe = new ArrayList<>();
@@ -3895,8 +3922,9 @@ public final class GenericCraftPacket {
                     && !ModIds.ID_FR_KETTLE.equals(recipeModType.id())
                     && !ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
                     && !manualGoetyRitual) {
-                sink.error(Component.translatable(
-                        "rsi.generic.error.unsupported_machine", recipe.getClass().getSimpleName()));
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.UNSUPPORTED_RECIPE,
+                                recipe.getClass().getSimpleName()));
                 return;
             }
         }
@@ -3972,7 +4000,9 @@ public final class GenericCraftPacket {
                         "[RSI-Storage] selected plan reference unavailable backend={} id={} player={}; no fallback",
                         selectedStorageReference.backendId(), selectedStorageReference.networkId(),
                         player.getGameProfile().getName());
-                sink.error(Component.translatable("rsi.generic.error.network_unavailable"));
+                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                        IntegrationDiagnostic.error(
+                                IntegrationDiagnosticCode.NETWORK_UNAVAILABLE));
                 return;
             } else {
                 planningEndpoint = resolved.orElseThrow();
@@ -4033,7 +4063,8 @@ public final class GenericCraftPacket {
                                 + "@" + descriptor.reference().networkId())
                         .toList());
         if (RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.get() && planningEndpoint == null) {
-            sink.error(Component.translatable("rsi.generic.error.network_unavailable"));
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.NETWORK_UNAVAILABLE));
             return;
         }
 
@@ -4186,7 +4217,9 @@ public final class GenericCraftPacket {
                                     reuseValidatedSnapshot, sink, planStorageReference, materialLocks, completed),
                     failure -> {
                         if (failure instanceof RejectedExecutionException) {
-                            sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
+                            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                    IntegrationDiagnostic.error(
+                                            IntegrationDiagnosticCode.PLANNER_BUSY));
                             return;
                         }
                         var fallbackReason = SynchronousFallbackReason.fromAsyncFailure(failure);
@@ -4282,8 +4315,8 @@ public final class GenericCraftPacket {
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
             // UNKNOWN means the planner did not prove feasibility. Its
             // diagnostic trace is not an authoritative shortage report.
-            sink.error(Component.translatable(
-                    boundedPreviewFailureKey(precomputedPlan)));
+            sink.error(PlanOutcome.BUDGET_EXHAUSTED,
+                    purePreviewDiagnostic(precomputedPlan));
             return;
         }
         boolean requiresTypedCatalystRoute = requiresTypedCatalystRoute(
@@ -4301,9 +4334,10 @@ public final class GenericCraftPacket {
         }
         boolean needsTypedResolver = !selectedPureResolver;
         if (needsTypedResolver && !typedResolverAvailable) {
-            sink.error(Component.translatable(planningEndpoint == null
-                    ? "rsi.generic.error.network_unavailable"
-                    : "rsi.generic.error.multiblock_auto_craft_disabled"));
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(planningEndpoint == null
+                            ? IntegrationDiagnosticCode.NETWORK_UNAVAILABLE
+                            : IntegrationDiagnosticCode.MULTIBLOCK_DISABLED));
             return;
         }
         if (needsTypedResolver
@@ -4322,17 +4356,21 @@ public final class GenericCraftPacket {
                                     materialLocks, routedPlan),
                             () -> {
                                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
-                                sink.error(Component.translatable(
-                                        "rsi.plan.failure.planner_busy"));
+                                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                        IntegrationDiagnostic.error(
+                                                IntegrationDiagnosticCode.PLANNER_BUSY));
                             }, failure -> {
                                 RSIntegrationMod.LOGGER.error(
                                         "[RSI-plan] Deferred typed preview failed for {}",
                                         recipeId, failure);
-                                sink.error(buildFailureMessage(failure, recipeId));
+                                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                        IntegrationDiagnostic.error(
+                                                IntegrationDiagnosticCode.INTERNAL_ERROR));
                             }));
             if (queued == TypedPreviewAdmissionQueue.OfferResult.FULL) {
                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
-                sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
+                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNER_BUSY));
                 return;
             }
             PerformanceMonitor.recordTypedPreviewQueued(
@@ -4466,19 +4504,21 @@ public final class GenericCraftPacket {
                     planGraph = null;
                 } else {
                     if (missing.isEmpty()) {
-                        sink.error(Component.translatable(
-                                "rsi.plan.failure.planning_timeout"));
+                        sink.error(PlanOutcome.BUDGET_EXHAUSTED,
+                                IntegrationDiagnostic.error(
+                                        IntegrationDiagnosticCode.PLANNING_TIMEOUT));
                     } else {
-                        sink.error(Component.translatable(
-                                "rsi.generic.error.missing_materials",
-                                CraftPacketUtils.formatMissingSummary(missing)));
+                        sink.error(PlanOutcome.MISSING_INPUTS,
+                                IntegrationDiagnostic.error(
+                                        IntegrationDiagnosticCode.MISSING_MATERIALS));
                     }
                     return;
                 }
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-plan] Typed resolver failed for {}", recipeId, failure);
-                sink.error(buildFailureMessage(failure, recipeId));
+                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.INTERNAL_ERROR));
                 return;
             } finally {
                 PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);
@@ -5244,8 +5284,9 @@ public final class GenericCraftPacket {
             if (allExecutionMachinesLeased) feasible = false;
         }
 
+        boolean nbtMismatch = false;
         if (!feasible) {
-            boolean nbtMismatch = hasNbtMismatch(materials, itemAvailable);
+            nbtMismatch = hasNbtMismatch(materials, itemAvailable);
             boolean bindingBlocked = precomputedPlan != null
                     && allMissingRequireBlockedOutput(precomputedPlan.missing(),
                     planningSnapshot.bindingBlockedOutputIds());
@@ -5379,9 +5420,10 @@ public final class GenericCraftPacket {
                 : ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
                 ? SummoningRitualAltarBatchDelegate.getPlanMachineCandidates(player, recipe)
                 : List.of();
-        if (!machineCandidates.isEmpty()
+        boolean noReadyMachine = !machineCandidates.isEmpty()
                 && machineCandidates.stream().noneMatch(candidate ->
-                candidate.state() == MachineCandidateView.State.READY)) {
+                candidate.state() == MachineCandidateView.State.READY);
+        if (noReadyMachine) {
             feasible = false;
             // 未加载祭坛和等待灵魂能量的祭坛都属于可重试状态，不应被当成永久
             // 前置条件失败；否则每次刷新都会在绑定有效时被当成执行失败请求。
@@ -5395,6 +5437,48 @@ public final class GenericCraftPacket {
                         candidate.dimension(), candidate.x(), candidate.y(), candidate.z(),
                         candidate.status()));
             }
+        }
+
+        boolean materialShortage = !dedupedMissing.isEmpty()
+                || materials.values().stream().anyMatch(a -> a.missingCount() > 0);
+        PlanOutcome outcome;
+        List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
+        if (feasible && !blockingPrerequisiteFailure && !noReadyMachine
+                && !allExecutionMachinesLeased && !missingExecutionBinding) {
+            outcome = PlanOutcome.READY;
+        } else if (timedOutMissingRoute) {
+            outcome = PlanOutcome.BUDGET_EXHAUSTED;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.COMPLEXITY_LIMIT));
+        } else if (allExecutionMachinesLeased) {
+            outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.MACHINES_LEASED));
+        } else if (missingExecutionBinding || (recipeModType != null
+                && !boundMachineTypes.contains(recipeModType.id()))) {
+            outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.NO_BOUND_MACHINE));
+        } else if (noReadyMachine) {
+            outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.NO_READY_MACHINE));
+        } else if (nbtMismatch) {
+            outcome = PlanOutcome.MISSING_INPUTS;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.NBT_MISMATCH));
+        } else if (materialShortage) {
+            outcome = PlanOutcome.MISSING_INPUTS;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.MISSING_MATERIALS));
+        } else if (blockingPrerequisiteFailure) {
+            outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.PREREQUISITE_UNAVAILABLE));
+        } else {
+            outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.INTERNAL_ERROR));
         }
 
         PlanResponseDraft responseDraft = new PlanResponseDraft(
@@ -5428,7 +5512,9 @@ public final class GenericCraftPacket {
                 machineCandidates,
                 stepIssues,
                 selectedStorageReference,
-                storageNetworks
+                storageNetworks,
+                outcome,
+                diagnostics
         );
 
         int responseStepCount = steps.size();
@@ -5472,7 +5558,9 @@ public final class GenericCraftPacket {
                     RSIntegrationMod.debug("[RSI-tryBuildPlan] PlanResponsePacket SENT: recipeId={}", recipeId);
                 }, failure -> {
                     if (failure instanceof RejectedExecutionException) {
-                        sink.error(Component.translatable("rsi.plan.failure.planner_busy"));
+                        sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                IntegrationDiagnostic.error(
+                                        IntegrationDiagnosticCode.PLANNER_BUSY));
                     } else if (failure instanceof CancellationException
                             || failure instanceof AsyncPlanningCoordinator.StalePlanningResultException) {
                         sink.cancelled(Component.translatable(
@@ -5480,7 +5568,9 @@ public final class GenericCraftPacket {
                     } else {
                         RSIntegrationMod.LOGGER.error("[RSI-plan] Response finalization failed for {}",
                                 recipeId, failure);
-                        sink.error(buildFailureMessage(failure, recipeId));
+                        sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                IntegrationDiagnostic.error(
+                                        IntegrationDiagnosticCode.INTERNAL_ERROR));
                     }
                 });
     }
@@ -5641,6 +5731,14 @@ public final class GenericCraftPacket {
         return result.status() == PureRecipePlanner.Status.TIME_LIMIT
                 ? "rsi.plan.failure.planning_timeout"
                 : "rsi.plan.failure.complexity_limit";
+    }
+
+    private static IntegrationDiagnostic purePreviewDiagnostic(
+            PureRecipePlanner.Result result) {
+        return IntegrationDiagnostic.error(
+                result.status() == PureRecipePlanner.Status.TIME_LIMIT
+                        ? IntegrationDiagnosticCode.PLANNING_TIMEOUT
+                        : IntegrationDiagnosticCode.COMPLEXITY_LIMIT);
     }
 
     static String summarizePureDemands(
