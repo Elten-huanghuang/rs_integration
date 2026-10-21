@@ -390,8 +390,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureRecipePlanner.Feasibility.INFEASIBLE, List.of(), List.of(missing),
                 Map.of(), PureRecipePlanner.Status.UNRESOLVABLE, 3, 2, 0);
 
-        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(incomplete, Set.of()));
-        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(
+        assertFalse(CraftPlanDecisionRules.shouldRetryTypedPlanning(incomplete, Set.of()));
+        assertTrue(CraftPlanDecisionRules.shouldRetryTypedPlanning(
                 incomplete, Set.of(smithingOutput.itemId())));
 
         PureRecipePlanner.Result complete = new PureRecipePlanner.Result(
@@ -400,8 +400,8 @@ class GenericCraftPacketTest extends BootstrapTest {
         PureRecipePlanner.Result bounded = new PureRecipePlanner.Result(
                 PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(missing),
                 Map.of(), PureRecipePlanner.Status.SEARCH_LIMIT, 3, 0, 0);
-        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(complete, Set.of()));
-        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(bounded, Set.of()));
+        assertFalse(CraftPlanDecisionRules.shouldRetryTypedPlanning(complete, Set.of()));
+        assertFalse(CraftPlanDecisionRules.shouldRetryTypedPlanning(bounded, Set.of()));
     }
 
     @Test
@@ -421,11 +421,11 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(blockedDemand, rawDemand), Map.of(),
                 PureRecipePlanner.Status.UNRESOLVABLE, 8, 2, 0);
 
-        assertTrue(GenericCraftPacket.missingTouchesBlockedOutput(
+        assertTrue(CraftPlanDecisionRules.missingTouchesBlockedOutput(
                 mixed.missing(), Set.of(blockedOutput.itemId())));
-        assertFalse(GenericCraftPacket.allMissingRequireBlockedOutput(
+        assertFalse(CraftPlanDecisionRules.allMissingRequireBlockedOutput(
                 mixed.missing(), Set.of(blockedOutput.itemId())));
-        assertFalse(GenericCraftPacket.shouldRetryTypedPlanning(
+        assertFalse(CraftPlanDecisionRules.shouldRetryTypedPlanning(
                 mixed, Set.of(blockedOutput.itemId())));
 
         var firstOutput = new ImmutableRecipeGraph.MaterialRef(
@@ -445,8 +445,8 @@ class GenericCraftPacketTest extends BootstrapTest {
         Set<ResourceLocation> blockedIds = Set.of(
                 firstOutput.itemId(), secondOutput.itemId());
 
-        assertTrue(GenericCraftPacket.allMissingRequireBlockedOutput(blocked.missing(), blockedIds));
-        assertTrue(GenericCraftPacket.shouldRetryTypedPlanning(blocked, blockedIds));
+        assertTrue(CraftPlanDecisionRules.allMissingRequireBlockedOutput(blocked.missing(), blockedIds));
+        assertTrue(CraftPlanDecisionRules.shouldRetryTypedPlanning(blocked, blockedIds));
     }
 
     @Test
@@ -454,7 +454,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
                 List.of(), List.of(), Map.of());
 
-        assertTrue(GenericCraftPacket.canUsePrecomputedPlan(complete));
+        assertTrue(CraftPlanDecisionRules.canUsePrecomputedPlan(complete));
     }
 
     @Test
@@ -478,8 +478,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureDemandTreeInspector.Status.MISSING_MATERIALS, 2,
                 diamondPickaxe, false);
 
-        assertTrue(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut, missing));
-        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut,
+        assertTrue(CraftPlanDecisionRules.canOpenBoundedMissingPlan(timedOut, missing));
+        assertFalse(CraftPlanDecisionRules.canOpenBoundedMissingPlan(timedOut,
                 new PureDemandTreeInspector.Result(
                         PureDemandTreeInspector.Status.NODE_LIMIT, 2,
                         diamondPickaxe, false)));
@@ -500,7 +500,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(diagnostic), Map.of(), PureRecipePlanner.Status.TIME_LIMIT,
                 10, 2, 0);
 
-        assertTrue(GenericCraftPacket.canOpenBoundedMissingPlan(timedOut, completeTree));
+        assertTrue(CraftPlanDecisionRules.canOpenBoundedMissingPlan(timedOut, completeTree));
     }
 
     @Test
@@ -520,8 +520,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureRecipePlanner.Feasibility.UNKNOWN, List.of(partialStep), List.of(), Map.of(),
                 PureRecipePlanner.Status.TIME_LIMIT, 10, 2, 0);
 
-        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(noSteps, completeTree));
-        assertFalse(GenericCraftPacket.canOpenBoundedMissingPlan(noMissing, completeTree));
+        assertFalse(CraftPlanDecisionRules.canOpenBoundedMissingPlan(noSteps, completeTree));
+        assertFalse(CraftPlanDecisionRules.canOpenBoundedMissingPlan(noMissing, completeTree));
     }
 
     @Test
@@ -538,11 +538,11 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureDemandTreeInspector.Status.MISSING_MATERIALS, 4,
                 missingMaterial, false);
 
-        assertTrue(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertTrue(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
                 incomplete, missing, false));
-        assertFalse(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertFalse(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
                 incomplete, missing, true));
-        assertFalse(GenericCraftPacket.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertFalse(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
                 null, missing, false));
     }
 
@@ -563,7 +563,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                     status, 10, 0, 0);
 
             assertEquals("rsi.plan.failure.complexity_limit",
-                    GenericCraftPacket.purePlanningFailureKey(result, Map.of()));
+                    CraftPlanDecisionRules.purePlanningFailureKey(result, Map.of()));
         }
         var diagnostic = new ImmutableRecipeGraph.IngredientRef(List.of(
                 new ImmutableRecipeGraph.MaterialRef(
@@ -575,9 +575,9 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureRecipePlanner.Feasibility.UNKNOWN, List.of(), List.of(diagnostic), Map.of(),
                 PureRecipePlanner.Status.SEARCH_LIMIT, 10, 2, 0);
         assertEquals("rsi.plan.failure.planning_timeout",
-                GenericCraftPacket.boundedPreviewFailureKey(timedOut));
+                CraftPlanDecisionRules.boundedPreviewFailureKey(timedOut));
         assertEquals("rsi.plan.failure.complexity_limit",
-                GenericCraftPacket.boundedPreviewFailureKey(searchLimited));
+                CraftPlanDecisionRules.boundedPreviewFailureKey(searchLimited));
     }
 
     @Test
@@ -591,7 +591,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(catalyst), 1), new ImmutableRecipeGraph.IngredientRef(
                 List.of(raw), 1)), Map.of());
 
-        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+        assertFalse(CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 true, false, missingRaw, java.util.Set.of(catalyst.itemId())));
     }
 
@@ -605,13 +605,13 @@ class GenericCraftPacketTest extends BootstrapTest {
         PureRecipePlanner.Result pureSuccess = new PureRecipePlanner.Result(true,
                 List.of(), List.of(), Map.of());
 
-        assertTrue(GenericCraftPacket.requiresTypedCatalystRoute(
+        assertTrue(CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 true, false, missingCatalyst, java.util.Set.of(catalyst.itemId())));
-        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+        assertFalse(CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 true, false, pureSuccess, java.util.Set.of(catalyst.itemId())));
-        assertFalse(GenericCraftPacket.requiresTypedCatalystRoute(
+        assertFalse(CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 false, true, pureSuccess, java.util.Set.of(catalyst.itemId())));
-        assertTrue(GenericCraftPacket.requiresTypedCatalystRoute(
+        assertTrue(CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 true, true, pureSuccess, java.util.Set.of(catalyst.itemId())));
     }
 
@@ -777,14 +777,14 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
-        assertTrue(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(true, false, true, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, true, true, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, false, false));
-        assertFalse(GenericCraftPacket.shouldSubmitRoutedPreview(false, false, true, true));
-        assertTrue(GenericCraftPacket.shouldUseAsyncPurePreview(true, false));
-        assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(true, true));
-        assertFalse(GenericCraftPacket.shouldUseAsyncPurePreview(false, false));
+        assertTrue(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(true, false, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, true, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, false, false));
+        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, true, true));
+        assertTrue(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, false));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, true));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(false, false));
     }
 
     @Test
@@ -864,7 +864,7 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void terminalInputGraphCoversWholeBatchWithoutScalingCatalysts() {
-        List<IngredientSpec> scaled = GenericCraftPacket.scaleIngredientSpecs(List.of(
+        List<IngredientSpec> scaled = CraftIngredientPlanMath.scaleIngredientSpecs(List.of(
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED),
                 new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)), 6);
 
@@ -877,7 +877,7 @@ class GenericCraftPacketTest extends BootstrapTest {
     @Test
     void selfAmplifyingTerminalScalesCostsButKeepsOneSeed() {
         ItemStack output = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
-        List<IngredientSpec> scaled = GenericCraftPacket.scaleTerminalIngredientSpecs(List.of(
+        List<IngredientSpec> scaled = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(List.of(
                 new IngredientSpec(Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
                 new IngredientSpec(Ingredient.of(Items.DIAMOND), 7),
                 new IngredientSpec(Ingredient.of(Items.NETHERRACK), 1)), output, 6);
@@ -890,21 +890,21 @@ class GenericCraftPacketTest extends BootstrapTest {
     @Test
     void selfAmplifyingTerminalCannotBypassTheSeedChainPlanner() {
         ItemStack template = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
-        List<IngredientSpec> templateSpecs = GenericCraftPacket.scaleTerminalIngredientSpecs(
+        List<IngredientSpec> templateSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                 List.of(
                         new IngredientSpec(
                                 Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
                         new IngredientSpec(Ingredient.of(Items.DIAMOND), 7),
                         new IngredientSpec(Ingredient.of(Items.NETHERRACK), 1)),
                 template, 1024);
-        assertFalse(GenericCraftPacket.useDirectTerminalPlan(
+        assertFalse(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
                 templateSpecs, template));
 
         ItemStack planks = new ItemStack(Items.OAK_PLANKS, 4);
-        List<IngredientSpec> ordinarySpecs = GenericCraftPacket.scaleTerminalIngredientSpecs(
+        List<IngredientSpec> ordinarySpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                 List.of(new IngredientSpec(Ingredient.of(Items.OAK_LOG), 1)), planks, 16);
-        assertTrue(GenericCraftPacket.useDirectTerminalPlan(
+        assertTrue(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
                 ordinarySpecs, planks));
     }
@@ -919,7 +919,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED));
 
         assertEquals(List.of(DemandRole.CONSUMED, DemandRole.CATALYST, DemandRole.CONSUMED),
-                GenericCraftPacket.alignInputRoles(displayed, specs));
+                CraftIngredientPlanMath.alignInputRoles(displayed, specs));
     }
 
     @Test
@@ -928,7 +928,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         available.put(Items.DIAMOND, 1024L);
 
         Map<net.minecraft.world.item.Item, Long> consumed =
-                GenericCraftPacket.consumeIngredientCountInPlace(
+                CraftIngredientPlanMath.consumeIngredientCountInPlace(
                         Ingredient.of(Items.DIAMOND), 1024, available);
 
         assertEquals(Map.of(Items.DIAMOND, 1024L), consumed);
@@ -944,7 +944,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         Map<CraftingResolver.StackKey, Integer> available = Map.of(
                 new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 1);
 
-        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), available));
+        assertFalse(CraftPlanDecisionRules.hasPureNbtMismatch(List.of(demand), available));
     }
 
     @Test
@@ -954,9 +954,9 @@ class GenericCraftPacketTest extends BootstrapTest {
                         new ResourceLocation("minecraft", "diamond_sword"), "{Damage:0}")),
                 2, ImmutableRecipeGraph.NbtMatchMode.EXACT);
 
-        assertTrue(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), Map.of(
+        assertTrue(CraftPlanDecisionRules.hasPureNbtMismatch(List.of(demand), Map.of(
                 new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 2)));
-        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand), Map.of(
+        assertFalse(CraftPlanDecisionRules.hasPureNbtMismatch(List.of(demand), Map.of(
                 new CraftingResolver.StackKey(Items.DIAMOND_SWORD, "{Damage:7}"), 1)));
     }
 
@@ -983,7 +983,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new ImmutableRecipeGraph(Map.of(output, List.of(unbound))), node -> false);
         assertFalse(onlyUnbound.graph().recipesByOutput().containsKey(output));
         assertEquals(java.util.Set.of(output.itemId()), onlyUnbound.blockedOutputIds());
-        assertTrue(GenericCraftPacket.missingTouchesBlockedOutput(
+        assertTrue(CraftPlanDecisionRules.missingTouchesBlockedOutput(
                 List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 1)),
                 onlyUnbound.blockedOutputIds()));
     }
@@ -1048,7 +1048,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         var demand = new ImmutableRecipeGraph.IngredientRef(alternatives, 7,
                 ImmutableRecipeGraph.NbtMatchMode.ANY);
 
-        String summary = GenericCraftPacket.summarizePureDemands(List.of(demand));
+        String summary = CraftPlanDecisionRules.summarizePureDemands(List.of(demand));
 
         assertTrue(summary.contains("minecraft:iron_chestplate"));
         assertTrue(summary.contains("count=7"));

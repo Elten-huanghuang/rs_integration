@@ -42,11 +42,11 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
                 new FluidStack(Fluids.WATER, 2000));
         ItemStack lava = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
                 new FluidStack(Fluids.LAVA, 5000));
-        assertFalse(GenericCraftPacket.hasNbtMismatch(Map.of(IngredientKey.of(water),
+        assertFalse(CraftPlanDecisionRules.hasNbtMismatch(Map.of(IngredientKey.of(water),
                 new PlanResponse.Availability(2000, 0)), Map.of(water.getItem(), 5000)));
         var demand = ImmutableRecipeGraphProjector.projectIngredient(new IngredientSpec(
                 StrictNBTIngredient.of(water.copyWithCount(1)), 2000));
-        assertFalse(GenericCraftPacket.hasPureNbtMismatch(List.of(demand),
+        assertFalse(CraftPlanDecisionRules.hasPureNbtMismatch(List.of(demand),
                 Map.of(new StackKey(lava.getItem(), lava.getTag().toString()), 5000)));
     }
 
@@ -54,7 +54,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
     void plannedNbtIntermediateDoesNotBecomeNbtMismatch() {
         ItemStack intermediate = new ItemStack(Items.POTION);
         intermediate.getOrCreateTag().putString("Potion", "minecraft:water");
-        assertFalse(GenericCraftPacket.hasNbtMismatch(Map.of(IngredientKey.of(intermediate),
+        assertFalse(CraftPlanDecisionRules.hasNbtMismatch(Map.of(IngredientKey.of(intermediate),
                 new PlanResponse.Availability(3, 0, 0)), Map.of(Items.POTION, 3)));
     }
 
@@ -66,7 +66,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
                 IngredientKey.of(expected), new PlanResponse.Availability(3, 0));
         Map<Item, Integer> available = Map.of(Items.POTION, 3);
 
-        assertTrue(GenericCraftPacket.hasNbtMismatch(materials, available));
+        assertTrue(CraftPlanDecisionRules.hasNbtMismatch(materials, available));
     }
 
     @Test
@@ -76,7 +76,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
         Map<IngredientKey, PlanResponse.Availability> materials = Map.of(
                 IngredientKey.of(expected), new PlanResponse.Availability(3, 1));
 
-        assertFalse(GenericCraftPacket.hasNbtMismatch(materials, Map.of(Items.POTION, 2)));
+        assertFalse(CraftPlanDecisionRules.hasNbtMismatch(materials, Map.of(Items.POTION, 2)));
     }
 
     @Test
@@ -90,8 +90,8 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
                 List.of(), PureRecipePlanner.Status.UNRESOLVABLE, 0, 0, 0,
                 PureRecipePlanner.FailureReason.MISSING_INPUTS);
 
-        assertTrue(GenericCraftPacket.hasCyclicPureFailure(cycle));
-        assertFalse(GenericCraftPacket.hasCyclicPureFailure(missing));
+        assertTrue(CraftPlanDecisionRules.hasCyclicPureFailure(cycle));
+        assertFalse(CraftPlanDecisionRules.hasCyclicPureFailure(missing));
     }
 
     @Test
@@ -99,7 +99,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
         ModRecipeHandlers.register(new SpecializedCraftingHandler());
         SpecializedCraftingRecipe recipe = new SpecializedCraftingRecipe();
 
-        List<IngredientSpec> specs = GenericCraftPacket.extractPlanIngredientSpecs(recipe);
+        List<IngredientSpec> specs = CraftIngredientPlanMath.extractPlanIngredientSpecs(recipe);
 
         assertTrue(specs.stream().anyMatch(spec -> spec.ingredient().test(new ItemStack(Items.STICK))));
         assertTrue(specs.stream().anyMatch(spec -> spec.ingredient().test(new ItemStack(Items.DIAMOND))));
@@ -107,7 +107,7 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
                 .filter(spec -> spec.ingredient().test(new ItemStack(Items.DIAMOND)))
                 .findFirst().orElseThrow();
         assertEquals(DemandRole.CATALYST, catalyst.role());
-        assertEquals(1, GenericCraftPacket.scaleIngredientSpecs(List.of(catalyst), 65).get(0).count());
+        assertEquals(1, CraftIngredientPlanMath.scaleIngredientSpecs(List.of(catalyst), 65).get(0).count());
     }
 
     private static final class SpecializedCraftingRecipe extends ShapelessRecipe {

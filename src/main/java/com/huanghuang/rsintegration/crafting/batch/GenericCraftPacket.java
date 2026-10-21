@@ -1178,7 +1178,8 @@ public final class GenericCraftPacket {
                                            ModType terminalType) {
         // Pure plans describe crafting-table operations only. A physical
         // terminal must retain its typed delegate and wait for real output.
-        return terminalType == ModType.GENERIC && canUsePrecomputedPlan(plan);
+        return terminalType == ModType.GENERIC
+                && CraftPlanDecisionRules.canUsePrecomputedPlan(plan);
     }
 
     /**
@@ -1353,7 +1354,7 @@ public final class GenericCraftPacket {
                                 "[RSI-exec] {} planner rejected recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservationAttempted=true",
                                 planKind, recipeId, result.status(), result.feasibility(), result.missing(),
                                 result.expandedStates(), result.backtracks(), result.memoHits());
-                        if (shouldRetryTypedPlanning(
+                        if (CraftPlanDecisionRules.shouldRetryTypedPlanning(
                                 result, snapshot.bindingBlockedOutputIds())) {
                             RSIntegrationMod.LOGGER.info(
                                     "[RSI-exec] retrying typed {} execution after pure planner rejection recipe={}",
@@ -1363,7 +1364,7 @@ public final class GenericCraftPacket {
                                     machineSelectionMode, storageReference, materialLocks);
                             return;
                         }
-                        if (missingTouchesOutputSet(result.missing(),
+                        if (CraftPlanDecisionRules.missingTouchesOutputSet(result.missing(),
                                 RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
                             RSIntegrationMod.debug(
                                     "[RSI-exec] retrying typed {} execution for unprojected dependency recipe={}",
@@ -2539,7 +2540,7 @@ public final class GenericCraftPacket {
             ItemStack preparationOutput = routeRecipeOutput(modType,
                     ModRecipeHandlers.tryGetResultItem(
                             recipe, player.serverLevel().registryAccess()));
-            List<IngredientSpec> preparationSpecs = scaleTerminalIngredientSpecs(
+            List<IngredientSpec> preparationSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, preparationOutput, repeatCount);
             if (preparationSpecs.isEmpty()) {
                 player.sendSystemMessage(Component.translatable(
@@ -2606,7 +2607,7 @@ public final class GenericCraftPacket {
                         cachedMachinePlan, materialLocks)) {
                     return;
                 }
-                List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
+                List<IngredientSpec> graphSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                         recipe, executionSpecs, recipeOutput, repeatCount);
                 ModRecipeHandler graphHandler = ModRecipeHandlers.handlerFor(recipe);
                 if (graphHandler != null) {
@@ -2734,8 +2735,8 @@ public final class GenericCraftPacket {
                     recipe, player.serverLevel().registryAccess())) {
                 ItemStack directOutput = ModRecipeHandlers.tryGetResultItem(
                         recipe, player.serverLevel().registryAccess());
-                List<IngredientSpec> directSpecs = scaleTerminalIngredientSpecs(
-                        recipe, extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
+                List<IngredientSpec> directSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+                        recipe, CraftIngredientPlanMath.extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
                 Map<StackKey, Long> directAvailable = listAvailable(
                         player, storageEndpoint);
                 DirectReservationCheck directReservation = probeDirectTerminalReservation(
@@ -2792,8 +2793,8 @@ public final class GenericCraftPacket {
                     cachedPreResolved, materialLocks)) {
                 return;
             }
-            List<IngredientSpec> graphSpecs = scaleTerminalIngredientSpecs(
-                    recipe, extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
+            List<IngredientSpec> graphSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+                    recipe, CraftIngredientPlanMath.extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
             Map<StackKey, Long> available = listAvailable(player, storageEndpoint);
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph;
@@ -2886,7 +2887,7 @@ public final class GenericCraftPacket {
             List<String> missingCheck = new ArrayList<>();
             ItemStack recipeOutput = cr2.getResultItem(
                     player.serverLevel().registryAccess()).copy();
-            List<IngredientSpec> scaledSpecs = scaleTerminalIngredientSpecs(
+            List<IngredientSpec> scaledSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
             CraftPlanGraph inputGraph;
             try {
@@ -2989,7 +2990,7 @@ public final class GenericCraftPacket {
                 && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             ItemStack smithingOutput = ModRecipeHandlers.tryGetResultItem(
                     recipe, player.serverLevel().registryAccess());
-            List<IngredientSpec> smithingSpecs = scaleTerminalIngredientSpecs(
+            List<IngredientSpec> smithingSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, smithingOutput, repeatCount);
             if (!smithingSpecs.isEmpty()) {
                 Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
@@ -3332,45 +3333,6 @@ public final class GenericCraftPacket {
         return tag != null ? key + "#" + tag : key;
     }
 
-    static List<IngredientSpec> scaleIngredientSpecs(
-            List<IngredientSpec> specs, int executions) {
-        List<IngredientSpec> scaled = new ArrayList<>(specs.size());
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            scaled.add(new IngredientSpec(spec.ingredient(),
-                    CraftPacketUtils.requiredCount(spec, executions),
-                    spec.consumption()));
-        }
-        return List.copyOf(scaled);
-    }
-
-    static List<IngredientSpec> scaleIngredientSpecs(
-            Recipe<?> recipe, List<IngredientSpec> specs, int executions) {
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
-        if (handler == null) return scaleIngredientSpecs(specs, executions);
-        List<IngredientSpec> scaled = new ArrayList<>(specs.size());
-        int inputIndex = 0;
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            scaled.add(new IngredientSpec(spec.ingredient(),
-                    handler.requiredIngredientCount(recipe, spec, inputIndex++, executions),
-                    spec.consumption()));
-        }
-        return List.copyOf(scaled);
-    }
-
-    static List<IngredientSpec> scaleTerminalIngredientSpecs(
-            List<IngredientSpec> specs, ItemStack output, int executions) {
-        return SelfAmplifyingRecipePolicy.scaleTargetInputs(specs, output, executions);
-    }
-
-    static boolean useDirectTerminalPlan(DirectMaterialAllocator.Result allocation,
-                                         List<IngredientSpec> scaledSpecs,
-                                         ItemStack output) {
-        return allocation.feasible()
-                && !SelfAmplifyingRecipePolicy.isSelfAmplifying(scaledSpecs, output);
-    }
-
     static boolean canUseDirectCraftingReservation(Recipe<?> recipe,
                                                    RegistryAccess registryAccess) {
         return !isSelfAmplifyingRecipe(recipe, registryAccess);
@@ -3387,57 +3349,6 @@ public final class GenericCraftPacket {
                 step.recipeId().equals(terminalStep.recipeId()))) {
             steps.add(terminalStep);
         }
-    }
-
-    static List<IngredientSpec> scaleTerminalIngredientSpecs(
-            Recipe<?> recipe, List<IngredientSpec> specs, ItemStack output, int executions) {
-        List<IngredientSpec> scaled = scaleTerminalIngredientSpecs(specs, output, executions);
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
-        if (handler == null) return scaled;
-
-        List<IngredientSpec> adjusted = new ArrayList<>(scaled.size());
-        int scaledIndex = 0;
-        int inputIndex = 0;
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) continue;
-            IngredientSpec terminalSpec = scaled.get(scaledIndex++);
-            int ordinaryCount = CraftPacketUtils.requiredCount(spec, executions);
-            int handlerCount = handler.requiredIngredientCount(
-                    recipe, spec, inputIndex++, executions);
-            adjusted.add(handlerCount == ordinaryCount
-                    ? terminalSpec
-                    : new IngredientSpec(terminalSpec.ingredient(), handlerCount,
-                            terminalSpec.consumption()));
-        }
-        return List.copyOf(adjusted);
-    }
-
-    static List<DemandRole> nonEmptyInputRoles(List<IngredientSpec> specs) {
-        return specs.stream()
-                .filter(spec -> !spec.isEmpty())
-                .map(IngredientSpec::role)
-                .toList();
-    }
-
-    static List<DemandRole> alignInputRoles(
-            List<Ingredient> displayed, List<IngredientSpec> specs) {
-        if (displayed.size() == specs.size()) {
-            return specs.stream().map(spec -> spec.isEmpty()
-                    ? DemandRole.CONSUMED : spec.role()).toList();
-        }
-
-        List<DemandRole> nonEmpty = nonEmptyInputRoles(specs);
-        List<DemandRole> aligned = new ArrayList<>(displayed.size());
-        int roleIndex = 0;
-        for (Ingredient ingredient : displayed) {
-            if (ingredient.isEmpty()) {
-                aligned.add(DemandRole.CONSUMED);
-            } else {
-                aligned.add(roleIndex < nonEmpty.size()
-                        ? nonEmpty.get(roleIndex++) : DemandRole.CONSUMED);
-            }
-        }
-        return List.copyOf(aligned);
     }
 
     private interface PlanResultSink {
@@ -3883,8 +3794,8 @@ public final class GenericCraftPacket {
                     perRecipe.add(spec.ingredient());
                 }
                 displayIngredients = perRecipe;
-                displayInputRoles = nonEmptyInputRoles(specs);
-                recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+                displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(specs);
+                recipeSpecs = CraftIngredientPlanMath.scaleIngredientSpecs(specs, repeatCount);
                 // Apply modifier to the JEI-provided base item so the plan
                 // shows the actual modified output (e.g. sword + eternal),
                 // not the unmodified base material.
@@ -3932,8 +3843,8 @@ public final class GenericCraftPacket {
                     .filter(spec -> !spec.isEmpty())
                     .map(IngredientSpec::ingredient)
                     .toList();
-            displayInputRoles = nonEmptyInputRoles(specs);
-            recipeSpecs = scaleIngredientSpecs(specs, repeatCount);
+            displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(specs);
+            recipeSpecs = CraftIngredientPlanMath.scaleIngredientSpecs(specs, repeatCount);
             targetOutput = validated;
             recipeModType = previewModType;
         } else if (goetyDynamic) {
@@ -3949,18 +3860,18 @@ public final class GenericCraftPacket {
                     .filter(spec -> !spec.isEmpty())
                     .map(IngredientSpec::ingredient)
                     .toList();
-            displayInputRoles = nonEmptyInputRoles(specs);
-            recipeSpecs = scaleTerminalIngredientSpecs(
+            displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(specs);
+            recipeSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, validated, repeatCount);
             targetOutput = validated;
             recipeModType = previewModType;
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
-            List<IngredientSpec> extractedSpecs = extractPlanIngredientSpecs(cr);
+            List<IngredientSpec> extractedSpecs = CraftIngredientPlanMath.extractPlanIngredientSpecs(cr);
             if (cr instanceof ShapedRecipe) {
                 // Preserve empty slots for the shaped-grid renderer.
                 displayIngredients = raw;
-                displayInputRoles = alignInputRoles(raw, extractedSpecs);
+                displayInputRoles = CraftIngredientPlanMath.alignInputRoles(raw, extractedSpecs);
             } else {
                 // Some mod recipes implement CraftingRecipe for JEI integration but
                 // their handler supplies semantic inputs absent from getIngredients(),
@@ -3969,11 +3880,11 @@ public final class GenericCraftPacket {
                         .filter(spec -> !spec.isEmpty())
                         .map(IngredientSpec::ingredient)
                         .toList();
-                displayInputRoles = nonEmptyInputRoles(extractedSpecs);
+                displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(extractedSpecs);
             }
             targetOutput = ModRecipeHandlers.tryGetResultItem(
                     cr, player.serverLevel().registryAccess());
-            recipeSpecs = scaleTerminalIngredientSpecs(
+            recipeSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, extractedSpecs, targetOutput, repeatCount);
         } else {
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
@@ -4015,10 +3926,10 @@ public final class GenericCraftPacket {
                 perRecipe.add(spec.ingredient());
             }
             displayIngredients = perRecipe;
-            displayInputRoles = nonEmptyInputRoles(specs);
+            displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(specs);
             targetOutput = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
             targetOutput = routeRecipeOutput(recipeModType, targetOutput);
-            recipeSpecs = scaleTerminalIngredientSpecs(
+            recipeSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, targetOutput, repeatCount);
             boolean manualGoetyRitual = GoetyRecipeHandler.requiresManualConfirmation(recipe);
             RSIntegrationMod.debug("[RSI-tryBuildPlan] targetOutput: recipeId={} class={} result={}x{} isEmpty={} modType={}",
@@ -4292,7 +4203,7 @@ public final class GenericCraftPacket {
                         .filter(spec -> !spec.isEmpty())
                         .map(IngredientSpec::ingredient)
                         .toList();
-                displayInputRoles = nonEmptyInputRoles(recipeSpecs);
+                displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(recipeSpecs);
                 ItemStack assembled = SmithingRecipeHandler.assembleWithBase(
                         smithingRecipe, selectedSmithingBase,
                         player.serverLevel().registryAccess());
@@ -4339,7 +4250,7 @@ public final class GenericCraftPacket {
                 && hasFixedTerminalInputs
                 ? DirectMaterialAllocator.allocate(recipeSpecs, available)
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
-        boolean directTerminalPlan = useDirectTerminalPlan(
+        boolean directTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
                 directPreviewAllocation, recipeSpecs, planTargetOutput);
         if (directTerminalPlan) {
             RSIntegrationMod.LOGGER.info(
@@ -4360,7 +4271,7 @@ public final class GenericCraftPacket {
         Set<ResourceLocation> pureIncompatibleOutputIds = directTerminalPlan ? Set.of()
                 : RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
         int demandMaxNodes = RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get();
-        if (!asyncAttempted && shouldSubmitRoutedPreview(directTerminalPlan,
+        if (!asyncAttempted && CraftPlanDecisionRules.shouldSubmitRoutedPreview(directTerminalPlan,
                 planningSnapshot.mainThreadOnly(),
                 effectiveOverrides.isEmpty() || ForcedRecipeGraphProjector.apply(
                         planningSnapshot.recipeGraph(), effectiveOverrides) != null,
@@ -4466,14 +4377,15 @@ public final class GenericCraftPacket {
         boolean terminalPureResult = directTerminalPlan
                 || precomputedPlan != null && pendingFallbackReason == null;
         boolean timedOutMissingRoute = terminalPureResult
-                && canOpenBoundedMissingPlan(precomputedPlan, demandTree);
+                && CraftPlanDecisionRules.canOpenBoundedMissingPlan(precomputedPlan, demandTree);
         if (!directTerminalPlan && terminalPureResult
                 && precomputedPlan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
                 && !timedOutMissingRoute) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-plan] bounded planner result recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservation=false",
                     recipeId, precomputedPlan.status(), precomputedPlan.feasibility(),
-                    summarizePureDemands(precomputedPlan.missing()), precomputedPlan.expandedStates(),
+                    CraftPlanDecisionRules.summarizePureDemands(precomputedPlan.missing()),
+                    precomputedPlan.expandedStates(),
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
             // UNKNOWN means the planner did not prove feasibility. Its
             // diagnostic trace is not an authoritative shortage report.
@@ -4481,10 +4393,10 @@ public final class GenericCraftPacket {
                     purePreviewDiagnostic(precomputedPlan));
             return;
         }
-        boolean requiresTypedCatalystRoute = requiresTypedCatalystRoute(
+        boolean requiresTypedCatalystRoute = CraftPlanDecisionRules.requiresTypedCatalystRoute(
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
                 precomputedPlan, reusableCatalystOutputIds);
-        boolean requiresTypedIncompleteRoute = shouldRetryTypedPlanning(
+        boolean requiresTypedIncompleteRoute = CraftPlanDecisionRules.shouldRetryTypedPlanning(
                 precomputedPlan, planningSnapshot.bindingBlockedOutputIds());
         boolean selectedPureResolver = terminalPureResult && projectedOverrides
                 && !requiresTypedCatalystRoute
@@ -4492,7 +4404,7 @@ public final class GenericCraftPacket {
         if (requiresTypedIncompleteRoute) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-plan] retrying typed preview after incomplete pure plan recipe={} missing={}",
-                    recipeId, summarizePureDemands(precomputedPlan.missing()));
+                    recipeId, CraftPlanDecisionRules.summarizePureDemands(precomputedPlan.missing()));
         }
         boolean needsTypedResolver = !selectedPureResolver;
         if (needsTypedResolver && !typedResolverAvailable) {
@@ -4573,7 +4485,7 @@ public final class GenericCraftPacket {
                 : recursiveHandler.getRecursiveIngredients(recipe, recipeSpecs);
         boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
                 ? false
-                : useDirectTerminalPlan(
+                : CraftIngredientPlanMath.useDirectTerminalPlan(
                         DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available),
                         recursiveRecipeSpecs, planTargetOutput);
 
@@ -4589,7 +4501,8 @@ public final class GenericCraftPacket {
         } else if (directRecursiveTerminalPlan) {
             resolutionSteps = List.of();
             selectedDirectTerminalResolver = true;
-        } else if (canUsePrecomputedPlan(precomputedPlan) && selectedPureResolver) {
+        } else if (CraftPlanDecisionRules.canUsePrecomputedPlan(precomputedPlan)
+                && selectedPureResolver) {
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
                     planningSnapshot.recipeGraph());
             usedPurePlan = true;
@@ -4648,7 +4561,7 @@ public final class GenericCraftPacket {
                 // transient 500 ms resolver deadline. This path never authorizes
                 // execution: the response remains infeasible and retains its
                 // shortage/machine warnings below.
-                if (canFallbackToBoundedPlanAfterTypedTimeout(
+                if (CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
                         precomputedPlan, demandTree, directTerminalPlan)) {
                     if (missing.isEmpty()) {
                         for (var unresolved : precomputedPlan.missing()) {
@@ -4813,8 +4726,8 @@ public final class GenericCraftPacket {
             List<DemandRole> inputRoles = new ArrayList<>();
             if (stepRecipe instanceof CraftingRecipe scr) {
                 List<Ingredient> craftingIngredients = scr.getIngredients();
-                List<DemandRole> craftingRoles = alignInputRoles(
-                        craftingIngredients, extractPlanIngredientSpecs(scr));
+                List<DemandRole> craftingRoles = CraftIngredientPlanMath.alignInputRoles(
+                        craftingIngredients, CraftIngredientPlanMath.extractPlanIngredientSpecs(scr));
                 if (scr instanceof ShapedRecipe shaped) {
                     recipeW = shaped.getWidth();
                     recipeH = shaped.getHeight();
@@ -4874,7 +4787,7 @@ public final class GenericCraftPacket {
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
-                        consumeIngredientCountInPlace(
+                        CraftIngredientPlanMath.consumeIngredientCountInPlace(
                                 spec.ingredient(), Math.max(0, cnt - 1), displayAvailable);
                         inputs.add(display);
                         inputRoles.add(spec.role());
@@ -5078,7 +4991,7 @@ public final class GenericCraftPacket {
                         ItemStack matched = matchAndConsume(spec.ingredient(), displayAvailable, plannedOutputs);
                         ItemStack display = matched != null ? matched.copy() : firstValidDisplayItem(spec.ingredient());
                         display.setCount(cnt);
-                        consumeIngredientCountInPlace(spec.ingredient(), Math.max(0, cnt - 1),
+                        CraftIngredientPlanMath.consumeIngredientCountInPlace(spec.ingredient(), Math.max(0, cnt - 1),
                                 displayAvailable, plannedOutputs);
                         targetInputs.add(display);
                         targetInputRoles.add(spec.role());
@@ -5207,7 +5120,7 @@ public final class GenericCraftPacket {
         Map<Item, Ingredient> itemSource = new HashMap<>();
         for (IngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
-            Map<Item, Long> consumed = consumeIngredientCountInPlace(
+            Map<Item, Long> consumed = CraftIngredientPlanMath.consumeIngredientCountInPlace(
                     spec.ingredient(), spec.count(), matAvailable);
             for (Map.Entry<Item, Long> entry : consumed.entrySet()) {
                 neededCounts.merge(entry.getKey(), entry.getValue().longValue(),
@@ -5448,9 +5361,10 @@ public final class GenericCraftPacket {
 
         boolean nbtMismatch = false;
         if (!feasible) {
-            nbtMismatch = hasNbtMismatch(materials, itemAvailable);
+            nbtMismatch = CraftPlanDecisionRules.hasNbtMismatch(materials, itemAvailable);
             boolean bindingBlocked = precomputedPlan != null
-                    && allMissingRequireBlockedOutput(precomputedPlan.missing(),
+                    && CraftPlanDecisionRules.allMissingRequireBlockedOutput(
+                            precomputedPlan.missing(),
                     planningSnapshot.bindingBlockedOutputIds());
             if (allExecutionMachinesLeased) {
                 modWarnings.add(Component.translatable(
@@ -5458,7 +5372,7 @@ public final class GenericCraftPacket {
             } else if (bindingBlocked) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.no_bound_machine"));
-            } else if (hasCyclicPureFailure(precomputedPlan)) {
+            } else if (CraftPlanDecisionRules.hasCyclicPureFailure(precomputedPlan)) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.cyclic_dependency"));
             } else if (nbtMismatch) {
@@ -5628,7 +5542,7 @@ public final class GenericCraftPacket {
             outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
             diagnostics.add(IntegrationDiagnostic.error(
                     IntegrationDiagnosticCode.NO_READY_MACHINE));
-        } else if (hasCyclicPureFailure(precomputedPlan)) {
+        } else if (CraftPlanDecisionRules.hasCyclicPureFailure(precomputedPlan)) {
             outcome = PlanOutcome.CYCLE;
             diagnostics.add(IntegrationDiagnostic.error(
                     IntegrationDiagnosticCode.CYCLIC_DEPENDENCY));
@@ -5639,7 +5553,7 @@ public final class GenericCraftPacket {
                         safePreferences.choiceFor(rootTarget),
                         safePreferences.excludedRecipes(), forcedOverrides,
                         steps.stream().map(step -> step.recipeId().toString()).toList(),
-                        summarizePureDemands(precomputedPlan == null
+                        CraftPlanDecisionRules.summarizePureDemands(precomputedPlan == null
                                 ? List.of() : precomputedPlan.missing()));
             }
         } else if (nbtMismatch) {
@@ -5726,7 +5640,8 @@ public final class GenericCraftPacket {
                         return;
                     }
                     PLAN_CACHE.put(cacheKey, plan, planningSnapshot,
-                            canUsePrecomputedPlan(precomputedPlan) ? precomputedPlan : null,
+                            CraftPlanDecisionRules.canUsePrecomputedPlan(precomputedPlan)
+                                    ? precomputedPlan : null,
                             resolvedGraphForCache, System.nanoTime());
                     RSIntegrationMod.debug("[RSI-tryBuildPlan] SENDING PlanResponsePacket: recipeId={} steps={} graphNodes={} feasible={} player={}",
                             recipeId, responseStepCount, responseGraphNodes,
@@ -5752,17 +5667,6 @@ public final class GenericCraftPacket {
                                         IntegrationDiagnosticCode.INTERNAL_ERROR));
                     }
                 });
-    }
-
-    static boolean shouldUseAsyncPurePreview(
-            boolean pureRoute, boolean directTerminalPlan) {
-        return pureRoute && !directTerminalPlan;
-    }
-
-    static boolean shouldSubmitRoutedPreview(boolean directTerminalPlan, boolean mainThreadOnly,
-                                              boolean overridesProjectable, boolean hasMaterialLocks) {
-        return shouldUseAsyncPurePreview(!mainThreadOnly && overridesProjectable && !hasMaterialLocks,
-                directTerminalPlan);
     }
 
     record PreviewStep(ResolutionStep step, int batches) {}
@@ -5806,42 +5710,15 @@ public final class GenericCraftPacket {
         return List.copyOf(merged.values());
     }
 
-    static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
-                                  Map<Item, ? extends Number> itemAvailable) {
-        for (Map.Entry<IngredientKey, PlanResponse.Availability> entry : materials.entrySet()) {
-            PlanResponse.Availability availability = entry.getValue();
-            ItemStack display = entry.getKey().stack(1);
-            // 流体种类保存在凭据 NBT 中，其他流体的库存不是同种物品的数据变体。
-            if (availability.missingCount() == 0 || !display.hasTag()
-                    || InkFluidSupport.isToken(display)) continue;
-            if (itemCount(itemAvailable, entry.getKey().item())
-                    >= (long) availability.available() + availability.missingCount()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static String purePlanningFailureKey(PureRecipePlanner.Result result,
-                                         Map<StackKey, ? extends Number> availableItems) {
-        if (result.status() == PureRecipePlanner.Status.TIME_LIMIT
-                || result.status() == PureRecipePlanner.Status.SEARCH_LIMIT
-                || result.status() == PureRecipePlanner.Status.STEP_LIMIT) {
-            return "rsi.plan.failure.complexity_limit";
-        }
-        return hasPureNbtMismatch(result.missing(), availableItems)
-                ? "rsi.plan.failure.nbt_mismatch"
-                : "rsi.plan.failure.missing_materials";
-    }
-
     /** Sends a planner failure without discarding the exact shortage and quantity. */
     private static void sendPurePlanningFailure(
             ServerPlayer player, PureRecipePlanner.Result result,
             Map<StackKey, ? extends Number> availableItems,
             Set<ResourceLocation> blockedOutputIds) {
-        String key = allMissingRequireBlockedOutput(result.missing(), blockedOutputIds)
+        String key = CraftPlanDecisionRules.allMissingRequireBlockedOutput(
+                result.missing(), blockedOutputIds)
                 ? "rsi.plan.failure.no_bound_machine"
-                : purePlanningFailureKey(result, availableItems);
+                : CraftPlanDecisionRules.purePlanningFailureKey(result, availableItems);
         if (!"rsi.plan.failure.missing_materials".equals(key)) {
             player.sendSystemMessage(Component.translatable(key));
             return;
@@ -5906,123 +5783,12 @@ public final class GenericCraftPacket {
         return result;
     }
 
-    static String boundedPreviewFailureKey(PureRecipePlanner.Result result) {
-        return result.status() == PureRecipePlanner.Status.TIME_LIMIT
-                ? "rsi.plan.failure.planning_timeout"
-                : "rsi.plan.failure.complexity_limit";
-    }
-
     private static IntegrationDiagnostic purePreviewDiagnostic(
             PureRecipePlanner.Result result) {
         return IntegrationDiagnostic.error(
                 result.status() == PureRecipePlanner.Status.TIME_LIMIT
                         ? IntegrationDiagnosticCode.PLANNING_TIMEOUT
                         : IntegrationDiagnosticCode.COMPLEXITY_LIMIT);
-    }
-
-    static String summarizePureDemands(
-            List<ImmutableRecipeGraph.IngredientRef> demands) {
-        if (demands == null || demands.isEmpty()) return "[]";
-        final int maxDemands = 4;
-        final int maxItems = 3;
-        List<String> summaries = new ArrayList<>();
-        for (int i = 0; i < Math.min(maxDemands, demands.size()); i++) {
-            ImmutableRecipeGraph.IngredientRef demand = demands.get(i);
-            if (demand == null) continue;
-            List<String> items = demand.alternatives().stream()
-                    .map(ImmutableRecipeGraph.MaterialRef::itemId)
-                    .distinct()
-                    .limit(maxItems)
-                    .map(ResourceLocation::toString)
-                    .toList();
-            summaries.add("{items=" + items + ", count=" + demand.count()
-                    + ", mode=" + demand.nbtMatchMode() + ", role=" + demand.role()
-                    + ", alternatives=" + demand.alternatives().size() + '}');
-        }
-        if (demands.size() > maxDemands) {
-            summaries.add("... +" + (demands.size() - maxDemands) + " demands");
-        }
-        return summaries.toString();
-    }
-
-    static boolean missingTouchesBlockedOutput(
-            List<ImmutableRecipeGraph.IngredientRef> missing,
-            Set<ResourceLocation> blockedOutputIds) {
-        return missingTouchesOutputSet(missing, blockedOutputIds);
-    }
-
-    static boolean missingTouchesOutputSet(
-            List<ImmutableRecipeGraph.IngredientRef> missing,
-            Set<ResourceLocation> outputIds) {
-        if (missing == null || missing.isEmpty() || outputIds == null
-                || outputIds.isEmpty()) return false;
-        return missing.stream().anyMatch(demand -> !demand.alternatives().isEmpty()
-                && demand.alternatives().stream().allMatch(material ->
-                outputIds.contains(material.itemId())));
-    }
-
-    static boolean allMissingRequireBlockedOutput(
-            List<ImmutableRecipeGraph.IngredientRef> missing,
-            Set<ResourceLocation> blockedOutputIds) {
-        if (missing == null || missing.isEmpty() || blockedOutputIds == null
-                || blockedOutputIds.isEmpty()) return false;
-        return missing.stream().allMatch(demand -> demand != null
-                && !demand.alternatives().isEmpty()
-                && demand.alternatives().stream().allMatch(material ->
-                blockedOutputIds.contains(material.itemId())));
-    }
-
-    static boolean shouldRetryTypedPlanning(
-            PureRecipePlanner.Result result,
-            Set<ResourceLocation> blockedOutputIds) {
-        return result != null
-                && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
-                && allMissingRequireBlockedOutput(result.missing(), blockedOutputIds);
-    }
-
-    static boolean requiresTypedCatalystRoute(
-            boolean catalystRouteAvailable,
-            boolean targetUsesReusableCatalyst,
-            @Nullable PureRecipePlanner.Result purePlan,
-            Set<ResourceLocation> reusableCatalystOutputIds) {
-        if (!catalystRouteAvailable) return false;
-        if (targetUsesReusableCatalyst || purePlan == null) return true;
-        if (purePlan.feasible()) return false;
-        if (purePlan.missing().isEmpty() || reusableCatalystOutputIds == null
-                || reusableCatalystOutputIds.isEmpty()) return true;
-
-        // A typed retry is useful only when every remaining shortage can actually be
-        // solved by catalyst-aware semantics. Independent raw shortages are already a
-        // conclusive result and should be shown immediately instead of spending server
-        // thread time in the legacy resolver before reporting the same failure.
-        return purePlan.missing().stream().allMatch(demand ->
-                !demand.alternatives().isEmpty()
-                        && demand.alternatives().stream().allMatch(material ->
-                        reusableCatalystOutputIds.contains(material.itemId())));
-    }
-
-    static boolean hasPureNbtMismatch(
-            List<ImmutableRecipeGraph.IngredientRef> missing,
-            Map<StackKey, ? extends Number> availableItems) {
-        if (missing == null || missing.isEmpty() || availableItems == null
-                || availableItems.isEmpty()) return false;
-
-        Map<ImmutableRecipeGraph.MaterialRef, Long> projected =
-                ImmutableRecipeGraphProjector.projectAvailability(availableItems);
-        for (ImmutableRecipeGraph.IngredientRef demand : missing) {
-            if (demand.nbtMatchMode() == ImmutableRecipeGraph.NbtMatchMode.ANY) continue;
-            Set<ResourceLocation> itemIds = demand.alternatives().stream()
-                    .map(ImmutableRecipeGraph.MaterialRef::itemId)
-                    .collect(Collectors.toSet());
-            long sameItemStock = projected.entrySet().stream()
-                    .filter(entry -> itemIds.contains(entry.getKey().itemId())
-                            && !InkFluidSupport.isToken(new ItemStack(
-                                    BuiltInRegistries.ITEM.get(entry.getKey().itemId()))))
-                    .mapToLong(Map.Entry::getValue)
-                    .sum();
-            if (sameItemStock >= demand.count()) return true;
-        }
-        return false;
     }
 
     static MarketTradeAvailability marketTradeAvailability(
@@ -6108,13 +5874,6 @@ public final class GenericCraftPacket {
         return true;
     }
 
-    static List<IngredientSpec> extractPlanIngredientSpecs(CraftingRecipe recipe) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
-        return specs == null || specs.isEmpty()
-                ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
-                : specs;
-    }
-
     private static boolean stampStateAffectsPlan(@Nullable ModType terminalType,
                                                  @Nullable PlanResponse plan) {
         if (terminalType != null && ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())) return true;
@@ -6130,11 +5889,6 @@ public final class GenericCraftPacket {
      */
     private static ItemStack matchBestAvailable(Ingredient ingredient, Map<Item, Long> itemAvailable) {
         return matchBestAvailable(ingredient, itemAvailable, Collections.emptySet());
-    }
-
-    private static long itemCount(Map<Item, ? extends Number> counts, Item item) {
-        Number count = counts.get(item);
-        return count == null ? 0L : count.longValue();
     }
 
     /**
@@ -6224,58 +5978,6 @@ public final class GenericCraftPacket {
         return matched;
     }
 
-    /**
-     * Consumes up to {@code amount} matching items in bulk.  The old preview
-     * path called {@link #matchAndConsume} once per required unit, which made a
-     * 1024-craft request perform thousands of identical scans.  Choosing each
-     * stocked ingredient once produces the same greedy result while keeping the
-     * work proportional to the number of tag members.
-     */
-    static Map<Item, Long> consumeIngredientCount(Ingredient ingredient, int amount,
-                                                  Map<Item, ? extends Number> supplied) {
-        Map<Item, Long> available = new LinkedHashMap<>();
-        supplied.forEach((item, count) -> {
-            if (item != null && count != null) {
-                available.put(item, Math.max(0L, count.longValue()));
-            }
-        });
-        return consumeIngredientCountInPlace(ingredient, amount, available,
-                Collections.emptySet());
-    }
-
-    static Map<Item, Long> consumeIngredientCountInPlace(
-            Ingredient ingredient, int amount, Map<Item, Long> available) {
-        return consumeIngredientCountInPlace(
-                ingredient, amount, available, Collections.emptySet());
-    }
-
-    private static Map<Item, Long> consumeIngredientCountInPlace(
-            Ingredient ingredient, int amount, Map<Item, Long> available,
-            Set<Item> preferred) {
-        if (ingredient == null || ingredient.isEmpty() || amount <= 0) return Map.of();
-
-        List<Item> candidates = new ArrayList<>();
-        Set<Item> seen = new HashSet<>();
-        for (ItemStack stack : ingredient.getItems()) {
-            if (!stack.isEmpty() && seen.add(stack.getItem())) candidates.add(stack.getItem());
-        }
-        candidates.sort((left, right) -> Long.compare(
-                available.getOrDefault(right, 0L), available.getOrDefault(left, 0L)));
-
-        Map<Item, Long> consumed = new LinkedHashMap<>();
-        int remaining = amount;
-        for (Item item : candidates) {
-            long stocked = Math.max(0L, available.getOrDefault(item, 0L));
-            if (stocked <= 0) continue;
-            int take = (int) Math.min(remaining, stocked);
-            available.put(item, stocked - take);
-            consumed.put(item, (long) take);
-            remaining -= take;
-            if (remaining == 0) break;
-        }
-        return consumed;
-    }
-
     /** Give item to player only if still connected. Prevents ghost items
      *  when a player disconnects mid-batch and the item is voided. */
     private static void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
@@ -6300,39 +6002,6 @@ public final class GenericCraftPacket {
     /** Clears preview plans when recipe data is reloaded. */
     public static void clearPlanCache() {
         PLAN_CACHE.clear();
-    }
-
-    static boolean canUsePrecomputedPlan(@Nullable PureRecipePlanner.Result result) {
-        return result != null && result.feasible();
-    }
-
-    static boolean hasCyclicPureFailure(@Nullable PureRecipePlanner.Result result) {
-        return result != null
-                && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
-                && result.failureReason() == PureRecipePlanner.FailureReason.CYCLE;
-    }
-
-    static boolean canOpenBoundedMissingPlan(
-            @Nullable PureRecipePlanner.Result plan,
-            PureDemandTreeInspector.Result demandTree) {
-        return plan != null
-                && plan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
-                && ((demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS
-                        && demandTree.unresolved() != null)
-                    || (plan.status() == PureRecipePlanner.Status.TIME_LIMIT
-                        && !plan.steps().isEmpty()
-                        && !plan.missing().isEmpty()));
-    }
-
-    static boolean canFallbackToBoundedPlanAfterTypedTimeout(
-            @Nullable PureRecipePlanner.Result plan,
-            PureDemandTreeInspector.Result demandTree,
-            boolean directTerminalPlan) {
-        return !directTerminalPlan
-                && plan != null
-                && !plan.missing().isEmpty()
-                && demandTree != null
-                && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS;
     }
 
     /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */
