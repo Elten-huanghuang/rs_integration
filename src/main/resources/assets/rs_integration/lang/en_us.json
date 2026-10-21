@@ -736,6 +736,7 @@
   "rsi.plan.machine_summary": "%s machines",
   "rsi.plan.missing_more": "... (+%s more)",
   "rsi.plan.materials": "Materials",
+  "rsi.plan.materials_scroll": "Scroll for more",
   "rsi.plan.tooltip.available": "Available",
   "rsi.plan.repeat_count": "Repeat:",
   "rsi.plan.bookmark_missing": "Add to recipe browser favorites (missing: %s)",

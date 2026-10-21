@@ -230,6 +230,14 @@ public final class PlanRenderEngine {
         int contentGridH = rows * rowStride;
         int maxScroll = Math.max(0, contentGridH - visibleGridH);
         scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset));
+        if (maxScroll > 0) {
+            String more = I18n.get("rsi.plan.materials_scroll");
+            int moreW = font.width(more);
+            if (moreW < contentW - 40) {
+                gfx.drawString(font, more, left + contentW - moreW - 8,
+                        top + 4, 0xFF88AA88, false);
+            }
+        }
 
         int cx = left + 8;
         int cy = gridTop - scrollOffset;

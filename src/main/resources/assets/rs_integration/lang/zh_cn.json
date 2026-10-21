@@ -741,6 +741,7 @@
   "rsi.plan.machine_summary": "%s 台机器",
   "rsi.plan.missing_more": "... (+%s 更多)",
   "rsi.plan.materials": "材料",
+  "rsi.plan.materials_scroll": "滚动查看更多",
   "rsi.plan.tooltip.available": "库存",
   "rsi.plan.repeat_count": "次数:",
   "rsi.plan.bookmark_missing": "加入收藏（缺少：%s）",

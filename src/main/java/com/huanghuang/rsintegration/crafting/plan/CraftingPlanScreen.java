@@ -79,8 +79,8 @@ public final class CraftingPlanScreen extends Screen {
     private static final int CARD_PAD = 8;
     private static final int ARROW_W = 18;
     private static final int STEPS_TOP_MIN = 40;
-    /** Material grid caps at this many visible rows; extras scroll (§ material overflow fix). */
-    private static final int MATERIAL_MAX_ROWS = 3;
+    /** Material grid keeps one compact row; the rest is reachable by scrolling. */
+    private static final int MATERIAL_MAX_ROWS = 1;
     /**
      * In tree view the missing-material panel is a secondary diagnostic.  Keep it bounded so a
      * large shortage list cannot consume the whole tree viewport (or draw past its background).
@@ -1242,7 +1242,8 @@ public final class CraftingPlanScreen extends Screen {
         int labelW = font.width(label);
         UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
         gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
-        renderBookmarkAllAction(gfx, font, 20, repeatRowY);
+        int bookmarkActionW = bookmarkAllActionWidth(font);
+        renderBookmarkAllAction(gfx, font, rowX + rowW - bookmarkActionW, repeatRowY);
 
         // ── Button card ──
         int cardY = repeatRowY + font.lineHeight + 4;
@@ -2000,6 +2001,12 @@ public final class CraftingPlanScreen extends Screen {
         return lines;
     }
 
+    private int bookmarkAllActionWidth(Font font) {
+        if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return 0;
+        return 3 + 6 + font.width(
+                Component.translatable("rsi.plan.bookmark_all.action").getString());
+    }
+
     private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y) {
         if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return;
 
@@ -2562,7 +2569,7 @@ public final class CraftingPlanScreen extends Screen {
             countWidth = Math.max(countWidth, font.width(material.available() + "/" + material.needed()));
         }
         int columns = Math.max(1, contentWidth / (SLOT_SIZE + countWidth + 14));
-        int maxRows = height < 420 || missingExpanded ? 1 : MATERIAL_MAX_ROWS;
+        int maxRows = MATERIAL_MAX_ROWS;
         int rows = Math.min(maxRows, (plan.materials().size() + columns - 1) / columns);
         materialAreaHeight = plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + rows * (SLOT_SIZE + 8) + 12;
     }
