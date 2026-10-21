@@ -628,26 +628,22 @@ public final class CraftingPlanScreen extends Screen {
         int groupW = 4 * REPEAT_BUTTON_W + 3 * REPEAT_BUTTON_GAP;
         int innerGap = 12;
         int contentW = groupW + innerGap + REPEAT_INPUT_W + innerGap + groupW;
-        int summaryGap = missingSummaryText.isEmpty() ? 0 : 10;
-        int summaryLimit = Math.max(0, width - 16 - (contentW + 28 + summaryGap));
-        int naturalSummaryW = missingSummaryText.isEmpty()
-                ? 0 : font.width(missingSummaryText) + 12;
-        int summaryW = Math.min(Math.min(naturalSummaryW, 180), summaryLimit);
-        if (summaryW > 0) summaryGap = 10;
-        else summaryGap = 0;
-        int rowW = contentW + 28 + summaryW + summaryGap;
+        int rowW = contentW + 28;
         int rowX = width / 2 - rowW / 2;
         int cardY = repeatRowY + font.lineHeight + 4;
         int cardH = 22;
         int buttonY = cardY + (cardH - REPEAT_BUTTON_H) / 2;
         int inputH = font.lineHeight + 6;
-        int summaryX = rowX + 14;
-        int startX = summaryX + summaryW + summaryGap;
+        int startX = rowX + 14;
         int inputX = startX + groupW + innerGap;
         int inputY = cardY + (cardH - inputH) / 2;
+        int summaryLimit = Math.max(0, rowX - 28);
+        int naturalSummaryW = missingSummaryText.isEmpty()
+                ? 0 : font.width(missingSummaryText) + 12;
+        int summaryW = Math.min(Math.min(naturalSummaryW, 180), summaryLimit);
         return new RepeatRowLayout(rowX, rowW, startX, cardY, buttonY,
                 inputX, inputY, inputH,
-                summaryX, cardY + 2, summaryW, cardH - 4);
+                20, cardY + 2, summaryW, cardH - 4);
     }
 
     private void createRepeatCountInput(Font font) {
