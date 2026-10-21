@@ -362,6 +362,24 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void defersWhenRepeatedIngredientSlotsShareTheSameShortStock() {
+        ResourceLocation recipeId = new ResourceLocation("test", "shared_slot_stock");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.COBBLESTONE, 8)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.DEFERRED,
+                    execute(fixture, recipeId, 1, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.COBBLESTONE));
+        assertEquals(8, inventory.get(0).getCount());
+    }
+
+    @Test
     void preservesEmptyShapedRecipeSlotsDuringBatchAssembly() {
         ResourceLocation recipeId = new ResourceLocation("test", "sparse_compression");
         NonNullList<Ingredient> ingredients = NonNullList.of(

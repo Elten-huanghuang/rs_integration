@@ -63,7 +63,7 @@ final class StableRecipeBatch {
 
         long requested = Math.max(1, step.executions());
         Availability availability = maximumAvailableCrafts(
-                plan, workingInventory, ledger, player);
+                plan, requested, workingInventory, ledger, player);
         if (!availability.snapshotReadable()) {
             logBatch(context, step, "deferred", requested, availability);
             return new Result(Outcome.DEFERRED,
@@ -247,9 +247,9 @@ final class StableRecipeBatch {
     }
 
     private static Availability maximumAvailableCrafts(
-            BatchPlan plan, List<ItemStack> workingInventory,
+            BatchPlan plan, long requested, List<ItemStack> workingInventory,
             ExtractionLedger ledger, ServerPlayer player) {
-        long available = Long.MAX_VALUE;
+        long upperBound = Long.MAX_VALUE;
         for (SlotRequirement slot : plan.slots()) {
             long slotAvailable = 0L;
             Map<CraftingResolver.StackKey, ItemStack> unique = new LinkedHashMap<>();
@@ -266,10 +266,40 @@ final class StableRecipeBatch {
                         countInWorkingInventory(workingInventory, candidate)
                                 + backing.available());
             }
-            available = Math.min(available, slotAvailable / slot.perCraft());
+            upperBound = Math.min(upperBound, slotAvailable / slot.perCraft());
         }
-        return new Availability(available == Long.MAX_VALUE ? 0L : available,
-                true, "success");
+        long requestedCrafts = Math.max(1L, requested);
+        long bounded = upperBound == Long.MAX_VALUE
+                ? requestedCrafts : Math.min(upperBound, requestedCrafts);
+        if (bounded < requestedCrafts) {
+            return new Availability(bounded, true, "slot upper bound");
+        }
+        // 同一物品可能出现在多个输入槽。各槽独立看都有库存并不代表总量足够，
+        // 因此用真实批量分配再确认一次，避免把硬缺料误报成执行期库存变化。
+        long available = maximumAllocatableCrafts(
+                plan, requestedCrafts, workingInventory, ledger, player);
+        return new Availability(available, true, "allocation aware");
+    }
+
+    private static long maximumAllocatableCrafts(
+            BatchPlan plan, long requested, List<ItemStack> workingInventory,
+            ExtractionLedger ledger, ServerPlayer player) {
+        if (resolveChunkRequirements(
+                plan, requested, workingInventory, ledger, player) != null) {
+            return requested;
+        }
+        long low = 0L;
+        long high = requested - 1L;
+        while (low < high) {
+            long middle = low + (high - low + 1L) / 2L;
+            if (resolveChunkRequirements(
+                    plan, middle, workingInventory, ledger, player) != null) {
+                low = middle;
+            } else {
+                high = middle - 1L;
+            }
+        }
+        return low;
     }
 
     private static void logBatch(FlatCraftExecutor.Context context,
