@@ -374,7 +374,12 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
-                    'com/huanghuang/rsintegration/compat/emi/RSEmiPlugin.class',
+                    'com/huanghuang/rsintegration/mods/emi/RSEmiPlugin.class',
+                    'com/huanghuang/rsintegration/mods/jei/RSJeiPlugin.class',
+                    'com/huanghuang/rsintegration/mods/historystages/HistoryStagesCompat.class',
+                    'com/huanghuang/rsintegration/feature/ftbquests/FtbQuestSubmissionService.class',
+                    'com/huanghuang/rsintegration/crafting/endpoint/CraftStorageEndpoint.class',
+                    'com/huanghuang/rsintegration/crafting/progress/CraftProgressTracker.class',
                     'rs_integration.mixins.json',
                     'rs_integration.craftflow_compat.mixins.json',
                     'rs_integration.refmap.json'
