@@ -117,8 +117,13 @@ public final class CraftingPlanScreen extends Screen {
     private boolean dragging;
     private int missingAreaTop;
     private int missingAreaHeight;
+    private int missingFullHeight;
     private int missingMaxScroll;
     private int missingScroll;
+    private boolean missingExpanded;
+    private int missingHeaderHeight;
+    private int missingToggleX, missingToggleY, missingToggleW, missingToggleH;
+    private int missingContentTop;
     private final ScrollbarUI missingBar = new ScrollbarUI();
     private int machineSelectorY;
     private int machineModeX, machineModeY, machineModeW, machineModeH;
@@ -130,6 +135,7 @@ public final class CraftingPlanScreen extends Screen {
     private record MachineCandidateHit(int x, int y, int w, int h, int index) {}
     private int materialAreaTop;
     private int materialAreaHeight;
+    private boolean contentLayoutMissingExpanded;
     // Material grid vertical scroll (pixels); max set by the render engine each frame.
     private int materialScroll;
     private int materialMaxScroll;
@@ -963,7 +969,6 @@ public final class CraftingPlanScreen extends Screen {
         int bottomReserved = embersPedestalH > 0 ? embersPedestalY
                 : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
         int areaBottom = bottomReserved - 4;
-        if (embersPedestalH == 0 && missingAreaHeight == 0 && materialAreaHeight == 0) areaBottom = height - 53;
 
         boolean dockedCandidates = recipeCandidatePanel != null && recipeCandidatePanel.isOpen();
         if (dockedCandidates) gfx.enableScissor(0, 0, left + contentW, height);
@@ -1749,42 +1754,95 @@ public final class CraftingPlanScreen extends Screen {
         boolean hasMissing = !missingEntries.isEmpty();
         List<Component> planWarnings = displayWarnings(plan);
         boolean hasModWarnings = !planWarnings.isEmpty();
+        boolean hasMachines = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
 
         // Background — dark warm tone, red accent
         UIRenderer.roundedGradient(gfx, left, top, contentW, missingAreaHeight, 6f,
                 0xE61E1814, 0xE6181410);
         // Left accent — red when materials are missing, orange when only mod warnings
         int accentColor = hasMissing ? C_ACCENT_MISSING
-                : (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()
-                ? C_ACCENT_READY : C_ORANGE);
+                : (hasMachines ? C_ACCENT_READY : C_ORANGE);
         gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, accentColor);
 
-        int my = top + 4;
-        int maxLineW = contentW - 24;
-        // Render missing items — inline, wrapped
+        List<String> summaryParts = new ArrayList<>();
         if (hasMissing) {
-            String hdr = Component.translatable("rsi.plan.missing_header").getString();
-            UIRenderer.textBackdrop(gfx, font, left + 10, my, hdr, C_TEXT_BACKDROP);
-            gfx.drawString(font, hdr, left + 10, my, 0xFFFF6666);
-
-            my += font.lineHeight + 4;
-            my = renderMissingTextEntries(gfx, font,
-                    missingEntries, left + 10, my, maxLineW);
+            summaryParts.add(Component.translatable(
+                    "rsi.plan.missing_summary", missingEntries.size()).getString());
         }
-        // Render mod warnings (one per line — they're longer sentences)
         if (hasModWarnings) {
-            if (!hasMissing) my += 4;
-            for (Component warn : planWarnings) {
-                String display = font.plainSubstrByWidth(warn.getString(), maxLineW);
-                UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
-                gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
-                my += font.lineHeight + 4;
+            summaryParts.add(Component.translatable(
+                    "rsi.plan.warning_summary", planWarnings.size()).getString());
+        }
+        if (hasMachines) {
+            summaryParts.add(Component.translatable(
+                    "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
+        }
+        String summary = String.join(" · ", summaryParts);
+        String action = I18n.get(missingExpanded
+                ? "rsi.plan.missing_collapse" : "rsi.plan.missing_expand");
+        int actionW = font.width(action);
+        boolean canToggle = missingFullHeight > missingHeaderHeight;
+        int summaryMaxW = Math.max(1, contentW - 20 - (canToggle ? actionW + 12 : 0));
+        String visibleSummary = font.plainSubstrByWidth(summary, summaryMaxW);
+        UIRenderer.textBackdrop(gfx, font, left + 10, top + 4, visibleSummary, C_TEXT_BACKDROP);
+        gfx.drawString(font, visibleSummary, left + 10, top + 4,
+                hasMissing ? 0xFFFF8888 : 0xFFDDAA00);
+
+        missingToggleW = canToggle ? actionW : 0;
+        missingToggleH = canToggle ? font.lineHeight : 0;
+        missingToggleX = left + contentW - actionW - 10;
+        missingToggleY = top + 4;
+        if (canToggle) {
+            boolean hovered = mouseX >= missingToggleX && mouseX < missingToggleX + missingToggleW
+                    && mouseY >= missingToggleY && mouseY < missingToggleY + missingToggleH;
+            gfx.drawString(font, action, missingToggleX, missingToggleY,
+                    hovered ? 0xFFFFFFFF : 0xFF9FC9B0, false);
+            if (hovered) {
+                gfx.fill(missingToggleX, missingToggleY + font.lineHeight,
+                        missingToggleX + missingToggleW, missingToggleY + font.lineHeight + 1,
+                        0xFF9FC9B0);
             }
         }
-        if (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()) {
-            if (my > top + 4) my += 2;
-            renderMachineSelector(gfx, font, left + 10, my, contentW - 20);
+
+        if (!missingExpanded) {
+            missingBar.active = false;
+            machineModeH = 0;
+            machineModeW = 0;
+            machineCandidateH = 0;
+            machineCandidateW = 0;
+            return;
         }
+
+        missingContentTop = top + missingHeaderHeight;
+        int contentBottom = top + missingAreaHeight - 2;
+        if (contentBottom <= missingContentTop) return;
+        int my = missingContentTop - missingScroll + 2;
+        int maxLineW = contentW - 24;
+        gfx.enableScissor(left + 4, missingContentTop, left + contentW - 4, contentBottom);
+        try {
+            if (hasMissing) {
+                my = renderMissingTextEntries(gfx, font,
+                        missingEntries, left + 10, my, maxLineW);
+            }
+            if (hasModWarnings) {
+                if (hasMissing) my += 2;
+                for (Component warn : planWarnings) {
+                    String display = font.plainSubstrByWidth(warn.getString(), maxLineW);
+                    UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
+                    gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
+                    my += font.lineHeight + 4;
+                }
+            }
+            if (hasMachines) {
+                if (my > missingContentTop) my += 2;
+                renderMachineSelector(gfx, font, left + 10, my, contentW - 20);
+            }
+        } finally {
+            gfx.disableScissor();
+        }
+        missingBar.update(left + contentW - 6, missingContentTop,
+                Math.max(1, contentBottom - missingContentTop), missingScroll, missingMaxScroll);
+        missingBar.draw(gfx, mouseX, mouseY);
     }
 
     private void renderMachineSelector(GuiGraphics gfx, Font font, int left, int y, int width) {
@@ -2464,31 +2522,50 @@ public final class CraftingPlanScreen extends Screen {
 
     /** 侧栏开关或视图变化时，按主内容实际宽度重新排材料和缺料提示。 */
     private void layoutContentSections(Font font, int contentWidth) {
-        if (contentLayoutWidth == contentWidth && contentLayoutMode == viewMode) return;
+        if (contentLayoutWidth == contentWidth && contentLayoutMode == viewMode
+                && contentLayoutMissingExpanded == missingExpanded) return;
         contentLayoutWidth = contentWidth;
         contentLayoutMode = viewMode;
+        contentLayoutMissingExpanded = missingExpanded;
         var missingEntries = MissingMaterialBookmarkList.textEntries(plan);
         int warningCount = displayWarnings(plan).size();
         boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
         if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
-            int lines = warningCount;
+            missingHeaderHeight = font.lineHeight + 8;
+            int missingLines = 0;
             if (!missingEntries.isEmpty()) {
-                lines += 1 + missingTextLineCount(font, missingEntries, Math.max(1, contentWidth - 24));
+                missingLines = 1 + missingTextLineCount(font, missingEntries,
+                        Math.max(1, contentWidth - 24));
             }
-            int warningHeight = lines > 0 ? font.lineHeight + 6 + lines * (font.lineHeight + 4) + 4 : 0;
-            int fullHeight = warningHeight + (machineCandidates ? 34 : 0);
-            missingAreaHeight = viewMode == ViewMode.TREE ? Math.min(fullHeight, TREE_MISSING_MAX_HEIGHT) : fullHeight;
-            missingMaxScroll = viewMode == ViewMode.TREE ? Math.max(0, fullHeight - missingAreaHeight) : 0;
+            int contentHeight = (missingLines + warningCount) * (font.lineHeight + 4) + 4;
+            int fullHeight = missingHeaderHeight + contentHeight + (machineCandidates ? 34 : 0);
+            missingFullHeight = fullHeight;
+            if (fullHeight <= missingHeaderHeight) {
+                missingExpanded = false;
+                contentLayoutMissingExpanded = false;
+            }
+            missingAreaHeight = missingExpanded
+                    ? Math.min(fullHeight, TREE_MISSING_MAX_HEIGHT)
+                    : missingHeaderHeight;
+            missingMaxScroll = missingExpanded
+                    ? Math.max(0, fullHeight - missingAreaHeight) : 0;
             missingScroll = Math.min(missingScroll, missingMaxScroll);
         } else {
             missingAreaHeight = missingMaxScroll = missingScroll = 0;
+            missingFullHeight = 0;
+            missingHeaderHeight = 0;
+            missingToggleW = missingToggleH = 0;
+            missingBar.active = false;
+            missingExpanded = false;
+            contentLayoutMissingExpanded = false;
         }
         int countWidth = font.width("0/0");
         for (var material : plan.materials().values()) {
             countWidth = Math.max(countWidth, font.width(material.available() + "/" + material.needed()));
         }
         int columns = Math.max(1, contentWidth / (SLOT_SIZE + countWidth + 14));
-        int rows = Math.min(MATERIAL_MAX_ROWS, (plan.materials().size() + columns - 1) / columns);
+        int maxRows = height < 420 || missingExpanded ? 1 : MATERIAL_MAX_ROWS;
+        int rows = Math.min(maxRows, (plan.materials().size() + columns - 1) / columns);
         materialAreaHeight = plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + rows * (SLOT_SIZE + 8) + 12;
     }
 
@@ -2584,7 +2661,7 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (recipeCandidatePanel != null && recipeCandidatePanel.mouseScrolled(mouseX, mouseY, delta)) return true;
-        if (viewMode == ViewMode.TREE && missingMaxScroll > 0
+        if (missingExpanded && missingMaxScroll > 0
                 && mouseY >= missingAreaTop && mouseY < missingAreaTop + missingAreaHeight) {
             missingScroll = Math.max(0, Math.min(missingMaxScroll,
                     missingScroll - (int) delta * 10));
@@ -2660,6 +2737,16 @@ public final class CraftingPlanScreen extends Screen {
     public boolean mouseClicked(double mx, double my, int button) {
         if (recipeCandidatePanel != null && recipeCandidatePanel.mouseClicked(mx, my, button)) {
             if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
+            return true;
+        }
+        if (button == 0 && materialDropdownNode == null
+                && (recipeCandidatePanel == null || !recipeCandidatePanel.isOpen())
+                && missingToggleW > 0
+                && mx >= missingToggleX && mx < missingToggleX + missingToggleW
+                && my >= missingToggleY && my < missingToggleY + missingToggleH) {
+            missingExpanded = !missingExpanded;
+            missingScroll = 0;
+            contentLayoutWidth = -1;
             return true;
         }
         if (dropdownNode != null && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
