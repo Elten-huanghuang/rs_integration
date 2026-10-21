@@ -123,6 +123,8 @@ public final class CraftingPlanScreen extends Screen {
     private int missingHeaderHeight;
     private int missingToggleX, missingToggleY, missingToggleW, missingToggleH;
     private int missingContentTop;
+    private String missingSummaryText = "";
+    private boolean missingSummaryHasMissing;
     private final ScrollbarUI missingBar = new ScrollbarUI();
     private int machineSelectorY;
     private int machineModeX, machineModeY, machineModeW, machineModeH;
@@ -618,24 +620,34 @@ public final class CraftingPlanScreen extends Screen {
                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
     }
 
-    private record RepeatRowLayout(int rowX, int rowW, int cardY, int buttonY,
-                                   int inputX, int inputY, int inputH) {}
+    private record RepeatRowLayout(int rowX, int rowW, int startX, int cardY, int buttonY,
+                                   int inputX, int inputY, int inputH,
+                                   int summaryX, int summaryY, int summaryW, int summaryH) {}
 
     private RepeatRowLayout repeatRowLayout(Font font) {
         int groupW = 4 * REPEAT_BUTTON_W + 3 * REPEAT_BUTTON_GAP;
         int innerGap = 12;
         int contentW = groupW + innerGap + REPEAT_INPUT_W + innerGap + groupW;
-        int rowW = contentW + 28;
+        int summaryGap = missingSummaryText.isEmpty() ? 0 : 10;
+        int summaryLimit = Math.max(0, width - 16 - (contentW + 28 + summaryGap));
+        int naturalSummaryW = missingSummaryText.isEmpty()
+                ? 0 : font.width(missingSummaryText) + 12;
+        int summaryW = Math.min(Math.min(naturalSummaryW, 180), summaryLimit);
+        if (summaryW > 0) summaryGap = 10;
+        else summaryGap = 0;
+        int rowW = contentW + 28 + summaryW + summaryGap;
         int rowX = width / 2 - rowW / 2;
         int cardY = repeatRowY + font.lineHeight + 4;
         int cardH = 22;
         int buttonY = cardY + (cardH - REPEAT_BUTTON_H) / 2;
         int inputH = font.lineHeight + 6;
-        int startX = rowX + 14;
+        int summaryX = rowX + 14;
+        int startX = summaryX + summaryW + summaryGap;
         int inputX = startX + groupW + innerGap;
         int inputY = cardY + (cardH - inputH) / 2;
-        return new RepeatRowLayout(rowX, rowW, cardY, buttonY,
-                inputX, inputY, inputH);
+        return new RepeatRowLayout(rowX, rowW, startX, cardY, buttonY,
+                inputX, inputY, inputH,
+                summaryX, cardY + 2, summaryW, cardH - 4);
     }
 
     private void createRepeatCountInput(Font font) {
@@ -1274,11 +1286,9 @@ public final class CraftingPlanScreen extends Screen {
         int pillH = font.lineHeight + 6;
         int innerGap = 12;
 
-        int leftGroupW = leftLabels.length * btnW + (leftLabels.length - 1) * gap;
-        int rightGroupW = rightLabels.length * btnW + (rightLabels.length - 1) * gap;
-        int contentW = leftGroupW + innerGap + pillW + innerGap + rightGroupW;
-        int rowW = contentW + 28;
-        int rowX = width / 2 - rowW / 2;
+        RepeatRowLayout layout = repeatRowLayout(font);
+        int rowW = layout.rowW();
+        int rowX = layout.rowX();
 
         // ── Label row ──
         ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
@@ -1292,13 +1302,15 @@ public final class CraftingPlanScreen extends Screen {
         gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
 
         // ── Button card ──
-        int cardY = repeatRowY + font.lineHeight + 4;
+        int cardY = layout.cardY();
         int cardH = 22;
         UIRenderer.roundedGradient(gfx, rowX, cardY, rowW, cardH, 5f, 0xE6141E18, 0xE6101814);
         gfx.fill(rowX + 1, cardY + 2, rowX + 4, cardY + cardH - 2, 0xFF44AA66);
 
-        int startX = rowX + 14;
-        int btnY = cardY + (cardH - btnH) / 2;
+        renderRepeatMissingSummary(gfx, font, layout);
+
+        int startX = layout.startX();
+        int btnY = layout.buttonY();
 
         // ── Left buttons: 1, -10, -5, - ──
         int bx = startX;
@@ -1315,14 +1327,14 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         // ── Count pill ──
-        int pillX = bx + innerGap - gap;
-        countPillX = pillX; countPillY = cardY + (cardH - pillH) / 2; countPillW = pillW; countPillH = pillH;
+        int pillX = layout.inputX();
+        countPillX = pillX; countPillY = layout.inputY(); countPillW = pillW; countPillH = pillH;
         UIRenderer.rounded(gfx, countPillX, countPillY, pillW, pillH,
                 pillH / 2f, 0xCC1B5E20);
         renderRepeatCountInput(gfx, font);
 
         // ── Right buttons: +, +5, +10, +64 ──
-        bx = pillX + pillW + innerGap - gap;
+        bx = pillX + pillW + innerGap;
         for (int i = 0; i < rightLabels.length; i++) {
             int idx = leftLabels.length + i;
             repeatBtnX[idx] = bx; repeatBtnY[idx] = btnY; repeatBtnW[idx] = btnW; repeatBtnH[idx] = btnH;
@@ -1335,6 +1347,31 @@ public final class CraftingPlanScreen extends Screen {
             gfx.drawString(font, rightLabels[i], bx + (btnW - tw) / 2, btnY + (btnH - font.lineHeight) / 2, fg);
             bx += btnW + gap;
         }
+    }
+
+    private void renderRepeatMissingSummary(GuiGraphics gfx, Font font,
+                                            RepeatRowLayout layout) {
+        missingToggleW = missingToggleH = 0;
+        if (missingSummaryText.isEmpty() || layout.summaryW() <= 0) return;
+
+        int x = layout.summaryX();
+        int y = layout.summaryY();
+        int w = layout.summaryW();
+        int h = layout.summaryH();
+        boolean hovered = mouseX >= x && mouseX < x + w
+                && mouseY >= y && mouseY < y + h;
+        int accent = missingSummaryHasMissing ? 0xFFD94B4B : 0xFFD89B32;
+        UIRenderer.rounded(gfx, x, y, w, h, 3f,
+                hovered ? 0xFF4A241E : 0xFF2E1C18);
+        gfx.fill(x + 2, y + 2, x + 4, y + h - 2, accent);
+        String visible = font.plainSubstrByWidth(missingSummaryText, Math.max(1, w - 9));
+        gfx.drawString(font, visible, x + 7,
+                y + (h - font.lineHeight) / 2,
+                hovered ? 0xFFFFFFFF : accent, false);
+        missingToggleX = x;
+        missingToggleY = y;
+        missingToggleW = w;
+        missingToggleH = h;
     }
 
     // ── Step card ─────────────────────────────────────────────────
@@ -2801,23 +2838,33 @@ public final class CraftingPlanScreen extends Screen {
         int warningCount = displayWarnings(plan).size();
         boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
         if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
-            // 摘要只有缺料/警告两段文字时，与下方合成数量行保持同高。
-            missingHeaderHeight = Math.max(font.lineHeight + 8, 38);
-            int missingLines = 0;
+            List<String> summaryParts = new ArrayList<>();
             if (!missingEntries.isEmpty()) {
-                missingLines = 1 + missingTextLineCount(font, missingEntries,
-                        Math.max(1, contentWidth - 24));
+                summaryParts.add(Component.translatable(
+                        "rsi.plan.missing_summary", missingEntries.size()).getString());
             }
-            int contentHeight = (missingLines + warningCount) * (font.lineHeight + 4) + 4;
-            int fullHeight = missingHeaderHeight + contentHeight + (machineCandidates ? 34 : 0);
-            missingFullHeight = fullHeight;
-            // 摘要只作为诊断入口，不再在底部展开第二套内容。
+            if (warningCount > 0) {
+                summaryParts.add(Component.translatable(
+                        "rsi.plan.warning_summary", warningCount).getString());
+            }
+            if (machineCandidates) {
+                summaryParts.add(Component.translatable(
+                        "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
+            }
+            missingSummaryText = String.join(" · ", summaryParts);
+            missingSummaryHasMissing = !missingEntries.isEmpty();
+            // 摘要并入重复数量卡片，不再单独占用一行；详情统一进入诊断页。
             missingExpanded = false;
             contentLayoutMissingExpanded = false;
-            missingAreaHeight = missingHeaderHeight;
+            missingAreaHeight = 0;
+            missingFullHeight = 0;
+            missingHeaderHeight = 0;
             missingMaxScroll = 0;
             missingScroll = 0;
+            missingBar.active = false;
         } else {
+            missingSummaryText = "";
+            missingSummaryHasMissing = false;
             missingAreaHeight = missingMaxScroll = missingScroll = 0;
             missingFullHeight = 0;
             missingHeaderHeight = 0;
