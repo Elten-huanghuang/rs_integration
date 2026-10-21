@@ -28,6 +28,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -54,6 +55,7 @@ public final class UnifiedGridView implements IGridView {
     private List<IGridStack> visible = new ArrayList<>();
     private boolean canCraft;
     private boolean dirty = true;
+    private final Path preferencesPath;
     /** 过滤档位下标；{@link #FILTER_LEVELS} 是它的唯一取值来源。 */
     private int filter;
     private int lastSortTick = -5;
@@ -72,6 +74,8 @@ public final class UnifiedGridView implements IGridView {
 
     public UnifiedGridView(GridScreen screen) {
         this.screen = screen;
+        this.preferencesPath = UnifiedGridPreferences.defaultPath();
+        this.filter = UnifiedGridPreferences.loadFilter(preferencesPath, FILTER_LEVELS);
         this.lastResyncTick = new int[GridResourceKind.count()];
         Arrays.fill(this.lastResyncTick, -20);
         for (GridResourceKind kind : GridResourceKind.values()) {
@@ -217,7 +221,11 @@ public final class UnifiedGridView implements IGridView {
         }
     }
 
-    public void cycleFilter() { filter = (filter + 1) % FILTER_LEVELS; forceSort(); }
+    public void cycleFilter() {
+        filter = (filter + 1) % FILTER_LEVELS;
+        UnifiedGridPreferences.saveFilter(preferencesPath, filter, FILTER_LEVELS);
+        forceSort();
+    }
 
     /** 当前过滤档位，供侧按钮选图标。 */
     public int filter() { return filter; }
