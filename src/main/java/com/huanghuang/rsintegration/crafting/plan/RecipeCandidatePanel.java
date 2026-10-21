@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.plan.RecipeCandidatePickerModel.Bounds;
 import com.huanghuang.rsintegration.crafting.plan.RecipeCandidatePickerModel.Candidate;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -19,8 +20,10 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Path;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
@@ -30,6 +33,7 @@ public final class RecipeCandidatePanel {
     private final Font font;
     private final RecipePreviewRenderer preview;
     private final BiConsumer<PlanTreeNode, ResourceLocation> onSelect;
+    private final Path preferencesPath;
     private final EditBox search;
     private PlanTreeNode node;
     private RecipeCandidatePickerModel model;
@@ -38,12 +42,20 @@ public final class RecipeCandidatePanel {
     private int rowsTop;
     private int lastMouseX = Integer.MIN_VALUE, lastMouseY = Integer.MIN_VALUE;
     private boolean keyboardNavigation;
+    private String preferenceKey;
+    private String defaultRecipeId;
+    private boolean noRecipeSelected;
+    private Set<String> excludedRecipes = Set.of();
+    private int noRecipeCardX, noRecipeCardY, noRecipeCardW, noRecipeCardH;
+    private int forgetX, forgetY, forgetW, forgetH;
 
     public RecipeCandidatePanel(Font font, RecipePreviewRenderer preview,
-                                BiConsumer<PlanTreeNode, ResourceLocation> onSelect) {
+                                BiConsumer<PlanTreeNode, ResourceLocation> onSelect,
+                                Path preferencesPath) {
         this.font = font;
         this.preview = preview;
         this.onSelect = onSelect;
+        this.preferencesPath = preferencesPath;
         search = new EditBox(font, 0, 0, 100, 16, Component.translatable("rsi.plan.recipe_picker.search"));
         search.setHint(Component.translatable("rsi.plan.recipe_picker.search"));
         search.setMaxLength(100);
@@ -63,6 +75,14 @@ public final class RecipeCandidatePanel {
         if (node.step == null) return;
         this.node = node;
         this.boundMachines = Set.copyOf(machines);
+        ResourceLocation preference = CraftingResolver.preferenceKey(node.key.stack(1));
+        this.preferenceKey = preference == null ? null : preference.toString();
+        CraftingPlanPreferences.Snapshot preferences =
+                CraftingPlanPreferences.load(preferencesPath);
+        this.defaultRecipeId = preferenceKey == null ? null
+                : preferences.recipeChoices().get(preferenceKey);
+        this.noRecipeSelected = CraftingPlanPreferences.NO_RECIPE.equals(defaultRecipeId);
+        this.excludedRecipes = new LinkedHashSet<>(preferences.excludedRecipes());
         var options = new LinkedHashMap<ResourceLocation, String>();
         options.put(node.step.recipeId(), node.step.modType() == null ? "generic" : node.step.modType().id());
         for (int i = 0; i < node.step.alternatives().size(); i++) {
@@ -85,6 +105,8 @@ public final class RecipeCandidatePanel {
         search.visible = search.active = true;
         search.setFocused(false);
         keyboardNavigation = false;
+        noRecipeCardW = 0;
+        forgetW = 0;
     }
 
     public void close() {
@@ -93,6 +115,12 @@ public final class RecipeCandidatePanel {
         bounds = null;
         search.visible = search.active = false;
         search.setFocused(false);
+        preferenceKey = null;
+        defaultRecipeId = null;
+        noRecipeSelected = false;
+        excludedRecipes = Set.of();
+        noRecipeCardW = 0;
+        forgetW = 0;
     }
 
     public void tick() { if (isOpen()) search.tick(); }
@@ -101,8 +129,14 @@ public final class RecipeCandidatePanel {
     public void layout(int screenWidth, int screenHeight, int contentTop) {
         if (!isOpen()) return;
         bounds = RecipeCandidatePickerModel.layout(screenWidth, screenHeight, contentTop);
-        model.setVisibleRows(bounds.rows());
-        rowsTop = bounds.y() + RecipeCandidatePickerModel.HEADER_HEIGHT;
+        noRecipeCardX = bounds.x() + 5;
+        noRecipeCardY = bounds.y() + RecipeCandidatePickerModel.HEADER_HEIGHT;
+        noRecipeCardW = bounds.width() - 14;
+        noRecipeCardH = 30;
+        rowsTop = noRecipeCardY + noRecipeCardH + 3;
+        int availableRowsHeight = bounds.y() + bounds.height()
+                - RecipeCandidatePickerModel.FOOTER_HEIGHT - rowsTop;
+        model.setVisibleRows(Math.max(1, availableRowsHeight / bounds.rowHeight()));
         search.setPosition(bounds.x() + 10, bounds.y() + 26);
         search.setWidth(Math.max(1, bounds.width() - 20));
     }
@@ -132,21 +166,61 @@ public final class RecipeCandidatePanel {
             graphics.flush();
             String title = Component.translatable("rsi.plan.recipe_picker.title",
                     model.filtered().size(), model.total()).getString();
-            graphics.drawString(font, font.plainSubstrByWidth(title, Math.max(1, w - 32)),
+            String forgetLabel = Component.translatable(
+                    "rsi.plan.recipe_picker.forget").getString();
+            boolean canForget = defaultRecipeId != null || noRecipeSelected;
+            forgetW = canForget ? font.width(forgetLabel) + 6 : 0;
+            forgetH = 14;
+            forgetX = x + w - forgetW - 24;
+            forgetY = y + 5;
+            int titleRight = w - 24 - (forgetW > 0 ? forgetW + 4 : 0);
+            graphics.drawString(font, font.plainSubstrByWidth(title, Math.max(1, titleRight)),
                     x + 8, y + 6, 0xFFE0F2E6, false);
+            if (forgetW > 0) {
+                boolean forgetHover = mouseX >= forgetX && mouseX < forgetX + forgetW
+                        && mouseY >= forgetY && mouseY < forgetY + forgetH;
+                graphics.drawString(font, forgetLabel, forgetX, forgetY,
+                        forgetHover ? 0xFFFFFFFF : 0xFF9FC9B0, false);
+            }
             graphics.drawString(font, "×", x + w - 17, y + 6, 0xFFAAC8B4, false);
             graphics.fill(x + 6, y + 23, x + w - 6, y + 39, 0xFF50745E);
             graphics.fill(x + 7, y + 24, x + w - 7, y + 38, 0xFF192C21);
             search.render(graphics, mouseX, mouseY, 0);
             graphics.flush();
-            int rowsBottom = rowsTop + bounds.rows() * bounds.rowHeight();
+            boolean noRecipeHover = mouseX >= noRecipeCardX && mouseX < noRecipeCardX + noRecipeCardW
+                    && mouseY >= noRecipeCardY && mouseY < noRecipeCardY + noRecipeCardH;
+            int noRecipeBorder = noRecipeSelected ? 0xFFFF6677
+                    : noRecipeHover ? 0xFFB85B68 : 0xFF66313A;
+            UIRenderer.rounded(graphics, noRecipeCardX, noRecipeCardY,
+                    noRecipeCardW, noRecipeCardH, 5f, noRecipeBorder);
+            UIRenderer.rounded(graphics, noRecipeCardX + 1, noRecipeCardY + 1,
+                    noRecipeCardW - 2, noRecipeCardH - 2, 4f,
+                    noRecipeSelected ? 0xFF3B1C22 : 0xFF211417);
+            graphics.fill(noRecipeCardX + 7, noRecipeCardY + 9,
+                    noRecipeCardX + 17, noRecipeCardY + 19, 0xFFFF6677);
+            graphics.drawString(font, "×", noRecipeCardX + 9, noRecipeCardY + 10,
+                    0xFF3B1C22, false);
+            String stockOnly = Component.translatable(
+                    "rsi.plan.recipe_picker.stock_only").getString();
+            graphics.drawString(font, font.plainSubstrByWidth(stockOnly, noRecipeCardW - 58),
+                    noRecipeCardX + 24, noRecipeCardY + 10,
+                    noRecipeSelected ? 0xFFFFB8C0 : 0xFFE8C0C5, false);
+            if (noRecipeSelected) {
+                String current = Component.translatable(
+                        "rsi.plan.recipe_picker.current").getString();
+                graphics.drawString(font, current,
+                        noRecipeCardX + noRecipeCardW - font.width(current) - 7,
+                        noRecipeCardY + 10, 0xFFFFB8C0, false);
+            }
+            int visibleRows = model.visibleRows();
+            int rowsBottom = rowsTop + visibleRows * bounds.rowHeight();
             graphics.enableScissor(x + 4, rowsTop, x + w - 4, rowsBottom);
             try {
                 if (model.filtered().isEmpty()) {
                     graphics.drawString(font, Component.translatable("rsi.plan.recipe_picker.empty"),
                             x + 10, rowsTop + 8, 0xFF9EB4A7, false);
                 }
-                for (int row = 0; row < bounds.rows(); row++) {
+                for (int row = 0; row < visibleRows; row++) {
                     int index = model.firstRow() + row;
                     if (index >= model.filtered().size()) break;
                     Candidate candidate = model.filtered().get(index);
@@ -157,14 +231,21 @@ public final class RecipeCandidatePanel {
                         if (!keyboardNavigation) model.hover(index);
                         hoveredCandidate = candidate;
                     }
-                    boolean selected = candidate.recipeId().equals(node.step.recipeId());
+                    boolean selected = !noRecipeSelected
+                            && candidate.recipeId().equals(node.step.recipeId());
+                    boolean isDefault = !noRecipeSelected
+                            && candidate.recipeId().toString().equals(defaultRecipeId);
+                    boolean excluded = excludedRecipes.contains(
+                            candidate.recipeId().toString());
                     int cardX = x + 5;
                     int cardY = rowY + 2;
                     int cardW = w - 14;
                     int cardH = Math.max(1, bounds.rowHeight() - 4);
-                    int cardBorder = selected ? 0xFF66D48A
+                    int cardBorder = excluded ? 0xFFB23A48
+                            : selected ? 0xFF66D48A
                             : hover ? 0xFF5B8A6B : 0xFF385341;
                     int cardFill = selected ? 0xFF1C3B2A
+                            : excluded ? 0xFF28171A
                             : hover ? 0xFF20382A : 0xFF141F19;
                     UIRenderer.rounded(graphics, cardX, cardY, cardW, cardH, 5f, cardBorder);
                     UIRenderer.rounded(graphics, cardX + 1, cardY + 1,
@@ -180,18 +261,30 @@ public final class RecipeCandidatePanel {
                             || modType != null && modType.isVirtual() || boundMachines.contains(candidate.modTypeId());
                     String machine = candidate.machine() + (bound ? "" : " · "
                             + Component.translatable("rsi.plan.recipe_picker.unbound").getString());
-                    int machineWidth = selected ? cardW - 82 : cardW - 42;
+                    List<String> badges = new ArrayList<>(3);
+                    if (selected) {
+                        badges.add(Component.translatable(
+                                "rsi.plan.recipe_picker.current").getString());
+                    }
+                    if (isDefault) {
+                        badges.add(Component.translatable(
+                                "rsi.plan.recipe_picker.default").getString());
+                    }
+                    if (excluded) {
+                        badges.add(Component.translatable(
+                                "rsi.plan.recipe_picker.excluded").getString());
+                    }
+                    String badge = String.join(" · ", badges);
+                    int badgeW = badge.isEmpty() ? 0 : font.width(badge);
+                    int machineWidth = cardW - 33 - badgeW;
                     graphics.drawString(font, font.plainSubstrByWidth(machine, Math.max(1, machineWidth)),
                             cardX + 25, cardY + 5, bound ? 0xFFAACDB7 : 0xFFE5B36C, false);
                     graphics.drawString(font, font.plainSubstrByWidth(candidate.name(), cardW - 16),
                             cardX + 8, cardY + 18, 0xFFE5F2E9, false);
-                    String current = Component.translatable(
-                            "rsi.plan.recipe_picker.current").getString();
-                    int currentW = font.width(current);
-                    if (selected) {
-                        graphics.drawString(font, current,
-                                cardX + cardW - currentW - 7, cardY + 5,
-                                0xFF9CF0B5, false);
+                    if (!badge.isEmpty()) {
+                        graphics.drawString(font, badge,
+                                cardX + cardW - badgeW - 7, cardY + 5,
+                                excluded ? 0xFFFF8A95 : 0xFF9CF0B5, false);
                     }
                     ItemStack rowHovered = preview.renderRecipeInArea(graphics, font, candidate.recipeId(),
                             cardX + 8, cardY + 30, cardW - 16, Math.max(1, cardH - 33),
@@ -231,8 +324,33 @@ public final class RecipeCandidatePanel {
 
     public boolean mouseClicked(double x, double y, int button) {
         if (!contains(x, y)) return false;
+        if (button == 1) {
+            int row = (int) (y - rowsTop) / bounds.rowHeight();
+            if (y >= rowsTop && row < model.visibleRows()) {
+                int index = model.firstRow() + row;
+                if (index >= 0 && index < model.filtered().size()) {
+                    String recipeId = model.filtered().get(index).recipeId().toString();
+                    boolean excluded = !excludedRecipes.contains(recipeId);
+                    excludedRecipes = new LinkedHashSet<>(excludedRecipes);
+                    if (excluded) excludedRecipes.add(recipeId);
+                    else excludedRecipes.remove(recipeId);
+                    CraftingPlanPreferences.setExcluded(preferencesPath, recipeId, excluded);
+                }
+            }
+            return true;
+        }
         if (button != 0) return true;
         if (x >= bounds.x() + bounds.width() - 24 && y < bounds.y() + 22) { close(); return true; }
+        if (forgetW > 0 && x >= forgetX && x < forgetX + forgetW
+                && y >= forgetY && y < forgetY + forgetH) {
+            forgetPreference();
+            return true;
+        }
+        if (x >= noRecipeCardX && x < noRecipeCardX + noRecipeCardW
+                && y >= noRecipeCardY && y < noRecipeCardY + noRecipeCardH) {
+            selectNoRecipe();
+            return true;
+        }
         if (y >= bounds.y() + 23 && y < bounds.y() + 39) {
             search.setFocused(true);
             search.mouseClicked(x, y, button);
@@ -285,7 +403,27 @@ public final class RecipeCandidatePanel {
         Candidate candidate = model.active();
         if (candidate == null) return;
         PlanTreeNode owner = node;
+        String recipeId = candidate.recipeId().toString();
+        excludedRecipes = new LinkedHashSet<>(excludedRecipes);
+        excludedRecipes.remove(recipeId);
+        defaultRecipeId = recipeId;
+        noRecipeSelected = false;
+        CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey, recipeId);
+        CraftingPlanPreferences.setExcluded(preferencesPath, recipeId, false);
         close();
         if (!candidate.recipeId().equals(owner.step.recipeId())) onSelect.accept(owner, candidate.recipeId());
+    }
+
+    private void selectNoRecipe() {
+        noRecipeSelected = true;
+        defaultRecipeId = CraftingPlanPreferences.NO_RECIPE;
+        CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey,
+                CraftingPlanPreferences.NO_RECIPE);
+    }
+
+    private void forgetPreference() {
+        defaultRecipeId = null;
+        noRecipeSelected = false;
+        CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey, null);
     }
 }

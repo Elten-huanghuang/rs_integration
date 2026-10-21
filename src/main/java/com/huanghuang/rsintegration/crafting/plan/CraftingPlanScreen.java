@@ -461,7 +461,8 @@ public final class CraftingPlanScreen extends Screen {
         lastRefreshCount = currentRepeat;
         Font font = minecraft.font;
         if (recipeCandidatePanel == null) {
-            recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview, this::selectTreeBranch);
+            recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview,
+                    this::selectTreeBranch, PLAN_PREFS_PATH);
         }
         closeRecipeCandidates();
         addWidget(recipeCandidatePanel.searchBox());
