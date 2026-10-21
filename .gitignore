@@ -35,6 +35,9 @@ libs/
 .agent/
 .agents/
 
-# 本地文档，不提交到仓库
+# 文档目录：仅更新公告和 API 文档允许提交
 /docs/*
-
+!/docs/announcements/
+!/docs/announcements/**
+!/docs/api/
+!/docs/api/**
