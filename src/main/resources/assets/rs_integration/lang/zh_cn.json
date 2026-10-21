@@ -739,8 +739,6 @@
   "rsi.plan.missing_summary": "缺少 %s 种材料",
   "rsi.plan.warning_summary": "%s 条警告",
   "rsi.plan.machine_summary": "%s 台机器",
-  "rsi.plan.missing_expand": "查看全部",
-  "rsi.plan.missing_collapse": "收起",
   "rsi.plan.missing_more": "... (+%s 更多)",
   "rsi.plan.materials": "材料",
   "rsi.plan.tooltip.available": "库存",

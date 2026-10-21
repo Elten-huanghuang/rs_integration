@@ -734,8 +734,6 @@
   "rsi.plan.missing_summary": "%s missing materials",
   "rsi.plan.warning_summary": "%s warnings",
   "rsi.plan.machine_summary": "%s machines",
-  "rsi.plan.missing_expand": "Show all",
-  "rsi.plan.missing_collapse": "Collapse",
   "rsi.plan.missing_more": "... (+%s more)",
   "rsi.plan.materials": "Materials",
   "rsi.plan.tooltip.available": "Available",

@@ -1305,6 +1305,9 @@ public final class CraftingPlanScreen extends Screen {
         }
         repeatCountBox.setY(countPillY);
         repeatCountBox.render(gfx, mouseX, mouseY, 0f);
+        int underlineY = countPillY + countPillH - 2;
+        gfx.fill(countPillX + 7, underlineY, countPillX + countPillW - 7,
+                underlineY + 1, repeatCountBox.isFocused() ? 0xFFFFFFFF : 0xFF69D98A);
     }
 
     private static final int GRID_SLOT = 18;
@@ -1778,31 +1781,26 @@ public final class CraftingPlanScreen extends Screen {
                     "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
         }
         String summary = String.join(" · ", summaryParts);
-        String action = I18n.get(missingExpanded
-                ? "rsi.plan.missing_collapse" : "rsi.plan.missing_expand");
-        int actionW = font.width(action);
         boolean canToggle = missingFullHeight > missingHeaderHeight;
-        int summaryMaxW = Math.max(1, contentW - 20 - (canToggle ? actionW + 12 : 0));
-        String visibleSummary = font.plainSubstrByWidth(summary, summaryMaxW);
+        String summaryText = canToggle
+                ? (missingExpanded ? "▼ " : "▶ ") + summary : summary;
+        int summaryMaxW = Math.max(1, contentW - 20);
+        String visibleSummary = font.plainSubstrByWidth(summaryText, summaryMaxW);
+        boolean headerHovered = canToggle
+                && mouseX >= left + 4 && mouseX < left + contentW - 4
+                && mouseY >= top + 2 && mouseY < top + missingHeaderHeight - 2;
+        if (headerHovered) {
+            gfx.fill(left + 2, top + 2, left + contentW - 2,
+                    top + missingHeaderHeight - 2, 0x22FFFFFF);
+        }
         UIRenderer.textBackdrop(gfx, font, left + 10, top + 4, visibleSummary, C_TEXT_BACKDROP);
         gfx.drawString(font, visibleSummary, left + 10, top + 4,
-                hasMissing ? 0xFFFF8888 : 0xFFDDAA00);
+                headerHovered ? 0xFFFFFFFF : hasMissing ? 0xFFFF8888 : 0xFFDDAA00);
 
-        missingToggleW = canToggle ? actionW : 0;
-        missingToggleH = canToggle ? font.lineHeight : 0;
-        missingToggleX = left + contentW - actionW - 10;
-        missingToggleY = top + 4;
-        if (canToggle) {
-            boolean hovered = mouseX >= missingToggleX && mouseX < missingToggleX + missingToggleW
-                    && mouseY >= missingToggleY && mouseY < missingToggleY + missingToggleH;
-            gfx.drawString(font, action, missingToggleX, missingToggleY,
-                    hovered ? 0xFFFFFFFF : 0xFF9FC9B0, false);
-            if (hovered) {
-                gfx.fill(missingToggleX, missingToggleY + font.lineHeight,
-                        missingToggleX + missingToggleW, missingToggleY + font.lineHeight + 1,
-                        0xFF9FC9B0);
-            }
-        }
+        missingToggleX = left + 4;
+        missingToggleY = top + 2;
+        missingToggleW = canToggle ? contentW - 8 : 0;
+        missingToggleH = canToggle ? Math.max(1, missingHeaderHeight - 4) : 0;
 
         if (!missingExpanded) {
             missingBar.active = false;
