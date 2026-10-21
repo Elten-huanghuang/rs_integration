@@ -10,7 +10,7 @@ import java.util.Locale;
 /** 候选列表的搜索、滚动和键盘导航，不依赖客户端渲染环境。 */
 public final class RecipeCandidatePickerModel {
     public static final int HEADER_HEIGHT = 44;
-    public static final int FOOTER_HEIGHT = 16;
+    public static final int FOOTER_HEIGHT = 18;
     private static final int PREFERRED_ROW_HEIGHT = 92;
     public record Candidate(ResourceLocation recipeId, String modTypeId, String name,
                             String machine, String searchText) {}
@@ -100,16 +100,28 @@ public final class RecipeCandidatePickerModel {
         }
     }
 
-    /** 窄侧栏最多展示四张卡片，不延伸到下方的执行模式与开始按钮。 */
-    public static Bounds layout(int screenWidth, int screenHeight, int contentTop) {
-        int width = Math.max(1, Math.min(screenWidth * 42 / 100,
+    /** 窄侧栏最多展示四张卡片，并严格限制在配方树可视区域内。 */
+    public static Bounds layout(int screenWidth, int screenHeight, int contentTop,
+                                int contentBottom) {
+        return layout(screenWidth, screenHeight, contentTop, contentBottom, 0);
+    }
+
+    /** 面板宽度优先保证 JEI 配方按原尺寸显示，屏幕过窄时才限制到可用宽度。 */
+    public static Bounds layout(int screenWidth, int screenHeight, int contentTop,
+                                int contentBottom, int preferredWidth) {
+        int maxWidth = Math.max(176, Math.min(screenWidth * 45 / 100, 420));
+        int width = preferredWidth > 0
+                ? Math.max(176, Math.min(maxWidth, preferredWidth))
+                : Math.max(1, Math.min(screenWidth * 42 / 100,
                 Math.min(232, Math.max(176, screenWidth * 30 / 100))));
-        int bottom = Math.min(screenHeight - 8, Math.max(68, screenHeight - 84));
-        int y = Math.max(8, Math.min(contentTop, bottom - 140));
+        int bottom = Math.max(8, Math.min(screenHeight - 8, contentBottom - 4));
+        int y = Math.max(8, Math.min(contentTop, bottom - HEADER_HEIGHT - FOOTER_HEIGHT - 1));
         int bodyHeight = Math.max(1, bottom - y - HEADER_HEIGHT - FOOTER_HEIGHT);
-        int rows = Math.min(4, Math.max(1, bodyHeight / PREFERRED_ROW_HEIGHT));
+        // 给展开卡片留出完整预览空间；至少保证六个候选行的高度。
+        int rows = Math.min(6, Math.max(1, bodyHeight / PREFERRED_ROW_HEIGHT));
         int rowHeight = Math.min(PREFERRED_ROW_HEIGHT, Math.max(1, bodyHeight / rows));
-        int height = HEADER_HEIGHT + rows * rowHeight + FOOTER_HEIGHT;
+        int height = Math.min(bottom - y,
+                HEADER_HEIGHT + rows * rowHeight + FOOTER_HEIGHT);
         return new Bounds(Math.max(0, screenWidth - width - 8), y, width, height,
                 rowHeight, rows);
     }

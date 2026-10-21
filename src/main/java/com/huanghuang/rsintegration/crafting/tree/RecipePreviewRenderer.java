@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
@@ -443,6 +444,11 @@ public final class RecipePreviewRenderer {
                 && recipeId.getPath().startsWith("vanilla_brewing/");
     }
 
+    static boolean isFluidContainerRecipe(ResourceLocation recipeId) {
+        return recipeId != null && "rs_integration".equals(recipeId.getNamespace())
+                && recipeId.getPath().startsWith("fluid_container/");
+    }
+
     private static boolean isIronSpellBooksRecipe(ResourceLocation recipeId) {
         if (recipeId == null || !"rs_integration".equals(recipeId.getNamespace())) return false;
         String path = recipeId.getPath();
@@ -540,6 +546,7 @@ public final class RecipePreviewRenderer {
             if (isIronSpellBooksRecipe(recipeId)) return IronSpellBooksRecipeCatalog.byId(mc.level, recipeId);
             if (isPmmoSalvageRecipe(recipeId)) return PmmoSalvageCatalog.byId(recipeId);
             if (isSyntheticBrewingRecipe(recipeId)) return VanillaBrewingCatalog.byId(recipeId);
+            if (isFluidContainerRecipe(recipeId)) return FluidContainerCatalog.resolve(mc.level, recipeId);
         } catch (RuntimeException | LinkageError ignored) {
             // 可选模组或客户端目录尚未就绪时，仍保留候选和配方 ID。
         }
@@ -592,6 +599,38 @@ public final class RecipePreviewRenderer {
     }
 
     /** 在候选行的固定区域中展示 JEI 布局，返回鼠标下的材料用于未缩放的提示。 */
+    public int previewWidthHint(ResourceLocation id) {
+        Optional<IRecipeLayoutDrawable<?>> cached = cache.get(id);
+        if (cached != null && cached.isPresent()) {
+            int width = cached.get().getRect().getWidth();
+            if (width > 0) return width;
+        }
+        Recipe<?> recipe = resolveRecipe(id);
+        if (recipe == null) return 0;
+        int columns = previewColumns(previewInputs(recipe).size());
+        return columns * 22 + 42;
+    }
+
+    /** 在候选行的固定区域中展示 JEI 布局，返回鼠标下的材料用于未缩放的提示。 */
+    public PreviewBounds previewBounds(ResourceLocation id) {
+        Optional<IRecipeLayoutDrawable<?>> layout = getDrawable(id);
+        if (layout.isPresent()) {
+            var rect = layout.get().getRect();
+            if (rect.getWidth() > 0 && rect.getHeight() > 0) {
+                return new PreviewBounds(rect.getWidth(), rect.getHeight());
+            }
+        }
+        Recipe<?> recipe = resolveRecipe(id);
+        if (recipe == null) return new PreviewBounds(1, 1);
+        List<ItemStack> inputs = previewInputs(recipe);
+        int columns = previewColumns(inputs.size());
+        int rows = Math.max(1, (inputs.size() + columns - 1) / columns);
+        return new PreviewBounds(columns * 22 + 42, rows * 22);
+    }
+
+    public record PreviewBounds(int width, int height) {}
+
+    /** 在候选行的固定区域中展示 JEI 布局，返回鼠标下的材料用于未缩放的提示。 */
     public ItemStack renderRecipeInArea(GuiGraphics graphics, Font font, ResourceLocation id,
                                        int x, int y, int width, int height, int mouseX, int mouseY,
                                        ItemStack fallback) {
@@ -608,10 +647,12 @@ public final class RecipePreviewRenderer {
             drawable.setPosition(0, 0);
             graphics.pose().pushPose();
             try {
+                graphics.enableScissor(x, y, x + width, y + height);
                 graphics.pose().translate(left, top, 0);
                 graphics.pose().scale(scale, scale, 1);
                 drawable.drawRecipe(graphics, localX, localY);
             } finally {
+                graphics.disableScissor();
                 graphics.pose().popPose();
             }
             if (mouseX < x || mouseX >= x + width || mouseY < y || mouseY >= y + height) return ItemStack.EMPTY;
@@ -629,7 +670,7 @@ public final class RecipePreviewRenderer {
             return ItemStack.EMPTY;
         }
         List<ItemStack> inputs = previewInputs(recipe);
-        int columns = Math.max(1, Math.min(4, inputs.size()));
+        int columns = previewColumns(inputs.size());
         int rows = Math.max(1, (inputs.size() + columns - 1) / columns);
         int naturalW = columns * 22 + 42;
         int naturalH = rows * 22;
@@ -640,6 +681,7 @@ public final class RecipePreviewRenderer {
         ItemStack hovered = ItemStack.EMPTY;
         graphics.pose().pushPose();
         try {
+            graphics.enableScissor(x, y, x + width, y + height);
             graphics.pose().translate(left, top, 0);
             graphics.pose().scale(scale, scale, 1);
             for (int i = 0; i < inputs.size(); i++) {
@@ -653,9 +695,15 @@ public final class RecipePreviewRenderer {
             renderPreviewSlot(graphics, font, output, outputX, outputY);
             if (localX >= outputX && localX < outputX + 18 && localY >= outputY && localY < outputY + 18) hovered = output;
         } finally {
+            graphics.disableScissor();
             graphics.pose().popPose();
         }
         return hovered;
+    }
+
+    private static int previewColumns(int inputCount) {
+        if (inputCount <= 0) return 1;
+        return Math.max(1, Math.min(9, (int) Math.ceil(Math.sqrt(inputCount))));
     }
 
     private static void renderPreviewSlot(GuiGraphics graphics, Font font, ItemStack stack, int x, int y) {
