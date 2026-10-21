@@ -71,6 +71,54 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void forcedRecipeWinsWithoutRemovingAlternativeFromTheGraph() {
+        MaterialRef target = material("forced_target");
+        MaterialRef firstInput = material("forced_input_a");
+        MaterialRef secondInput = material("forced_input_b");
+        RecipeNode first = recipe("forced_recipe_a", target, 1,
+                ingredient(firstInput, 1));
+        RecipeNode second = recipe("forced_recipe_b", target, 1,
+                ingredient(secondInput, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(target, List.of(first, second)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(firstInput, 1, secondInput, 1),
+                List.of(ingredient(target, 1)), 20, 1024, 100,
+                Long.MAX_VALUE, System::nanoTime, Set.of(),
+                Map.of(target.itemId(), id("forced_recipe_b")));
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(
+                id("forced_recipe_b"), 1)), result.steps());
+        assertEquals(2, graph.recipesByOutput().get(target).size());
+    }
+
+    @Test
+    void forcedRecipeIsHardAndDoesNotSilentlyFallBackToAnotherCandidate() {
+        MaterialRef target = material("hard_forced_target");
+        MaterialRef availableInput = material("hard_forced_available_input");
+        MaterialRef missingInput = material("hard_forced_missing_input");
+        RecipeNode fallback = recipe("hard_forced_fallback", target, 1,
+                ingredient(availableInput, 1));
+        RecipeNode forced = recipe("hard_forced_selected", target, 1,
+                ingredient(missingInput, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(target, List.of(fallback, forced)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(availableInput, 1), List.of(ingredient(target, 1)),
+                20, 1024, 100, Long.MAX_VALUE, System::nanoTime, Set.of(),
+                Map.of(target.itemId(), forced.recipeId()));
+
+        assertFalse(result.feasible(), result.toString());
+        assertEquals(PureRecipePlanner.FailureReason.MISSING_INPUTS,
+                result.failureReason());
+        assertTrue(result.steps().stream().noneMatch(step ->
+                step.recipeId().equals(fallback.recipeId())), result.steps().toString());
+    }
+
+    @Test
     void valueOnlyDemandCanUseTaggedOutputVariant() {
         MaterialRef sword = material("awakened_sword");
         MaterialRef raw = material("sword_raw");
@@ -431,7 +479,7 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
-    void cycleTerminatesAndReportsMissing() {
+    void cycleTerminatesAndReportsCycle() {
         RecipeNode logFromPlank = recipe("log", LOG, 1, ingredient(PLANK, 1));
         RecipeNode plankFromLog = recipe("plank", PLANK, 1, ingredient(LOG, 1));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
@@ -441,6 +489,27 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertFalse(result.feasible());
         assertEquals(1, result.missing().size());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(PureRecipePlanner.FailureReason.CYCLE, result.failureReason());
+    }
+
+    @Test
+    void terminalDecompressionLoopIsReportedAsCycle() {
+        MaterialRef ingot = material("cycle_ingot");
+        MaterialRef block = material("cycle_block");
+        RecipeNode decompress = recipe("cycle_decompress", ingot, 1,
+                ingredient(block, 1));
+        RecipeNode compress = recipe("cycle_compress", block, 1,
+                ingredient(ingot, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                ingot, List.of(decompress),
+                block, List.of(compress)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(), List.of(ingredient(block, 1)), 20,
+                256, 256, Long.MAX_VALUE, System::nanoTime, Set.of(ingot));
+
+        assertFalse(result.feasible(), result.toString());
+        assertEquals(PureRecipePlanner.FailureReason.CYCLE, result.failureReason());
     }
 
     @Test

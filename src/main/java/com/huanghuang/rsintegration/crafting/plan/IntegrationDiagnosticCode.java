@@ -17,6 +17,7 @@ public enum IntegrationDiagnosticCode {
     COMPLEXITY_LIMIT("rsi.plan.failure.complexity_limit"),
     PLANNING_TIMEOUT("rsi.plan.failure.planning_timeout"),
     MISSING_MATERIALS("rsi.plan.failure.missing_materials"),
+    CYCLIC_DEPENDENCY("rsi.plan.failure.cyclic_dependency"),
     NBT_MISMATCH("rsi.plan.failure.nbt_mismatch"),
     MACHINES_LEASED("rsi.plan.failure.machines_leased"),
     NO_READY_MACHINE("rsi.goety.warn.no_ready_altar"),

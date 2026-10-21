@@ -12,10 +12,10 @@ import java.util.Set;
 /**
  * Client-side branch-selection state for the recipe tree (v3.4).
  * <p>
- * The tree view writes here (user picks an alternative); the card view reads
- * {@link #deriveActiveRecipeIds} to render only the chosen path. No per-switch
- * network traffic — selections are submitted once, with {@code selectedBranches},
- * when the player presses Start.
+ * The tree view writes a draft here when the player picks an alternative. A
+ * successful server preview confirms that draft; a failed preview restores the
+ * previous branch snapshot. Selections are material-scoped so every occurrence
+ * of the same item uses one consistent producer in the shared recipe graph.
  * <p>
  * Keyed by {@link IngredientKey} (item + NBT, never count), so a selection made
  * on one "oak planks" node applies to every same-key node, and selections survive
@@ -25,6 +25,9 @@ public final class SelectedPath {
 
     /** A chosen alternative: which dropdown row ({@code index}) and its recipe. */
     public record Selection(int index, ResourceLocation recipeId) {}
+
+    /** 编辑前的完整状态，用于失败预览回滚，不把一次不可执行尝试变成持久偏好。 */
+    public record BranchSnapshot(@Nullable Selection selection, boolean explicit) {}
 
     // Only nodes with alternatives (hasOrSiblings) appear here.
     private final Map<IngredientKey, Selection> branchSelections = new LinkedHashMap<>();
@@ -78,6 +81,20 @@ public final class SelectedPath {
         if (prev == null || prev.index() != alternativeIndex || !prev.recipeId().equals(recipeId)) {
             dirty = true;
         }
+        recalculatePending();
+    }
+
+    public BranchSnapshot snapshotBranch(IngredientKey nodeKey) {
+        return new BranchSnapshot(branchSelections.get(nodeKey),
+                explicitSelections.contains(nodeKey));
+    }
+
+    public void restoreBranch(IngredientKey nodeKey, BranchSnapshot snapshot) {
+        if (snapshot.selection() == null) branchSelections.remove(nodeKey);
+        else branchSelections.put(nodeKey, snapshot.selection());
+        if (snapshot.explicit()) explicitSelections.add(nodeKey);
+        else explicitSelections.remove(nodeKey);
+        dirty = true;
         recalculatePending();
     }
 

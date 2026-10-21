@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,12 +46,29 @@ public final class ForcedRecipeGraphProjector {
             boolean applied = false;
             for (MaterialRef output : List.copyOf(projected.keySet())) {
                 if (!matchesOutput(output, preferenceKey)) continue;
-                projected.put(output, List.of(forcedNode));
+                // 强制选择只影响执行优先级，不删除其他候选；否则响应里的配方树
+                // 会只剩当前配方，玩家无法从 B 再切回 A。
+                List<RecipeNode> candidates = new ArrayList<>(
+                        projected.getOrDefault(output, List.of()));
+                candidates.removeIf(candidate ->
+                        candidate.recipeId().equals(forcedNode.recipeId()));
+                candidates.add(0, forcedNode);
+                projected.put(output, candidates);
                 applied = true;
             }
             if (!applied) return null;
         }
         return new ImmutableRecipeGraph(projected);
+    }
+
+    /** 返回该输出上玩家显式选择的配方；未选择时返回 null。 */
+    @Nullable
+    public static ResourceLocation forcedRecipeFor(
+            MaterialRef output, Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+        for (Map.Entry<ResourceLocation, ResourceLocation> forced : forcedRecipes.entrySet()) {
+            if (matchesOutput(output, forced.getKey())) return forced.getValue();
+        }
+        return null;
     }
 
     private static boolean matchesOutput(MaterialRef output, ResourceLocation preferenceKey) {

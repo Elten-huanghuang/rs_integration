@@ -36,6 +36,12 @@ final class PlanResponseClientPacketHandler {
                 && (plan.recipeId() == null || plan.recipeId().isEmpty())
                 && plan.targetResult().isEmpty()) {
             var mc = Minecraft.getInstance();
+            // 页面内的候选切换必须把错误交回页面状态机，才能回滚这次草稿选择并
+            // 重开原节点。旧实现只发聊天栏消息，pending 选择会永久残留。
+            if (mc.screen instanceof CraftingPlanScreen existing
+                    && existing.acceptResponse(requestId, plan)) {
+                return;
+            }
             if (mc.player != null) {
                 Component message = firstDiagnosticMessage(plan)
                         .orElseGet(() -> plan.modWarnings().isEmpty()

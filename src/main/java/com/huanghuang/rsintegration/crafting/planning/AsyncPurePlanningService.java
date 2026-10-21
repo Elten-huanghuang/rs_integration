@@ -178,7 +178,7 @@ public final class AsyncPurePlanningService {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 planningGraph, stock, roots, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos, System::nanoTime,
-                planningRootGuard(target));
+                planningRootGuard(target), snapshot.forcedRecipes());
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);

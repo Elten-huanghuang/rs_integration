@@ -4563,7 +4563,7 @@ public final class GenericCraftPacket {
         // same-output machine recipes from the complete server index so the plan tree can
         // offer a bound machine path even when crafting was selected as the primary path.
         Map<Item, List<RecipeIndex.Entry>> recipeIndex = RecipeIndex.get(player.serverLevel());
-        if (usedPurePlan && resolutionSteps != null) {
+        if (resolutionSteps != null) {
             resolutionSteps = attachIndexedAlternatives(
                     resolutionSteps, recipeIndex, player.serverLevel().registryAccess());
         }
@@ -5296,6 +5296,9 @@ public final class GenericCraftPacket {
             } else if (bindingBlocked) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.no_bound_machine"));
+            } else if (hasCyclicPureFailure(precomputedPlan)) {
+                modWarnings.add(Component.translatable(
+                        "rsi.plan.failure.cyclic_dependency"));
             } else if (nbtMismatch) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.nbt_mismatch"));
@@ -5463,6 +5466,14 @@ public final class GenericCraftPacket {
             outcome = PlanOutcome.RUNTIME_UNAVAILABLE;
             diagnostics.add(IntegrationDiagnostic.error(
                     IntegrationDiagnosticCode.NO_READY_MACHINE));
+        } else if (hasCyclicPureFailure(precomputedPlan)) {
+            outcome = PlanOutcome.CYCLE;
+            diagnostics.add(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.CYCLIC_DEPENDENCY));
+            RSIntegrationMod.debug(
+                    "[RSI-plan] cycle failure recipe={} forced={} steps={} missing={}",
+                    recipeId, forcedOverrides, steps.size(), summarizePureDemands(
+                            precomputedPlan != null ? precomputedPlan.missing() : List.of()));
         } else if (nbtMismatch) {
             outcome = PlanOutcome.MISSING_INPUTS;
             diagnostics.add(IntegrationDiagnostic.error(
@@ -6127,6 +6138,12 @@ public final class GenericCraftPacket {
         return result != null && result.feasible();
     }
 
+    static boolean hasCyclicPureFailure(@Nullable PureRecipePlanner.Result result) {
+        return result != null
+                && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
+                && result.failureReason() == PureRecipePlanner.FailureReason.CYCLE;
+    }
+
     static boolean canOpenBoundedMissingPlan(
             @Nullable PureRecipePlanner.Result plan,
             PureDemandTreeInspector.Result demandTree) {
@@ -6185,6 +6202,13 @@ public final class GenericCraftPacket {
             }
 
             LinkedHashMap<ResourceLocation, String> alternatives = new LinkedHashMap<>();
+            for (int i = 0; i < step.alternativeIds().size(); i++) {
+                ResourceLocation altId = step.alternativeIds().get(i);
+                if (altId.equals(step.recipeId())) continue;
+                String altMod = i < step.alternativeModTypes().size()
+                        ? step.alternativeModTypes().get(i) : step.modType().id();
+                alternatives.putIfAbsent(altId, altMod);
+            }
             for (RecipeIndex.Entry candidate : sameItem) {
                 ResourceLocation candidateId = candidate.recipe().getId();
                 if (candidateId.equals(step.recipeId())) continue;
@@ -6199,7 +6223,7 @@ public final class GenericCraftPacket {
             enriched.add(new ResolutionStep(step.recipeId(), step.modType(), step.recipeTypeId(),
                     List.copyOf(alternatives.keySet()), List.copyOf(alternatives.values()),
                     step.inferMode(), step.executions(), step.syntheticInput(), step.syntheticOutput(),
-                    step.productionTarget()));
+                    step.productionTarget(), step.magicCosts()));
         }
         return List.copyOf(enriched);
     }

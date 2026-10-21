@@ -191,8 +191,6 @@ public final class CraftingPlanScreen extends Screen {
                               boolean enough) {}
     private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
     private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, long missingCount) {}
-    private int bookmarkAllActionX, bookmarkAllActionY;
-    private int bookmarkAllActionW, bookmarkAllActionH;
     @Nullable
     private BookmarkHit hoveredBookmark;
     // Card-view fold toggle hitboxes (rebuilt each frame, read during mouseClicked).
@@ -218,6 +216,8 @@ public final class CraftingPlanScreen extends Screen {
     // 候选配方与主视图共用服务器分支选择，右侧面板只负责展示和导航。
     private PlanTreeNode dropdownNode;
     private RecipeCandidatePanel recipeCandidatePanel;
+    @Nullable
+    private PendingCandidateSwitch pendingCandidateSwitch;
     private int contentLayoutWidth = -1;
     private ViewMode contentLayoutMode;
     private final Map<String, ItemStack> materialLocks = new LinkedHashMap<>();
@@ -229,6 +229,10 @@ public final class CraftingPlanScreen extends Screen {
     private int materialPanelX, materialPanelY, materialPanelW, materialPanelH;
     private final List<MaterialDropHit> materialDropHits = new ArrayList<>();
     private record MaterialDropHit(int x, int y, int w, int h, ItemStack option) {}
+    private record PendingCandidateSwitch(IngredientKey key,
+                                          SelectedPath.BranchSnapshot previous,
+                                          ResourceLocation requestedRecipe,
+                                          @Nullable ResourceLocation preferenceKey) {}
 
     // Hover intent: the full JEI recipe preview only pops after the mouse rests on the same
     // target for HOVER_INTENT_MS, so a quick pass across nodes/candidates doesn't spam previews.
@@ -359,6 +363,23 @@ public final class CraftingPlanScreen extends Screen {
                     minecraft.player.displayClientMessage(warnings.get(0), false);
                 }
             }
+            rollbackPendingCandidateSwitch();
+            reopenPendingCandidates();
+            return true;
+        }
+        // 预览失败且没有目标步骤时不要清空当前可用计划。压缩/分解配方很容易
+        // 形成 锭→块→锭 的闭环；若直接替换计划树，原节点会消失，玩家就无法
+        // 从候选面板切回上一条配方。
+        if (PlanPreviewDecision.keepCurrentPlan(
+                plan, newPlan, pendingCandidateSwitch != null)) {
+            if (minecraft != null && minecraft.player != null) {
+                List<Component> warnings = displayWarnings(newPlan);
+                minecraft.player.displayClientMessage(warnings.isEmpty()
+                        ? Component.translatable("rsi.plan.status_fail")
+                        : warnings.get(0), false);
+            }
+            rollbackPendingCandidateSwitch();
+            reopenPendingCandidates();
             return true;
         }
         updatePlan(newPlan);
@@ -392,6 +413,8 @@ public final class CraftingPlanScreen extends Screen {
         closeMaterialDropdown();
         this.clearWidgets();
         this.init();
+        commitPendingCandidateSwitch();
+        reopenPendingCandidates();
     }
 
     private int findMachineCandidate(String dimension, int x, int y, int z) {
@@ -462,7 +485,9 @@ public final class CraftingPlanScreen extends Screen {
         Font font = minecraft.font;
         if (recipeCandidatePanel == null) {
             recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview,
-                    this::selectTreeBranch, PLAN_PREFS_PATH);
+                    this::selectTreeBranch, PLAN_PREFS_PATH,
+                    this::bookmarkAllMissingMaterials,
+                    () -> !MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty());
         }
         closeRecipeCandidates();
         addWidget(recipeCandidatePanel.searchBox());
@@ -918,8 +943,6 @@ public final class CraftingPlanScreen extends Screen {
         hoveredItemForTooltip = ItemStack.EMPTY;
         hoveredStepWarnings = List.of();
         bookmarkHits.clear();
-        bookmarkAllActionW = 0;
-        bookmarkAllActionH = 0;
         hoveredBookmark = null;
         float fade = Math.min(1f, ticksOpen / 8f);
         float ease = UIRenderer.easeOutCubic(fade);
@@ -959,17 +982,18 @@ public final class CraftingPlanScreen extends Screen {
 
         // Steps area (scrollable)
         int areaTop = stepsTop;
-        if (recipeCandidatePanel != null) {
-            recipeCandidatePanel.layout(width, height, areaTop);
-            contentW = Math.max(1, recipeCandidatePanel.contentRight(width - 20) - left);
-        }
-        layoutContentSections(font, contentW);
+        int fullContentW = Math.max(1, width - 40);
+        layoutContentSections(font, fullContentW);
         // Recompute the bottom stack for the current view — the material panel is card-view
         // only (design doc §4), so tree view reclaims its band for the tree.
         layoutBottomStack();
         int bottomReserved = embersPedestalH > 0 ? embersPedestalY
                 : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
         int areaBottom = bottomReserved - 4;
+        if (recipeCandidatePanel != null) {
+            recipeCandidatePanel.layout(width, height, areaTop, areaBottom);
+            contentW = Math.max(1, recipeCandidatePanel.contentRight(fullContentW) - left);
+        }
 
         boolean dockedCandidates = recipeCandidatePanel != null && recipeCandidatePanel.isOpen();
         if (dockedCandidates) gfx.enableScissor(0, 0, left + contentW, height);
@@ -1072,23 +1096,30 @@ public final class CraftingPlanScreen extends Screen {
         cardBar.draw(gfx, mouseX, mouseY);
         }
 
-        // Embers alchemy pedestal layout
-        if (embersPedestalH > 0) {
-            renderEmbersPedestalArea(gfx, font, left, contentW);
+        } finally {
+            if (dockedCandidates) {
+                gfx.flush();
+                gfx.disableScissor();
+            }
         }
 
-        // Missing items + mod warnings
+        // Embers alchemy pedestal layout
+        if (embersPedestalH > 0) {
+            renderEmbersPedestalArea(gfx, font, left, fullContentW);
+        }
+
+        // Missing items + mod warnings（始终通栏，不随右侧面板缩窄）
         List<Component> planWarnings = displayWarnings(plan);
         if (missingAreaHeight > 0 && (
                 !MissingMaterialBookmarkList.textEntries(plan).isEmpty() ||
                 !planWarnings.isEmpty() ||
                 (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()))) {
-            renderMissingArea(gfx, font, left, missingAreaTop, contentW);
+            renderMissingArea(gfx, font, left, missingAreaTop, fullContentW);
         }
 
         // Material summary — card view only; tree view shows the total-demand strip instead.
         if (viewMode == ViewMode.CARD && materialAreaHeight > 0) {
-            materialMaxScroll = renderEngine.renderMaterialArea(gfx, left, materialAreaTop, contentW,
+            materialMaxScroll = renderEngine.renderMaterialArea(gfx, left, materialAreaTop, fullContentW,
                     materialAreaHeight, plan.materials(), mouseX, mouseY, materialScroll,
                     (stack, mx, my, avail, need) -> {
                         hoveredItemForTooltip = stack;
@@ -1100,17 +1131,11 @@ public final class CraftingPlanScreen extends Screen {
             if (materialScroll > materialMaxScroll) materialScroll = materialMaxScroll;
             // Draggable scrollbar — grid begins below the header row (top+4 + lineHeight+4).
             int gridTop = materialAreaTop + 8 + font.lineHeight;
-            materialBar.update(left + contentW - 5, gridTop,
+            materialBar.update(left + fullContentW - 5, gridTop,
                     materialAreaTop + materialAreaHeight - gridTop, materialScroll, materialMaxScroll);
             materialBar.draw(gfx, mouseX, mouseY);
         } else {
             materialBar.active = false;
-        }
-        } finally {
-            if (dockedCandidates) {
-                gfx.flush();
-                gfx.disableScissor();
-            }
         }
 
         // ── Repeat count row ─────────────────────────────────────────
@@ -1273,12 +1298,6 @@ public final class CraftingPlanScreen extends Screen {
         UIRenderer.rounded(gfx, countPillX, countPillY, pillW, pillH,
                 pillH / 2f, 0xCC1B5E20);
         renderRepeatCountInput(gfx, font);
-        int bookmarkActionW = bookmarkAllActionWidth(font);
-        int bookmarkX = 20;
-        if (bookmarkX + bookmarkActionW >= rowX - 4) {
-            bookmarkX = Math.max(8, rowX - bookmarkActionW - 4);
-        }
-        renderBookmarkAllAction(gfx, font, bookmarkX, countPillY, countPillH);
 
         // ── Right buttons: +, +5, +10, +64 ──
         bx = pillX + pillW + innerGap - gap;
@@ -1310,10 +1329,12 @@ public final class CraftingPlanScreen extends Screen {
             repeatCountBox.setWidth(textWidth + 2);
         }
         repeatCountBox.setY(countPillY);
+        repeatCountBox.setTextColor(repeatCountBox.isFocused()
+                ? 0xFFFFFFFF : 0xFFC8E6C9);
         repeatCountBox.render(gfx, mouseX, mouseY, 0f);
         int underlineY = countPillY + countPillH - 2;
         gfx.fill(countPillX + 7, underlineY, countPillX + countPillW - 7,
-                underlineY + 1, repeatCountBox.isFocused() ? 0xFFFFFFFF : 0xFF69D98A);
+                underlineY + 1, 0xFF69D98A);
     }
 
     private static final int GRID_SLOT = 18;
@@ -1787,26 +1808,29 @@ public final class CraftingPlanScreen extends Screen {
                     "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
         }
         String summary = String.join(" · ", summaryParts);
-        boolean canToggle = missingFullHeight > missingHeaderHeight;
-        String summaryText = canToggle
-                ? (missingExpanded ? "▼ " : "▶ ") + summary : summary;
+        boolean canOpenDiagnostics = hasMissing || hasModWarnings || hasMachines;
+        String summaryText = summary;
         int summaryMaxW = Math.max(1, contentW - 20);
         String visibleSummary = font.plainSubstrByWidth(summaryText, summaryMaxW);
-        boolean headerHovered = canToggle
-                && mouseX >= left + 4 && mouseX < left + contentW - 4
-                && mouseY >= top + 2 && mouseY < top + missingHeaderHeight - 2;
+        int summaryX = left + 10;
+        int summaryY = top + (missingHeaderHeight - font.lineHeight) / 2;
+        int summaryW = font.width(visibleSummary);
+        boolean headerHovered = canOpenDiagnostics
+                && mouseX >= summaryX && mouseX < summaryX + summaryW
+                && mouseY >= summaryY && mouseY < summaryY + font.lineHeight;
         if (headerHovered) {
-            gfx.fill(left + 2, top + 2, left + contentW - 2,
-                    top + missingHeaderHeight - 2, 0x22FFFFFF);
+            gfx.fill(summaryX - 2, summaryY - 2,
+                    summaryX + summaryW + 2, summaryY + font.lineHeight + 2,
+                    0x22FFFFFF);
         }
-        UIRenderer.textBackdrop(gfx, font, left + 10, top + 4, visibleSummary, C_TEXT_BACKDROP);
-        gfx.drawString(font, visibleSummary, left + 10, top + 4,
+        UIRenderer.textBackdrop(gfx, font, summaryX, summaryY, visibleSummary, C_TEXT_BACKDROP);
+        gfx.drawString(font, visibleSummary, summaryX, summaryY,
                 headerHovered ? 0xFFFFFFFF : hasMissing ? 0xFFFF8888 : 0xFFDDAA00);
 
-        missingToggleX = left + 4;
-        missingToggleY = top + 2;
-        missingToggleW = canToggle ? contentW - 8 : 0;
-        missingToggleH = canToggle ? Math.max(1, missingHeaderHeight - 4) : 0;
+        missingToggleX = canOpenDiagnostics ? summaryX - 2 : 0;
+        missingToggleY = canOpenDiagnostics ? summaryY - 2 : 0;
+        missingToggleW = canOpenDiagnostics ? summaryW + 4 : 0;
+        missingToggleH = canOpenDiagnostics ? font.lineHeight + 4 : 0;
 
         if (!missingExpanded) {
             missingBar.active = false;
@@ -2004,33 +2028,6 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         return lines;
-    }
-
-    private int bookmarkAllActionWidth(Font font) {
-        if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return 0;
-        return 12 + font.width(
-                Component.translatable("rsi.plan.bookmark_all.action").getString());
-    }
-
-    private void renderBookmarkAllAction(GuiGraphics gfx, Font font, int x, int y, int height) {
-        if (MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty()) return;
-
-        String action = Component.translatable("rsi.plan.bookmark_all.action").getString();
-        int width = 12 + font.width(action);
-        bookmarkAllActionX = x;
-        bookmarkAllActionY = y;
-        bookmarkAllActionW = width;
-        bookmarkAllActionH = height;
-        boolean hovered = mouseX >= bookmarkAllActionX
-                && mouseX < bookmarkAllActionX + bookmarkAllActionW
-                && mouseY >= bookmarkAllActionY
-                && mouseY < bookmarkAllActionY + bookmarkAllActionH;
-        UIRenderer.rounded(gfx, x, y, width, height, height / 2f,
-                hovered ? 0xCC338855 : 0xCC1B5E20);
-        gfx.drawString(font, action,
-                x + (width - font.width(action)) / 2,
-                y + (height - font.lineHeight) / 2,
-                hovered ? 0xFFA8E6B5 : 0xFF78B889, false);
     }
 
     // ── Scrolling ─────────────────────────────────────────────────
@@ -2317,6 +2314,10 @@ public final class CraftingPlanScreen extends Screen {
         closeRecipeCandidates();
         if (node.step == null || node.containsCycle()) return;
 
+        ResourceLocation preferenceKey = CraftingResolver
+                .preferenceKey(node.key.stack(1));
+        pendingCandidateSwitch = new PendingCandidateSwitch(
+                node.key, selectedPath.snapshotBranch(node.key), recipeId, preferenceKey);
         int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
         selectedPath.selectBranch(node.key, idx, recipeId);
 
@@ -2325,12 +2326,37 @@ public final class CraftingPlanScreen extends Screen {
         boolean isTarget = node.depth == 0;
         if (isTarget) {
             rootRid = recipeId;
-            ResourceLocation preferenceKey = CraftingResolver
-                    .preferenceKey(node.key.stack(1));
             if (preferenceKey != null) forced.remove(preferenceKey.toString());
         }
 
         sendCraftPacket(rootRid, true, forced, currentRepeat, false);
+    }
+
+    /** 配方切换响应重建树后，重新打开原节点的候选卡片，便于继续切换。 */
+    private void reopenPendingCandidates() {
+        PendingCandidateSwitch pending = pendingCandidateSwitch;
+        pendingCandidateSwitch = null;
+        if (pending == null || treeModel == null) return;
+        PlanTreeNode node = treeModel.findByKey(pending.key());
+        if (node == null || node.step == null) return;
+        openRecipeCandidates(node);
+    }
+
+    private void commitPendingCandidateSwitch() {
+        PendingCandidateSwitch pending = pendingCandidateSwitch;
+        if (pending == null) return;
+        if (pending.preferenceKey() != null) {
+            String recipeId = pending.requestedRecipe().toString();
+            CraftingPlanPreferences.saveRecipeChoice(
+                    PLAN_PREFS_PATH, pending.preferenceKey().toString(), recipeId);
+            CraftingPlanPreferences.setExcluded(PLAN_PREFS_PATH, recipeId, false);
+        }
+    }
+
+    private void rollbackPendingCandidateSwitch() {
+        PendingCandidateSwitch pending = pendingCandidateSwitch;
+        if (pending == null) return;
+        selectedPath.restoreBranch(pending.key(), pending.previous());
     }
 
     /**
@@ -2370,6 +2396,23 @@ public final class CraftingPlanScreen extends Screen {
         setFocused(null);
         dropdownNode = node;
         recipeCandidatePanel.open(node, plan.boundMachineTypes() == null ? Set.of() : plan.boundMachineTypes());
+        recipeCandidatePanel.setPlanDiagnostics(
+                MissingMaterialBookmarkList.textEntries(plan), displayWarnings(plan));
+        resetHoverIntent();
+    }
+
+    /** 底部缺料/警告摘要统一作为诊断入口。 */
+    private void openPlanDiagnostics() {
+        if (treeModel == null || treeModel.root == null || recipeCandidatePanel == null) return;
+        closeMaterialDropdown();
+        unfocusRepeatCountInput();
+        setFocused(null);
+        dropdownNode = treeModel.root;
+        recipeCandidatePanel.open(treeModel.root,
+                plan.boundMachineTypes() == null ? Set.of() : plan.boundMachineTypes());
+        recipeCandidatePanel.setPlanDiagnostics(
+                MissingMaterialBookmarkList.textEntries(plan), displayWarnings(plan));
+        recipeCandidatePanel.showDiagnostics();
         resetHoverIntent();
     }
 
@@ -2537,7 +2580,8 @@ public final class CraftingPlanScreen extends Screen {
         int warningCount = displayWarnings(plan).size();
         boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
         if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
-            missingHeaderHeight = font.lineHeight + 8;
+            // 摘要只有缺料/警告两段文字时，与下方合成数量行保持同高。
+            missingHeaderHeight = Math.max(font.lineHeight + 8, 38);
             int missingLines = 0;
             if (!missingEntries.isEmpty()) {
                 missingLines = 1 + missingTextLineCount(font, missingEntries,
@@ -2546,16 +2590,12 @@ public final class CraftingPlanScreen extends Screen {
             int contentHeight = (missingLines + warningCount) * (font.lineHeight + 4) + 4;
             int fullHeight = missingHeaderHeight + contentHeight + (machineCandidates ? 34 : 0);
             missingFullHeight = fullHeight;
-            if (fullHeight <= missingHeaderHeight) {
-                missingExpanded = false;
-                contentLayoutMissingExpanded = false;
-            }
-            missingAreaHeight = missingExpanded
-                    ? Math.min(fullHeight, TREE_MISSING_MAX_HEIGHT)
-                    : missingHeaderHeight;
-            missingMaxScroll = missingExpanded
-                    ? Math.max(0, fullHeight - missingAreaHeight) : 0;
-            missingScroll = Math.min(missingScroll, missingMaxScroll);
+            // 摘要只作为诊断入口，不再在底部展开第二套内容。
+            missingExpanded = false;
+            contentLayoutMissingExpanded = false;
+            missingAreaHeight = missingHeaderHeight;
+            missingMaxScroll = 0;
+            missingScroll = 0;
         } else {
             missingAreaHeight = missingMaxScroll = missingScroll = 0;
             missingFullHeight = 0;
@@ -2746,13 +2786,12 @@ public final class CraftingPlanScreen extends Screen {
             return true;
         }
         if (button == 0 && materialDropdownNode == null
-                && (recipeCandidatePanel == null || !recipeCandidatePanel.isOpen())
                 && missingToggleW > 0
                 && mx >= missingToggleX && mx < missingToggleX + missingToggleW
                 && my >= missingToggleY && my < missingToggleY + missingToggleH) {
-            missingExpanded = !missingExpanded;
+            missingExpanded = false;
             missingScroll = 0;
-            contentLayoutWidth = -1;
+            openPlanDiagnostics();
             return true;
         }
         if (dropdownNode != null && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
@@ -2820,12 +2859,6 @@ public final class CraftingPlanScreen extends Screen {
             boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
                     && my >= countPillY && my < countPillY + countPillH;
             if (!overRepeatInput) unfocusRepeatCountInput();
-            if (bookmarkAllActionW > 0
-                    && mx >= bookmarkAllActionX && mx < bookmarkAllActionX + bookmarkAllActionW
-                    && my >= bookmarkAllActionY && my < bookmarkAllActionY + bookmarkAllActionH) {
-                bookmarkAllMissingMaterials();
-                return true;
-            }
             for (BookmarkHit hit : bookmarkHits) {
                 if (mx >= hit.x() && mx < hit.x() + hit.w()
                         && my >= hit.y() && my < hit.y() + hit.h()) {

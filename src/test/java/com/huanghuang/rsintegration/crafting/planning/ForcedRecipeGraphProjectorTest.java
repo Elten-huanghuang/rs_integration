@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class ForcedRecipeGraphProjectorTest {
 
     @Test
-    void forcedRecipeReplacesEveryCandidateForItsOutputItem() {
+    void forcedRecipeLeadsWithoutHidingOtherCandidates() {
         MaterialRef nineX = material("forced_log_9x");
         MaterialRef eightX = material("forced_log_8x");
         MaterialRef sevenX = material("forced_log_7x");
@@ -35,7 +35,7 @@ class ForcedRecipeGraphProjectorTest {
                 graph, Map.of(eightX.itemId(), eightFromNine.recipeId()));
 
         assertNotNull(projected);
-        assertEquals(List.of(eightFromNine),
+        assertEquals(List.of(eightFromNine, eightFromSeven),
                 ImmutableRecipeGraphProjector.candidates(projected, eightX, NbtMatchMode.EXACT));
         assertEquals(List.of(nineFromEight),
                 ImmutableRecipeGraphProjector.candidates(projected, nineX, NbtMatchMode.EXACT));

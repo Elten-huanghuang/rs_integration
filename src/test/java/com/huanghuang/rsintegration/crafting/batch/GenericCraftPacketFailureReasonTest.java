@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -76,6 +77,21 @@ class GenericCraftPacketFailureReasonTest extends BootstrapTest {
                 IngredientKey.of(expected), new PlanResponse.Availability(3, 1));
 
         assertFalse(GenericCraftPacket.hasNbtMismatch(materials, Map.of(Items.POTION, 2)));
+    }
+
+    @Test
+    void onlyExplicitPlannerCycleBecomesCycleOutcome() {
+        PureRecipePlanner.Result cycle = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(), List.of(), Map.of(),
+                List.of(), PureRecipePlanner.Status.UNRESOLVABLE, 0, 0, 0,
+                PureRecipePlanner.FailureReason.CYCLE);
+        PureRecipePlanner.Result missing = new PureRecipePlanner.Result(
+                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(), List.of(), Map.of(),
+                List.of(), PureRecipePlanner.Status.UNRESOLVABLE, 0, 0, 0,
+                PureRecipePlanner.FailureReason.MISSING_INPUTS);
+
+        assertTrue(GenericCraftPacket.hasCyclicPureFailure(cycle));
+        assertFalse(GenericCraftPacket.hasCyclicPureFailure(missing));
     }
 
     @Test
