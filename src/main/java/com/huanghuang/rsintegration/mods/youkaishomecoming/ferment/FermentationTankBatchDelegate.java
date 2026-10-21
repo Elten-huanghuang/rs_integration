@@ -32,7 +32,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import org.jetbrains.annotations.NotNull;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Items;

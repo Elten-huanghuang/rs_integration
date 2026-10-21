@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
+import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fml.ModList;
@@ -31,7 +31,7 @@ public final class CosmopolitanTisaneRecipeResolver {
     }
 
     public static boolean isSupportedId(@Nullable ResourceLocation recipeId) {
-        return JeiRecipeIdNormalizer.isCosmopolitanTisane(recipeId);
+        return RecipeIdNormalizer.isCosmopolitanTisane(recipeId);
     }
 
     private static void ensureInitialized() {

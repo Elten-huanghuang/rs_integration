@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;

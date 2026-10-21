@@ -1,27 +1,30 @@
 package com.huanghuang.rsintegration.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.CraftProgressClientEvents;
-import com.huanghuang.rsintegration.crafting.CraftProgressKeybind;
-import com.huanghuang.rsintegration.crafting.CraftProgressOverlay;
+import com.huanghuang.rsintegration.client.recipe.JeiCraftingPlanContext;
+import com.huanghuang.rsintegration.client.recipe.JeiNetworkItemCache;
+import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressClientEvents;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressKeybind;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressOverlay;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup;
 import com.huanghuang.rsintegration.util.ModIds;
-import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
+import com.huanghuang.rsintegration.storage.disk.UnifiedDiskVisibility;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModList;
-import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
-import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
-import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
+import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
+import com.huanghuang.rsintegration.feature.ftbquests.client.FtbQuestJeiRuntime;
+import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands;
 import com.huanghuang.rsintegration.crafting.tree.RecipeBrowserSlowCallDiagnostics;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
-import com.huanghuang.rsintegration.villager.tradelock.client.VillagerTradeLockClient;
+import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubClient;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelClient;
+import com.huanghuang.rsintegration.feature.villager.tradelock.client.VillagerTradeLockClient;
 
 /** Owns client-only listener references so the common mod class remains dedicated-server safe. */
 @OnlyIn(Dist.CLIENT)

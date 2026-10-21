@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.SimpleContainer;

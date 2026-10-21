@@ -1,4 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Array;

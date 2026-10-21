@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.voidupgrade.VoidUpgradeManager;
+import com.huanghuang.rsintegration.feature.voidupgrade.VoidUpgradeManager;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.network.Network;
 import org.spongepowered.asm.mixin.Mixin;

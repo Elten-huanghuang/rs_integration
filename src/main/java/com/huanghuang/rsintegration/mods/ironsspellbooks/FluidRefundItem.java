@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;

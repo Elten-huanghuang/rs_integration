@@ -4,8 +4,7 @@ import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.network.chat.Component;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.machine.StandardMenuProviderOpener;
-import com.huanghuang.rsintegration.sidepanel.network.PlaceboRemoteMenuSnapshotPacket;
+import com.huanghuang.rsintegration.network.gui.PlaceboRemoteMenuSnapshotPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;

@@ -1,17 +1,14 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.craftingstation.CraftingStationAccess;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationResultSlot;
-import com.huanghuang.rsintegration.craftingstation.AnvilTerminalState;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationState;
-import com.huanghuang.rsintegration.craftingstation.SmithingInputSlot;
-import com.huanghuang.rsintegration.craftingstation.SmithingResultSlot;
-import com.huanghuang.rsintegration.craftingstation.SmithingTerminalAccess;
-import com.huanghuang.rsintegration.craftingstation.SmithingTerminalState;
-import com.huanghuang.rsintegration.craftingstation.StonecutterInputSlot;
-import com.huanghuang.rsintegration.craftingstation.StonecutterTerminalState;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationResultSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.AnvilTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationState;
+import com.huanghuang.rsintegration.feature.craftingstation.SmithingTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.container.slot.grid.CraftingGridSlot;
@@ -29,7 +26,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** 在不改 RS 源码的前提下，将合成终端的槽位代理到 RSI 工作站状态。 */
 @Mixin(value = GridContainerMenu.class, remap = false)
-public abstract class GridContainerSmithingMixin implements SmithingTerminalAccess {
+public abstract class GridContainerSmithingMixin implements CraftingStationAccess {
     @Unique
     private static final int RSI_STONECUTTER_INPUT_X = 20;
     @Unique
@@ -88,9 +85,9 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
                         ? new CraftingGridSlot(menu.getGrid().getCraftingMatrix(), index,
                         26 + index % 3 * 18, top + 4 + index / 3 * 18)
                         : rsi$stationMode == CraftingStationMode.SMITHING
-                        ? new SmithingInputSlot(menu, index,
+                        ? new CraftingStationInputSlot(rsi$getSmithingState(), index,
                         index < 3 ? 26 + index * 18 : -1000,
-                        index < 3 ? top + 22 : -1000)
+                        index < 3 ? top + 22 : -1000, index < 3)
                         : rsi$stationMode == CraftingStationMode.STONECUTTER
                         ? new StonecutterInputSlot(menu, index,
                         index == 0 ? RSI_STONECUTTER_INPUT_X : -1000,
@@ -107,7 +104,7 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
                         ? new ResultCraftingGridSlot(menu.getPlayer(), menu.getGrid(),
                         old.getSlotIndex(), 134, top + 22)
                         : rsi$stationMode == CraftingStationMode.SMITHING
-                        ? new SmithingResultSlot(menu, menu.getPlayer(), menu.getGrid(),
+                        ? new CraftingStationResultSlot(menu, menu.getPlayer(), menu.getGrid(),
                         old.getSlotIndex(), 116, top + 22)
                         : new CraftingStationResultSlot(menu, menu.getPlayer(), menu.getGrid(),
                         old.getSlotIndex(),
@@ -128,9 +125,9 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
     private CraftingGridSlot rsi$redirectInputSlot(Container container,
                                                     int index, int x, int y) {
         if (rsi$stationMode == CraftingStationMode.SMITHING) {
-            return new SmithingInputSlot((GridContainerMenu) (Object) this, index,
+            return new CraftingStationInputSlot(rsi$getSmithingState(), index,
                     index < 3 ? 26 + index * 18 : -1000,
-                    index < 3 ? y + 18 : -1000);
+                    index < 3 ? y + 18 : -1000, index < 3);
         }
         if (rsi$stationMode == CraftingStationMode.STONECUTTER) {
             return new StonecutterInputSlot((GridContainerMenu) (Object) this, index,
@@ -150,7 +147,7 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
     private ResultCraftingGridSlot rsi$redirectResultSlot(Player player, IGrid grid,
                                                             int index, int x, int y) {
         if (rsi$stationMode == CraftingStationMode.SMITHING) {
-            return new SmithingResultSlot((GridContainerMenu) (Object) this, player, grid,
+            return new CraftingStationResultSlot((GridContainerMenu) (Object) this, player, grid,
                     index, x - 18, y);
         }
         if (rsi$stationMode == CraftingStationMode.STONECUTTER) {
@@ -171,16 +168,6 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
         if (!player.level().isClientSide && rsi$stationMode != CraftingStationMode.CRAFTING) {
             rsi$getCraftingStationState().returnInputs(player);
         }
-    }
-
-    @Override
-    public boolean rsi$isSmithingMode() {
-        return rsi$stationMode == CraftingStationMode.SMITHING;
-    }
-
-    @Override
-    public void rsi$setSmithingMode(boolean enabled) {
-        rsi$setCraftingStationMode(enabled ? CraftingStationMode.SMITHING : CraftingStationMode.CRAFTING);
     }
 
     @Override
@@ -243,8 +230,8 @@ public abstract class GridContainerSmithingMixin implements SmithingTerminalAcce
         }
     }
 
-    @Override
-    public SmithingTerminalState rsi$getSmithingState() {
+    @Unique
+    private SmithingTerminalState rsi$getSmithingState() {
         if (rsi$smithingState == null) {
             rsi$smithingState = new SmithingTerminalState((GridContainerMenu) (Object) this);
         }

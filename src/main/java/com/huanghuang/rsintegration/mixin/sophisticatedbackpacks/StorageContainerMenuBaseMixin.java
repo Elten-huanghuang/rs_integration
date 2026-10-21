@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
+
 import java.lang.reflect.Method;
 
 import net.minecraft.world.inventory.Slot;

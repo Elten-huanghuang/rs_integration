@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
+
+
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import net.minecraft.server.level.ServerPlayer;

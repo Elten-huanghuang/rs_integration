@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
+import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -18,10 +18,10 @@ import com.huanghuang.rsintegration.mods.goety.GoetyMaterialAvailability;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
-import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
-import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
-import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
+import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -48,10 +48,10 @@ public final class RecipeAvailabilityChecker {
     private RecipeAvailabilityChecker() {}
 
     public static MaterialAvailability check(ServerPlayer player, RecipeAvailabilityKey key) {
-        Recipe<?> recipe = GenericCraftPacket.resolveRecipe(player.serverLevel(), key.recipeId());
+        Recipe<?> recipe = CraftRecipeResolver.resolve(player.serverLevel(), key.recipeId());
         if (recipe == null) return MaterialAvailability.UNKNOWN;
         if (HistoryStagesCompat.isRecipeLocked(recipe, player)) return MaterialAvailability.UNKNOWN;
-        ModType type = GenericCraftPacket.resolveExecutionModType(player, recipe, key.dimension(), key.machinePos());
+        ModType type = CraftMachineBindingSupport.resolveExecutionModType(player, recipe, key.dimension(), key.machinePos());
         var dimension = ResourceKey.create(Registries.DIMENSION, key.dimension());
         var machineLevel = player.server.getLevel(dimension);
         if (CraftExecutionPolicy.requiresBoundMachine(recipe, type)
@@ -69,7 +69,7 @@ public final class RecipeAvailabilityChecker {
         }
         CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
         if (endpoint == null || CraftStorageEndpoints.isRefinedStorage(endpoint)) {
-            CraftStorageEndpoint resolved = GenericCraftPacket.resolveStorageEndpointForRecipe(
+            CraftStorageEndpoint resolved = CraftPlanStorageService.resolveEndpoint(
                     player, key.dimension(), key.machinePos(), type);
             if (resolved != null) endpoint = resolved;
         }

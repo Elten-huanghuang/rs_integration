@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
+import com.huanghuang.rsintegration.client.input.GuiNavStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;

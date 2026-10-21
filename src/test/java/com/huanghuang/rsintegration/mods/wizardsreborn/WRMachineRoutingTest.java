@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
-import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 

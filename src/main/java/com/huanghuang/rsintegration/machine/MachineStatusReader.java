@@ -57,7 +57,7 @@ public final class MachineStatusReader {
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
             return readFurnace(furnace);
         }
-        if (isIronFurnace(be)) {
+        if (FurnaceMachineAccess.isIronFurnace(be)) {
             return readIronFurnace(be);
         }
 
@@ -65,9 +65,12 @@ public final class MachineStatusReader {
     }
 
     private static MachineStatus readFurnace(AbstractFurnaceBlockEntity furnace) {
-        ItemStack input  = furnace.getItem(0).copy();
-        ItemStack fuel   = furnace.getItem(1).copy();
-        ItemStack output = furnace.getItem(2).copy();
+        ItemStack input = furnace.getItem(
+                FurnaceMachineAccess.INPUT_SLOT).copy();
+        ItemStack fuel = furnace.getItem(
+                FurnaceMachineAccess.FUEL_SLOT).copy();
+        ItemStack output = furnace.getItem(
+                FurnaceMachineAccess.OUTPUT_SLOT).copy();
 
         int cookProgress = readIntField(furnace, COOKING_PROGRESS);
         int cookTotal    = readIntField(furnace, COOKING_TOTAL_TIME);
@@ -96,7 +99,7 @@ public final class MachineStatusReader {
 
     private static MachineStatus readIronFurnace(BlockEntity be) {
         try {
-            if ((boolean) be.getClass().getMethod("isFactory").invoke(be)) {
+            if (FurnaceMachineAccess.isFactoryIronFurnace(be)) {
                 Container container = (Container) be;
                 ItemStack input = ItemStack.EMPTY;
                 ItemStack output = ItemStack.EMPTY;
@@ -119,11 +122,14 @@ public final class MachineStatusReader {
                         : (progress > 0 || !input.isEmpty() ? MachineState.WORKING : MachineState.IDLE);
                 return new MachineStatus(state, progress, total > 0 ? total : 200, input, output, ItemStack.EMPTY);
             }
-            boolean ordinary = (boolean) be.getClass().getMethod("isFurnace").invoke(be);
+            boolean ordinary = FurnaceMachineAccess.isOrdinaryIronFurnace(be);
             if (!ordinary) return MachineStatus.UNKNOWN;
-            ItemStack input = ((Container) be).getItem(0).copy();
-            ItemStack fuel = ((Container) be).getItem(1).copy();
-            ItemStack output = ((Container) be).getItem(2).copy();
+            ItemStack input = ((Container) be).getItem(
+                    FurnaceMachineAccess.INPUT_SLOT).copy();
+            ItemStack fuel = ((Container) be).getItem(
+                    FurnaceMachineAccess.FUEL_SLOT).copy();
+            ItemStack output = ((Container) be).getItem(
+                    FurnaceMachineAccess.OUTPUT_SLOT).copy();
             int progress = be.getClass().getField("cookTime").getInt(be);
             int total = be.getClass().getField("totalCookTime").getInt(be);
             boolean burning = (boolean) be.getClass().getMethod("isBurning").invoke(be);
@@ -133,15 +139,6 @@ public final class MachineStatusReader {
         } catch (ReflectiveOperationException | ClassCastException exception) {
             return MachineStatus.UNKNOWN;
         }
-    }
-
-    private static boolean isIronFurnace(BlockEntity be) {
-        Class<?> type = be.getClass();
-        while (type != null) {
-            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
-            type = type.getSuperclass();
-        }
-        return false;
     }
 
     private static int readIntField(Object target, Field field) {

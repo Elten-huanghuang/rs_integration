@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
-import com.huanghuang.rsintegration.recipe.WRAlchemyRecipeHandler.MachineInput;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyRecipeHandler.MachineInput;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;

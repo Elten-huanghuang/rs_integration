@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;

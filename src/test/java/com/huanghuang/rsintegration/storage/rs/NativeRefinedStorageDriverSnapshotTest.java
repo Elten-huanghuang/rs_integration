@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;

@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

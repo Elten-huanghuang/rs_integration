@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;

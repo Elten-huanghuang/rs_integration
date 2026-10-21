@@ -1,0 +1,361 @@
+package com.huanghuang.rsintegration.storage.disk.rs;
+
+import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskSummary;
+import com.huanghuang.rsintegration.storage.disk.core.ResourceTable.DuplicateRepair;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore.Limits;
+import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore;
+import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore.Manifest;
+import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore.Saved;
+import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore.Snapshot;
+import com.refinedmods.refinedstorage.apiimpl.API;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.storage.LevelResource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.IOException;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Stream;
+
+/** 每服务器一个管理器；只有一份冻结快照在后台保存，队列不会无限增长。 */
+public final class UnifiedDiskManager {
+    private static final Logger LOGGER = LogManager.getLogger(UnifiedDiskManager.class);
+    private static final Map<MinecraftServer, UnifiedDiskManager> SERVERS = new IdentityHashMap<>();
+    public static final class Entry {
+        public final UUID id;
+        public UnifiedDiskCore core;
+        public Manifest manifest;
+        public String error;
+        private UnifiedDiskFailure failure;
+        private UnifiedDiskSummary summary;
+        Entry(UUID id) { this.id = id; }
+    }
+    private record Pending(Entry entry, Snapshot snapshot, CompletableFuture<Saved> result) {}
+    private final MinecraftServer server;
+    private final DiskFileStore files;
+    private final ExecutorService writer = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "RSI unified disk writer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final Map<UUID, Entry> entries = new HashMap<>();
+    private final Map<UUID, Integer> tooltipRequests = new HashMap<>();
+    private final Map<UUID, Set<UUID>> failureNotifications = new HashMap<>();
+    private final UnifiedMountCoordinator mounts = new UnifiedMountCoordinator();
+    private Pending pending;
+    private int activeBackups;
+    private CompletableFuture<Void> backupsFinished = CompletableFuture.completedFuture(null);
+    private final UUID worldId;
+    private final boolean enabled;
+    private final String identityError;
+    private final UnifiedDiskFailure identityFailure;
+
+    private UnifiedDiskManager(MinecraftServer server) {
+        this.server = server;
+        files = new DiskFileStore(server.getWorldPath(LevelResource.ROOT).resolve("data/rs_integration/unified_disks"));
+        UUID identity = null;
+        String failure = null;
+        UnifiedDiskFailure diagnostic = null;
+        try { identity = files.worldIdentity(); }
+        catch (IOException e) {
+            failure = e.getMessage(); diagnostic = UnifiedDiskFailure.from(e);
+            LOGGER.error("[RSI] 统一盘世界身份不可用，禁用挂载并保留全部文件", e);
+        }
+        worldId = identity; identityError = failure;
+        identityFailure = diagnostic;
+        enabled = identity != null && RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK);
+    }
+
+    public static UnifiedDiskManager get(ServerLevel level) {
+        MinecraftServer server = level.getServer();
+        if (!server.isSameThread()) throw new IllegalStateException("统一盘管理器必须在服务器主线程访问");
+        return SERVERS.computeIfAbsent(server, UnifiedDiskManager::new);
+    }
+
+    public static UnifiedDiskManager existing(MinecraftServer server) { return SERVERS.get(server); }
+    public UUID worldId() { return worldId; }
+    public boolean enabled() { return enabled; }
+    public UnifiedMountCoordinator mounts() { return mounts; }
+    public Map<UUID, Entry> entries() { return Collections.unmodifiableMap(entries); }
+
+    /** 只暂停文件提交，游戏中的存取继续更新内存；备份线程关闭凭据即可解除暂停。 */
+    public final class BackupLease implements AutoCloseable {
+        private boolean closed;
+
+        private BackupLease() {}
+
+        public void prepareFiles() throws IOException { files.prepareBackup(); }
+
+        @Override public void close() {
+            synchronized (UnifiedDiskManager.this) {
+                if (closed) return;
+                closed = true;
+                if (--activeBackups == 0) backupsFinished.complete(null);
+            }
+        }
+    }
+
+    public synchronized BackupLease beginBackup() throws IOException {
+        if (!server.isSameThread()) throw new IllegalStateException("备份检查点必须在服务器主线程冻结");
+        if (identityError != null) throw new IOException(identityError);
+        if (activeBackups == 0) {
+            flush();
+            for (Entry entry : entries.values()) {
+                if (needsSave(entry)) throw new IOException("统一盘保存失败，不能创建不完整备份: " + entry.id);
+            }
+            backupsFinished = new CompletableFuture<>();
+        }
+        activeBackups++;
+        return new BackupLease();
+    }
+
+    private synchronized boolean backingUp() { return activeBackups > 0; }
+
+    private boolean needsSave(Entry entry) {
+        return entry.core != null && (entry.core.dirty() || !entry.manifest.limits().equals(entry.core.limits));
+    }
+
+    public List<UUID> savedDiskIds() throws IOException {
+        if (identityError != null) throw new IOException(identityError);
+        return files.savedDiskIds();
+    }
+
+    /** 找回原库存的物理凭据；不创建空库存、不更换 UUID、不复制库存。 */
+    public void restoreIdentity(UUID id, ItemStack replacement) throws IOException {
+        if (!enabled()) throw new IOException("统一盘已关闭或世界身份不可用");
+        if (!(replacement.getItem() instanceof UnifiedDiskItem item) || replacement.getCount() != 1
+                || replacement.hasTag()) throw new IOException("找回必须使用新的空白归墟盘");
+        Entry known = entry(id);
+        if (known.core == null) throw new IOException("原库存不可用：" + known.error);
+        if (!id.equals(known.core.diskId) || !worldId().equals(known.core.worldId)) {
+            throw new IOException("原库存身份不匹配");
+        }
+        item.setIdentity(replacement, id, worldId());
+    }
+
+    public boolean allowTooltipRequest(UUID player) {
+        int tick = server.getTickCount();
+        Integer previous = tooltipRequests.get(player);
+        if (previous != null && tick - previous < 10) return false;
+        tooltipRequests.put(player, tick);
+        return true;
+    }
+
+    public void forgetTooltipPlayer(UUID player) {
+        tooltipRequests.remove(player);
+        for (Set<UUID> notified : failureNotifications.values()) notified.remove(player);
+    }
+
+    public UnifiedDiskFailure failure(UUID id) {
+        if (identityFailure != null) return identityFailure;
+        if (!enabled()) return UnifiedDiskFailure.disabled();
+        Entry known = entries.get(id);
+        return known == null ? entry(id).failure : known.failure;
+    }
+
+    /** 每次登录、每张盘只提醒一次；离线拥有者在后续 tick 中补发。 */
+    public void notifyFailure(UUID id, UUID recipient) {
+        if (id == null || recipient == null) return;
+        UnifiedDiskFailure failure = failure(id);
+        if (failure == null) return;
+        ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+        if (player == null || !failureNotifications.computeIfAbsent(id, ignored -> new HashSet<>()).add(recipient)) return;
+        Entry entry = entries.get(id);
+        boolean quarantined = identityFailure == null && enabled() && entry != null && entry.error == null;
+        ChatFormatting color = quarantined ? ChatFormatting.YELLOW : ChatFormatting.RED;
+        player.sendSystemMessage(Component.translatable(quarantined
+                ? "rsi.unified_disk.quarantine.notice" : "rsi.unified_disk.failure.notice", id.toString())
+                .withStyle(color, ChatFormatting.BOLD));
+        player.sendSystemMessage(failure.reason().copy().withStyle(color));
+        player.sendSystemMessage(failure.action().copy().withStyle(ChatFormatting.YELLOW));
+        player.sendSystemMessage(Component.translatable(quarantined
+                ? "item.rs_integration.unified_storage_disk.failure.quarantine_preserved"
+                : "item.rs_integration.unified_storage_disk.failure.preserved")
+                .withStyle(ChatFormatting.GRAY));
+    }
+
+    public UnifiedDiskSummary summary(UUID id) {
+        Entry known = entries.get(id);
+        if (known != null && known.core == null && known.error == null && known.summary != null) return known.summary;
+        Entry entry = entry(id);
+        if (entry.core == null) return null;
+        entry.summary = UnifiedDiskSummary.from(entry.core);
+        return entry.summary;
+    }
+
+    public Entry entry(UUID id) {
+        Entry entry = entries.computeIfAbsent(id, Entry::new);
+        if (identityError != null) { entry.error = identityError; entry.failure = identityFailure; return entry; }
+        if (entry.core != null || entry.error != null) return entry;
+        try {
+            entry.manifest = files.manifest(id);
+            UnifiedDiskCore loaded = files.load(worldId, id,
+                    RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
+                    RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES));
+            if (!entry.manifest.limits().equals(loaded.limits) && !backingUp()) {
+                // 先原子提交容量描述，再对外开放扩容库存；复用原页，不复制库存。
+                entry.manifest = files.save(Snapshot.freeze(loaded), entry.manifest).manifest();
+            }
+            entry.core = loaded;
+            logDuplicateRepairs(id, loaded);
+            entry.failure = UnifiedDiskFailure.quarantined(loaded);
+            if (entry.failure != null) {
+                LOGGER.warn("[RSI] 统一盘 {} 已隔离 {} 项缺失物品、{} 项缺失流体，正常库存仍可使用",
+                        id, loaded.items.quarantinedSize(), loaded.fluids.quarantinedSize());
+                LOGGER.warn("[RSI] 缺失物品注册名（最多 16 项）: {}；缺失流体注册名（最多 16 项）: {}",
+                        loaded.items.quarantinedIds().stream().limit(16).toList(),
+                        loaded.fluids.quarantinedIds().stream().limit(16).toList());
+            }
+        } catch (Exception e) {
+            entry.error = e.getMessage();
+            entry.failure = UnifiedDiskFailure.from(e);
+            entry.summary = null;
+            LOGGER.error("[RSI] 统一盘 {} 不可用，保留原始文件，拒绝创建空库存", id, e);
+        }
+        return entry;
+    }
+
+    private void logDuplicateRepairs(UUID id, UnifiedDiskCore core) {
+        List<DuplicateRepair> repairs = Stream.concat(core.items.duplicateRepairs().stream(),
+                core.fluids.duplicateRepairs().stream()).toList();
+        if (repairs.isEmpty()) return;
+        LOGGER.warn("[RSI] 统一盘 {} 已自动合并 {} 条重复资源记录，库存数量和原始文件均已保留",
+                id, repairs.size());
+        repairs.stream().limit(16).forEach(repair -> LOGGER.warn(
+                "[RSI] 重复资源已合并: kind={} resource={} keptSlot={} mergedSlot={}",
+                repair.kind(), repair.resource(), repair.keptSlot(), repair.mergedSlot()));
+    }
+
+    public UnifiedDiskRoot create(UUID owner) throws IOException {
+        if (!enabled) throw new IOException("统一盘已关闭");
+        if (backingUp()) throw new IOException("正在备份存档，请稍后初始化统一盘");
+        UUID id = UUID.randomUUID();
+        Limits limits = new Limits(RSStorageConfig.diskLimit(RSStorageConfig.DISK_ITEM_ENTRIES),
+                RSStorageConfig.diskLimit(RSStorageConfig.DISK_FLUID_ENTRIES),
+                RSStorageConfig.diskLimit(RSStorageConfig.DISK_ENTRY_BYTES),
+                RSStorageConfig.diskLimit(RSStorageConfig.DISK_PAYLOAD_BYTES));
+        UnifiedDiskCore core = new UnifiedDiskCore(worldId, id, owner, limits);
+        Saved saved = files.save(Snapshot.freeze(core), null);
+        Entry entry = new Entry(id);
+        entry.core = core;
+        entry.manifest = saved.manifest();
+        entries.put(id, entry);
+        return new UnifiedDiskRoot(this, id, worldId, owner);
+    }
+
+    public UnifiedDiskRoot resolve(ItemStack stack, ServerLevel level) {
+        if (!enabled || !(stack.getItem() instanceof UnifiedDiskItem item) || !item.isValid(stack)
+                || stack.getTag().getInt("Format") != 1 || !worldId.equals(item.worldId(stack))) return null;
+        UUID id = item.getId(stack);
+        var disk = API.instance().getStorageDiskManager(level).get(id);
+        if (disk instanceof UnifiedDiskRoot root) {
+            return root.compatible() && id.equals(root.id()) && worldId.equals(root.worldId()) ? root : null;
+        }
+        if (disk != null) {
+            LOGGER.warn("[RSI] 统一盘 {} 在 RS 管理器中存在错误类型代理: {}", id, disk.getFactoryId());
+            return null;
+        }
+        Entry entry = entry(id);
+        if (entry.core == null) return null;
+        UnifiedDiskRoot root = new UnifiedDiskRoot(this, id, worldId, entry.core.owner);
+        API.instance().getStorageDiskManager(level).set(id, root);
+        API.instance().getStorageDiskManager(level).markForSaving();
+        return root;
+    }
+
+    public void tick() {
+        mounts.sweep();
+        if (server.getTickCount() % 100 == 0) {
+            for (Entry entry : entries.values()) {
+                if (entry.failure != null && entry.manifest != null) notifyFailure(entry.id, entry.manifest.owner());
+            }
+        }
+        if (pending != null && pending.result.isDone()) finish();
+        if (!backingUp() && pending == null && server.getTickCount() % 100 == 0) {
+            for (Entry entry : entries.values()) {
+                if (needsSave(entry)) { schedule(entry); break; }
+            }
+        }
+        // 非挂载的干净核心可逐出；UUID 代理及磁盘文件继续保留。
+        if (server.getTickCount() % 1200 == 0) {
+            for (Entry entry : entries.values()) {
+                if (entry.core != null && !needsSave(entry) && !mounts.mounted(entry.id)
+                        && (pending == null || pending.entry != entry)) {
+                    entry.summary = UnifiedDiskSummary.from(entry.core);
+                    entry.core = null;
+                }
+            }
+        }
+    }
+
+    private void schedule(Entry entry) {
+        Snapshot snapshot = Snapshot.freeze(entry.core);
+        Manifest previous = entry.manifest;
+        pending = new Pending(entry, snapshot, CompletableFuture.supplyAsync(() -> {
+            try { return files.save(snapshot, previous); }
+            catch (IOException e) { throw new IllegalStateException(e); }
+        }, writer));
+    }
+
+    private void finish() {
+        Pending completed = pending;
+        pending = null;
+        try {
+            Saved saved = completed.result.join();
+            completed.entry.manifest = saved.manifest();
+            completed.entry.core.items.acknowledge(completed.snapshot.items());
+            completed.entry.core.fluids.acknowledge(completed.snapshot.fluids());
+            completed.entry.core.acknowledgeMagic(completed.snapshot.coreMagic());
+        } catch (RuntimeException e) {
+            LOGGER.error("[RSI] 统一盘 {} 保存失败，保留 dirty 与旧检查点，等待重试", completed.entry.id, e);
+        }
+    }
+
+    public void flush() {
+        if (backingUp()) return;
+        if (pending != null) finish();
+        for (Entry entry : entries.values()) {
+            if (needsSave(entry)) { schedule(entry); finish(); }
+        }
+    }
+
+    public static void stop(MinecraftServer server) {
+        UnifiedDiskManager manager = SERVERS.get(server);
+        if (manager == null) return;
+        CompletableFuture<Void> backups;
+        synchronized (manager) { backups = manager.backupsFinished; }
+        // 备份凭据由后台线程直接释放，不依赖已停止的服务器任务队列。
+        backups.join();
+        manager.flush();
+        manager.writer.shutdown();
+        manager.mounts.clear();
+        SERVERS.remove(server);
+    }
+
+    public String diagnostic(UUID id) {
+        Entry entry = entry(id);
+        if (entry.core == null) return "盘=" + id + "，不可用=" + entry.error;
+        return "盘=" + id + "，世界=" + worldId + "，物品种类=" + entry.core.items.size()
+                + "，流体种类=" + entry.core.fluids.size() + "，载荷=" + entry.core.payloadBytes()
+                + "，dirty=" + entry.core.dirty() + "，保存中=" + (pending != null && pending.entry == entry)
+                + "，隔离物品=" + entry.core.items.quarantinedSize() + "，隔离流体=" + entry.core.fluids.quarantinedSize()
+                + "，提交=" + entry.manifest.commit() + "，挂载=" + mounts.location(id);
+    }
+}

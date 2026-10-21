@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;

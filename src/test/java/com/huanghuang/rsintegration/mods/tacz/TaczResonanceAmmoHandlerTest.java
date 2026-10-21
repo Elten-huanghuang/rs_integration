@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.mods.tacz;
 
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.electronwill.nightconfig.core.CommentedConfig;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskWrapper;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.IRSAPI;
 import com.refinedmods.refinedstorage.apiimpl.API;

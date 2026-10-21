@@ -13,7 +13,7 @@ import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
-import com.huanghuang.rsintegration.recipe.DeepFryingRecipeHandler;
+import com.huanghuang.rsintegration.mods.casualnessdelight.DeepFryingRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.CasualnessDelightReflection;
 import net.minecraft.core.BlockPos;

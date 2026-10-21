@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.magic.route;
 
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
 import com.huanghuang.rsintegration.magic.MagicDiskStore;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceNetworkPool;

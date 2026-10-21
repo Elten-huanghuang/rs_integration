@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.confluence;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModType;

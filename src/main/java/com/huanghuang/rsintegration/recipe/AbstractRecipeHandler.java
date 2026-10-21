@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import net.minecraft.world.item.crafting.Recipe;
 

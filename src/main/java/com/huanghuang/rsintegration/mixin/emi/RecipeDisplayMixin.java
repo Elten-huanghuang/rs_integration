@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.emi;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.emi.EmiCraftButtonDecorator;
-import com.huanghuang.rsintegration.compat.emi.EmiCraftButtonPlacement;
+import com.huanghuang.rsintegration.mods.emi.EmiCraftButtonDecorator;
+import com.huanghuang.rsintegration.mods.emi.EmiCraftButtonPlacement;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.screen.RecipeDisplay;
 import dev.emi.emi.screen.WidgetGroup;

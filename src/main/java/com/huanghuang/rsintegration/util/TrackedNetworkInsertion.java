@@ -6,7 +6,7 @@ import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import net.minecraft.server.level.ServerPlayer;
 
 /** Inserts an item while recording the accepted delta before the real mutation. */

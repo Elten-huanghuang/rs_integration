@@ -2,8 +2,8 @@ package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskAmountResolver;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;

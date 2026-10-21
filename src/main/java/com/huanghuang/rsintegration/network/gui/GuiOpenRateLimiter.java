@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.network.gui;
 
 import com.huanghuang.rsintegration.config.GuiTimingConfig;
+import com.huanghuang.rsintegration.util.PlayerRateLimiter;
 
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server-side rate limiter for machine GUI open requests.
@@ -12,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * and OOM-ing the server with BlockEntity lookups + NetworkHooks.
  */
 public final class GuiOpenRateLimiter {
-    private static final Map<UUID, Long> LAST_OPEN_TIME = new ConcurrentHashMap<>();
+    private static final PlayerRateLimiter LIMITER = new PlayerRateLimiter();
 
     private GuiOpenRateLimiter() {}
 
@@ -21,12 +20,7 @@ public final class GuiOpenRateLimiter {
     }
 
     static boolean isRateLimited(UUID playerId, long now, long intervalMs) {
-        Long last = LAST_OPEN_TIME.get(playerId);
-        if (last != null && (now - last) < intervalMs) {
-            return true;
-        }
-        LAST_OPEN_TIME.put(playerId, now);
-        return false;
+        return LIMITER.isRateLimited(playerId, now, intervalMs);
     }
 
     private static long configuredIntervalMs() {
@@ -38,6 +32,6 @@ public final class GuiOpenRateLimiter {
     }
 
     public static void onPlayerLogout(UUID playerId) {
-        LAST_OPEN_TIME.remove(playerId);
+        LIMITER.remove(playerId);
     }
 }

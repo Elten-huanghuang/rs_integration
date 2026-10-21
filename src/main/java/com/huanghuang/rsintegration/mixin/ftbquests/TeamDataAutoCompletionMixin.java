@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionAutoCompletionContext;
-import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionAutoCompletionContext;
+import com.huanghuang.rsintegration.feature.ftbquests.StorageQuestScanService;
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import dev.ftb.mods.ftbquests.quest.Quest;

@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.crafting.fluid;
 
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
+import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
@@ -223,7 +222,10 @@ class FluidContainerExecutionTest extends BootstrapTest {
         RecipeManager manager = mock(RecipeManager.class);
         when(level.getRecipeManager()).thenReturn(manager);
         when(manager.byKey(recipe.getId())).thenReturn(Optional.empty());
-        var resolve = GenericCraftPacket.class.getDeclaredMethod("resolveRecipe", ServerLevel.class, recipe.getId().getClass());
+        Class<?> resolverClass = Class.forName(
+                "com.huanghuang.rsintegration.crafting.batch.CraftRecipeResolver");
+        var resolve = resolverClass.getDeclaredMethod(
+                "resolve", ServerLevel.class, recipe.getId().getClass());
         resolve.setAccessible(true);
         assertSame(recipe, resolve.invoke(null, level, recipe.getId()));
     }

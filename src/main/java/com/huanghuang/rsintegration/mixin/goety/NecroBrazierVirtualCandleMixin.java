@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.goety;
 
-import com.huanghuang.rsintegration.magic.BrazierSoulPort;
+import com.huanghuang.rsintegration.mods.goety.magic.BrazierSoulPort;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;

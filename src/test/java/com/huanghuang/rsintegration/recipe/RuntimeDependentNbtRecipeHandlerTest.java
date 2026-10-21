@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.mods.malum.MalumRecipeHandler;
+import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarRecipeHandler;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.NonNullList;

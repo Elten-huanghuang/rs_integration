@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.jei;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.client.JeiNetworkOverlayRenderer;
+import com.huanghuang.rsintegration.client.recipe.JeiNetworkOverlayRenderer;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.gui.overlay.IngredientListRenderer;

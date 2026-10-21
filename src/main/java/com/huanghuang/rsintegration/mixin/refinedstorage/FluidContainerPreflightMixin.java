@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidTransfer;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidTransfer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.network.security.Permission;

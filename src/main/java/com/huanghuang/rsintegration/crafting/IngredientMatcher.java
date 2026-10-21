@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;

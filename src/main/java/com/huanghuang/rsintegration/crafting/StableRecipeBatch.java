@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.server.level.ServerLevel;

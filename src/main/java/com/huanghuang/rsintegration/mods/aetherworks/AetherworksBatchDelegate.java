@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -14,7 +14,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
-import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRecipeHandler;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;

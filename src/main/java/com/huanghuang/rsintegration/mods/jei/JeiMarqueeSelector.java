@@ -4,10 +4,10 @@ import com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen;
 import java.lang.reflect.Modifier;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.client.recipe.RecipeBrowserBridge;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.client.input.RSIKeyBindings;
+import com.huanghuang.rsintegration.mods.jei.RSJeiPlugin;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import mezz.jei.api.ingredients.ITypedIngredient;

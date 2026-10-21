@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.embers;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 

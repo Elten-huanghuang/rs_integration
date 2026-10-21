@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
-import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import net.minecraft.nbt.CompoundTag;

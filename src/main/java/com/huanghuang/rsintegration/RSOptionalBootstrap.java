@@ -1,32 +1,35 @@
 package com.huanghuang.rsintegration;
 
+
+
+import com.huanghuang.rsintegration.network.machine.MachineNetworkHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSBindingHook;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockEntities;
-import com.huanghuang.rsintegration.magic.ResonantMagicBindingHintOverlay;
-import com.huanghuang.rsintegration.magic.ResonantMagicHud;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockEntities;
+import com.huanghuang.rsintegration.feature.resonance.magic.client.ResonantMagicBindingHintOverlay;
+import com.huanghuang.rsintegration.feature.resonance.magic.client.ResonantMagicHud;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskFactory;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
-import com.huanghuang.rsintegration.resonance.item.ResonanceDiskItem;
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
-import com.huanghuang.rsintegration.resonance.bridge.RSInventoryBridge;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.client.RSIKeyBindings;
-import com.huanghuang.rsintegration.voidupgrade.RSVoidUpgradeItem;
-import com.huanghuang.rsintegration.voidupgrade.network.VoidUpgradeNetworkHandler;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskFactory;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.feature.resonance.item.ResonanceDiskItem;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageResolvers;
+import com.huanghuang.rsintegration.feature.resonance.bridge.RSInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.passive.PassiveEffectEngine;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelClient;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelModule;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.client.input.RSIKeyBindings;
+import com.huanghuang.rsintegration.feature.voidupgrade.RSVoidUpgradeItem;
+import com.huanghuang.rsintegration.feature.voidupgrade.network.VoidUpgradeNetworkHandler;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskFactory;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskEvents;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipPackets;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskTooltipClient;
-import com.huanghuang.rsintegration.disk.rs.RSInfiniteDiskTooltip;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskFactory;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskItem;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskEvents;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskTooltipPackets;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskTooltipClient;
+import com.huanghuang.rsintegration.storage.disk.rs.RSInfiniteDiskTooltip;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.apiimpl.API;
 import net.minecraft.server.level.ServerPlayer;
@@ -92,7 +95,7 @@ public final class RSOptionalBootstrap {
     }
 
     public static void onPlayerLoggedIn(ServerPlayer player) {
-        RSSidePanelNetworkHandler.sendBindingSync(player);
+        MachineNetworkHandler.sendBindingSync(player);
     }
 
     public static void onPlayerChangedDimension(ServerPlayer player) {

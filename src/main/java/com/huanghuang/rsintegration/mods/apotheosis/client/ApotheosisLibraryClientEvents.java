@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.apotheosis.client;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -8,7 +9,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryImp
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryLevelPacket;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApotheosisLibraryScanResponsePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
+import com.huanghuang.rsintegration.machine.client.data.BindingCache;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryBinding;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;

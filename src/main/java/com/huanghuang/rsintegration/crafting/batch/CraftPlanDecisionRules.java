@@ -5,6 +5,9 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
+import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -18,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /** 纯规划结果与执行前路由判断，不读写世界、玩家或缓存。 */
@@ -208,6 +212,28 @@ public final class CraftPlanDecisionRules {
                 && !plan.missing().isEmpty()
                 && demandTree != null
                 && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS;
+    }
+
+    static boolean matchesAsyncRequest(
+            PlanningSnapshot snapshot, UUID playerId, ResourceLocation recipeId,
+            long requestGeneration, Map<ResourceLocation, ResourceLocation> forcedRecipes) {
+        return matchesAsyncRequest(snapshot, playerId, recipeId, requestGeneration,
+                forcedRecipes, PlanningPreferences.empty());
+    }
+
+    static boolean matchesAsyncRequest(
+            PlanningSnapshot snapshot, UUID playerId, ResourceLocation recipeId,
+            long requestGeneration, Map<ResourceLocation, ResourceLocation> forcedRecipes,
+            PlanningPreferences preferences) {
+        return snapshot.playerId().equals(playerId)
+                && snapshot.recipeId().equals(recipeId)
+                && snapshot.requestGeneration() == requestGeneration
+                && snapshot.forcedRecipes().equals(forcedRecipes)
+                && snapshot.preferences().equals(preferences);
+    }
+
+    static boolean shouldFallbackAfterAsyncFailure(Throwable failure) {
+        return SynchronousFallbackReason.fromAsyncFailure(failure).isPresent();
     }
 
     private static long itemCount(Map<Item, ? extends Number> counts, Item item) {

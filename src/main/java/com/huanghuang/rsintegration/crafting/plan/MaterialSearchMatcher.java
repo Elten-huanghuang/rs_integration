@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
-import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 
 import java.util.Locale;
 

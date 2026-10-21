@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 
 /**
  * 即时配方的批量执行契约。

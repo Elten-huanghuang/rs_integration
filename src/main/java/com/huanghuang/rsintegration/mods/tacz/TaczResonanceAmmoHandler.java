@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mods.tacz;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
 import com.tacz.guns.api.item.IAmmo;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
-import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+
+
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;

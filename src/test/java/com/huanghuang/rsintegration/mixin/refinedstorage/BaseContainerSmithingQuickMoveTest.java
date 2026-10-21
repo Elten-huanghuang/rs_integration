@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.craftingstation.CraftingStationInputSlot;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationResultSlot;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationResultSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationState;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Abilities;

@@ -1,7 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.LegacyRsCraftStorageEndpoint;
 
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageResolvers;
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageResolvers;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;

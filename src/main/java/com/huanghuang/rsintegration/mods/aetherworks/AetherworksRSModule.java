@@ -7,9 +7,9 @@ import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSet
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.recipe.AetherworksRecipeHandler;
-import com.huanghuang.rsintegration.recipe.AetherworksToolStationRecipeHandler;
-import com.huanghuang.rsintegration.recipe.AetherworksMetalFormerRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;

@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.huanghuang.rsintegration.machine.client.MachineHubInputHandler;
+import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.client.gui.components.events.GuiEventListener;

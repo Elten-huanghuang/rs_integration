@@ -8,7 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.recipe.ParrotFeedingRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.ParrotFeedingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;

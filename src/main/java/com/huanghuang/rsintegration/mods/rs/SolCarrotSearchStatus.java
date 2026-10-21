@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.rs;
 
-import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.mojang.logging.LogUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;

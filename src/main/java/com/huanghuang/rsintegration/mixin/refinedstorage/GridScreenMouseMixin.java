@@ -1,13 +1,14 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.machine.MachineHubInputHandler;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
-import com.huanghuang.rsintegration.voidupgrade.client.VoidUpgradeClient;
+import com.huanghuang.rsintegration.machine.client.MachineHub;
+import com.huanghuang.rsintegration.machine.client.MachineHubInputHandler;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
+import com.huanghuang.rsintegration.feature.voidupgrade.client.VoidUpgradeClient;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;

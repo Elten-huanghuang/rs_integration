@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.LogSampler;

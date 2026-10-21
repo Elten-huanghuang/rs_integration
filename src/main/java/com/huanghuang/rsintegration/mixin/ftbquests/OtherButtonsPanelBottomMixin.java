@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.client.ConfirmCheckmarksButton;
+import com.huanghuang.rsintegration.feature.ftbquests.client.ConfirmCheckmarksButton;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import dev.ftb.mods.ftbquests.client.gui.quests.OtherButtonsPanelBottom;

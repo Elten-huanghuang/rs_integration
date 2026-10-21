@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.distantworlds;
+
 import java.lang.reflect.Method;
 
 import net.minecraft.network.FriendlyByteBuf;

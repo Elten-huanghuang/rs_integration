@@ -9,6 +9,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class MagicResourceDiskStoreTest extends BootstrapTest {
     @Test
@@ -38,5 +39,18 @@ class MagicResourceDiskStoreTest extends BootstrapTest {
                 new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())));
 
         assertArrayEquals(original, copy);
+    }
+
+    @Test
+    void readsLegacyStandaloneSoulRecord() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream output = new DataOutputStream(bytes)) {
+            output.writeInt(321);
+        }
+
+        int amount = MagicResourceDiskStore.readLegacySouls(
+                new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())));
+
+        assertEquals(321, amount);
     }
 }

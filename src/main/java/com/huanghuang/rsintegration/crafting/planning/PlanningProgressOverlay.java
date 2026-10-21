@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressScreen;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressScreen;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;

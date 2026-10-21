@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mixin.malum;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilityService;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskAbilities;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskAbilityService;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -13,8 +14,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskAccess;
-import com.huanghuang.rsintegration.resonance.bd.BDResonanceDiskData;
+import com.huanghuang.rsintegration.feature.resonance.bd.BDResonanceDiskAccess;
+import com.huanghuang.rsintegration.feature.resonance.bd.BDResonanceDiskData;
 import net.minecraft.world.item.Item;
 
 @Mixin(value = com.sammy.malum.common.block.curiosities.weeping_well.VoidConduitBlockEntity.class,

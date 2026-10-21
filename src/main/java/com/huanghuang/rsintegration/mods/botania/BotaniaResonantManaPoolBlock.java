@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mods.botania;
 
-import com.huanghuang.rsintegration.magic.BotaniaResonantManaPoolBlockEntity;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockEntities;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
+import com.huanghuang.rsintegration.feature.resonance.magic.BotaniaResonantManaPoolBlockEntity;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockEntities;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;

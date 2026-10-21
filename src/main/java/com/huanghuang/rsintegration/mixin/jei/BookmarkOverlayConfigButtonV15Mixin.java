@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
 import com.huanghuang.rsintegration.client.config.JeiConfigButton;
-import com.huanghuang.rsintegration.compat.jei.JeiConfigButtonPlacement;
-import com.huanghuang.rsintegration.compat.jei.JeiConfigButtonPlacement.Position;
+import com.huanghuang.rsintegration.mods.jei.JeiConfigButtonPlacement;
+import com.huanghuang.rsintegration.mods.jei.JeiConfigButtonPlacement.Position;
 import mezz.jei.api.gui.handlers.IGuiProperties;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.input.IUserInputHandler;

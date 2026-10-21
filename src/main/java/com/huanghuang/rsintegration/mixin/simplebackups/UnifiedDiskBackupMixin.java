@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.simplebackups;
 
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskBackup;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskBackup;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.server.MinecraftServer;

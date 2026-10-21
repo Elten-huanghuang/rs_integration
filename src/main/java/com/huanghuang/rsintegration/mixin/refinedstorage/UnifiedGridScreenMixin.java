@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridClient;
+import com.huanghuang.rsintegration.feature.unifiedgrid.client.UnifiedGridClient;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import org.spongepowered.asm.mixin.Mixin;

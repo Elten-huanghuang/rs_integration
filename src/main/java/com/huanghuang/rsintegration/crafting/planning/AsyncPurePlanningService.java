@@ -7,7 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
-import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Set;

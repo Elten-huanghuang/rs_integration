@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.goety;
 
-import com.huanghuang.rsintegration.magic.GoetySoulOverflow;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulOverflow;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import net.minecraft.world.entity.player.Player;

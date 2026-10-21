@@ -1,4 +1,8 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+
 import java.lang.reflect.Field;
 
 import com.mojang.logging.LogUtils;

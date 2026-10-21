@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.dungeonsdelight;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
-import com.huanghuang.rsintegration.recipe.DungeonsDelightRecipeHandler;
+import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRecipeHandler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;

@@ -280,7 +280,7 @@ public final class MagicGridItemTransfer {
         if (creative != null) return creative;
         if (manaBinding(stack) != null) return MagicResourceKind.MANA;
         if (isSourceJar(stack)) return MagicResourceKind.SOURCE;
-        if (GoetySoulTotem.isTotem(stack)) return MagicResourceKind.SOUL;
+        if (OptionalGoetySoulTotem.isTotem(stack)) return MagicResourceKind.SOUL;
         return null;
     }
 
@@ -289,7 +289,7 @@ public final class MagicGridItemTransfer {
         if (stack == null || stack.isEmpty() || !kind.available()) return UNKNOWN;
         IntUnaryOperator getter = switch (kind) {
             // 灵魂图腾是自己实现的 NBT 读写，不经过反射。
-            case SOUL -> item -> GoetySoulTotem.souls(stack);
+            case SOUL -> item -> OptionalGoetySoulTotem.souls(stack);
             case MANA -> item -> {
                 Binding binding = manaBinding(stack);
                 return binding == null ? UNKNOWN : binding.balance();
@@ -303,7 +303,7 @@ public final class MagicGridItemTransfer {
     public static long space(MagicResourceKind kind, @Nullable ItemStack stack) {
         if (stack == null || stack.isEmpty() || !kind.available()) return 0L;
         return switch (kind) {
-            case SOUL -> GoetySoulTotem.space(stack);
+            case SOUL -> OptionalGoetySoulTotem.space(stack);
             case MANA -> {
                 Binding binding = manaBinding(stack);
                 yield binding == null ? 0L : Math.max(0, binding.max() - binding.balance());
@@ -329,8 +329,8 @@ public final class MagicGridItemTransfer {
         if (before == UNKNOWN) return UNKNOWN;
         boolean ok = switch (kind) {
             case SOUL -> {
-                GoetySoulTotem.set(stack, amount);
-                yield GoetySoulTotem.souls(stack) == amount;
+                OptionalGoetySoulTotem.set(stack, amount);
+                yield OptionalGoetySoulTotem.souls(stack) == amount;
             }
             case MANA -> {
                 Binding binding = manaBinding(stack);
@@ -376,6 +376,78 @@ public final class MagicGridItemTransfer {
         if (capability == null) return null;
         LazyOptional<?> optional = stack.getCapability(capability, (Direction) null);
         return optional == null ? null : optional.resolve().orElse(null);
+    }
+
+    /** Goety 是可选依赖；灵魂图腾只通过反射接入，避免通用转移层静态链接具体模组。 */
+    private static final class OptionalGoetySoulTotem {
+        private static final String CLASS_NAME =
+                "com.huanghuang.rsintegration.mods.goety.magic.GoetySoulTotem";
+        private static final Class<?> TYPE = loadType();
+        private static final Method IS_TOTEM = findMethod("isTotem", ItemStack.class);
+        private static final Method SOULS = findMethod("souls", ItemStack.class);
+        private static final Method SPACE = findMethod("space", ItemStack.class);
+        private static final Method SET = findMethod("set", ItemStack.class, int.class);
+
+        private OptionalGoetySoulTotem() {}
+
+        private static Class<?> loadType() {
+            try {
+                return Class.forName(CLASS_NAME, false,
+                        MagicGridItemTransfer.class.getClassLoader());
+            } catch (ClassNotFoundException | LinkageError ignored) {
+                return null;
+            }
+        }
+
+        @Nullable
+        private static Method findMethod(String name, Class<?>... parameterTypes) {
+            if (TYPE == null) return null;
+            try {
+                return TYPE.getMethod(name, parameterTypes);
+            } catch (NoSuchMethodException | SecurityException ignored) {
+                return null;
+            }
+        }
+
+        private static boolean available() {
+            return IS_TOTEM != null && SOULS != null && SPACE != null && SET != null;
+        }
+
+        private static boolean isTotem(ItemStack stack) {
+            if (!available()) return false;
+            try {
+                return Boolean.TRUE.equals(IS_TOTEM.invoke(null, stack));
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                return false;
+            }
+        }
+
+        private static int souls(ItemStack stack) {
+            return invokeInt(SOULS, stack);
+        }
+
+        private static long space(ItemStack stack) {
+            return invokeInt(SPACE, stack);
+        }
+
+        private static void set(ItemStack stack, int amount) {
+            if (!available()) return;
+            try {
+                SET.invoke(null, stack, amount);
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                // 可选模组接口不可用时保持原物品不变。
+            }
+        }
+
+        private static int invokeInt(@Nullable Method method, ItemStack stack) {
+            if (method == null) return 0;
+            try {
+                Object result = method.invoke(null, stack);
+                return result instanceof Number number ? number.intValue() : 0;
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                return 0;
+            }
+        }
     }
 
     /** 按名称取 {@code BotaniaForgeCapabilities.MANA_ITEM}；Botania 缺席时返回 null。 */

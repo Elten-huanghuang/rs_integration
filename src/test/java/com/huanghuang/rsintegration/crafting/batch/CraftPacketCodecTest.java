@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeProgress;
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeState;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeState;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;

@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;

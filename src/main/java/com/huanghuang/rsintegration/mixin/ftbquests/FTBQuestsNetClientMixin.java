@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
 
-import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
+import com.huanghuang.rsintegration.feature.ftbquests.client.FtbQuestJeiRuntime;
 import dev.ftb.mods.ftbquests.client.FTBQuestsNetClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

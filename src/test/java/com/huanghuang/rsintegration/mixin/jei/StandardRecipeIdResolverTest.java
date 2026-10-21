@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
-import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
+import com.huanghuang.rsintegration.recipe.viewer.StandardRecipeIdResolver;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 

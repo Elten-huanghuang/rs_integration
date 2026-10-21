@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestObjectId;
-import com.huanghuang.rsintegration.compat.ftbquests.NativeItemTaskSubmissionService;
+import com.huanghuang.rsintegration.feature.ftbquests.FtbQuestObjectId;
+import com.huanghuang.rsintegration.feature.ftbquests.NativeItemTaskSubmissionService;
 import dev.ftb.mods.ftbquests.net.SubmitTaskMessage;
 import dev.ftb.mods.ftbquests.quest.ServerQuestFile;
 import dev.ftb.mods.ftbquests.quest.TeamData;

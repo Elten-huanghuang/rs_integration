@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mixin.yuusha;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;

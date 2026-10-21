@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network.binding;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;

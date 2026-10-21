@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeProgress;
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot.NodeState;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeState;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;

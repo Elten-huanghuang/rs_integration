@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.terraequipment;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.inolia_zaicek.terra_equipment.config.TEConfig;
 import com.inolia_zaicek.terra_equipment.item.EffectPotionItem;
 import net.minecraft.server.level.ServerPlayer;

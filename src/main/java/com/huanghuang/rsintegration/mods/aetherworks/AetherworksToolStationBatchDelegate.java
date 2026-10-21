@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 

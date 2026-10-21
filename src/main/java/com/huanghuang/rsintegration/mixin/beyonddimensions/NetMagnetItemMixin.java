@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.server.level.ServerPlayer;

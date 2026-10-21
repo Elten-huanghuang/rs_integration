@@ -45,7 +45,7 @@ class BrewingMachineConcurrencyTest {
         MachineLeaseRegistry.Lease lease = leases.tryAcquire(key(busy), owner(7));
         assertNotNull(lease);
 
-        List<BoundMachine> candidates = AsyncCraftChain.filterUnleasedMachines(
+        List<BoundMachine> candidates = MachineDispatchPlanner.filterUnleased(
                 List.of(busy, available), leases, BREWING.id());
 
         assertEquals(List.of(available), candidates);

@@ -1,14 +1,17 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
+
+import com.huanghuang.rsintegration.network.machine.MachineNetworkHandler;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.machine.MachineHub;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelModule;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
-import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+import com.huanghuang.rsintegration.machine.client.MachineHub;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelModule;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelNetworkHandler;
+import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
+import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
@@ -67,7 +70,7 @@ public abstract class GridScreenMachineTabMixin {
             if (RSSidePanelModule.isEnabled()) {
                 RSSidePanelNetworkHandler.sendRequestSync();
             } else {
-                RSSidePanelNetworkHandler.sendBindingSyncRequest();
+                MachineNetworkHandler.sendBindingSyncRequest();
             }
         }
 

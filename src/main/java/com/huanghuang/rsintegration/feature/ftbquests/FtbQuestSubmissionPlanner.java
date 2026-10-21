@@ -1,0 +1,91 @@
+package com.huanghuang.rsintegration.feature.ftbquests;
+
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Builds a multi-root recursive crafting preview for one eligible quest. */
+public final class FtbQuestSubmissionPlanner {
+
+    private FtbQuestSubmissionPlanner() {}
+
+    public static QuestSubmissionPlan plan(ServerPlayer player,
+                                            QuestSubmissionSnapshot snapshot,
+                                            INetwork network) {
+        return plan(player, snapshot,
+                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network), network);
+    }
+
+    public static QuestSubmissionPlan plan(ServerPlayer player,
+                                            QuestSubmissionSnapshot snapshot,
+                                            CraftStorageEndpoint endpoint,
+                                            INetwork network) {
+        List<IngredientSpec> specs = new ArrayList<>();
+        List<ItemStack> displays = new ArrayList<>();
+        List<String> overflow = new ArrayList<>();
+        for (QuestItemRequirement requirement : snapshot.requirements()) {
+            // descriptionId, not a rendered name: `missing` is a translation-key
+            // channel resolved on the client (a server has no lang table).
+            int remaining = boundedCount(requirement.remaining(), overflow,
+                    requirement.displayStack().getDescriptionId());
+            if (remaining <= 0) continue;
+            Ingredient ingredient = requirement.validDisplayItems().isEmpty()
+                    ? Ingredient.of(requirement.displayStack())
+                    : Ingredient.of(requirement.validDisplayItems().stream());
+            specs.add(new IngredientSpec(ingredient, remaining));
+            displays.add(requirement.displayStack());
+        }
+
+        Map<CraftingResolver.StackKey, Long> available =
+                MaterialSources.listAllAvailable(player, endpoint);
+        List<String> missing = new ArrayList<>(overflow);
+        var graph = CraftingResolver.resolveGraphForSpecsWithTypes(specs, available,
+                player.serverLevel(), player, endpoint, missing, null, false,
+                RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get());
+
+        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack display = displays.get(i).copyWithCount(1);
+            long have = available.entrySet().stream()
+                    .filter(entry -> spec.ingredient().test(entry.getKey().toStack()))
+                    .mapToLong(Map.Entry::getValue)
+                    .reduce(0L, SaturatingLongMath::add);
+            materials.put(IngredientKey.of(display),
+                    new PlanResponse.Availability(spec.count(), have));
+        }
+        return new QuestSubmissionPlan(snapshot, graph, PlanGraphView.from(graph),
+                materials, missing.stream().distinct().toList());
+    }
+
+    /**
+     * Clamps an absurd quest requirement to int range, recording the item in
+     * {@code errors}. The recorded value must stay a bare translation key so the
+     * client can resolve it; the count is deliberately omitted rather than
+     * appended, which would defeat the key lookup.
+     */
+    private static int boundedCount(long count, List<String> errors, String descriptionId) {
+        if (count > Integer.MAX_VALUE) {
+            errors.add(descriptionId);
+            return Integer.MAX_VALUE;
+        }
+        return (int) Math.max(0L, count);
+    }
+}

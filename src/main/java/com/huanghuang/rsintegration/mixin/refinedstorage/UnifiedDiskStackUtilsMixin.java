@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskMounts;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskMounts;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.util.StackUtils;
 import net.minecraft.server.level.ServerLevel;

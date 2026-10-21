@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import java.util.stream.Collectors;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraft.world.item.Items;
@@ -18,7 +18,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
-import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;

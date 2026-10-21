@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.recipe.DeepFryingRecipeHandler;
+import com.huanghuang.rsintegration.mods.casualnessdelight.DeepFryingRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraftforge.common.ForgeConfigSpec;

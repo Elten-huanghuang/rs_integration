@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridMenuAccess;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridSession;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridMenuAccess;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridSession;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;

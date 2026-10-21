@@ -14,6 +14,10 @@ import java.io.IOException;
 public final class MagicResourceDiskStore {
     /** 归墟盘目录中的固定文件名。 */
     public static final String NAME = "magic-resources.bin";
+    /** 1.5.x 及更早版本保存 Goety 灵魂的独立文件名。 */
+    public static final String LEGACY_SOULS_NAME = "goety-souls.bin";
+    /** 旧灵魂文件只包含一个 int。 */
+    public static final int LEGACY_SOULS_BYTES = Integer.BYTES;
     /** 旧格式每种资源固定占 4 字节（int）。 */
     public static final int LEGACY_BYTES = Math.multiplyExact(MagicResourceKind.values().length, Integer.BYTES);
     /** 新格式每种资源固定占 8 字节（long）。 */
@@ -49,5 +53,14 @@ public final class MagicResourceDiskStore {
         }
         if (input.available() != 0) throw new IOException("统一盘魔法资源记录尾部非法");
         return amounts;
+    }
+
+    /** 读取旧版独立灵魂文件，供磁盘加载时迁移到统一魔法资源表。 */
+    public static int readLegacySouls(DataInputStream input) throws IOException {
+        int amount = input.readInt();
+        if (input.available() != 0 || amount < 0) {
+            throw new IOException("统一盘旧版灵魂记录非法");
+        }
+        return amount;
     }
 }

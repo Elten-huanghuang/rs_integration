@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
-import com.huanghuang.rsintegration.compat.jei.RecipeBookmarkRightClickHandler;
+import com.huanghuang.rsintegration.mods.jei.RecipeBookmarkRightClickHandler;
 import mezz.jei.gui.elements.GuiIconToggleButton;
 import mezz.jei.gui.input.IUserInputHandler;
 import mezz.jei.gui.recipes.RecipeBookmarkButton;

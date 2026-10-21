@@ -1,9 +1,11 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+
+
+import com.huanghuang.rsintegration.network.machine.MachineNetworkHandler;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
+import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.core.BlockPos;
 
@@ -41,7 +43,7 @@ public final class IronFurnaceBindingUpdater {
                     BeyondDimensionsMachineOperations
                             .sendBindingSync(player);
                 } else if (ModList.get().isLoaded("refinedstorage")) {
-                    RSSidePanelNetworkHandler.sendBindingSync(player);
+                    MachineNetworkHandler.sendBindingSync(player);
                 }
             }
             RSIntegrationMod.LOGGER.debug("[RSI-IronFurnaces] Migrated binding at {} {} to {}",

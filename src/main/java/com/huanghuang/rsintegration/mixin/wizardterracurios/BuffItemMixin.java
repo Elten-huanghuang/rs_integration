@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.wizardterracurios;
 
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.server.level.ServerPlayer;

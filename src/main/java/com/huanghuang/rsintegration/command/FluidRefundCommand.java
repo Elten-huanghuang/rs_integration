@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.command;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;

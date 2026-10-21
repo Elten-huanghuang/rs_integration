@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmandcharm;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.recipe.LetsDoCookingPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.farmandcharm.LetsDoCookingPotRecipeHandler;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;

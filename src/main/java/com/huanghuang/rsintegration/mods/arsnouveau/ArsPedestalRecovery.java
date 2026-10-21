@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;

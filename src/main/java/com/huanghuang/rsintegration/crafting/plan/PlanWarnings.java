@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDele
 import net.minecraft.world.item.crafting.CraftingRecipe;
 
 import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksBatchDelegate;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksToolStationBatchDelegate;

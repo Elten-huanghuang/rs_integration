@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationResult;

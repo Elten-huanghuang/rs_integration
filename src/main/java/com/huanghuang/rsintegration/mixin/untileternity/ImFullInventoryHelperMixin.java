@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mixin.untileternity;
 
 import com.carrot123.until_eternity.item.ImFullInventoryHelper;
 import com.carrot123.until_eternity.item.ModItems;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;

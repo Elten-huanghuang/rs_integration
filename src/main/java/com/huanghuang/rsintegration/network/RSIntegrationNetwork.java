@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.network;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.command.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
-import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
+import com.huanghuang.rsintegration.feature.resonance.backpack.ResonanceBackpackContainer;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -28,7 +28,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.ArrayList;
 import java.util.Map;
@@ -47,6 +46,8 @@ public final class RSIntegrationNetwork {
     private static final PlayerNetworkResolutionCache<INetwork> RESOLUTION_CACHE =
             new PlayerNetworkResolutionCache<>(20);
     private static final ConcurrentHashMap<UUID, INetwork> LAST_RESOLVED_NETWORKS =
+            new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, INetwork> ACTIVE_SIDE_PANEL_NETWORKS =
             new ConcurrentHashMap<>();
 
     private RSIntegrationNetwork() {}
@@ -76,6 +77,27 @@ public final class RSIntegrationNetwork {
         LAST_RESOLVED_NETWORKS.put(playerId, network);
         RESOLUTION_CACHE.put(playerId, player.server, player.level().dimension(),
                 player.containerMenu, player.server.getTickCount(), network);
+    }
+
+    public static void rememberActiveSidePanelNetwork(
+            UUID playerId, INetwork network) {
+        if (playerId != null && network != null) {
+            ACTIVE_SIDE_PANEL_NETWORKS.put(playerId, network);
+        }
+    }
+
+    public static void forgetActiveSidePanelNetwork(UUID playerId) {
+        if (playerId != null) ACTIVE_SIDE_PANEL_NETWORKS.remove(playerId);
+    }
+
+    @Nullable
+    public static INetwork getActiveSidePanelNetwork(UUID playerId) {
+        return playerId == null ? null : ACTIVE_SIDE_PANEL_NETWORKS.get(playerId);
+    }
+
+    @Nullable
+    public static INetwork getRetainedNetwork(UUID playerId) {
+        return playerId == null ? null : LAST_RESOLVED_NETWORKS.get(playerId);
     }
 
     @Nullable
@@ -149,8 +171,7 @@ public final class RSIntegrationNetwork {
         // A live side-panel listener is an active RS UI session.  Do not use
         // getListenerNetwork(), because it also returns the retained,
         // last-known network after the panel has been closed.
-        network = RSSidePanelNetworkHandler
-                .getActiveListenerNetwork(player.getUUID());
+        network = getActiveSidePanelNetwork(player.getUUID());
         if (network != null) return network;
 
         // A machine binding is an explicit, player-owned RS access path and
@@ -193,8 +214,7 @@ public final class RSIntegrationNetwork {
         // Reuse the validated side-panel listener after the RS grid screen is
         // closed; the crafting plan is a separate request and may arrive with
         // no RS container or NetworkItem in the active player inventory.
-        net = RSSidePanelNetworkHandler
-                .getListenerNetwork(player.getUUID());
+        net = getRetainedNetwork(player.getUUID());
         if (net != null) {
             logResolved("RS side-panel listener", net);
             return net;
@@ -212,11 +232,13 @@ public final class RSIntegrationNetwork {
     public static void invalidateNetworkResolution(UUID playerId) {
         RESOLUTION_CACHE.invalidate(playerId);
         LAST_RESOLVED_NETWORKS.remove(playerId);
+        ACTIVE_SIDE_PANEL_NETWORKS.remove(playerId);
     }
 
     public static void clearNetworkResolutionCache() {
         RESOLUTION_CACHE.clear();
         LAST_RESOLVED_NETWORKS.clear();
+        ACTIVE_SIDE_PANEL_NETWORKS.clear();
         lastNearbyScan.clear();
     }
 

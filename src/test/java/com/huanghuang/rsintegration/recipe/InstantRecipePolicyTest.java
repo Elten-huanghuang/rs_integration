@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;

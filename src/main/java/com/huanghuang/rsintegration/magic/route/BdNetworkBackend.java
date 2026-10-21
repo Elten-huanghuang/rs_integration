@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.magic.route;
 
-import com.huanghuang.rsintegration.magic.BdReservationBridge;
+import com.huanghuang.rsintegration.mods.goety.magic.BdReservationBridge;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceNetworkPool;
 import net.minecraft.resources.ResourceLocation;

@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.client.StorageSearchClient;
+import com.huanghuang.rsintegration.client.storage.StorageSearchClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 

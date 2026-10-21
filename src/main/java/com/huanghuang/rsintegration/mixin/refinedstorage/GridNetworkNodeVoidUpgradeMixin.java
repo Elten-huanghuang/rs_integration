@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.ModItems;
-import com.huanghuang.rsintegration.voidupgrade.VoidUpgradeManager;
+import com.huanghuang.rsintegration.feature.voidupgrade.VoidUpgradeManager;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.apiimpl.network.node.GridNetworkNode;
 import com.refinedmods.refinedstorage.inventory.item.FilterItemHandler;

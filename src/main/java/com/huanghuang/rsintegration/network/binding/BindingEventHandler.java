@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.network.binding;
+
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
-import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.network.binding.BindingInfo;
+import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
 import com.huanghuang.rsintegration.mods.goety.GoetyInfuserMachineSupport;
 import com.huanghuang.rsintegration.mods.wishingfountain.WishingFountainStructure;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
@@ -22,12 +23,12 @@ import net.minecraft.world.phys.Vec3;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
-import com.huanghuang.rsintegration.magic.ResonantMagicStorage;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicStorage;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
+import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
@@ -187,7 +188,7 @@ public final class BindingEventHandler {
         BlockEntity be = event.getLevel().getBlockEntity(pos);
         String blockKey = matched.blockKey(block);
         if ("ironfurnaces_furnace".equals(matched.modType.id())
-                && be != null && isIronFurnace(be)) {
+                && FurnaceMachineAccess.isIronFurnace(be)) {
             blockKey = ironFurnacePrefix(be) + "||" + block.getDescriptionId();
         }
         String blockRegKey = ForgeRegistries.BLOCKS.getKey(block).toString();
@@ -443,7 +444,7 @@ public final class BindingEventHandler {
         BlockEntity be = level.getBlockEntity(pos);
         String blockKey = target.blockKey(block);
         if ("ironfurnaces_furnace".equals(target.modType.id())
-                && be != null && isIronFurnace(be)) {
+                && FurnaceMachineAccess.isIronFurnace(be)) {
             blockKey = ironFurnacePrefix(be) + "||" + block.getDescriptionId();
         }
         ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(block);
@@ -513,15 +514,6 @@ public final class BindingEventHandler {
     record NearbyTarget(BlockPos rootPos, MachineBindingTarget target) {}
 
     enum NearbyBindResult { BOUND, ALREADY_BOUND }
-
-    private static boolean isIronFurnace(BlockEntity be) {
-        Class<?> type = be.getClass();
-        while (type != null) {
-            if ("ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase".equals(type.getName())) return true;
-            type = type.getSuperclass();
-        }
-        return false;
-    }
 
     private static String ironFurnacePrefix(BlockEntity be) {
         try {
@@ -959,20 +951,7 @@ public final class BindingEventHandler {
     }
 
     static void sendBindingRefresh(ServerPlayer player) {
-        // The binding handler is shared by RS and BD-only installations.  The
-        // side-panel bridge has an optional RS API type in its method table,
-        // so never link it when Refined Storage is absent.
-        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-            if (ModList.get().isLoaded("beyonddimensions")) {
-                BeyondDimensionsMachineOperations.sendBindingSync(player);
-            }
-            return;
-        }
-        try {
-            RSSidePanelNetworkHandler.sendBindingSync(player);
-        } catch (Exception | LinkageError e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Bind] Failed to send binding sync", e);
-        }
+        MachineBindingSyncBridge.send(player);
     }
 
     @SubscribeEvent

@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskWrapper;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskWrapper;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.util.StackUtils;

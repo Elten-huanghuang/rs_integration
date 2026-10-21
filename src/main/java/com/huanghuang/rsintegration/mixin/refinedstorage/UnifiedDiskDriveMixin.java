@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
-import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskItem;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskMounts;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedMountCoordinator;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskItem;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskMounts;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.RS;

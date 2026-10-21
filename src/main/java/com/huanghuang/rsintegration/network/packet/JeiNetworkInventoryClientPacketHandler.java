@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.client.JeiNetworkItemCache;
+import com.huanghuang.rsintegration.client.recipe.JeiNetworkItemCache;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 

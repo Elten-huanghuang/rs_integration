@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskRoot;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.api.storage.IStorage;

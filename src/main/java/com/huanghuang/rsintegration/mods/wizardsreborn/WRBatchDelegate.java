@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -28,7 +29,7 @@ import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntit
 import com.huanghuang.rsintegration.mixin.wizardsreborn.CrystalBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.recipe.WRRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import net.minecraft.core.BlockPos;

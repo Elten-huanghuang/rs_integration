@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridJeiTracker;
-import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridView;
+import com.huanghuang.rsintegration.feature.unifiedgrid.client.UnifiedGridJeiTracker;
+import com.huanghuang.rsintegration.feature.unifiedgrid.client.UnifiedGridView;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.integration.jei.IngredientTracker;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;

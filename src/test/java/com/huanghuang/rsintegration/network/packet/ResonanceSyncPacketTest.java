@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskAbilities;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import io.netty.buffer.Unpooled;

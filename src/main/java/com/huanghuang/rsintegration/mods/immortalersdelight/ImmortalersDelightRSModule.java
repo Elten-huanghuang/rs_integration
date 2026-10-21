@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.recipe.EnchantalCoolerRecipeHandler;
+import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;

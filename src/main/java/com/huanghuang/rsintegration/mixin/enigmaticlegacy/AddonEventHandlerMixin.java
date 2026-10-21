@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mixin.enigmaticlegacy;
+
 import java.lang.reflect.Method;
 
 import auviotre.enigmatic.addon.handlers.AddonEventHandler;
 import com.aizistral.enigmaticlegacy.handlers.SuperpositionHandler;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;

@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.magic;
 
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
 import net.minecraft.server.MinecraftServer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import com.huanghuang.rsintegration.disk.rs.UnifiedMountCoordinator;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedMountCoordinator;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import net.minecraft.server.level.ServerLevel;
 

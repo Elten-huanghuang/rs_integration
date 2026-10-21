@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.QuestInventorySubmissionContext;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestInventorySubmissionContext;
 import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
 import dev.ftb.mods.ftbquests.quest.task.Task;

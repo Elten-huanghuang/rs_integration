@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;

@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.mods.common.InventoryListItemHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
-import com.huanghuang.rsintegration.recipe.LetsDoCookingPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.farmandcharm.LetsDoCookingPotRecipeHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.RegistryAccess;

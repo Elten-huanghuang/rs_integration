@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
-import com.huanghuang.rsintegration.recipe.AetherworksMetalFormerRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerRecipeHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;

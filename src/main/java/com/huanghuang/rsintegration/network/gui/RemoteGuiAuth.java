@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network.gui;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;

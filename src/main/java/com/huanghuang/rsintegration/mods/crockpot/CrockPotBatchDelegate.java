@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.crockpot;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -14,11 +15,11 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import com.refinedmods.refinedstorage.api.util.Action;

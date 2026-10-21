@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.goety;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -8,8 +10,8 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.magic.GoetySoulCraftingTask;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulCraftingTask;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Items;
@@ -19,7 +21,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
-import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
+import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.ModIds;

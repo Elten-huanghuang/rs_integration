@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.recipe.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
-import com.huanghuang.rsintegration.compat.historystages.HistoryStagesCompat;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;

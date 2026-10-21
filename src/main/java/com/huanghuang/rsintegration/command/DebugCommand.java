@@ -1,7 +1,10 @@
 package com.huanghuang.rsintegration.command;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -15,12 +18,12 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyProgressSavedData;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
-import com.huanghuang.rsintegration.magic.GoetySoulCraftingTask;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulCraftingTask;
 import com.huanghuang.rsintegration.magic.MagicResourceDiagnostics;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceRouteCounters;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
-import com.huanghuang.rsintegration.magic.SoulPlanPreview;
+import com.huanghuang.rsintegration.mods.goety.magic.SoulPlanPreview;
 import com.huanghuang.rsintegration.magic.route.BackendResolution;
 import com.huanghuang.rsintegration.magic.route.Channel;
 import com.huanghuang.rsintegration.magic.route.MagicScope;

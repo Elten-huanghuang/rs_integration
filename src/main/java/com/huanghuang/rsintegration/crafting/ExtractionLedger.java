@@ -1,4 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.storage.StorageBackendId;
@@ -24,7 +27,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
-import com.huanghuang.rsintegration.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageReservationSource;
 import com.huanghuang.rsintegration.storage.StorageSettlementLedger;

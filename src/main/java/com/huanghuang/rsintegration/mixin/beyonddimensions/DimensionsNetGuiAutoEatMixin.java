@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
+import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;

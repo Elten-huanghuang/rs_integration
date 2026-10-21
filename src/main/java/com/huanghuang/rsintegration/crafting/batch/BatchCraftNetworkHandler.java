@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
-import com.huanghuang.rsintegration.compat.ftbquests.QuestMissingBookmarkPacket;
-import com.huanghuang.rsintegration.compat.ftbquests.CheckmarkConfirmPacket;
-import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestMissingBookmarkPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.CheckmarkConfirmPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.StorageQuestScanPacket;
 import com.huanghuang.rsintegration.util.ModIds;
 import java.util.Optional;
 import net.minecraftforge.fml.ModList;

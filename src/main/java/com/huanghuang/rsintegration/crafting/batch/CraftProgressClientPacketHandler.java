@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.CraftProgressSnapshot;
-import com.huanghuang.rsintegration.crafting.CraftProgressTracker;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTracker;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
+import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands;
 
 import java.util.List;
 import java.util.UUID;

@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.recipe.AvaritiaRecipeHandler;
+import com.huanghuang.rsintegration.mods.avaritia.AvaritiaRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;

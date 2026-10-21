@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
+
+
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import net.minecraft.network.FriendlyByteBuf;

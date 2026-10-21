@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
 import net.minecraft.server.MinecraftServer;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;

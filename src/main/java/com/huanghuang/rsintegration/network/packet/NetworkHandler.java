@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.network.packet;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -24,7 +25,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 public final class NetworkHandler {
 
     /** Bump this whenever packet serialization or the registered packet set changes. */
-    private static final String PROTOCOL_VERSION = "66";
+    private static final String PROTOCOL_VERSION = "68";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RSIntegrationMod.MOD_ID, "main"),

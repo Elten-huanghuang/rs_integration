@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
+import com.huanghuang.rsintegration.util.PlayerRateLimiter;
 
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server-side rate limiter for crafting plan preview requests.
@@ -24,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * legitimate requests to at most one per 150ms.
  */
 public final class PreviewRateLimiter {
-    private static final Map<UUID, Long> LAST_PREVIEW_TIME = new ConcurrentHashMap<>();
+    private static final PlayerRateLimiter LIMITER = new PlayerRateLimiter();
     private PreviewRateLimiter() {}
 
     /** Returns true if this request should be rejected for arriving too soon. */
@@ -33,14 +32,7 @@ public final class PreviewRateLimiter {
     }
 
     static boolean isRateLimited(UUID playerId, long now, long intervalMs) {
-        Long prev = LAST_PREVIEW_TIME.get(playerId);
-        if (prev != null && (now - prev) < intervalMs) {
-            // Do not slide the window on rejected requests. Otherwise a burst
-            // can starve the next legitimate preview forever.
-            return true;
-        }
-        LAST_PREVIEW_TIME.put(playerId, now);
-        return false;
+        return LIMITER.isRateLimited(playerId, now, intervalMs);
     }
 
     private static long configuredIntervalMs() {
@@ -53,6 +45,6 @@ public final class PreviewRateLimiter {
 
     /** Cleanup on player logout. */
     public static void onPlayerLogout(UUID playerId) {
-        LAST_PREVIEW_TIME.remove(playerId);
+        LIMITER.remove(playerId);
     }
 }

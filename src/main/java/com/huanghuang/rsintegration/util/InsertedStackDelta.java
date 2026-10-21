@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.util;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 

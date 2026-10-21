@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
+import com.huanghuang.rsintegration.feature.ftbquests.client.FtbQuestJeiRuntime;
 import dev.ftb.mods.ftbquests.net.ClearRepeatCooldownMessage;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

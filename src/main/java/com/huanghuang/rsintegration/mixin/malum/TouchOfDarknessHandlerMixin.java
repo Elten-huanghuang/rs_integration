@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.malum;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilities;
-import com.huanghuang.rsintegration.resonance.disk.ResonanceDiskAbilityService;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskAbilities;
+import com.huanghuang.rsintegration.feature.resonance.disk.ResonanceDiskAbilityService;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;

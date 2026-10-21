@@ -1,17 +1,17 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.craftingstation.CraftingStationAccess;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationAvailability;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationModePacket;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationState;
-import com.huanghuang.rsintegration.craftingstation.AnvilTerminalState;
-import com.huanghuang.rsintegration.craftingstation.AnvilNamePacket;
-import com.huanghuang.rsintegration.craftingstation.SmithingInputSlot;
-import com.huanghuang.rsintegration.craftingstation.SmithingTerminalAccess;
-import com.huanghuang.rsintegration.craftingstation.StonecutterRecipeSelectPacket;
-import com.huanghuang.rsintegration.craftingstation.StonecutterScreenAccess;
-import com.huanghuang.rsintegration.craftingstation.StonecutterTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAvailability;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
+import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.AnvilTerminalState;
+import com.huanghuang.rsintegration.network.craftingstation.AnvilNamePacket;
+import com.huanghuang.rsintegration.feature.craftingstation.SmithingTerminalState;
+import com.huanghuang.rsintegration.network.craftingstation.StonecutterRecipeSelectPacket;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterScreenAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterTerminalState;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
@@ -506,7 +506,9 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     @Unique
     private static Slot rsi$findSlot(GridContainerMenu menu, int smithingIndex) {
         for (Slot slot : menu.slots) {
-            if (slot instanceof SmithingInputSlot input && input.isActive()
+            if (slot instanceof CraftingStationInputSlot input
+                    && input.stationState() instanceof SmithingTerminalState
+                    && input.isActive()
                     && input.getSlotIndex() == smithingIndex) return input;
         }
         return null;
@@ -518,6 +520,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
             Slot slot = rsi$findSlot(menu, index);
             if (slot == null || !slot.hasItem()) return false;
         }
-        return SmithingTerminalAccess.access(menu).rsi$getSmithingState().result().isEmpty();
+        return CraftingStationAccess.access(menu).rsi$getCraftingStationState()
+                .result().isEmpty();
     }
 }

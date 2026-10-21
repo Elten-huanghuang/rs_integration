@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration;
 
-import com.huanghuang.rsintegration.magic.ResonantMagicBlock;
-import com.huanghuang.rsintegration.magic.ResonantManaPoolBlock;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlock;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantManaPoolBlock;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;

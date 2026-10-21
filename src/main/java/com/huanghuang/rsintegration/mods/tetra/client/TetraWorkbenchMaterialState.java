@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.TetraJeiItemBridge;
 import com.huanghuang.rsintegration.mods.jei.TetraWorkbenchJeiFilterRefreshRegistry;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.mods.jei.RSJeiPlugin;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.runtime.IJeiRuntime;

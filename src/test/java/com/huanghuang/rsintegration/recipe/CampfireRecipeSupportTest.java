@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.recipe;
+import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;

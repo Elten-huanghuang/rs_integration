@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -388,10 +389,10 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         ItemStack catalystStack = new ItemStack(Items.STONE_SWORD);
         catalystStack.getOrCreateTag().putString("owner", "first");
         Ingredient catalyst = net.minecraftforge.common.crafting.StrictNBTIngredient.of(catalystStack);
-        var view = mock(com.huanghuang.rsintegration.resonance.api.ResonanceStorageView.class);
+        var view = mock(com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView.class);
         when(view.backendId()).thenReturn("test");
         when(view.storedStacks()).thenReturn(List.of(
-                new com.huanghuang.rsintegration.resonance.api.ResonanceStorageView.StoredStack(0, catalystStack)));
+                new com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView.StoredStack(0, catalystStack)));
         when(view.extractExactView(anyInt(), any(), anyInt(), eq(true))).thenReturn(ItemStack.EMPTY);
         try (var sources = mockStatic(ResonanceCraftingSource.class)) {
             sources.when(() -> ResonanceCraftingSource.viewsFor(endpoint, player)).thenReturn(List.of(view));

@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
-import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
-import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
-import com.huanghuang.rsintegration.client.JeiCraftingPlanContext;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.recipe.viewer.LongTravailCrownRecipes;
+import com.huanghuang.rsintegration.client.recipe.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.client.recipe.JeiCraftingPlanContext;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -36,12 +36,11 @@ import com.huanghuang.rsintegration.crafting.tree.PlanTreeRenderer;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.crafting.tree.SelectedPath;
 import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
-import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
-import com.huanghuang.rsintegration.sidepanel.client.SidePanelJeiBridge;
-import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.client.input.GuiNavStack;
+import com.huanghuang.rsintegration.machine.client.BindingBackendResolver;
+import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelJeiBridge;
+import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.network.machine.bd.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.client.Minecraft;
@@ -941,7 +940,7 @@ public final class CraftingPlanScreen extends Screen {
             NetworkHandler.CHANNEL.sendToServer(
                     new BeyondDimensionsOpenBoundMachineGuiPacket(dim, pos));
         } else {
-            RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+            NetworkHandler.CHANNEL.sendToServer(
                     new OpenBoundMachineGuiPacket(dim, pos, plan.recipeId(), recipeId, plan.baseItem()));
         }
     }

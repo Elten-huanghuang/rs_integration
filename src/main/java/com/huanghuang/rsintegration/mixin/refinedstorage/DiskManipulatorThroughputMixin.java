@@ -2,12 +2,12 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.core.ResourceTable;
-import com.huanghuang.rsintegration.disk.rs.DiskManipulatorBudget;
-import com.huanghuang.rsintegration.disk.rs.DiskManipulatorTransferSession;
-import com.huanghuang.rsintegration.disk.rs.DiskManipulatorTransferSession.Step;
-import com.huanghuang.rsintegration.disk.rs.UnifiedBoundDisk;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.core.ResourceTable;
+import com.huanghuang.rsintegration.storage.disk.rs.DiskManipulatorBudget;
+import com.huanghuang.rsintegration.storage.disk.rs.DiskManipulatorTransferSession;
+import com.huanghuang.rsintegration.storage.disk.rs.DiskManipulatorTransferSession.Step;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedBoundDisk;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;

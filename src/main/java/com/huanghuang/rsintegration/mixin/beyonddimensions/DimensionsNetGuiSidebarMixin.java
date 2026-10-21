@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
+import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
 import com.wintercogs.beyonddimensions.client.gui.widget.LeftButtonSidebar;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.events.GuiEventListener;

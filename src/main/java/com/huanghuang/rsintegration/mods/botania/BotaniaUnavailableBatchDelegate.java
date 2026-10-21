@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.botania;
+
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;

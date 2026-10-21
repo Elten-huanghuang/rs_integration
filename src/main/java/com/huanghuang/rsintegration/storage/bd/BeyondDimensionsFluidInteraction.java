@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.crafting.fluid.FluidContainerTransfer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.impl.FluidStackKey;
 import com.wintercogs.beyonddimensions.common.menu.DimensionsNetMenu;

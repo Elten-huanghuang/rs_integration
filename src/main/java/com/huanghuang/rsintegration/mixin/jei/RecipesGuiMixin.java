@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.jei;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
+import com.huanghuang.rsintegration.client.recipe.AltarCraftButtons;
 import mezz.jei.gui.recipes.RecipesGui;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Invoker;
@@ -27,8 +28,8 @@ public abstract class RecipesGuiMixin {
         // Log every click unconditionally for debugging the Embers bug
         try {
             if (button == 0) {
-                int mgSize = AltarCraftButtons.getMachineGuiPositions().size();
-                int plusSize = AltarCraftButtons.getPositions().size();
+                int mgSize = AltarCraftButtons.getMachineGuiCount();
+                int plusSize = AltarCraftButtons.getButtonCount();
                 int mgIndex = AltarCraftButtons.hitTestMachineGui(mouseX, mouseY);
                 if (mgIndex >= 0) {
                     RSIntegrationMod.LOGGER.debug("[RSI-RecipesGui] MachineGUI hit: index={} at ({},{})", mgIndex, mouseX, mouseY);
@@ -58,13 +59,11 @@ public abstract class RecipesGuiMixin {
                         RSIntegrationMod.LOGGER.trace("[RSI-RecipesGui] Miss: ({},{}) mgBtns={} plusBtns={}",
                                 (int) mouseX, (int) mouseY, mgSize, plusSize);
                         if (plusSize > 0) {
-                            int[] p0 = AltarCraftButtons.getPositions().get(0);
+                            var p0 = AltarCraftButtons.getBounds(0);
+                            var last = AltarCraftButtons.getBounds(plusSize - 1);
                             RSIntegrationMod.LOGGER.trace("[RSI-RecipesGui] Plus[0]=({},{},{},{}) last=({},{},{},{})",
-                                    p0[0], p0[1], p0[2], p0[3],
-                                    AltarCraftButtons.getPositions().get(plusSize - 1)[0],
-                                    AltarCraftButtons.getPositions().get(plusSize - 1)[1],
-                                    AltarCraftButtons.getPositions().get(plusSize - 1)[2],
-                                    AltarCraftButtons.getPositions().get(plusSize - 1)[3]);
+                                    p0.x(), p0.y(), p0.width(), p0.height(),
+                                    last.x(), last.y(), last.width(), last.height());
                         }
                     }
                 }

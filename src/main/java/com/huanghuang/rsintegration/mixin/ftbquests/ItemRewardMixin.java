@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.ftbquests;
-import com.huanghuang.rsintegration.compat.ftbquests.FtbQuestRewardDropContext;
-import com.huanghuang.rsintegration.compat.ftbquests.StorageQuestScanService;
+
+import com.huanghuang.rsintegration.feature.ftbquests.FtbQuestRewardDropContext;
+import com.huanghuang.rsintegration.feature.ftbquests.StorageQuestScanService;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ftb.mods.ftbquests.quest.reward.ItemReward;

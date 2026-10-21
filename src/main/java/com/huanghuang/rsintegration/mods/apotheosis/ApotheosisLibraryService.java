@@ -7,7 +7,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.Entr
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.EntryStatus;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisLibraryModels.ImportStats;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;

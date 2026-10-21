@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.common;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StorageCapability;

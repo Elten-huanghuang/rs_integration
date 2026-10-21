@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.mixin.enigmaticaddons;
+
 import java.lang.reflect.Method;
 
 import auviotre.enigmatic.addon.contents.items.AvariceRing;
 import com.huanghuang.rsintegration.mixin.minecraft.InventoryAccessor;
-import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import net.minecraft.core.NonNullList;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;

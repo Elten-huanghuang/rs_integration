@@ -7,12 +7,12 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.feature.craftingstation.MachineTypeCompatibility;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineOperations;
-import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoritesSavedData;
-import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
+import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.network.binding.MachineFavoriteKey;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
@@ -29,7 +29,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.Locale;
 import java.util.Set;
@@ -515,24 +514,8 @@ public final class AltarBindingRegistry {
 
     public static boolean isCompatibleMachineType(ModType requested, ModType bound) {
         if (requested == null || bound == null) return false;
-        if (requested.id().equals(bound.id())) return true;
-        // candlelight / bakery 复用 farm_and_charm 的 CookingPotRecipe，统一
-        // 归入 farm_and_charm 规范类型，因此该请求必须接受共享锅绑定。
-        if (ModIds.ID_FC_COOKING_POT.equals(requested.id())) {
-            return ModIds.ID_CANDLELIGHT_COOKING_POT.equals(bound.id())
-                    || ModIds.ID_BAKERY_COOKING_POT.equals(bound.id());
-        }
-        // 共享配方在由具体物理锅发起执行时，也要接受规范宴会锅绑定。
-        if (ModIds.ID_CANDLELIGHT_COOKING_POT.equals(requested.id())
-                || ModIds.ID_BAKERY_COOKING_POT.equals(requested.id())) {
-            return ModIds.ID_FC_COOKING_POT.equals(bound.id());
-        }
-        return switch (bound.id()) {
-            case "ironfurnaces_furnace" -> "vanilla_furnace".equals(requested.id());
-            case "ironfurnaces_blast_furnace" -> "vanilla_blast_furnace".equals(requested.id());
-            case "ironfurnaces_smoker" -> "vanilla_smoker".equals(requested.id());
-            default -> false;
-        };
+        return MachineTypeCompatibility.isCompatible(
+                requested.id(), bound.id());
     }
 
     /** Resolve the delegate type for a binding accepted by a recipe type. */
@@ -603,14 +586,9 @@ public final class AltarBindingRegistry {
 
         if (server != null) {
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-                    RSIntegrationNetwork
-                            .invalidateNetworkResolution(p.getUUID());
-                    RSSidePanelNetworkHandler
-                            .sendBindingSync(p);
-                } else if (ModList.get().isLoaded("beyonddimensions")) {
-                    BeyondDimensionsMachineOperations.sendBindingSync(p);
-                }
+                RSIntegrationNetwork
+                        .invalidateNetworkResolution(p.getUUID());
+                MachineBindingSyncBridge.send(p);
             }
         }
     }

@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -29,8 +30,6 @@ import java.util.List;
 /** Selects the physical delegate for cooking recipes without eagerly loading optional mods. */
 public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
-    private static final String IRON_FURNACE_BE =
-            "ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase";
     private static final String IRON_DELEGATE =
             "com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate";
 
@@ -65,7 +64,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         if (level == null) return null;
         if (!level.hasChunkAt(pos)) return null;
         BlockEntity be = level.getBlockEntity(pos);
-        if (be != null && isIronFurnace(be.getClass())) {
+        if (FurnaceMachineAccess.isIronFurnace(be)) {
             try {
                 return (IBatchDelegate) Class.forName(IRON_DELEGATE).getDeclaredConstructor().newInstance();
             } catch (ReflectiveOperationException | LinkageError exception) {
@@ -74,15 +73,6 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
             }
         }
         return new VanillaMachineBatchDelegate();
-    }
-
-    static boolean isIronFurnace(Class<?> type) {
-        Class<?> current = type;
-        while (current != null) {
-            if (IRON_FURNACE_BE.equals(current.getName())) return true;
-            current = current.getSuperclass();
-        }
-        return false;
     }
 
     private IBatchDelegate active() {

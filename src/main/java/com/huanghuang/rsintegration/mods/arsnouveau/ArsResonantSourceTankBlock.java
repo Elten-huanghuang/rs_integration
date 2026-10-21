@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
 import com.hollingsworth.arsnouveau.common.block.SourceJar;
-import com.huanghuang.rsintegration.magic.ArsResonantSourceTankBlockEntity;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockEntities;
-import com.huanghuang.rsintegration.magic.ResonantMagicBlockMarker;
+import com.huanghuang.rsintegration.feature.resonance.magic.ArsResonantSourceTankBlockEntity;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockEntities;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;

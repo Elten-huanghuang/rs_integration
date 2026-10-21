@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.farmandcharm;
 
-import com.huanghuang.rsintegration.recipe.LetsDoRoasterRecipeHandler;
+import com.huanghuang.rsintegration.mods.farmandcharm.LetsDoRoasterRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.LetsDoReflection;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;

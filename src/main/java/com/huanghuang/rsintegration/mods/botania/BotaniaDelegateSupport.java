@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.botania;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import net.minecraft.server.level.ServerLevel;

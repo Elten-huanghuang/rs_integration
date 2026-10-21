@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.apotheosis;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.reforging.client.ReforgingRestockClient;
+import com.huanghuang.rsintegration.feature.reforging.client.ReforgingRestockClient;
 import net.minecraft.world.Container;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

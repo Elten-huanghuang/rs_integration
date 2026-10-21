@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.recipe.SlashBladeRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.function.Supplier;

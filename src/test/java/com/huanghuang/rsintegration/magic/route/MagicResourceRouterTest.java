@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.magic.route;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.SessionCraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.SessionCraftStorageEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceNetworkPool;
 import com.huanghuang.rsintegration.storage.StorageBackendId;

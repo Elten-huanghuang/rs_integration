@@ -1,8 +1,9 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
-import com.huanghuang.rsintegration.compat.ftbquests.RsAutocraftProgressTracker;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.feature.ftbquests.RsAutocraftProgressTracker;
 import com.refinedmods.refinedstorage.api.autocrafting.task.ICraftingRequestInfo;
 import com.refinedmods.refinedstorage.api.autocrafting.task.ICraftingTask;
 import com.refinedmods.refinedstorage.apiimpl.autocrafting.task.v6.CraftingTask;

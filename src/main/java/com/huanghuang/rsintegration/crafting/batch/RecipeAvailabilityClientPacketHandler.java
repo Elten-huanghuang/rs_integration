@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 

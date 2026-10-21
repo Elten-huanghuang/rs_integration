@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;

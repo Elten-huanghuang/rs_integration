@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.resonance.backpack.OpenResonanceBackpackPacket;
+import com.huanghuang.rsintegration.feature.resonance.backpack.OpenResonanceBackpackPacket;
 import net.minecraftforge.network.simple.SimpleChannel;
 import java.util.Optional;
 import net.minecraftforge.network.NetworkDirection;

@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.constructionwand;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;

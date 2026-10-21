@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.villager.client.VillagerRestockClient;
+import com.huanghuang.rsintegration.feature.villager.client.VillagerRestockClient;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

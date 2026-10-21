@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.storage;
+
 import java.lang.reflect.Method;
 
 import net.minecraft.server.level.ServerPlayer;

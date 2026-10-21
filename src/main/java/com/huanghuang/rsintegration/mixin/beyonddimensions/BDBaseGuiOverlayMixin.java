@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
+import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubClient;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;

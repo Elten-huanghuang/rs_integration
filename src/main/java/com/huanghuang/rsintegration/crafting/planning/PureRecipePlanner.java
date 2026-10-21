@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.planning;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;

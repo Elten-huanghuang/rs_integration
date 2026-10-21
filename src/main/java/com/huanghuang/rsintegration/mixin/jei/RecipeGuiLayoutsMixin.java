@@ -1,16 +1,17 @@
 package com.huanghuang.rsintegration.mixin.jei;
+
 import java.lang.reflect.Field;
 
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionRequestPacket;
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionSnapshot;
-import com.huanghuang.rsintegration.compat.ftbquests.QuestSubmissionTargetIds;
-import com.huanghuang.rsintegration.compat.jei.StandardRecipeIdResolver;
-import com.huanghuang.rsintegration.compat.jei.WishingFountainRecipeIdResolver;
-import com.huanghuang.rsintegration.compat.jei.SophisticatedStorageRecipeIdResolver;
-import com.huanghuang.rsintegration.compat.jei.JeiMachineCategoryPolicy;
-import com.huanghuang.rsintegration.compat.jei.JeiRecipeButtonPlacement;
-import com.huanghuang.rsintegration.compat.jei.JeiRecipeIdNormalizer;
-import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipeIdResolver;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionSnapshot;
+import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.recipe.viewer.StandardRecipeIdResolver;
+import com.huanghuang.rsintegration.recipe.viewer.WishingFountainRecipeIdResolver;
+import com.huanghuang.rsintegration.recipe.viewer.SophisticatedStorageRecipeIdResolver;
+import com.huanghuang.rsintegration.recipe.viewer.RecipeMachineCategoryPolicy;
+import com.huanghuang.rsintegration.mods.jei.JeiRecipeButtonPlacement;
+import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
+import com.huanghuang.rsintegration.mods.jei.LongTravailCrownRecipeIdResolver;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
@@ -58,17 +59,16 @@ import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
-import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
+import com.huanghuang.rsintegration.machine.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.RSSidePanelNetworkHandler;
-import com.huanghuang.rsintegration.sidepanel.client.AltarCraftButtons;
-import com.huanghuang.rsintegration.sidepanel.client.GuiNavStack;
-import com.huanghuang.rsintegration.sidepanel.client.BindingBackendResolver;
-import com.huanghuang.rsintegration.sidepanel.network.OpenBoundMachineGuiPacket;
-import com.huanghuang.rsintegration.machine.BeyondDimensionsOpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.client.recipe.AltarCraftButtons;
+import com.huanghuang.rsintegration.client.input.GuiNavStack;
+import com.huanghuang.rsintegration.machine.client.BindingBackendResolver;
+import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
+import com.huanghuang.rsintegration.network.machine.bd.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.client.CraftButtonTextures;
-import com.huanghuang.rsintegration.client.RecipeAvailabilityClient;
+import com.huanghuang.rsintegration.client.recipe.CraftButtonTextures;
+import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
 import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
 import com.huanghuang.rsintegration.mods.goety.GoetyRitualPolicy;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
@@ -77,7 +77,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
-import com.huanghuang.rsintegration.recipe.WRAlchemyRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyRecipeHandler;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
@@ -499,7 +499,7 @@ public class RecipeGuiLayoutsMixin {
                         NetworkHandler.CHANNEL.sendToServer(
                                 new BeyondDimensionsOpenBoundMachineGuiPacket(guiDim, guiPos));
                     } else {
-                        RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                        NetworkHandler.CHANNEL.sendToServer(
                                 new OpenBoundMachineGuiPacket(
                                         guiDim, guiPos, jeiOpenRecipeId.toString(), jeiOpenRecipeId, capturedBaseForMachine));
                     }
@@ -546,7 +546,6 @@ public class RecipeGuiLayoutsMixin {
     private void rsi$refreshButtonPositions() {
         AltarCraftButtons.clearTransferPositions();
         int mgIdx = 0;
-        List<int[]> mgPos = AltarCraftButtons.getMachineGuiPositions();
         int screenWidth = Minecraft.getInstance().getWindow().getGuiScaledWidth();
         int screenHeight = Minecraft.getInstance().getWindow().getGuiScaledHeight();
         for (int i = 0; i < rsi$layoutIndices.size(); i++) {
@@ -573,23 +572,14 @@ public class RecipeGuiLayoutsMixin {
             pos[2] = bw;
             pos[3] = bh;
 
-            List<int[]> globalPos = AltarCraftButtons.getPositions();
-            if (i < globalPos.size()) {
-                int[] gp = globalPos.get(i);
-                gp[0] = bx;
-                gp[1] = by;
-                gp[2] = bw;
-                gp[3] = bh;
-            }
+            AltarCraftButtons.updateBounds(i, bx, by, bw, bh);
 
             AltarCraftButtons.addTransferPos(area.getX(), area.getY(), bw, bh);
 
-            if (hasMachineGui && mgIdx < mgPos.size()) {
-                int[] mgp = mgPos.get(mgIdx);
-                mgp[0] = bx + bw + BUTTON_GAP;
-                mgp[1] = by;
-                mgp[2] = bw;
-                mgp[3] = bh;
+            if (hasMachineGui
+                    && mgIdx < AltarCraftButtons.getMachineGuiCount()) {
+                AltarCraftButtons.updateMachineGuiBounds(
+                        mgIdx, bx + bw + BUTTON_GAP, by, bw, bh);
                 mgIdx++;
             }
         }
@@ -691,7 +681,8 @@ public class RecipeGuiLayoutsMixin {
             // JEI can invoke draw during a layout swap.  The layout list and
             // the button metadata are rebuilt in separate callbacks; skip a
             // transient entry instead of drawing a stale/misaligned button.
-            if (i >= rsi$availabilityKeys.size() && i >= AltarCraftButtons.getPositions().size()) continue;
+            if (i >= rsi$availabilityKeys.size()
+                    && i >= AltarCraftButtons.getButtonCount()) continue;
             if (!AltarCraftButtons.isVisible(i)) continue;
             rsi$refreshLongTravailAvailability(i);
             int[] pos = rsi$positions.get(i);
@@ -717,10 +708,10 @@ public class RecipeGuiLayoutsMixin {
         }
 
         // Draw machine GUI buttons (gear icon to the right of "+" buttons)
-        List<int[]> mgPositions = AltarCraftButtons.getMachineGuiPositions();
-        for (int i = 0; i < mgPositions.size(); i++) {
-            int[] pos = mgPositions.get(i);
-            int mx = pos[0], my = pos[1], mw = pos[2], mh = pos[3];
+        for (int i = 0; i < AltarCraftButtons.getMachineGuiCount(); i++) {
+            var pos = AltarCraftButtons.getMachineGuiBounds(i);
+            int mx = pos.x(), my = pos.y();
+            int mw = pos.width(), mh = pos.height();
             boolean hovered = mouseX >= mx && mouseX < mx + mw && mouseY >= my && mouseY < my + mh;
 
             CraftButtonTextures.machine(guiGraphics, mx, my, mw, mh, hovered);
@@ -904,7 +895,7 @@ public class RecipeGuiLayoutsMixin {
             // Miner's Delight and similar add-ons reuse CookingPotRecipe in a
             // different JEI machine category. A class-only fallback would make
             // their machines borrow the Farmer's Delight cooking-pot binding.
-            if (!JeiMachineCategoryPolicy.allowClassFallback(
+            if (!RecipeMachineCategoryPolicy.allowClassFallback(
                     uid, recipe.getClass().getName(), filter)) {
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI-Mixin] Skipping class fallback for machine-owned category {} ({})",
@@ -975,7 +966,7 @@ public class RecipeGuiLayoutsMixin {
      */
     @Unique
     private static ResourceLocation unwrapJeiId(ResourceLocation id) {
-        ResourceLocation normalized = JeiRecipeIdNormalizer.normalize(id);
+        ResourceLocation normalized = RecipeIdNormalizer.normalize(id);
         if (id != null && !id.equals(normalized)) {
             RSIntegrationMod.LOGGER.debug("[RSI-JEI-Mixin] unwrapJeiId: {} -> {}", id, normalized);
         }
@@ -1626,7 +1617,7 @@ public class RecipeGuiLayoutsMixin {
                     NetworkHandler.CHANNEL.sendToServer(
                             new BeyondDimensionsOpenBoundMachineGuiPacket(anvilDim, anvilPos));
                 } else {
-                    RSSidePanelNetworkHandler.CHANNEL.sendToServer(
+                    NetworkHandler.CHANNEL.sendToServer(
                             new OpenBoundMachineGuiPacket(anvilDim, anvilPos,
                                     anvilRecipeId.toString(), anvilRecipeId));
                 }

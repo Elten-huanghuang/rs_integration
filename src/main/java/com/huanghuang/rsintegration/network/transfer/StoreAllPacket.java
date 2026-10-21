@@ -1,0 +1,60 @@
+package com.huanghuang.rsintegration.network.transfer;
+
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.storage.ContainerTransferLogic;
+import com.huanghuang.rsintegration.util.ModIds;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.fml.ModList;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraftforge.common.util.FakePlayer;
+
+import java.util.function.Supplier;
+
+public final class StoreAllPacket {
+
+    // 0 = RS Network, 1 = Backpack, 2 = Beyond Dimensions
+    private final byte mode;
+
+    public StoreAllPacket(byte mode) {
+        this.mode = mode;
+    }
+
+    public static void encode(StoreAllPacket pkt, FriendlyByteBuf buf) {
+        buf.writeByte(pkt.mode);
+    }
+
+    public static StoreAllPacket decode(FriendlyByteBuf buf) {
+        return new StoreAllPacket(buf.readByte());
+    }
+
+    public static void handle(StoreAllPacket pkt, Supplier<NetworkEvent.Context> ctxSupplier) {
+        NetworkEvent.Context ctx = ctxSupplier.get();
+        ServerPlayer player = ctx.getSender();
+        if (player == null) {
+            ctx.setPacketHandled(true);
+            return;
+        }
+        if (player instanceof FakePlayer) {
+            ctx.setPacketHandled(true);
+            return;
+        }
+        ctx.enqueueWork(() -> {
+            if (!RSIntegrationConfig.ENABLE_CONTAINER_TRANSFER.get()) return;
+
+            if (pkt.mode < 0 || pkt.mode > 2) return;
+            if (pkt.mode == 0 && !ModList.get().isLoaded(ModIds.REFINED_STORAGE)) return;
+            if (pkt.mode == 1 && !ModList.get().isLoaded(ModIds.SOPHISTICATED_BACKPACKS)) return;
+            if (pkt.mode == 2 && !ModList.get().isLoaded("beyonddimensions")) return;
+
+            AbstractContainerMenu menu = player.containerMenu;
+            if (menu == null) return;
+            if (menu instanceof InventoryMenu) return;
+
+            ContainerTransferLogic.transferAll(player, menu, pkt.mode);
+        });
+        ctx.setPacketHandled(true);
+    }
+}

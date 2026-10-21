@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.farmersrespite.kettle;
 
-import com.huanghuang.rsintegration.recipe.FarmersRespiteRecipeHandler;
+import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;

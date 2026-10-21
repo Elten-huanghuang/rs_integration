@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.unifiedgrid.client.UnifiedGridView;
+import com.huanghuang.rsintegration.feature.unifiedgrid.client.UnifiedGridView;
 import com.refinedmods.refinedstorage.network.grid.GridItemUpdateMessage;
 import com.refinedmods.refinedstorage.network.grid.GridFluidUpdateMessage;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;

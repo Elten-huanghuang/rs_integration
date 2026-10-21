@@ -4,7 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.recipe.FarmersDelightRecipeHandler;
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.BlockPos;

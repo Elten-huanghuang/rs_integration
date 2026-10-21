@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mods.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.mods.jei.RSJeiPlugin;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import com.refinedmods.refinedstorage.screen.grid.view.IGridView;

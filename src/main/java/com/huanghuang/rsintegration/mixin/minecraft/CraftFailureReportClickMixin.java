@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
+import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Style;
 import org.spongepowered.asm.mixin.Mixin;

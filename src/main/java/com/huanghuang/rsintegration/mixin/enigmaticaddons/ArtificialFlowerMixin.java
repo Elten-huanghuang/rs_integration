@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.mixin.enigmaticaddons;
+
 import java.lang.reflect.Method;
 
 import auviotre.enigmatic.addon.contents.items.ArtificialFlower;
 import auviotre.enigmatic.addon.handlers.SuperAddonHandler;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
-import com.huanghuang.rsintegration.resonance.passive.PassiveItemLookup;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.passive.PassiveItemLookup;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;

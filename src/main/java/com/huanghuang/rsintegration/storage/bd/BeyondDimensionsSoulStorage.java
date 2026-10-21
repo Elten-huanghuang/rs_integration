@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.storage.bd;
 
-import com.huanghuang.rsintegration.magic.GoetySoulStackKey;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulStackKey;
 import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import net.minecraft.server.level.ServerPlayer;

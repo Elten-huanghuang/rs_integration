@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mixin.tacz;
 
 import com.huanghuang.rsintegration.mods.tacz.TaczResonanceAmmoHandler;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.passive.PassiveEffectEngine;
+import com.huanghuang.rsintegration.feature.resonance.passive.PassiveEffectEngine;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.tacz.guns.item.ModernKineticGunScriptAPI;

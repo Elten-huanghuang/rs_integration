@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
-import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
+import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.world.item.EnchantedBookItem;

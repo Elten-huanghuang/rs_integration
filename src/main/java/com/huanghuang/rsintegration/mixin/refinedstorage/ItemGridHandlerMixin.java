@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.RsAutocraftProgressTracker;
+import com.huanghuang.rsintegration.feature.ftbquests.RsAutocraftProgressTracker;
 import com.refinedmods.refinedstorage.api.autocrafting.ICraftingManager;
 import com.refinedmods.refinedstorage.api.autocrafting.task.ICraftingTask;
 import com.refinedmods.refinedstorage.apiimpl.network.grid.handler.ItemGridHandler;

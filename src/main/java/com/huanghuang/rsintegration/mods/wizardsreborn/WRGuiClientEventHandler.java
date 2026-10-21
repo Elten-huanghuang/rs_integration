@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.wizardsreborn;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-import com.huanghuang.rsintegration.recipe.WRAlchemyRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyRecipeHandler;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;

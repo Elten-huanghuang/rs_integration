@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.apotheosis;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.EditBox;

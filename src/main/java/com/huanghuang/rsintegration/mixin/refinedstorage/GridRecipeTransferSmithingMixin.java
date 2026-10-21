@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.network.SmithingJeiTransferHandler;
+import com.huanghuang.rsintegration.mods.jei.SmithingJeiTransferHandler;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;

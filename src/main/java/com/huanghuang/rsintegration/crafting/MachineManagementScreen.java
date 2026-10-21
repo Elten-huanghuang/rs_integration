@@ -1,13 +1,15 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressScreen;
 
-import com.huanghuang.rsintegration.autoeat.client.PinyinUtil;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.sidepanel.client.MachinePreferenceClient;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabRenderer;
-import com.huanghuang.rsintegration.sidepanel.data.BindingCache;
-import com.huanghuang.rsintegration.sidepanel.data.BindingInfo;
+import com.huanghuang.rsintegration.machine.client.MachinePreferenceClient;
+import com.huanghuang.rsintegration.machine.client.MachineEntryPolicy;
+import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
+import com.huanghuang.rsintegration.machine.client.MachineTabRenderer;
+import com.huanghuang.rsintegration.machine.client.data.BindingCache;
+import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
@@ -121,8 +123,7 @@ public final class MachineManagementScreen extends Screen {
         machines.clear();
         for (BindingInfo info : MachineTabHandler.getAllBoundMachinesForManagement()) {
             if (view == View.GUI_ONLY
-                    && (!BindingEventHandler.supportsGuiByInfo(info)
-                    || MachinePreferenceClient.isBlocked(info))) continue;
+                    && !MachineEntryPolicy.isSelectable(info)) continue;
             machines.add(info);
         }
         machines.sort(Comparator
@@ -306,7 +307,7 @@ public final class MachineManagementScreen extends Screen {
         lines.add(Component.literal(hovered.dim() + " " + hovered.pos().toShortString())
                 .withStyle(ChatFormatting.DARK_GRAY));
         boolean blocked = MachinePreferenceClient.isBlocked(hovered);
-        if (!blocked && BindingEventHandler.supportsGuiByInfo(hovered)) {
+        if (MachineEntryPolicy.isSelectable(hovered)) {
             lines.add(Component.translatable("rsi.control_center.hint.open")
                     .withStyle(ChatFormatting.GRAY));
         }
@@ -368,8 +369,7 @@ public final class MachineManagementScreen extends Screen {
                 }
                 return true;
             }
-            if (button == 0 && !MachinePreferenceClient.isBlocked(info)
-                    && BindingEventHandler.supportsGuiByInfo(info)) {
+            if (button == 0 && MachineEntryPolicy.isSelectable(info)) {
                 MachineTabHandler.onClick(info);
                 return true;
             }

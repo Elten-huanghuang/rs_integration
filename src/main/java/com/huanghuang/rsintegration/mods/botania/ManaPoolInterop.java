@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.botania;
 
-import com.huanghuang.rsintegration.magic.BotaniaResonantManaPoolBlockEntity;
+import com.huanghuang.rsintegration.feature.resonance.magic.BotaniaResonantManaPoolBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;

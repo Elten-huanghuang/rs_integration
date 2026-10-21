@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
-import com.huanghuang.rsintegration.sidepanel.favorite.MachineFavoriteKey;
+import com.huanghuang.rsintegration.network.binding.MachineFavoriteKey;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;

@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
+
 import java.lang.reflect.Method;
 
 import com.mojang.logging.LogUtils;

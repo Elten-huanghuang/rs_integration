@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mixin.constructionwand;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.client.JeiNetworkItemCache;
+import com.huanghuang.rsintegration.client.recipe.JeiNetworkItemCache;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import org.spongepowered.asm.mixin.Mixin;

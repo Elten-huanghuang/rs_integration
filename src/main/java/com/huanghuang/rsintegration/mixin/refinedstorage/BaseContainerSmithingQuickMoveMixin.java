@@ -1,10 +1,10 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.craftingstation.CraftingStationAccess;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationInputSlot;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationResultSlot;
-import com.huanghuang.rsintegration.craftingstation.StonecutterTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationResultSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterTerminalState;
 import com.refinedmods.refinedstorage.container.BaseContainerMenu;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.world.entity.player.Player;

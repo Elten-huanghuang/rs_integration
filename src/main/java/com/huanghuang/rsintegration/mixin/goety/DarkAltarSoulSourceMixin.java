@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.goety;
 
-import com.huanghuang.rsintegration.magic.DarkAltarSoulPort;
+import com.huanghuang.rsintegration.mods.goety.magic.DarkAltarSoulPort;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;

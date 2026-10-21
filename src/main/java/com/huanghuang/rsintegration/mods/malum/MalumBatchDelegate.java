@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.mods.malum;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 

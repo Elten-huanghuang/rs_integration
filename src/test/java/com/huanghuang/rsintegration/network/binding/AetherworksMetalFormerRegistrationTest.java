@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRSModule;
-import com.huanghuang.rsintegration.recipe.AetherworksMetalFormerRecipeHandler;
+import com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerRecipeHandler;
 import com.huanghuang.rsintegration.util.ModIds;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

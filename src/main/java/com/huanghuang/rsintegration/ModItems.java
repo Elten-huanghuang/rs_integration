@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration;
 
-import com.huanghuang.rsintegration.disk.UnifiedDiskVisibility;
+import com.huanghuang.rsintegration.storage.disk.UnifiedDiskVisibility;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
 import net.minecraft.core.registries.Registries;
@@ -12,7 +12,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import com.huanghuang.rsintegration.resonance.backpack.ResonanceBackpackContainer;
+import com.huanghuang.rsintegration.feature.resonance.backpack.ResonanceBackpackContainer;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;

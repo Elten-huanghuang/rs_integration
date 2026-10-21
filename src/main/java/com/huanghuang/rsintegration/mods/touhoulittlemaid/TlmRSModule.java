@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.recipe.TlmAltarRecipeHandler;
+import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarRecipeHandler;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.List;

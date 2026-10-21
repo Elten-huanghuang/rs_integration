@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.mixin.moonstone;
+
 import java.lang.reflect.Method;
 
 import com.google.common.collect.Multimap;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.util.ThreadLocalStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;

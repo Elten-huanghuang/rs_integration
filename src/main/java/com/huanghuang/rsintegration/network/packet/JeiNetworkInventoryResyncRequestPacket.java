@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.network.packet;
 
-import com.huanghuang.rsintegration.server.JeiNetworkInventorySyncManager;
+import com.huanghuang.rsintegration.network.packet.JeiNetworkInventorySyncManager;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;

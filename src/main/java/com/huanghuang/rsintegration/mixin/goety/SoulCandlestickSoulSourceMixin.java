@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.goety;
 
-import com.huanghuang.rsintegration.magic.GoetyVirtualSoulAccess;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetyVirtualSoulAccess;
 import net.minecraft.core.BlockPos;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

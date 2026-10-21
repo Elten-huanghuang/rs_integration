@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mods.rs.recentsearch;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.machine.MachineHub;
+import com.huanghuang.rsintegration.machine.client.MachineHub;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.widget.SearchWidget;
 import net.minecraft.client.Minecraft;

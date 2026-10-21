@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.unifiedgrid.UnifiedGridFluidTransfer;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidTransfer;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.world.item.ItemStack;

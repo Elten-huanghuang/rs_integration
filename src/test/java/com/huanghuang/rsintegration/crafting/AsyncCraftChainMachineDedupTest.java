@@ -181,7 +181,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine duplicate = new BoundMachine(overworld, pos, ModType.GENERIC, "furnace");
         BoundMachine otherType = new BoundMachine(overworld, pos, ModType.CUSTOM_GUI, "furnace");
 
-        List<BoundMachine> result = AsyncCraftChain.deduplicateMachines(
+        List<BoundMachine> result = MachineDispatchPlanner.deduplicate(
                 List.of(first, duplicate, otherType));
 
         assertEquals(2, result.size());
@@ -202,7 +202,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         leases.tryAcquire(busyKey, new MachineLeaseRegistry.Owner(
                 UUID.randomUUID(), new NodeId(0), 0));
 
-        List<BoundMachine> result = AsyncCraftChain.filterUnleasedMachines(
+        List<BoundMachine> result = MachineDispatchPlanner.filterUnleased(
                 List.of(busy, idle), leases, ModType.GENERIC.id());
 
         assertEquals(List.of(idle), result);
@@ -210,12 +210,12 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
 
     @Test
     void classifiesLeaseAvailabilityWithoutTreatingBusyAsMissing() {
-        assertEquals(AsyncCraftChain.MachineLeaseAvailability.NONE_BOUND,
-                AsyncCraftChain.classifyLeaseAvailability(0, 0));
-        assertEquals(AsyncCraftChain.MachineLeaseAvailability.ALL_LEASED,
-                AsyncCraftChain.classifyLeaseAvailability(2, 0));
-        assertEquals(AsyncCraftChain.MachineLeaseAvailability.AVAILABLE,
-                AsyncCraftChain.classifyLeaseAvailability(2, 1));
+        assertEquals(MachineDispatchPlanner.LeaseAvailability.NONE_BOUND,
+                MachineDispatchPlanner.classifyLeaseAvailability(0, 0));
+        assertEquals(MachineDispatchPlanner.LeaseAvailability.ALL_LEASED,
+                MachineDispatchPlanner.classifyLeaseAvailability(2, 0));
+        assertEquals(MachineDispatchPlanner.LeaseAvailability.AVAILABLE,
+                MachineDispatchPlanner.classifyLeaseAvailability(2, 1));
     }
 
     @Test
@@ -226,8 +226,8 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine usable = new BoundMachine(overworld, new BlockPos(3, 64, 4),
                 ModType.GENERIC, "usable");
 
-        AsyncCraftChain.MachineCandidateSelection selection =
-                AsyncCraftChain.filterMachineCandidates(
+        MachineDispatchPlanner.CandidateSelection selection =
+                MachineDispatchPlanner.filterCandidates(
                         List.of(denied, usable),
                         machine -> true,
                         machine -> machine == usable);
@@ -245,8 +245,8 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine loaded = new BoundMachine(overworld, new BlockPos(3, 64, 4),
                 ModType.GENERIC, "loaded");
 
-        AsyncCraftChain.MachineCandidateSelection selection =
-                AsyncCraftChain.filterMachineCandidates(
+        MachineDispatchPlanner.CandidateSelection selection =
+                MachineDispatchPlanner.filterCandidates(
                         List.of(unloaded, loaded),
                         machine -> machine == loaded,
                         machine -> true);
@@ -264,7 +264,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine preferred = new BoundMachine(overworld, new BlockPos(3, 64, 4),
                 ModType.GENERIC, "preferred");
 
-        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+        List<BoundMachine> routed = MachineDispatchPlanner.routeCandidates(
                 List.of(first, preferred), MachineSelectionMode.PREFERRED,
                 preferred.dim(), preferred.pos());
 
@@ -277,7 +277,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine bound = new BoundMachine(overworld, new BlockPos(1, 64, 2),
                 ModType.GENERIC, "bound");
 
-        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+        List<BoundMachine> routed = MachineDispatchPlanner.routeCandidates(
                 List.of(bound), MachineSelectionMode.EXCLUSIVE,
                 overworld, new BlockPos(99, 64, 99));
 
@@ -290,7 +290,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         BoundMachine bound = new BoundMachine(overworld, new BlockPos(1, 64, 2),
                 ModType.GENERIC, "bound");
 
-        List<BoundMachine> routed = AsyncCraftChain.routeMachineCandidates(
+        List<BoundMachine> routed = MachineDispatchPlanner.routeCandidates(
                 List.of(bound), MachineSelectionMode.EXCLUSIVE, null, null);
 
         assertTrue(routed.isEmpty());

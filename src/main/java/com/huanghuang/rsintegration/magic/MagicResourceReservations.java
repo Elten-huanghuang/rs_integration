@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.magic;
 
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
-import com.huanghuang.rsintegration.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -105,7 +105,8 @@ public final class MagicResourceReservations {
         return moved;
     }
 
-    /** 一次任务持有的预留；所有方法都在服务器主线程调用。 */    public static final class Pool implements GoetySoulNetworkPool {
+    /** 一次任务持有的预留；所有方法都在服务器主线程调用。 */
+    public static final class Pool implements MagicResourceNetworkPool {
         private final MagicResourceKind kind;
         private final Map<UnifiedDiskCore, Long> claims = new LinkedHashMap<>();
         private long remaining;

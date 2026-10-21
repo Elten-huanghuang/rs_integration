@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import com.huanghuang.rsintegration.ModType;
 import com.electronwill.nightconfig.core.CommentedConfig;
@@ -115,7 +116,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new ItemStack(Items.DIAMOND), List.of());
         CraftPlanGraph safe = new CraftPlanGraph(1, List.of(safeNode), List.of(),
                 List.of(missingTerminal), List.of(), List.of(nodeId));
-        assertTrue(GenericCraftPacket.isPreparationGraphExecutable(safe));
+        assertTrue(CraftPreparationPlans.isExecutable(safe));
 
         InputPortId inputId = new InputPortId(nodeId, 0);
         CraftNode blockedNode = new CraftNode(nodeId, new ResourceLocation("test", "planks"),
@@ -129,7 +130,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                         new MaterialSource.ProducerOutput(outputId), planks, 4)))),
                 List.of(new UnresolvedDemand(inputId, Ingredient.of(Items.STICK), 1,
                         new ItemStack(Items.STICK))), List.of(nodeId));
-        assertFalse(GenericCraftPacket.isPreparationGraphExecutable(blocked));
+        assertFalse(CraftPreparationPlans.isExecutable(blocked));
     }
 
     @Test
@@ -191,7 +192,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(rawNodeId, safeNodeId, blockedNodeId, downstreamNodeId));
         CraftPlanValidator.validate(graph);
 
-        CraftPlanGraph pruned = GenericCraftPacket.pruneBlockedPreparationGraph(graph);
+        CraftPlanGraph pruned = CraftPreparationPlans.pruneBlocked(graph);
 
         assertEquals(List.of(rawNodeId, safeNodeId), pruned.topologicalOrder());
         assertEquals(2, pruned.nodes().size());
@@ -220,7 +221,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(new UnresolvedDemand(inputId, Ingredient.of(Items.STICK), 1,
                         new ItemStack(Items.STICK))), List.of(nodeId));
 
-        assertNull(GenericCraftPacket.pruneBlockedPreparationGraph(graph));
+        assertNull(CraftPreparationPlans.pruneBlocked(graph));
     }
 
     private static CraftNode graphNode(NodeId id, String path, List<InputDemand> inputs,
@@ -300,7 +301,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         displayData.putString("jei_display", "client-only");
         clicked.setTag(displayData);
 
-        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+        ItemStack selected = CraftTerminalSteps.selectTerminalGraphOutput(
                 recipe, recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), clicked);
 
         assertFalse(selected.hasTag());
@@ -321,7 +322,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         levelTwo.putInt("level", 2);
         clicked.setTag(levelTwo);
 
-        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+        ItemStack selected = CraftTerminalSteps.selectTerminalGraphOutput(
                 recipe, recipe.getResultItem(net.minecraft.core.RegistryAccess.EMPTY), clicked);
 
         assertEquals(2, selected.getTag().getInt("level"));
@@ -372,7 +373,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                     }
                 };
 
-        ItemStack selected = GenericCraftPacket.selectTerminalGraphOutput(
+        ItemStack selected = CraftTerminalSteps.selectTerminalGraphOutput(
                 recipe, declared, clicked, handler);
 
         assertEquals(Items.BOOK, selected.getItem());
@@ -673,8 +674,8 @@ class GenericCraftPacketTest extends BootstrapTest {
         Map<CraftingResolver.StackKey, Integer> available = Map.of(
                 new CraftingResolver.StackKey(Items.EMERALD, null), 2048);
 
-        var exact = GenericCraftPacket.marketTradeAvailability(market, available, 64);
-        var shortage = GenericCraftPacket.marketTradeAvailability(market, available, 65);
+        var exact = CraftMarketPlanService.tradeAvailability(market, available, 64);
+        var shortage = CraftMarketPlanService.tradeAvailability(market, available, 65);
 
         assertEquals(2048, exact.required());
         assertEquals(2048, exact.available());
@@ -693,13 +694,13 @@ class GenericCraftPacketTest extends BootstrapTest {
         tag.putInt("level", 2);
         variant.setTag(tag);
 
-        assertFalse(GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+        assertFalse(CraftPlanCacheKeys.key(player, recipe, forced, 4, variant,
                         ModType.GENERIC).equals(
-                GenericCraftPacket.planCacheKey(player, recipe, forced, 4, null,
+                CraftPlanCacheKeys.key(player, recipe, forced, 4, null,
                         ModType.GENERIC)));
-        assertFalse(GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+        assertFalse(CraftPlanCacheKeys.key(player, recipe, forced, 4, variant,
                         ModType.GENERIC).equals(
-                GenericCraftPacket.planCacheKey(player, recipe, forced, 4, variant,
+                CraftPlanCacheKeys.key(player, recipe, forced, 4, variant,
                         ModType.FARMINGFORBLOCKHEADS_MARKET)));
     }
 
@@ -714,32 +715,32 @@ class GenericCraftPacketTest extends BootstrapTest {
                 Map.of(), overrides, new ImmutableRecipeGraph(Map.of()),
                 "network", "binding", false);
 
-        assertTrue(GenericCraftPacket.matchesAsyncRequest(
+        assertTrue(CraftPlanDecisionRules.matchesAsyncRequest(
                 snapshot, playerId, recipeId, 7, overrides));
-        assertFalse(GenericCraftPacket.matchesAsyncRequest(
+        assertFalse(CraftPlanDecisionRules.matchesAsyncRequest(
                 snapshot, playerId, recipeId, 8, overrides));
-        assertFalse(GenericCraftPacket.matchesAsyncRequest(
+        assertFalse(CraftPlanDecisionRules.matchesAsyncRequest(
                 snapshot, playerId, recipeId, 7, Map.of()));
     }
 
     @Test
     void cancelledAndStaleAsyncPlansNeverTriggerSynchronousFallback() {
-        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
                 new CancellationException("superseded")));
         PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1,
                 new ResourceLocation("test", "recipe"), Map.of(), Map.of(),
                 new ImmutableRecipeGraph(Map.of()), "network", "binding", false);
-        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
                 new AsyncPlanningCoordinator.StalePlanningResultException(snapshot)));
-        assertFalse(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
                 new RejectedExecutionException("planner queue full")));
-        assertTrue(GenericCraftPacket.shouldFallbackAfterAsyncFailure(
+        assertTrue(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
                 new IllegalStateException("planner failed")));
     }
 
     @Test
     void synchronousTerminalStepUsesRequestedExecutionCount() {
-        var step = GenericCraftPacket.genericTerminalStep(
+        var step = CraftTerminalSteps.genericTerminalStep(
                 new ResourceLocation("minecraft", "iron_ingot"), 6);
 
         assertEquals(6, step.executions());
@@ -752,7 +753,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         ResourceLocation target = new ResourceLocation("crafttweaker", "avarice_scroll");
 
         List<CraftingResolver.ResolutionStep> executionSteps =
-                GenericCraftPacket.genericExecutionSteps(projectedSteps, target, 4);
+                CraftTerminalSteps.genericExecutionSteps(projectedSteps, target, 4);
 
         assertEquals(List.of(intermediate), projectedSteps);
         assertEquals(2, executionSteps.size());
@@ -765,7 +766,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         List<CraftingResolver.ResolutionStep> steps = List.of(
                 genericStep("first", Integer.MAX_VALUE), genericStep("second", 1));
 
-        assertEquals(Integer.MAX_VALUE, GenericCraftPacket.totalExecutions(steps));
+        assertEquals(Integer.MAX_VALUE, CraftTerminalSteps.totalExecutions(steps));
     }
 
     private static CraftingResolver.ResolutionStep genericStep(String path, int executions) {
@@ -794,7 +795,7 @@ class GenericCraftPacketTest extends BootstrapTest {
             modList.when(ModList::get).thenReturn(loadedMods);
             when(loadedMods.isLoaded(ModIds.BIOMANCY)).thenReturn(false);
 
-            assertNull(GenericCraftPacket.resolveBiomancyDigestingRecipe(
+            assertNull(CraftRecipeResolver.resolveBiomancyDigesting(
                     mock(ServerLevel.class), new ResourceLocation("test", "display_recipe")));
         }
     }
@@ -804,7 +805,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         ResourceLocation recipeId = new ResourceLocation("test", "background_smithing");
 
         CraftingResolver.ResolutionStep step =
-                GenericCraftPacket.backgroundPhysicalTerminalStep(
+                CraftTerminalSteps.backgroundPhysicalTerminalStep(
                         recipeId, ModType.byId("smithing"), true, 4);
 
         assertEquals(ModType.GENERIC, step.modType());
@@ -855,7 +856,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                         new RecipeIndex.Entry(crafting, ModType.GENERIC, craftingType),
                         new RecipeIndex.Entry(infuser, ModType.CUSTOM_GUI, craftingType)));
 
-        var enriched = GenericCraftPacket.attachIndexedAlternatives(
+        var enriched = CraftDisplayMaterials.attachIndexedAlternatives(
                 List.of(step), index, net.minecraft.core.RegistryAccess.EMPTY);
 
         assertEquals(List.of(infuser.getId()), enriched.get(0).alternativeIds());

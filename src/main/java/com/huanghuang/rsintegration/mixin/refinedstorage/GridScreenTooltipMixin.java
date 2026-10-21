@@ -1,9 +1,10 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
+
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.machine.MachineHub;
+import com.huanghuang.rsintegration.machine.client.MachineHub;
 import com.huanghuang.rsintegration.mods.rs.recentsearch.RecentSearchClient;
-import com.huanghuang.rsintegration.sidepanel.client.MachineTabHandler;
+import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import com.refinedmods.refinedstorage.screen.grid.stack.IGridStack;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;

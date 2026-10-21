@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
-import com.huanghuang.rsintegration.craftingstation.CraftingStationAccess;
-import com.huanghuang.rsintegration.craftingstation.CraftingStationMode;
-import com.huanghuang.rsintegration.craftingstation.StonecutterScreenAccess;
-import com.huanghuang.rsintegration.craftingstation.StonecutterTerminalState;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterScreenAccess;
+import com.huanghuang.rsintegration.feature.craftingstation.StonecutterTerminalState;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.screen.BaseScreen;

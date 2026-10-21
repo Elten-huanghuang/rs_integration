@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 

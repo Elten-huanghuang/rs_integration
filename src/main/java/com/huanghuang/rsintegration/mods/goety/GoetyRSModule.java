@@ -6,14 +6,14 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
-import com.huanghuang.rsintegration.recipe.GoetyRecipeHandler;
+import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.DistExecutor;
-import com.huanghuang.rsintegration.recipe.CursedInfuserRecipeHandler;
+import com.huanghuang.rsintegration.mods.goety.CursedInfuserRecipeHandler;
 
 import java.util.List;
 import java.util.function.Supplier;

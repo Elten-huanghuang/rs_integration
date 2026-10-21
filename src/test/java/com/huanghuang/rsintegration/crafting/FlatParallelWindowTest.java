@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
@@ -50,20 +51,20 @@ class FlatParallelWindowTest extends BootstrapTest {
 
     @Test
     void parallelDispatchAddsIndependentPhysicalBufferCapacities() {
-        assertEquals(32, AsyncCraftChain.combinedParallelDispatchLimit(32, List.of()));
-        assertEquals(64, AsyncCraftChain.combinedParallelDispatchLimit(32, List.of(64)));
-        assertEquals(256, AsyncCraftChain.combinedParallelDispatchLimit(
+        assertEquals(32, MachineDispatchPlanner.combinedParallelDispatchLimit(32, List.of()));
+        assertEquals(64, MachineDispatchPlanner.combinedParallelDispatchLimit(32, List.of(64)));
+        assertEquals(256, MachineDispatchPlanner.combinedParallelDispatchLimit(
                 32, List.of(64, 64, 64, 64)));
         assertEquals(128, AsyncCraftChain.flatDispatchWindow(128,
-                AsyncCraftChain.combinedParallelDispatchLimit(
+                MachineDispatchPlanner.combinedParallelDispatchLimit(
                         32, List.of(64, 64, 64, 64))));
     }
 
     @Test
     void invalidPhysicalCapacitiesCannotLowerTheConfiguredSafetyBaseline() {
-        assertEquals(32, AsyncCraftChain.combinedParallelDispatchLimit(
+        assertEquals(32, MachineDispatchPlanner.combinedParallelDispatchLimit(
                 32, java.util.Arrays.asList(null, 0, -1)));
-        assertEquals(Integer.MAX_VALUE, AsyncCraftChain.combinedParallelDispatchLimit(
+        assertEquals(Integer.MAX_VALUE, MachineDispatchPlanner.combinedParallelDispatchLimit(
                 32, List.of(Integer.MAX_VALUE, Integer.MAX_VALUE)));
     }
 

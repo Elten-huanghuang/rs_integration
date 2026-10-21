@@ -1,8 +1,13 @@
 package com.huanghuang.rsintegration.crafting;
-import java.lang.reflect.Field;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+
+
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.compat.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
@@ -511,32 +516,8 @@ public final class AsyncCraftChain {
             List<BoundMachine> machines, ResourceLocation recipeId) {
         MachinePreference preference = machinePreference;
         if (preference == null || !preference.recipeId().equals(recipeId)) return machines;
-        return routeMachineCandidates(machines, preference.mode(),
+        return MachineDispatchPlanner.routeCandidates(machines, preference.mode(),
                 preference.dimension(), preference.position());
-    }
-
-    static List<BoundMachine> routeMachineCandidates(
-            List<BoundMachine> machines, MachineSelectionMode mode,
-            @Nullable ResourceLocation dimension, @Nullable BlockPos position) {
-        if (machines == null || machines.isEmpty() || mode == null
-                || mode == MachineSelectionMode.AUTO) {
-            return machines == null ? List.of() : machines;
-        }
-        if (dimension == null || position == null) {
-            return mode == MachineSelectionMode.EXCLUSIVE ? List.of() : machines;
-        }
-        BoundMachine selected = machines.stream()
-                .filter(machine -> machine.dim().equals(dimension)
-                        && machine.pos().equals(position))
-                .findFirst().orElse(null);
-        if (mode == MachineSelectionMode.EXCLUSIVE) {
-            return selected == null ? List.of() : List.of(selected);
-        }
-        if (selected == null || machines.size() < 2 || machines.get(0) == selected) return machines;
-        List<BoundMachine> ordered = new ArrayList<>(machines.size());
-        ordered.add(selected);
-        for (BoundMachine machine : machines) if (machine != selected) ordered.add(machine);
-        return ordered;
     }
 
     public ItemStack displayTarget() {
@@ -1555,7 +1536,8 @@ public final class AsyncCraftChain {
     private PreparationResult prepareGraphNode(NodeId nodeId,
                                                CraftingResolver.ResolutionStep step,
                                                ServerPlayer online) {
-        List<BoundMachine> machines = deduplicateMachines(AltarBindingRegistry.getBoundMachinesForRecipe(
+        List<BoundMachine> machines = MachineDispatchPlanner.deduplicate(
+                AltarBindingRegistry.getBoundMachinesForRecipe(
                 online, step.modType(), step.recipeId()));
         machines.sort((a, b) -> {
             ResourceLocation playerDim = online.level().dimension().location();
@@ -1601,7 +1583,8 @@ public final class AsyncCraftChain {
             return PreparationResult.fatal("No bound machine matches " + step.recipeId());
         }
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server, delegate);
-        available = filterUnleasedMachines(available, machineLeases, step.modType().id());
+        available = MachineDispatchPlanner.filterUnleased(
+                available, machineLeases, step.modType().id());
         if (available.isEmpty()) {
             return PreparationResult.retry("all bound machines are busy, unloaded, or unavailable");
         }
@@ -2942,7 +2925,7 @@ public final class AsyncCraftChain {
         return machine.dimension() + "@" + machine.position().toShortString();
     }
 
-    static CraftProgressSnapshot.Reason progressReasonForDetail(String detail) {
+    public static CraftProgressSnapshot.Reason progressReasonForDetail(String detail) {
         if (detail == null || detail.isEmpty()) return CraftProgressSnapshot.Reason.NONE;
         String normalized = detail.toLowerCase(Locale.ROOT);
         // Classify the observed failure, not a guessed cause of a timeout.
@@ -3289,30 +3272,6 @@ public final class AsyncCraftChain {
 
     //  multi-block step execution
 
-    static List<BoundMachine> deduplicateMachines(List<BoundMachine> machines) {
-        return MachineDispatchPlanner.deduplicate(machines);
-    }
-
-    static List<BoundMachine> filterUnleasedMachines(List<BoundMachine> machines,
-                                                      MachineLeaseRegistry leases,
-                                                      String logicalType) {
-        return MachineDispatchPlanner.filterUnleased(machines, leases, logicalType);
-    }
-
-    enum MachineLeaseAvailability {
-        NONE_BOUND,
-        ALL_LEASED,
-        AVAILABLE
-    }
-
-    static MachineLeaseAvailability classifyLeaseAvailability(int boundCount, int availableCount) {
-        return switch (MachineDispatchPlanner.classifyLeaseAvailability(boundCount, availableCount)) {
-            case NONE_BOUND -> MachineLeaseAvailability.NONE_BOUND;
-            case ALL_LEASED -> MachineLeaseAvailability.ALL_LEASED;
-            case AVAILABLE -> MachineLeaseAvailability.AVAILABLE;
-        };
-    }
-
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
         machineWaitMessage = null;
         machineWaitDetail = null;
@@ -3376,11 +3335,13 @@ public final class AsyncCraftChain {
         }
 
         // Duplicate bindings must never create multiple workers for one logical machine.
-        machines = deduplicateMachines(machines);
+        machines = MachineDispatchPlanner.deduplicate(machines);
         int boundMachineCount = machines.size();
-        machines = filterUnleasedMachines(machines, machineLeases, step.modType().id());
-        if (classifyLeaseAvailability(boundMachineCount, machines.size())
-                == MachineLeaseAvailability.ALL_LEASED) {
+        machines = MachineDispatchPlanner.filterUnleased(
+                machines, machineLeases, step.modType().id());
+        if (MachineDispatchPlanner.classifyLeaseAvailability(
+                boundMachineCount, machines.size())
+                == MachineDispatchPlanner.LeaseAvailability.ALL_LEASED) {
             if (!waitingForMachineLease) {
                 RSIntegrationMod.LOGGER.debug(ctx.format(
                         "All bound machines for {} are leased by active operations; waiting to retry"),
@@ -3468,7 +3429,8 @@ public final class AsyncCraftChain {
             return startGenericStep(initialDelegate, step, online);
         }
 
-        MachineCandidateSelection candidateSelection = filterMachineCandidates(
+        MachineDispatchPlanner.CandidateSelection candidateSelection =
+                MachineDispatchPlanner.filterCandidates(
                 machines,
                 machine -> {
                     ResourceKey<Level> dimKey = ResourceKey.create(
@@ -3903,20 +3865,6 @@ public final class AsyncCraftChain {
                 : Component.literal(step.recipeId().toString());
     }
 
-    record MachineCandidateSelection(List<BoundMachine> usable,
-                                     boolean unloadedRejected,
-                                     boolean protectionRejected) {}
-
-    static MachineCandidateSelection filterMachineCandidates(
-            List<BoundMachine> machines,
-            Predicate<BoundMachine> loaded,
-            Predicate<BoundMachine> permitted) {
-        MachineDispatchPlanner.CandidateSelection result =
-                MachineDispatchPlanner.filterCandidates(machines, loaded, permitted);
-        return new MachineCandidateSelection(
-                result.usable(), result.unloadedRejected(), result.protectionRejected());
-    }
-
     //  parallel (load-balanced) step
 
     /**
@@ -3972,18 +3920,8 @@ public final class AsyncCraftChain {
                 if (candidate != null) releasePreparationQuietly(candidate);
             }
         }
-        return combinedParallelDispatchLimit(configuredLimit, physicalCapacities);
-    }
-
-    static int combinedParallelDispatchLimit(int configuredLimit,
-                                             List<Integer> physicalCapacities) {
-        int baseline = Math.max(1, configuredLimit);
-        long combined = 0L;
-        for (Integer capacity : physicalCapacities) {
-            if (capacity == null || capacity <= 0) continue;
-            combined = Math.min(Integer.MAX_VALUE, combined + capacity.longValue());
-        }
-        return (int) Math.max(baseline, combined);
+        return MachineDispatchPlanner.combinedParallelDispatchLimit(
+                configuredLimit, physicalCapacities);
     }
 
     private IBatchDelegate tryStartParallelWindow(List<BoundMachine> machines,

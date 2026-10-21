@@ -3,8 +3,8 @@ package com.huanghuang.rsintegration.crafting.tree;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import java.lang.reflect.Field;
 
-import com.huanghuang.rsintegration.client.RecipeBrowserBridge;
-import com.huanghuang.rsintegration.compat.jei.LongTravailCrownRecipes;
+import com.huanghuang.rsintegration.client.recipe.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.recipe.viewer.LongTravailCrownRecipes;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
@@ -13,7 +13,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.network.RSJeiPlugin;
+import com.huanghuang.rsintegration.mods.jei.RSJeiPlugin;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.forge.ForgeTypes;

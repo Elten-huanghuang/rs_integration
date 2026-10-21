@@ -8,8 +8,8 @@ import net.minecraft.world.item.ItemStack;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import net.minecraft.core.BlockPos;

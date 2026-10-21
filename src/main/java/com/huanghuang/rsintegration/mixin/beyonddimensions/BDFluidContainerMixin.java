@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.beyonddimensions;
 
-import com.huanghuang.rsintegration.magic.BeyondDimensionsSoulInteraction;
+import com.huanghuang.rsintegration.mods.goety.magic.BeyondDimensionsSoulInteraction;
 import com.huanghuang.rsintegration.storage.bd.BeyondDimensionsFluidInteraction;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.spongepowered.asm.mixin.Mixin;
