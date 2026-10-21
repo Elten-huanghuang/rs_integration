@@ -64,7 +64,6 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.fml.loading.FMLPaths;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -73,8 +72,8 @@ import java.util.*;
 @OnlyIn(Dist.CLIENT)
 public final class CraftingPlanScreen extends Screen {
 
-    private static final Path PLAN_PREFS_PATH = FMLPaths.CONFIGDIR.get()
-            .resolve("rs_integration").resolve("crafting_plan.json");
+    private static final Path PLAN_PREFS_PATH =
+            ClientPlanningPreferences.preferencesPath();
     private static final int SLOT_SIZE = 18;
     private static final int CARD_PAD = 8;
     private static final int ARROW_W = 18;

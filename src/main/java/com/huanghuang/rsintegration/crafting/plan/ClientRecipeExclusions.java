@@ -1,9 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.fml.loading.FMLPaths;
 
-import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -21,7 +19,8 @@ public final class ClientRecipeExclusions {
         if (!isStableRecipeId(recipeId)) return false;
         boolean excludedNow = !snapshot().contains(recipeId.toString());
         if (!CraftingPlanPreferences.setExcluded(
-                preferencesPath(), recipeId.toString(), excludedNow)) {
+                ClientPlanningPreferences.preferencesPath(),
+                recipeId.toString(), excludedNow)) {
             return false;
         }
         Set<String> updated = new LinkedHashSet<>(snapshot());
@@ -35,7 +34,8 @@ public final class ClientRecipeExclusions {
         if (!isStableRecipeId(recipeId)) return false;
         if (snapshot().contains(recipeId.toString())) return true;
         if (!CraftingPlanPreferences.setExcluded(
-                preferencesPath(), recipeId.toString(), true)) {
+                ClientPlanningPreferences.preferencesPath(),
+                recipeId.toString(), true)) {
             return false;
         }
         Set<String> updated = new LinkedHashSet<>(snapshot());
@@ -49,7 +49,8 @@ public final class ClientRecipeExclusions {
             return true;
         }
         if (!CraftingPlanPreferences.setExcluded(
-                preferencesPath(), recipeId.toString(), false)) {
+                ClientPlanningPreferences.preferencesPath(),
+                recipeId.toString(), false)) {
             return false;
         }
         Set<String> updated = new LinkedHashSet<>(snapshot());
@@ -70,13 +71,9 @@ public final class ClientRecipeExclusions {
     private static Set<String> snapshot() {
         if (excluded == null) {
             excluded = Set.copyOf(
-                    CraftingPlanPreferences.load(preferencesPath()).excludedRecipes());
+                    CraftingPlanPreferences.load(
+                            ClientPlanningPreferences.preferencesPath()).excludedRecipes());
         }
         return excluded;
-    }
-
-    private static Path preferencesPath() {
-        return FMLPaths.CONFIGDIR.get()
-                .resolve("rs_integration").resolve("crafting_plan.json");
     }
 }

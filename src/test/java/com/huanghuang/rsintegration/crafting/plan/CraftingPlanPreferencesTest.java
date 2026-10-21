@@ -110,4 +110,21 @@ class CraftingPlanPreferencesTest extends BootstrapTest {
         assertTrue(loaded.recipeChoices().isEmpty());
         assertTrue(loaded.excludedRecipes().isEmpty());
     }
+
+    @Test
+    void legacyConfigPreferenceMigratesToGameDirectory() throws Exception {
+        Path legacy = directory.resolve("config/rs_integration/crafting_plan.json");
+        Path current = directory.resolve("rs_integration/crafting_plan.json");
+        Files.createDirectories(legacy.getParent());
+        Files.writeString(legacy, """
+                {
+                  "outputDestination": "PLAYER_INVENTORY"
+                }
+                """, StandardCharsets.UTF_8);
+
+        assertTrue(ClientPlanningPreferences.migrateLegacy(legacy, current));
+        assertFalse(Files.exists(legacy));
+        assertEquals(OutputDestination.PLAYER_INVENTORY,
+                CraftingPlanPreferences.load(current).outputDestination());
+    }
 }
