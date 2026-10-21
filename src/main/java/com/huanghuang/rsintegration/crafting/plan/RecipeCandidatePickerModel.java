@@ -11,7 +11,7 @@ import java.util.Locale;
 public final class RecipeCandidatePickerModel {
     public static final int HEADER_HEIGHT = 44;
     public static final int FOOTER_HEIGHT = 16;
-    private static final int PREFERRED_ROW_HEIGHT = 82;
+    private static final int PREFERRED_ROW_HEIGHT = 92;
     public record Candidate(ResourceLocation recipeId, String modTypeId, String name,
                             String machine, String searchText) {}
 
@@ -100,14 +100,14 @@ public final class RecipeCandidatePickerModel {
         }
     }
 
-    /** 窄侧栏最多展示三行，不延伸到下方的执行模式与开始按钮。 */
+    /** 窄侧栏最多展示四张卡片，不延伸到下方的执行模式与开始按钮。 */
     public static Bounds layout(int screenWidth, int screenHeight, int contentTop) {
-        int width = Math.max(1, Math.min(screenWidth * 40 / 100,
-                Math.min(204, Math.max(160, screenWidth * 28 / 100))));
+        int width = Math.max(1, Math.min(screenWidth * 42 / 100,
+                Math.min(232, Math.max(176, screenWidth * 30 / 100))));
         int bottom = Math.min(screenHeight - 8, Math.max(68, screenHeight - 84));
-        int y = Math.max(8, Math.min(contentTop, bottom - 104));
+        int y = Math.max(8, Math.min(contentTop, bottom - 140));
         int bodyHeight = Math.max(1, bottom - y - HEADER_HEIGHT - FOOTER_HEIGHT);
-        int rows = Math.min(3, Math.max(1, bodyHeight / PREFERRED_ROW_HEIGHT));
+        int rows = Math.min(4, Math.max(1, bodyHeight / PREFERRED_ROW_HEIGHT));
         int rowHeight = Math.min(PREFERRED_ROW_HEIGHT, Math.max(1, bodyHeight / rows));
         int height = HEADER_HEIGHT + rows * rowHeight + FOOTER_HEIGHT;
         return new Bounds(Math.max(0, screenWidth - width - 8), y, width, height,

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.plan.RecipeCandidatePickerModel.Can
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -157,24 +158,43 @@ public final class RecipeCandidatePanel {
                         hoveredCandidate = candidate;
                     }
                     boolean selected = candidate.recipeId().equals(node.step.recipeId());
-                    graphics.fill(x + 5, rowY + 1, x + w - 9, rowY + bounds.rowHeight() - 2,
-                            selected ? 0xFF244B34 : index == model.cursor() ? 0xFF284036 : 0xFF172A20);
-                    graphics.fill(x + 5, rowY + bounds.rowHeight() - 2, x + w - 9,
-                            rowY + bounds.rowHeight() - 1, 0xFF385341);
-                    if (selected) graphics.fill(x + 5, rowY + 3, x + 7, rowY + bounds.rowHeight() - 4, 0xFF66D48A);
+                    int cardX = x + 5;
+                    int cardY = rowY + 2;
+                    int cardW = w - 14;
+                    int cardH = Math.max(1, bounds.rowHeight() - 4);
+                    int cardBorder = selected ? 0xFF66D48A
+                            : hover ? 0xFF5B8A6B : 0xFF385341;
+                    int cardFill = selected ? 0xFF1C3B2A
+                            : hover ? 0xFF20382A : 0xFF141F19;
+                    UIRenderer.rounded(graphics, cardX, cardY, cardW, cardH, 5f, cardBorder);
+                    UIRenderer.rounded(graphics, cardX + 1, cardY + 1,
+                            cardW - 2, cardH - 2, 4f, cardFill);
+                    if (selected) {
+                        graphics.fill(cardX + 1, cardY + 4,
+                                cardX + 3, cardY + cardH - 4, 0xFF66D48A);
+                    }
                     graphics.flush();
-                    preview.drawCategoryIcon(graphics, candidate.recipeId(), x + 10, rowY + 3, 14);
+                    preview.drawCategoryIcon(graphics, candidate.recipeId(), cardX + 7, cardY + 5, 14);
                     ModType modType = ModType.findById(candidate.modTypeId());
                     boolean bound = candidate.modTypeId().isEmpty() || "generic".equals(candidate.modTypeId())
                             || modType != null && modType.isVirtual() || boundMachines.contains(candidate.modTypeId());
                     String machine = candidate.machine() + (bound ? "" : " · "
                             + Component.translatable("rsi.plan.recipe_picker.unbound").getString());
-                    graphics.drawString(font, font.plainSubstrByWidth(machine, w - 42),
-                            x + 28, rowY + 5, bound ? 0xFFAACDB7 : 0xFFE5B36C, false);
-                    graphics.drawString(font, font.plainSubstrByWidth(candidate.name(), w - 24),
-                            x + 11, rowY + 19, 0xFFE5F2E9, false);
+                    int machineWidth = selected ? cardW - 82 : cardW - 42;
+                    graphics.drawString(font, font.plainSubstrByWidth(machine, Math.max(1, machineWidth)),
+                            cardX + 25, cardY + 5, bound ? 0xFFAACDB7 : 0xFFE5B36C, false);
+                    graphics.drawString(font, font.plainSubstrByWidth(candidate.name(), cardW - 16),
+                            cardX + 8, cardY + 18, 0xFFE5F2E9, false);
+                    String current = Component.translatable(
+                            "rsi.plan.recipe_picker.current").getString();
+                    int currentW = font.width(current);
+                    if (selected) {
+                        graphics.drawString(font, current,
+                                cardX + cardW - currentW - 7, cardY + 5,
+                                0xFF9CF0B5, false);
+                    }
                     ItemStack rowHovered = preview.renderRecipeInArea(graphics, font, candidate.recipeId(),
-                            x + 12, rowY + 32, w - 28, Math.max(1, bounds.rowHeight() - 36),
+                            cardX + 8, cardY + 30, cardW - 16, Math.max(1, cardH - 33),
                             mouseX, mouseY, node.displayStack);
                     graphics.flush();
                     if (hover && !rowHovered.isEmpty()) hovered = rowHovered;
