@@ -111,7 +111,14 @@ public final class RecipePreviewRenderer {
         }
         Optional<IRecipeLayoutDrawable<?>> opt = getDrawable(recipeId);
         if (opt.isPresent()) {
-            renderJeiTooltip(gfx, font, opt.get(), anchorX, anchorY, screenW, screenH, mouseX, mouseY);
+            long started = RecipeBrowserSlowCallDiagnostics.begin();
+            try {
+                renderJeiTooltip(gfx, font, opt.get(),
+                        anchorX, anchorY, screenW, screenH, mouseX, mouseY);
+            } finally {
+                RecipeBrowserSlowCallDiagnostics.finish("JEI", "tooltip_draw", recipeId,
+                        opt.get().getClass().getName(), started);
+            }
             return true;
         }
 
@@ -139,11 +146,15 @@ public final class RecipePreviewRenderer {
         Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
 
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
             return findHandlingCategory(jei, vanilla)
                     .flatMap(cat -> createDrawableForCategory(jei, cat, vanilla));
         } catch (Exception e) {
             return Optional.empty();
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("JEI", "layout_create", recipeId,
+                    vanilla.getClass().getName(), started);
         }
     }
 
@@ -430,12 +441,16 @@ public final class RecipePreviewRenderer {
         if (jei == null || mc.level == null) return Optional.empty();
         Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
             return findHandlingCategory(jei, vanilla)
                     .map(IRecipeCategory::getIcon)
                     .filter(Objects::nonNull);
         } catch (Exception e) {
             return Optional.empty();
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("JEI", "category_icon_lookup",
+                    recipeId, vanilla.getClass().getName(), started);
         }
     }
 
@@ -529,10 +544,14 @@ public final class RecipePreviewRenderer {
         if (jei == null || mc.level == null) return Optional.empty();
         Recipe<?> vanilla = resolveRecipe(recipeId);
         if (vanilla == null) return Optional.empty();
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
             return findHandlingCategory(jei, vanilla).map(IRecipeCategory::getTitle);
         } catch (Exception e) {
             return Optional.empty();
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("JEI", "category_title_lookup",
+                    recipeId, vanilla.getClass().getName(), started);
         }
     }
 
@@ -557,45 +576,52 @@ public final class RecipePreviewRenderer {
 
     /** 搜索索引只收集文字；不为屏幕外的数百个候选创建 JEI 布局。 */
     public CandidateDetails candidateDetails(ResourceLocation id, ItemStack fallback) {
-        return candidateCache.computeIfAbsent(id, ignored -> {
-            Recipe<?> recipe = resolveRecipe(id);
-            if (recipe == null) return new CandidateDetails(id.getPath(), id.toString());
-            List<ItemStack> inputs = previewInputs(recipe);
-            ItemStack output = previewOutput(recipe, fallback);
-            String name = inputs.isEmpty() ? output.getHoverName().getString()
-                    : inputs.get(0).getHoverName().getString() + " → " + output.getHoverName().getString();
-            if (LongTravailCrownRecipes.isRecipeId(id)
-                    && recipe instanceof CraftingRecipe crown
-                    && crown.getIngredients().size() > 4) {
-                ItemStack[] flowers = crown.getIngredients().get(4).getItems();
-                if (flowers.length > 0 && !flowers[0].isEmpty()) {
-                    name = flowers[0].getHoverName().getString()
-                            + " → " + output.getHoverName().getString();
-                }
-            }
-            if (recipe instanceof IronSpellBooksRecipe iron && iron.isScrollRecycling()) {
-                ResourceLocation spell = ResourceLocation.tryParse(iron.spellId());
-                if (spell != null) {
-                    String key = "spell." + spell.getNamespace() + "." + spell.getPath();
-                    String spellName = I18n.exists(key) ? I18n.get(key) : spell.getPath();
-                    String level = id.getPath().substring(id.getPath().lastIndexOf('/') + 1);
-                    name = Component.translatable("rsi.plan.recipe_picker.spell_level", spellName, level).getString();
-                }
-            }
-            StringBuilder search = new StringBuilder(id.toString()).append(' ').append(name);
-            for (ItemStack input : inputs) {
-                search.append(' ').append(input.getHoverName().getString());
-                try {
-                    for (Component line : input.getTooltipLines(mc.player, TooltipFlag.Default.NORMAL)) {
-                        search.append(' ').append(line.getString());
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
+        try {
+            return candidateCache.computeIfAbsent(id, ignored -> {
+                Recipe<?> recipe = resolveRecipe(id);
+                if (recipe == null) return new CandidateDetails(id.getPath(), id.toString());
+                List<ItemStack> inputs = previewInputs(recipe);
+                ItemStack output = previewOutput(recipe, fallback);
+                String name = inputs.isEmpty() ? output.getHoverName().getString()
+                        : inputs.get(0).getHoverName().getString() + " → " + output.getHoverName().getString();
+                if (LongTravailCrownRecipes.isRecipeId(id)
+                        && recipe instanceof CraftingRecipe crown
+                        && crown.getIngredients().size() > 4) {
+                    ItemStack[] flowers = crown.getIngredients().get(4).getItems();
+                    if (flowers.length > 0 && !flowers[0].isEmpty()) {
+                        name = flowers[0].getHoverName().getString()
+                                + " → " + output.getHoverName().getString();
                     }
-                } catch (RuntimeException | LinkageError ignoredTooltip) {
-                    // 个别第三方物品的提示依赖菜单状态，不影响整个候选面板。
                 }
-            }
-            search.append(' ').append(output.getHoverName().getString());
-            return new CandidateDetails(name, search.toString());
-        });
+                if (recipe instanceof IronSpellBooksRecipe iron && iron.isScrollRecycling()) {
+                    ResourceLocation spell = ResourceLocation.tryParse(iron.spellId());
+                    if (spell != null) {
+                        String key = "spell." + spell.getNamespace() + "." + spell.getPath();
+                        String spellName = I18n.exists(key) ? I18n.get(key) : spell.getPath();
+                        String level = id.getPath().substring(id.getPath().lastIndexOf('/') + 1);
+                        name = Component.translatable("rsi.plan.recipe_picker.spell_level",
+                                spellName, level).getString();
+                    }
+                }
+                StringBuilder search = new StringBuilder(id.toString()).append(' ').append(name);
+                for (ItemStack input : inputs) {
+                    search.append(' ').append(input.getHoverName().getString());
+                    try {
+                        for (Component line : input.getTooltipLines(mc.player, TooltipFlag.Default.NORMAL)) {
+                            search.append(' ').append(line.getString());
+                        }
+                    } catch (RuntimeException | LinkageError ignoredTooltip) {
+                        // 个别第三方物品的提示依赖菜单状态，不影响整个候选面板。
+                    }
+                }
+                search.append(' ').append(output.getHoverName().getString());
+                return new CandidateDetails(name, search.toString());
+            });
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("RecipeBrowser", "candidate_details_build",
+                    id, "candidate-cache", started);
+        }
     }
 
     /** 在候选行的固定区域中展示 JEI 布局，返回鼠标下的材料用于未缩放的提示。 */
@@ -607,7 +633,8 @@ public final class RecipePreviewRenderer {
         }
         Recipe<?> recipe = resolveRecipe(id);
         if (recipe == null) return 0;
-        int columns = previewColumns(previewInputs(recipe).size());
+        int columns = previewColumns(previewInputsMeasured(
+                id, recipe, "preview_width_input_expand").size());
         return columns * 22 + 42;
     }
 
@@ -622,7 +649,7 @@ public final class RecipePreviewRenderer {
         }
         Recipe<?> recipe = resolveRecipe(id);
         if (recipe == null) return new PreviewBounds(1, 1);
-        List<ItemStack> inputs = previewInputs(recipe);
+        List<ItemStack> inputs = previewInputsMeasured(id, recipe, "preview_bounds_input_expand");
         int columns = previewColumns(inputs.size());
         int rows = Math.max(1, (inputs.size() + columns - 1) / columns);
         return new PreviewBounds(columns * 22 + 42, rows * 22);
@@ -637,30 +664,37 @@ public final class RecipePreviewRenderer {
         Optional<IRecipeLayoutDrawable<?>> layout = getDrawable(id);
         if (layout.isPresent()) {
             var drawable = layout.get();
-            int recipeW = Math.max(1, drawable.getRect().getWidth());
-            int recipeH = Math.max(1, drawable.getRect().getHeight());
-            float scale = Math.min(1f, Math.min(width / (float) recipeW, height / (float) recipeH));
-            int left = x + (int) ((width - recipeW * scale) / 2);
-            int top = y + (int) ((height - recipeH * scale) / 2);
-            int localX = (int) Math.floor((mouseX - left) / scale);
-            int localY = (int) Math.floor((mouseY - top) / scale);
-            drawable.setPosition(0, 0);
-            graphics.pose().pushPose();
+            long started = RecipeBrowserSlowCallDiagnostics.begin();
             try {
-                graphics.enableScissor(x, y, x + width, y + height);
-                graphics.pose().translate(left, top, 0);
-                graphics.pose().scale(scale, scale, 1);
-                drawable.drawRecipe(graphics, localX, localY);
+                int recipeW = Math.max(1, drawable.getRect().getWidth());
+                int recipeH = Math.max(1, drawable.getRect().getHeight());
+                float scale = Math.min(1f, Math.min(width / (float) recipeW, height / (float) recipeH));
+                int left = x + (int) ((width - recipeW * scale) / 2);
+                int top = y + (int) ((height - recipeH * scale) / 2);
+                int localX = (int) Math.floor((mouseX - left) / scale);
+                int localY = (int) Math.floor((mouseY - top) / scale);
+                drawable.setPosition(0, 0);
+                graphics.pose().pushPose();
+                try {
+                    graphics.enableScissor(x, y, x + width, y + height);
+                    graphics.pose().translate(left, top, 0);
+                    graphics.pose().scale(scale, scale, 1);
+                    drawable.drawRecipe(graphics, localX, localY);
+                } finally {
+                    graphics.disableScissor();
+                    graphics.pose().popPose();
+                }
+                if (mouseX < x || mouseX >= x + width
+                        || mouseY < y || mouseY >= y + height) return ItemStack.EMPTY;
+                ItemStack item = drawable.getIngredientUnderMouse(localX, localY, VanillaTypes.ITEM_STACK)
+                        .orElse(ItemStack.EMPTY);
+                if (!item.isEmpty()) return item;
+                return drawable.getIngredientUnderMouse(localX, localY, ForgeTypes.FLUID_STACK)
+                        .map(InkFluidSupport::token).orElse(ItemStack.EMPTY);
             } finally {
-                graphics.disableScissor();
-                graphics.pose().popPose();
+                RecipeBrowserSlowCallDiagnostics.finish("JEI", "candidate_card_draw",
+                        id, drawable.getClass().getName(), started);
             }
-            if (mouseX < x || mouseX >= x + width || mouseY < y || mouseY >= y + height) return ItemStack.EMPTY;
-            ItemStack item = drawable.getIngredientUnderMouse(localX, localY, VanillaTypes.ITEM_STACK)
-                    .orElse(ItemStack.EMPTY);
-            if (!item.isEmpty()) return item;
-            return drawable.getIngredientUnderMouse(localX, localY, ForgeTypes.FLUID_STACK)
-                    .map(InkFluidSupport::token).orElse(ItemStack.EMPTY);
         }
 
         Recipe<?> recipe = resolveRecipe(id);
@@ -669,7 +703,8 @@ public final class RecipePreviewRenderer {
                     x + 2, y + 4, 0xFF8CA898, false);
             return ItemStack.EMPTY;
         }
-        List<ItemStack> inputs = previewInputs(recipe);
+        List<ItemStack> inputs = previewInputsMeasured(
+                id, recipe, "fallback_preview_input_expand");
         int columns = previewColumns(inputs.size());
         int rows = Math.max(1, (inputs.size() + columns - 1) / columns);
         int naturalW = columns * 22 + 42;
@@ -713,6 +748,17 @@ public final class RecipePreviewRenderer {
         if (stack.getCount() > 1) {
             String count = Integer.toString(stack.getCount());
             graphics.drawString(font, count, x + 18 - font.width(count), y + 10, 0xFFFFFFFF, true);
+        }
+    }
+
+    private List<ItemStack> previewInputsMeasured(ResourceLocation id, Recipe<?> recipe,
+                                                   String stage) {
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
+        try {
+            return previewInputs(recipe);
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("RecipeBrowser", stage,
+                    id, recipe.getClass().getName(), started);
         }
     }
 

@@ -184,10 +184,20 @@ public final class CraftingPlanScreen extends Screen {
     // layer anchored above the root node (design doc §4.1). Logical (pre-zoom) units.
     private static final int STRIP_ROW_H = 20;
     private static final int STRIP_GAP = 8;
+    private static final int STRIP_PAGE_SIZE = 8;
+    private static final int STRIP_PAGE_BUTTON_W = 12;
+    private static final int STRIP_PAGE_BUTTON_GAP = 3;
     private final List<CostHit> costHits = new ArrayList<>();
     private record CostHit(int x, int y, int w, int h, IngredientKey key) {}
     private record StripEntry(ItemStack display, IngredientKey key, long count, long available,
                               boolean enough) {}
+    private enum StripRow { TOTAL, LEFTOVER }
+    private final List<StripPageHit> stripPageHits = new ArrayList<>();
+    private record StripPageHit(int x, int y, int w, int h, StripRow row, int delta) {}
+    private List<StripEntry> cachedTotalStrip = List.of();
+    private List<StripEntry> cachedLeftoverStrip = List.of();
+    private int totalStripPage;
+    private int leftoverStripPage;
     private final List<BookmarkHit> bookmarkHits = new ArrayList<>();
     private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, long missingCount) {}
     @Nullable
@@ -333,6 +343,7 @@ public final class CraftingPlanScreen extends Screen {
         this.treeRenderer = new PlanTreeRenderer(Minecraft.getInstance().font);
         this.treeRenderer.setIconRenderer(recipePreview::drawCategoryIcon);
         loadStoredMaterialChoices();
+        rebuildMaterialStripCache();
         rebuildTreeModel(true);
         JeiCraftingPlanContext.INSTANCE.activate(plan);
     }
@@ -415,6 +426,7 @@ public final class CraftingPlanScreen extends Screen {
         this.dropdownNode = null;
         this.materialScroll = 0;
         loadStoredMaterialChoices();
+        rebuildMaterialStripCache();
         rebuildTreeModel(false);
         this.orHitboxes.clear();
         closeMaterialDropdown();
@@ -2103,6 +2115,7 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         costHits.clear();
+        stripPageHits.clear();
         gfx.enableScissor(left, treeViewTop, left + contentW, areaBottom);
         try {
             int logicalLeft = (int) Math.floor((treeViewLeft - treePanX) / treeZoom);
@@ -2199,19 +2212,29 @@ public final class CraftingPlanScreen extends Screen {
 
         int anchorX = rootBox.itemCenterX();
         int rowY = rootBox.y() - STRIP_GAP - rows * STRIP_ROW_H;
-        if (!plan.materials().isEmpty()) {
+        if (!cachedTotalStrip.isEmpty()) {
             renderStripRow(gfx, font, anchorX, rowY, I18n.get("rsi.plan.cost_total"),
-                    0xFF76B16F, buildTotalEntries(), false, mouseX, mouseY);
+                    0xFF76B16F, cachedTotalStrip, totalStripPage, false, mouseX, mouseY);
             rowY += STRIP_ROW_H;
         }
-        if (!plan.leftovers().isEmpty()) {
+        if (!cachedLeftoverStrip.isEmpty()) {
             renderStripRow(gfx, font, anchorX, rowY, I18n.get("rsi.plan.cost_leftover"),
-                    0xFFF08A53, buildLeftoverEntries(), true, mouseX, mouseY);
+                    0xFFF08A53, cachedLeftoverStrip, leftoverStripPage, true, mouseX, mouseY);
         }
     }
 
     private int stripRowCount() {
-        return (plan.materials().isEmpty() ? 0 : 1) + (plan.leftovers().isEmpty() ? 0 : 1);
+        return (cachedTotalStrip.isEmpty() ? 0 : 1) + (cachedLeftoverStrip.isEmpty() ? 0 : 1);
+    }
+
+    /** 计划响应是材料条数据的唯一来源，派生显示项只在响应切换时生成。 */
+    private void rebuildMaterialStripCache() {
+        cachedTotalStrip = buildTotalEntries();
+        cachedLeftoverStrip = buildLeftoverEntries();
+        totalStripPage = MaterialStripPaging.clampPage(
+                totalStripPage, cachedTotalStrip.size(), STRIP_PAGE_SIZE);
+        leftoverStripPage = MaterialStripPaging.clampPage(
+                leftoverStripPage, cachedLeftoverStrip.size(), STRIP_PAGE_SIZE);
     }
 
     private List<StripEntry> buildTotalEntries() {
@@ -2238,11 +2261,27 @@ public final class CraftingPlanScreen extends Screen {
      * in screen space (logical×zoom + pan) so click-to-center and hover work under the transform.
      */
     private void renderStripRow(GuiGraphics gfx, Font font, int anchorX, int rowY, String label,
-                                int accent, List<StripEntry> entries, boolean leftover,
+                                int accent, List<StripEntry> entries, int page, boolean leftover,
                                 int mouseX, int mouseY) {
+        int pageCount = MaterialStripPaging.pageCount(entries.size(), STRIP_PAGE_SIZE);
+        int safePage = MaterialStripPaging.clampPage(
+                page, entries.size(), STRIP_PAGE_SIZE);
+        int pageStart = MaterialStripPaging.pageStart(
+                safePage, entries.size(), STRIP_PAGE_SIZE);
+        int pageEnd = MaterialStripPaging.pageEnd(
+                safePage, entries.size(), STRIP_PAGE_SIZE);
+        boolean paged = pageCount > 1;
+        String pageLabel = paged ? (safePage + 1) + "/" + pageCount : "";
+        int pagerWidth = paged ? STRIP_PAGE_BUTTON_W * 2 + STRIP_PAGE_BUTTON_GAP * 3
+                + font.width(pageLabel) : 0;
+
         int labelW = font.width(label);
-        int rowW = labelW + 8;
-        for (StripEntry e : entries) rowW += 18 + font.width(stripCountText(e, leftover)) + 6;
+        int entriesWidth = 0;
+        for (int i = pageStart; i < pageEnd; i++) {
+            StripEntry e = entries.get(i);
+            entriesWidth += 18 + font.width(stripCountText(e, leftover)) + 6;
+        }
+        int rowW = labelW + 8 + pagerWidth + entriesWidth;
 
         int startX = anchorX - rowW / 2;
 
@@ -2250,7 +2289,13 @@ public final class CraftingPlanScreen extends Screen {
         gfx.drawString(font, label, startX, textY, accent, false);
         int sx = startX + labelW + 8;
         int slotY = rowY + (STRIP_ROW_H - 16) / 2;
-        for (StripEntry e : entries) {
+        if (paged) {
+            renderStripPageButton(gfx, font, sx, slotY, "<", safePage > 0,
+                    leftover ? StripRow.LEFTOVER : StripRow.TOTAL, -1, mouseX, mouseY);
+            sx += STRIP_PAGE_BUTTON_W + STRIP_PAGE_BUTTON_GAP;
+        }
+        for (int i = pageStart; i < pageEnd; i++) {
+            StripEntry e = entries.get(i);
             InkFluidRenderer.render(gfx, e.display(), sx, slotY);
             if (!leftover && !e.enough()) {
                 int buttonX = sx + 8;
@@ -2289,8 +2334,50 @@ public final class CraftingPlanScreen extends Screen {
                 hoveredTooltipAvail = a != null ? a.available() : 0;
                 hoveredTooltipNeeded = e.count();
             }
-            costHits.add(new CostHit(scrX, scrY, scrS, scrS, e.key()));
+            int hitLeft = Math.max(scrX, treeViewLeft);
+            int hitTop = Math.max(scrY, treeViewTop);
+            int hitRight = Math.min(scrX + scrS, treeViewRight);
+            int hitBottom = Math.min(scrY + scrS, treeViewBottom);
+            if (hitRight > hitLeft && hitBottom > hitTop) {
+                costHits.add(new CostHit(hitLeft, hitTop,
+                        hitRight - hitLeft, hitBottom - hitTop, e.key()));
+            }
             sx += 18 + font.width(cnt) + 6;
+        }
+        if (paged) {
+            sx += STRIP_PAGE_BUTTON_GAP;
+            renderStripPageButton(gfx, font, sx, slotY, ">", safePage + 1 < pageCount,
+                    leftover ? StripRow.LEFTOVER : StripRow.TOTAL,
+                    1, mouseX, mouseY);
+            sx += STRIP_PAGE_BUTTON_W + STRIP_PAGE_BUTTON_GAP;
+            gfx.drawString(font, pageLabel, sx, textY, 0xFF9CB9A5, false);
+        }
+    }
+
+    private void renderStripPageButton(GuiGraphics gfx, Font font, int x, int y,
+                                       String label, boolean enabled, StripRow row,
+                                       int delta, int mouseX, int mouseY) {
+        int screenX = (int) Math.round(x * treeZoom + treePanX);
+        int screenY = (int) Math.round(y * treeZoom + treePanY);
+        int screenW = Math.max(1, (int) Math.round(STRIP_PAGE_BUTTON_W * treeZoom));
+        int screenH = Math.max(1, (int) Math.round(16 * treeZoom));
+        boolean hovered = enabled && mouseX >= screenX && mouseX < screenX + screenW
+                && mouseY >= screenY && mouseY < screenY + screenH;
+        int fill = !enabled ? 0xFF1C2A21 : hovered ? 0xFF4C8060 : 0xFF294936;
+        gfx.fill(x, y, x + STRIP_PAGE_BUTTON_W, y + 16, fill);
+        int textColor = enabled ? 0xFFD8E8DC : 0xFF607268;
+        gfx.drawString(font, label,
+                x + (STRIP_PAGE_BUTTON_W - font.width(label)) / 2,
+                y + (16 - font.lineHeight) / 2, textColor, false);
+        if (!enabled) return;
+
+        int hitLeft = Math.max(screenX, treeViewLeft);
+        int hitTop = Math.max(screenY, treeViewTop);
+        int hitRight = Math.min(screenX + screenW, treeViewRight);
+        int hitBottom = Math.min(screenY + screenH, treeViewBottom);
+        if (hitRight > hitLeft && hitBottom > hitTop) {
+            stripPageHits.add(new StripPageHit(hitLeft, hitTop,
+                    hitRight - hitLeft, hitBottom - hitTop, row, delta));
         }
     }
 
@@ -3083,6 +3170,7 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         if (viewMode == ViewMode.TREE) {
+            if (button == 0 && handleStripPageClick(mx, my)) return true;
             // Expand/Collapse-all toolbar button (top-right of the viewport).
             if (button == 0 && treeFoldAllHitW > 0
                     && mx >= treeFoldAllHitX && mx < treeFoldAllHitX + treeFoldAllHitW
@@ -3203,6 +3291,27 @@ public final class CraftingPlanScreen extends Screen {
             dragging = true;
         }
         return super.mouseClicked(mx, my, button);
+    }
+
+    private boolean handleStripPageClick(double mx, double my) {
+        for (StripPageHit hit : stripPageHits) {
+            if (mx < hit.x() || mx >= hit.x() + hit.w()
+                    || my < hit.y() || my >= hit.y() + hit.h()) {
+                continue;
+            }
+            if (hit.row() == StripRow.TOTAL) {
+                totalStripPage = MaterialStripPaging.movePage(
+                        totalStripPage, hit.delta(), cachedTotalStrip.size(), STRIP_PAGE_SIZE);
+            } else {
+                leftoverStripPage = MaterialStripPaging.movePage(
+                        leftoverStripPage, hit.delta(), cachedLeftoverStrip.size(), STRIP_PAGE_SIZE);
+            }
+            // 页码变化后，旧页物品的屏幕命中区立即失效，等待下一帧重建。
+            costHits.clear();
+            stripPageHits.clear();
+            return true;
+        }
+        return false;
     }
 
     @Override

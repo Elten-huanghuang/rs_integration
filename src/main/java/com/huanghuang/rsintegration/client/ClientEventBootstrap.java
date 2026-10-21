@@ -17,6 +17,7 @@ import net.minecraftforge.fml.ModList;
 import com.huanghuang.rsintegration.autoeat.client.AutoEatClientEvents;
 import com.huanghuang.rsintegration.compat.ftbquests.client.FtbQuestJeiRuntime;
 import com.huanghuang.rsintegration.crafting.CraftFailureClientCommands;
+import com.huanghuang.rsintegration.crafting.tree.RecipeBrowserSlowCallDiagnostics;
 import com.huanghuang.rsintegration.machine.BeyondDimensionsMachineHubClient;
 import com.huanghuang.rsintegration.resonance.bridge.ClientDiskData;
 import com.huanghuang.rsintegration.sidepanel.RSSidePanelClient;
@@ -65,6 +66,7 @@ public final class ClientEventBootstrap {
         RecipeAvailabilityClient.clear();
         JeiNetworkItemCache.INSTANCE.clear();
         JeiCraftingPlanContext.INSTANCE.clear();
+        RecipeBrowserSlowCallDiagnostics.reset();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSSidePanelClient.clearOnLogout();
         }

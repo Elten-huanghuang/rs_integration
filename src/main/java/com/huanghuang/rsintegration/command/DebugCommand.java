@@ -7,6 +7,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.*;
+import com.huanghuang.rsintegration.crafting.tree.RecipeBrowserSlowCallDiagnostics;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -81,7 +82,9 @@ public final class DebugCommand {
                 .then(Commands.literal("embers_clearlocks")
                         .executes(DebugCommand::embersClearLocks))
                 .then(Commands.literal("perf")
-                        .executes(DebugCommand::perfSnapshot))
+                        .executes(DebugCommand::perfSnapshot)
+                        .then(Commands.literal("reset")
+                                .executes(DebugCommand::perfReset)))
                 .then(Commands.literal("magic")
                         .then(Commands.literal("route")
                                 .executes(DebugCommand::magicRoute)))
@@ -512,9 +515,19 @@ public final class DebugCommand {
     private static int perfSnapshot(CommandContext<CommandSourceStack> ctx) {
         String snap = PerformanceMonitor.snapshot();
         ctx.getSource().sendSuccess(() -> Component.literal(snap), false);
+        String browserSlow = RecipeBrowserSlowCallDiagnostics.summary();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "  " + browserSlow), false);
         for (String line : magicRouteCounterLines()) {
             ctx.getSource().sendSuccess(() -> Component.literal(line), false);
         }
+        return 1;
+    }
+
+    private static int perfReset(CommandContext<CommandSourceStack> ctx) {
+        RecipeBrowserSlowCallDiagnostics.reset();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "已清理有界配方浏览器慢调用去重状态。"), false);
         return 1;
     }
 

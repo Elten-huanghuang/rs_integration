@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.compat.emi.EmiClientBridge;
+import com.huanghuang.rsintegration.crafting.tree.RecipeBrowserSlowCallDiagnostics;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mixin.jei.BookmarkOverlayAccessor;
 import com.huanghuang.rsintegration.network.RSJeiPlugin;
@@ -114,11 +115,15 @@ public final class RecipeBrowserBridge {
                                                     ResourceLocation recipeId,
                                                     int x, int y, int size) {
         if (graphics == null || recipeId == null || size <= 0 || !hasEmi()) return false;
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
             return EmiClientBridge.drawRecipeCategoryIcon(graphics, recipeId, x, y, size);
         } catch (LinkageError | RuntimeException exception) {
             RSIntegrationMod.LOGGER.debug("[RSI-EMI] Failed to draw recipe category icon", exception);
             return false;
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("EMI", "category_icon_lookup",
+                    recipeId, "EmiClientBridge.drawRecipeCategoryIcon", started);
         }
     }
 
@@ -127,12 +132,16 @@ public final class RecipeBrowserBridge {
                                                  int screenWidth, int screenHeight,
                                                  int mouseX, int mouseY) {
         if (graphics == null || recipeId == null || !hasEmi()) return false;
+        long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
             return EmiClientBridge.renderRecipePreview(graphics, recipeId, anchorX, anchorY,
                     screenWidth, screenHeight, mouseX, mouseY);
         } catch (LinkageError | RuntimeException exception) {
             RSIntegrationMod.LOGGER.debug("[RSI-EMI] Failed to render recipe preview", exception);
             return false;
+        } finally {
+            RecipeBrowserSlowCallDiagnostics.finish("EMI", "tooltip_draw",
+                    recipeId, "EmiClientBridge.renderRecipePreview", started);
         }
     }
 
