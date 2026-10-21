@@ -1,11 +1,21 @@
 package com.huanghuang.rsintegration.mods.avaritia;
 
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-class CraftingTableBatchDelegateTest {
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class CraftingTableBatchDelegateTest extends BootstrapTest {
 
     @Test
     void recognizesAvaritiaCraftingTableTiersByRegistryId() {
@@ -64,5 +74,46 @@ class CraftingTableBatchDelegateTest {
                 "committee.nova.mods.avaritia.common.crafting.recipe.NoConsumeCatalystShapedRecipe"));
         assertEquals(false, CraftingTableBatchDelegate.supportsStableBatchClass(
                 "example.CustomTableRecipe"));
+    }
+
+    @Test
+    void preservesSparseNineByNineLayoutForNeutronCollector() {
+        List<Ingredient> ingredients = new ArrayList<>(
+                Collections.nCopies(9 * 9, Ingredient.EMPTY));
+        ingredients.set(0, Ingredient.of(Items.IRON_BLOCK));
+        ingredients.set(2, Ingredient.of(Items.QUARTZ_BLOCK));
+        ingredients.set(80, Ingredient.of(Items.REDSTONE_BLOCK));
+
+        List<IngredientSpec> layout = CraftingTableBatchDelegate.fixedSlotLayout(ingredients);
+        List<Integer> expectedSlots = new ArrayList<>();
+        for (int slot = 0; slot < layout.size(); slot++) {
+            IngredientSpec spec = layout.get(slot);
+            if (!spec.isEmpty()) {
+                expectedSlots.add(slot);
+            }
+        }
+        MaterialPlan plan = MaterialPlan.fromLegacy(layout, List.of());
+
+        assertEquals(81, layout.size());
+        assertTrue(layout.get(1).isEmpty());
+        assertTrue(layout.get(79).isEmpty());
+        assertEquals(List.of(0, 2, 80), expectedSlots);
+        assertEquals(expectedSlots, plan.entries().stream()
+                .map(MaterialPlan.Entry::inputSlot)
+                .toList());
+    }
+
+    @Test
+    void compactInputListCannotEraseSparsePlacementIndices() {
+        List<Ingredient> ingredients = new ArrayList<>(
+                Collections.nCopies(9 * 9, Ingredient.EMPTY));
+        ingredients.set(0, Ingredient.of(Items.IRON_BLOCK));
+        ingredients.set(80, Ingredient.of(Items.REDSTONE_BLOCK));
+        MaterialPlan plan = MaterialPlan.fromLegacy(
+                CraftingTableBatchDelegate.fixedSlotLayout(ingredients), List.of());
+
+        assertEquals(List.of(0, 80), plan.entries().stream()
+                .map(MaterialPlan.Entry::inputSlot)
+                .toList());
     }
 }

@@ -56,10 +56,21 @@ public final class AvaritiaRecipeHandler extends AbstractRecipeHandler {
         if (name.endsWith("ExtremeSmithingRecipe")) {
             return getSmithingIngredients(recipe);
         }
-        // Avaritia table recipes all implement vanilla getIngredients().
-        List<Ingredient> list = recipe.getIngredients();
+        return tableIngredients(name, recipe.getIngredients());
+    }
+
+    @Nullable
+    static List<IngredientSpec> tableIngredients(String recipeClassName,
+                                                 List<Ingredient> ingredients) {
+        String name = recipeClassName;
+        if (name.endsWith("ShapedTableCraftingRecipe")
+                || name.endsWith("ShapedExtremeCraftingRecipe")) {
+            // 定型配方必须保留空槽，否则后续材料会按紧凑索引落到错误坐标。
+            return CraftingTableBatchDelegate.fixedSlotLayout(ingredients);
+        }
+        // 无序 Avaritia 工作台配方只需要实际材料。
         List<IngredientSpec> specs = new ArrayList<>();
-        for (Ingredient ing : list) {
+        for (Ingredient ing : ingredients) {
             if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
         }
         return specs.isEmpty() ? null : specs;

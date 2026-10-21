@@ -14,6 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -100,11 +101,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
             // Avaritia's shaped matcher reads the complete square handler and
             // preserves empty cells. Keep those cells in the material contract
             // so a pattern is inserted at its original coordinates.
-            List<IngredientSpec> layout = new ArrayList<>();
-            for (var ingredient : recipe.getIngredients()) {
-                layout.add(new IngredientSpec(ingredient, ingredient.isEmpty() ? 0 : 1));
-            }
-            return layout;
+            return fixedSlotLayout(recipe.getIngredients());
         }
         var handler = ModRecipeHandlers.handlerFor(recipe);
         if (handler != null) {
@@ -381,6 +378,15 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
         String name = candidate.getClass().getName();
         return name.endsWith("ShapedTableCraftingRecipe")
                 || name.endsWith("ShapedExtremeCraftingRecipe");
+    }
+
+    /** 将带空位的定型配方保留为物理槽位顺序，供规划与执行共同使用。 */
+    public static List<IngredientSpec> fixedSlotLayout(List<Ingredient> ingredients) {
+        List<IngredientSpec> layout = new ArrayList<>(ingredients.size());
+        for (Ingredient ingredient : ingredients) {
+            layout.add(new IngredientSpec(ingredient, ingredient.isEmpty() ? 0 : 1));
+        }
+        return List.copyOf(layout);
     }
 
     static boolean isCraftingTableBlockEntity(String className) {
