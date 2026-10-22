@@ -3,8 +3,10 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.network.binding.MachineBindingService.PlayerEndpoint;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -49,6 +51,26 @@ class MachineBindingInfoFactoryTest extends BootstrapTest {
                 endpoint, "beyonddimensions:net_terminal_item");
 
         assertEquals("beyonddimensions:net_terminal_item", info.itemKey());
+    }
+
+    @Test
+    void preservesDynamicMachineNameFromDisplayStack() {
+        ItemStack displayStack = new ItemStack(Items.STONE);
+        displayStack.setHoverName(Component.literal("自定义机器"));
+        PlayerEndpoint endpoint = new PlayerEndpoint(
+                UUID.randomUUID(), ResourceLocation.tryParse("minecraft:stone"),
+                MachineEndpointId.create(),
+                new BindingStorage.BindingEntry(
+                        ResourceLocation.tryParse("minecraft:overworld"),
+                        BlockPos.ZERO, "block.minecraft.stone",
+                        "minecraft:stone", displayStack),
+                1L);
+
+        BindingInfo info = MachineBindingInfoFactory.fromEndpoint(endpoint, null);
+
+        assertEquals("自定义机器", info.displayName());
+        assertEquals("自定义机器", BindingEventHandler.resolveBlockName(
+                info.blockKey(), info.blockRegKey(), info.displayStack()).getString());
     }
 
     @Test

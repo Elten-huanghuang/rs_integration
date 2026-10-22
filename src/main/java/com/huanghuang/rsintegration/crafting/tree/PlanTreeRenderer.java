@@ -279,8 +279,8 @@ public final class PlanTreeRenderer {
             int dotY = cy + font.lineHeight + 1;
             // Small color dot.
             gfx.fill(box.itemCenterX() - 3, dotY, box.itemCenterX() + 3, dotY + 4, dotColor);
-            // Localized machine label (via rsi.batch.mod.<id> key), width-clamped to the node.
-            String label = PlanRenderEngine.formatModTypeLabel(modName);
+            // 优先使用实际绑定机器名称，宽度限制在节点内。
+            String label = PlanRenderEngine.formatMachineLabel(node.step);
             int maxW = w + 6;
             if (font.width(label) > maxW) {
                 label = font.plainSubstrByWidth(label, maxW - font.width("…")) + "…";

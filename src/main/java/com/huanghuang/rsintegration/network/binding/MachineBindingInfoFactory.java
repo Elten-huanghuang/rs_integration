@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.network.binding.MachineBindingService.PlayerEndpoint;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -53,13 +54,16 @@ public final class MachineBindingInfoFactory {
         if (blockKey != null && blockKey.startsWith("pmmo_salvage||")) {
             return "rsi.batch.mod.pmmo_salvage";
         }
-        if (displayStack != null && !displayStack.isEmpty()
-                && displayStack.getHoverName().getContents()
-                instanceof TranslatableContents translatable) {
-            String key = translatable.getKey();
-            String mapped = blockRegKey == null ? null
-                    : BindingEventHandler.MULTI_PART_ROOT_MAP.get(blockRegKey);
-            if (!key.equals(mapped)) return key;
+        if (displayStack != null && !displayStack.isEmpty()) {
+            Component hoverName = displayStack.getHoverName();
+            if (hoverName.getContents() instanceof TranslatableContents translatable) {
+                String key = translatable.getKey();
+                String mapped = blockRegKey == null ? null
+                        : BindingEventHandler.MULTI_PART_ROOT_MAP.get(blockRegKey);
+                if (!key.equals(mapped)) return key;
+            }
+            String literal = hoverName.getString();
+            if (!literal.isBlank()) return literal;
         }
         if (blockRegKey != null) {
             String effectiveKey = BindingEventHandler.MULTI_PART_ROOT_MAP

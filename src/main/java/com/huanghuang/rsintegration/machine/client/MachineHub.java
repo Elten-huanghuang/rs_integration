@@ -5,7 +5,6 @@ import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.huanghuang.rsintegration.machine.client.BindingSyncChunkAccumulator;
 import com.huanghuang.rsintegration.machine.client.data.BindingCache;
@@ -13,7 +12,6 @@ import com.huanghuang.rsintegration.machine.client.data.MachineStatusCache;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.network.binding.MachineFavoriteKey;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.resources.language.I18n;
 import net.minecraft.util.Mth;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -22,6 +20,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.event.TickEvent;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 import java.util.ArrayList;
@@ -196,28 +195,18 @@ public final class MachineHub {
         if (filterText.isEmpty()) {
             filteredMachines.addAll(machines);
         } else {
-            String lower = filterText.toLowerCase();
+            String lower = filterText.toLowerCase(Locale.ROOT);
             for (var m : machines) {
-                String localized = I18n.get(m.displayName()).toLowerCase();
-                if (localized.contains(lower) || m.displayName().toLowerCase().contains(lower)) {
+                String localized = MachineDisplayNameResolver.displayText(m)
+                        .toLowerCase(Locale.ROOT);
+                if (localized.contains(lower)
+                        || m.displayName().toLowerCase(Locale.ROOT).contains(lower)) {
                     filteredMachines.add(m);
                     continue;
                 }
                 // Pinyin search (same as side panel DisplayListManager)
-                if (matchesPinyin(I18n.get(m.displayName()), lower)) {
+                if (matchesPinyin(localized, lower)) {
                     filteredMachines.add(m);
-                    continue;
-                }
-                // Also search the client-side resolved name — cover gun-pack
-                // workbench names even when BlockId is nested in BlockEntityTag.
-                var ds = m.displayStack();
-                if (ds != null && !ds.isEmpty()) {
-                    String resolved = BindingEventHandler
-                            .resolveBlockName(m.blockKey(), m.blockRegKey(), ds)
-                            .getString().toLowerCase();
-                    if (resolved.contains(lower) || matchesPinyin(resolved, lower)) {
-                        filteredMachines.add(m);
-                    }
                 }
             }
         }

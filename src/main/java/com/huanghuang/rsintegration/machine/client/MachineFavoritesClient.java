@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.client.ClientTooltipGuard;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.machine.client.MachineHub;
-import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
 import com.refinedmods.refinedstorage.screen.BaseScreen;
@@ -159,13 +158,7 @@ public final class MachineFavoritesClient {
 
     private static void renderTooltip(GuiGraphics graphics, BindingInfo info, int mouseX, int mouseY) {
         List<Component> lines = new ArrayList<>();
-        ItemStack displayStack = info.displayStack();
-        if (displayStack != null && !displayStack.isEmpty()) {
-            lines.add(BindingEventHandler.resolveBlockName(
-                    info.blockKey(), info.blockRegKey(), displayStack));
-        } else {
-            lines.add(Component.translatable(info.displayName()));
-        }
+        lines.add(MachineDisplayNameResolver.displayName(info));
         lines.add(Component.literal(info.dim() + " " + info.pos().toShortString())
                 .withStyle(ChatFormatting.DARK_GRAY));
         ClientTooltipGuard.begin();

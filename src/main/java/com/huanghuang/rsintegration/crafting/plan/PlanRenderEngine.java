@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
+import com.huanghuang.rsintegration.machine.client.MachineDisplayNameResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,6 +21,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.Map;
+
+import javax.annotation.Nullable;
 
 /**
  * Extracted rendering logic for {@code CraftingPlanScreen}.
@@ -129,7 +132,7 @@ public final class PlanRenderEngine {
 
         ModType modType = step.modType();
         if (modType != null) {
-            String modLabel = formatModTypeLabel(modType.id());
+            String modLabel = formatMachineLabel(step);
             gfx.drawString(font, modLabel, cardX + 50, y + 18,
                     0xFF6A8A6A | (alpha << 24));
         }
@@ -397,12 +400,22 @@ public final class PlanRenderEngine {
     }
 
     /**
-     * Resolve a human-readable label for a mod type.
-     * Uses the game's existing localisation when available —
-     * either from {@code rsi.batch.mod.<id>} translation keys
-     * or the mod's own display name from {@code mods.toml}.
+     * 优先解析配方对应绑定机器的真实名称；没有绑定快照时再使用类型标签。
      */
     private static final Map<String, String> MOD_LABEL_CACHE = new ConcurrentHashMap<>();
+
+    public static String formatMachineLabel(PlanStep step) {
+        if (step == null || step.modType() == null) return "?";
+        String bound = findBoundMachineLabel(step.modType().id(), step.recipeId());
+        return bound != null ? bound : formatModTypeLabel(step.modType().id());
+    }
+
+    @Nullable
+    public static String findBoundMachineLabel(String modTypeId, ResourceLocation recipeId) {
+        ModType type = ModType.findById(modTypeId);
+        Component name = MachineDisplayNameResolver.findDisplayName(type, recipeId);
+        return name == null ? null : name.getString();
+    }
 
     public static String formatModTypeLabel(String modTypeId) {
         // 1. Explicit translation key (optional override)

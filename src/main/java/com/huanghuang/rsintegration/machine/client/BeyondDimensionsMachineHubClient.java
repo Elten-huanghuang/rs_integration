@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.machine.client;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.huanghuang.rsintegration.machine.client.data.BindingCache;
@@ -12,7 +11,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.Rect2i;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -246,7 +244,7 @@ public final class BeyondDimensionsMachineHubClient {
             g.renderItemDecorations(Minecraft.getInstance().font, icon, iconX, iconY);
             if (hovered) {
                 g.renderTooltip(Minecraft.getInstance().font,
-                        Component.translatable(favorites.get(i).displayName()), mouseX, mouseY);
+                        MachineDisplayNameResolver.displayName(favorites.get(i)), mouseX, mouseY);
             }
         }
     }

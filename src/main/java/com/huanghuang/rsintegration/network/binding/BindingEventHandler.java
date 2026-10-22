@@ -634,43 +634,45 @@ public final class BindingEventHandler {
         int sep = blockKey.indexOf("||");
         String descId = (sep >= 0 && sep < blockKey.length() - 2) ? blockKey.substring(sep + 2) : blockKey;
 
-        if (displayStack != null && !displayStack.isEmpty() && displayStack.hasTag()) {
-            String realBlockId = null;
-            var tag = displayStack.getTag();
-            if (tag.contains("BlockId", Tag.TAG_STRING)) {
-                realBlockId = tag.getString("BlockId");
-            } else if (tag.contains("BlockEntityTag")) {
-                var beTag = tag.getCompound("BlockEntityTag");
-                if (beTag.contains("BlockId", Tag.TAG_STRING)) {
-                    realBlockId = beTag.getString("BlockId");
-                }
-            }
-            if (realBlockId != null && !realBlockId.isEmpty()) {
-                // Redirect multi-block parts to the assembled machine so
-                // names resolve to an actual translation key (e.g.
-                // workbench_a → gun_smith_table → "枪械工作台").
-                String mapped = MULTI_PART_ROOT_MAP.get(realBlockId);
-                String resolveId = mapped != null ? mapped : realBlockId;
-                var rl = ResourceLocation.tryParse(resolveId);
-                if (rl != null) {
-                    var realBlock = ForgeRegistries.BLOCKS.getValue(rl);
-                    if (realBlock != null && realBlock != Blocks.AIR) {
-                        return Component.translatable(realBlock.getDescriptionId());
+        if (displayStack != null && !displayStack.isEmpty()) {
+            if (displayStack.hasTag()) {
+                String realBlockId = null;
+                var tag = displayStack.getTag();
+                if (tag.contains("BlockId", Tag.TAG_STRING)) {
+                    realBlockId = tag.getString("BlockId");
+                } else if (tag.contains("BlockEntityTag")) {
+                    var beTag = tag.getCompound("BlockEntityTag");
+                    if (beTag.contains("BlockId", Tag.TAG_STRING)) {
+                        realBlockId = beTag.getString("BlockId");
                     }
                 }
-                // Gun-pack workbenches are not registered in Forge — their
-                // BlockId lives in TACZ's block index.  If the BlockId was
-                // nested in BlockEntityTag (existing bindings), temporarily
-                // lift it to the root level on a COPY so that
-                // GunSmithTableItem.getName() can see it.
-                String rootBlockId = tag.contains("BlockId", Tag.TAG_STRING)
-                        ? tag.getString("BlockId") : null;
-                if (rootBlockId == null) {
-                    ItemStack copy = displayStack.copy();
-                    copy.getOrCreateTag().putString("BlockId", realBlockId);
-                    Component hoverName = copy.getHoverName();
-                    if (hoverName != null && !hoverName.getString().isEmpty()) {
-                        return hoverName;
+                if (realBlockId != null && !realBlockId.isEmpty()) {
+                    // Redirect multi-block parts to the assembled machine so
+                    // names resolve to an actual translation key (e.g.
+                    // workbench_a → gun_smith_table → "枪械工作台").
+                    String mapped = MULTI_PART_ROOT_MAP.get(realBlockId);
+                    String resolveId = mapped != null ? mapped : realBlockId;
+                    var rl = ResourceLocation.tryParse(resolveId);
+                    if (rl != null) {
+                        var realBlock = ForgeRegistries.BLOCKS.getValue(rl);
+                        if (realBlock != null && realBlock != Blocks.AIR) {
+                            return Component.translatable(realBlock.getDescriptionId());
+                        }
+                    }
+                    // Gun-pack workbenches are not registered in Forge — their
+                    // BlockId lives in TACZ's block index.  If the BlockId was
+                    // nested in BlockEntityTag (existing bindings), temporarily
+                    // lift it to the root level on a COPY so that
+                    // GunSmithTableItem.getName() can see it.
+                    String rootBlockId = tag.contains("BlockId", Tag.TAG_STRING)
+                            ? tag.getString("BlockId") : null;
+                    if (rootBlockId == null) {
+                        ItemStack copy = displayStack.copy();
+                        copy.getOrCreateTag().putString("BlockId", realBlockId);
+                        Component hoverName = copy.getHoverName();
+                        if (hoverName != null && !hoverName.getString().isEmpty()) {
+                            return hoverName;
+                        }
                     }
                 }
             }

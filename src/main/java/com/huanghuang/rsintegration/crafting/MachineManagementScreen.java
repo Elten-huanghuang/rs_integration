@@ -3,7 +3,7 @@ import com.huanghuang.rsintegration.crafting.progress.CraftProgressScreen;
 
 import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
-import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
+import com.huanghuang.rsintegration.machine.client.MachineDisplayNameResolver;
 import com.huanghuang.rsintegration.machine.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.machine.client.MachineEntryPolicy;
 import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
@@ -535,8 +535,7 @@ public final class MachineManagementScreen extends Screen {
     }
 
     private Component displayComponent(BindingInfo info) {
-        return BindingEventHandler.resolveBlockName(
-                info.blockKey(), info.blockRegKey(), info.displayStack());
+        return MachineDisplayNameResolver.displayName(info);
     }
 
     private String displayName(BindingInfo info) {

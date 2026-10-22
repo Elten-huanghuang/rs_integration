@@ -261,14 +261,7 @@ public final class MachineHubRenderer {
             // Tooltip
             if (isHovered) {
                 var tip = new ArrayList<Component>();
-                Component displayName;
-                ItemStack ds = info.displayStack();
-                if (ds != null && !ds.isEmpty()) {
-                    displayName = BindingEventHandler
-                            .resolveBlockName(info.blockKey(), info.blockRegKey(), ds);
-                } else {
-                    displayName = Component.literal(I18n.get(info.displayName()));
-                }
+                Component displayName = MachineDisplayNameResolver.displayName(info);
                 tip.add(displayName);
                 if (iType == MachineInteractType.QUICK) {
                     String st = switch (iStatus.state()) {

@@ -1466,8 +1466,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // ── Mod type tag ──────────────────────────────────────
         if (isMultiblock) {
-            String modLabel = Component.translatable(
-                    "rsi.batch.mod." + step.modType().id()).getString();
+            String modLabel = PlanRenderEngine.formatMachineLabel(step);
             int labelW = font.width(modLabel) + 12;
             UIRenderer.pill(gfx, cx, cy, labelW, font.lineHeight + 4, renderEngine.animation().getAlpha(animIdx), true);
             gfx.drawString(font, modLabel, cx + 6, cy + 2, C_MODTAG_TEXT);

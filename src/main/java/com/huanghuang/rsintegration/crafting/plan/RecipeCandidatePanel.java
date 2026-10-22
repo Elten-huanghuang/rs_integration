@@ -168,9 +168,10 @@ public final class RecipeCandidatePanel {
             String mod = option.getValue();
             var details = preview.candidateDetails(id, node.displayStack);
             Component title = preview.categoryTitle(id).orElse(null);
-            String machine = title != null
-                    ? title.getString()
-                    : PlanRenderEngine.formatModTypeLabel(mod);
+            String boundMachine = PlanRenderEngine.findBoundMachineLabel(mod, id);
+            String machine = boundMachine != null
+                    ? boundMachine
+                    : title != null ? title.getString() : PlanRenderEngine.formatModTypeLabel(mod);
             candidates.add(new Candidate(id, mod, details.name(), machine,
                     details.searchText(), details.outputCount()));
             widestPreview = Math.max(widestPreview,
