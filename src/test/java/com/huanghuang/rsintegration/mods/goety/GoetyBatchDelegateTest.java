@@ -190,6 +190,21 @@ class GoetyBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
+    void soulProbeCombinesTaskReservationWithAltarEnergy() {
+        int available = GoetyBatchDelegate.combinedSoulAvailability(50, 0, 50);
+
+        assertEquals(100, available);
+        assertEquals(IBatchDelegate.PreparationState.READY,
+                GoetyBatchDelegate.soulPreparationResult(100, available).state());
+    }
+
+    @Test
+    void soulProbeCombinesUnreservedStorageWithAltarEnergy() {
+        assertEquals(100,
+                GoetyBatchDelegate.combinedSoulAvailability(50, 50, 0));
+    }
+
+    @Test
     void removedSoulTotemProducesRetryableSpecificFailure() {
         IBatchDelegate.PreparationResult result =
                 GoetyBatchDelegate.soulPreparationResult(100, 0);

@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 
 import javax.annotation.Nullable;
@@ -31,6 +32,8 @@ public final class MaterialMatcher {
     public static boolean matchesExact(MaterialKey material, ItemStack stack) {
         Objects.requireNonNull(material, "material");
         if (stack == null || stack.isEmpty() || stack.getItem() != material.item()) return false;
+        if (InkFluidSupport.isToken(stack)
+                && InkFluidSupport.sameIdentity(material.toStack(1), stack)) return true;
         if (!isSlashBladeItem(material.item())) return MaterialKey.of(stack).equals(material);
 
         CompoundTag expectedTag = parseTag(material.tag());

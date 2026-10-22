@@ -1,11 +1,16 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -91,6 +96,22 @@ class MaterialMatcherTest extends BootstrapTest {
         ItemStack expected = tagged("declared");
         ItemStack actual = tagged("runtime");
         assertFalse(IngredientMatcher.matchesProducedOutput(expected, actual));
+    }
+
+    @Test
+    void fluidTokenIdentityIgnoresSerializedAmountMetadata() {
+        InkFluidItem tokenItem = InkFluidTestFixtures.tokenItem();
+        ItemStack declared = InkFluidSupport.token(tokenItem,
+                new FluidStack(Fluids.WATER, 1000));
+        ItemStack actual = declared.copy();
+        actual.getOrCreateTag().putInt("Amount", 1000);
+
+        assertTrue(MaterialMatcher.matchesExact(MaterialKey.of(declared), actual));
+        assertTrue(MaterialMatcher.sameRuntimeFragment(declared, actual));
+
+        ItemStack otherFluid = InkFluidSupport.token(tokenItem,
+                new FluidStack(Fluids.LAVA, 1000));
+        assertFalse(MaterialMatcher.matchesExact(MaterialKey.of(declared), otherFluid));
     }
 
     private static ItemStack tagged(String value) {

@@ -665,7 +665,7 @@
   "rsi.plan.view_card": "卡片视图",
   "rsi.plan.view_tree": "树状视图",
   "rsi.plan.tree_help_title": "操作说明",
-  "rsi.plan.tree_help": "左键：切换配方 / 打开 JEI\n右键节点：折叠 · 展开\n右键拖拽：平移\nCtrl + 滚轮：缩放\n滚轮悬停目标：调整数量",
+  "rsi.plan.tree_help": "左键节点：打开配方卡片 / 材料选择\n左键卡片：选择配方\n左键折叠按钮：折叠 / 展开\n右键或中键拖动：平移\n中键短按节点：打开 JEI\n滚轮：上下平移\nCtrl + 滚轮：缩放\n制作次数：在底部数量区修改",
   "rsi.plan.confirm_branches": "应用并开始",
   "rsi.plan.status_default": "默认路径 — 可直接执行",
   "rsi.plan.status_custom": "已自定义分支 — 将按所选路径执行",

@@ -99,4 +99,16 @@ public final class InkFluidSupport {
         if (remainder == null) throw new IllegalStateException("RS 返回了无效的流体存入结果");
         return remainder.isEmpty() ? ItemStack.EMPTY : token(stack.getItem(), remainder);
     }
+
+    /**
+     * 比较流体凭据所代表的流体身份。数量由 ItemStack 数量承载，外层 NBT 的
+     * Amount 仅用于序列化，不能参与图产物身份比较。
+     */
+    public static boolean sameIdentity(ItemStack first, ItemStack second) {
+        if (!isToken(first) || !isToken(second) || first.getItem() != second.getItem()) return false;
+        FluidStack firstFluid = fluid(first);
+        FluidStack secondFluid = fluid(second);
+        return !firstFluid.isEmpty() && !secondFluid.isEmpty()
+                && firstFluid.isFluidEqual(secondFluid);
+    }
 }

@@ -660,7 +660,7 @@
   "rsi.plan.view_card": "Card View",
   "rsi.plan.view_tree": "Tree View",
   "rsi.plan.tree_help_title": "Controls",
-  "rsi.plan.tree_help": "LMB: switch recipe / open JEI\nRMB node: fold · expand\nRMB drag: pan\nCtrl + wheel: zoom\nWheel over target: adjust count",
+  "rsi.plan.tree_help": "LMB node: open recipe cards / material choices\nLMB card: choose recipe\nLMB fold button: fold / expand\nRMB or MMB drag: pan\nMMB click node: open JEI\nWheel: pan vertically\nCtrl + wheel: zoom\nCraft count: use the bottom controls",
   "rsi.plan.confirm_branches": "Apply & Start",
   "rsi.plan.status_default": "Default path — ready to execute",
   "rsi.plan.status_custom": "Custom branches — will execute selected path",

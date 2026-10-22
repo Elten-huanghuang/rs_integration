@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulCraftingTask;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -344,7 +345,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 player, (BlockEntity) be);
         long diskSouls = GoetySoulCraftingTask.availableInStorage(
                 player, null, storageEndpoint());
-        int combinedSouls = saturatingAdd(totalSouls, diskSouls, 0);
+        long taskSouls = taskReservedSouls();
+        int combinedSouls = combinedSoulAvailability(
+                totalSouls, diskSouls, taskSouls);
         PreparationResult soulResult = soulPreparationResult(brazierSoulCost, combinedSouls);
         if (soulResult.state() != PreparationState.READY) {
             soulPreparationFailure = soulResult;
@@ -352,8 +355,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit brazier OK: recipe={} soulCost={} candlesticks={} nativeSouls={} diskSouls={}",
-                recipeId, brazierSoulCost, candlesticks.size(), totalSouls, diskSouls);
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit brazier OK: recipe={} soulCost={} candlesticks={} nativeSouls={} diskSouls={} taskSouls={}",
+                recipeId, brazierSoulCost, candlesticks.size(), totalSouls, diskSouls, taskSouls);
         return true;
     }
 
@@ -1522,11 +1525,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         int nativeAvailable = GoetySoulCraftingTask.nativeAvailableDarkAltar(player, altar);
         long diskAvailable = GoetySoulCraftingTask.availableInStorage(
                 player, null, storageEndpoint());
-        int combined = saturatingAdd(nativeAvailable,
-                Math.max(0, diskAvailable), 0);
+        long taskReserved = taskReservedSouls();
+        int combined = combinedSoulAvailability(
+                nativeAvailable, diskAvailable, taskReserved);
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-Batch-Goety] Soul probe: altar={} required={} nativeSouls={} diskSouls={} available={}",
-                myPos, cost, nativeAvailable, diskAvailable, combined);
+                "[RSI-Batch-Goety] Soul probe: altar={} required={} nativeSouls={} diskSouls={} taskSouls={} available={}",
+                myPos, cost, nativeAvailable, diskAvailable, taskReserved, combined);
         PreparationResult soulResult = soulPreparationResult(cost, combined);
         if (soulResult.state() != PreparationState.READY) {
             soulPreparationFailure = soulResult;
@@ -1536,6 +1540,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         return true;
+    }
+
+    /**
+     * 执行链会先为本任务预留网络灵魂，因此预检读取到的未预留库存不再包含
+     * 这部分。将本任务自己的预留计入后，才能正确与祭坛原生灵魂合并。
+     */
+    private long taskReservedSouls() {
+        if (magicResourceTaskReservation() == null) return 0L;
+        return magicResourceTaskReservation().pool(MagicResourceKind.SOUL).remaining();
+    }
+
+    static int combinedSoulAvailability(
+            int nativeAvailable, long unreservedStorage, long taskReserved) {
+        return saturatingAdd(nativeAvailable, unreservedStorage, taskReserved);
     }
 
     private static int saturatingAdd(int first, long second, long third) {

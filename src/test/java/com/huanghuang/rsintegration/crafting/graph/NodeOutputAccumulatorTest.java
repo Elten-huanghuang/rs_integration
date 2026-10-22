@@ -1,9 +1,14 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -143,6 +148,26 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertEquals(expected, accumulator.shortages().get(0).expected());
         assertEquals(expected, accumulator.shortages().get(0).missing());
     }
+
+    @Test
+    void publishesFluidTokenWhenOnlySerializedAmountMetadataDiffers() {
+        InkFluidItem tokenItem = InkFluidTestFixtures.tokenItem();
+        ItemStack declared = InkFluidSupport.token(tokenItem,
+                new FluidStack(Fluids.WATER, 1000));
+        ItemStack actual = declared.copy();
+        actual.getOrCreateTag().putInt("Amount", 1000);
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(7), 0),
+                MaterialKey.of(declared), declared.getCount(), OutputKind.PRIMARY);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        List<NodeOutputAccumulator.Publication> publications = accumulator.add(List.of(actual));
+
+        assertEquals(1, publications.size());
+        assertEquals(1000, publications.get(0).stack().getCount());
+        assertTrue(accumulator.isComplete());
+    }
+
     private static ItemStack tagged(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

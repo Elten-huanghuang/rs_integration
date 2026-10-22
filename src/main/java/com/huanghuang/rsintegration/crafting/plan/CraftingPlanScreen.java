@@ -179,6 +179,7 @@ public final class CraftingPlanScreen extends Screen {
     private double treeZoom = 1.0;
     private double treePanX, treePanY;
     private boolean treeCameraInit;
+    private final PlanTreeMouseGesture<PlanTreeNode> treeMouseGesture = new PlanTreeMouseGesture<>();
     // Tree viewport rect (screen space), set each render for hit-testing / centering.
     private int treeViewLeft, treeViewTop, treeViewRight, treeViewBottom;
     // Total-demand strip: raw-material totals + leftovers, drawn in the tree camera
@@ -366,6 +367,14 @@ public final class CraftingPlanScreen extends Screen {
         super.onClose();
     }
 
+    @Override
+    public void removed() {
+        treeMouseGesture.cancel();
+        dragging = false;
+        draggingBar = null;
+        super.removed();
+    }
+
     public boolean acceptResponse(long requestId, PlanResponse newPlan) {
         if (!responseRequests.accept(requestId, newPlan.recipeId())) {
             RSIntegrationMod.LOGGER.debug(
@@ -500,6 +509,9 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        treeMouseGesture.cancel();
+        dragging = false;
+        draggingBar = null;
         currentRepeat = clampRepeatCount(plan.repeatCount());
         lastRefreshCount = currentRepeat;
         Font font = minecraft.font;
@@ -2967,16 +2979,43 @@ public final class CraftingPlanScreen extends Screen {
         return null;
     }
 
+    private boolean overMaterialDropdown(double mouseX, double mouseY) {
+        return materialDropdownNode != null && materialPanelW > 0
+                && mouseX >= materialPanelX && mouseX < materialPanelX + materialPanelW
+                && mouseY >= materialPanelY && mouseY < materialPanelY + materialPanelH;
+    }
+
+    @Nullable
+    private MachineCandidateHit machineCandidateAt(double mouseX, double mouseY) {
+        if (!machineDropdownOpen) return null;
+        for (MachineCandidateHit hit : machineCandidateHits) {
+            if (mouseX >= hit.x() && mouseX < hit.x() + hit.w()
+                    && mouseY >= hit.y() && mouseY < hit.y() + hit.h()) {
+                return hit;
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private PlanTreeNode gestureNodeAt(double mouseX, double mouseY) {
+        if (recipeCandidatePanel != null && recipeCandidatePanel.contains(mouseX, mouseY)
+                || overMaterialDropdown(mouseX, mouseY)
+                || machineCandidateAt(mouseX, mouseY) != null) return null;
+        return nodeAt(mouseX, mouseY);
+    }
+
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (recipeCandidatePanel != null && recipeCandidatePanel.mouseScrolled(mouseX, mouseY, delta)) return true;
+        if (machineCandidateAt(mouseX, mouseY) != null) return true;
         if (missingExpanded && missingMaxScroll > 0
                 && mouseY >= missingAreaTop && mouseY < missingAreaTop + missingAreaHeight) {
             missingScroll = Math.max(0, Math.min(missingMaxScroll,
                     missingScroll - (int) delta * 10));
             return true;
         }
-        if (materialDropdownNode != null) {
+        if (overMaterialDropdown(mouseX, mouseY)) {
             int total = filteredMaterialOptions(materialDropdownNode).size();
             int maxVisible = Math.max(1, materialDropHits.size() - 1);
             materialDropdownScroll = Math.max(0, Math.min(Math.max(0, total - maxVisible),
@@ -2993,15 +3032,6 @@ public final class CraftingPlanScreen extends Screen {
                 treeZoom = newZoom;
                 treePanX = mouseX - lx * treeZoom;
                 treePanY = mouseY - ly * treeZoom;
-                return true;
-            }
-            // Wheel over the target (root) node adjusts the whole-plan repeat count;
-            // the debounced refresh (requestPlanRefresh) re-resolves after scrolling stops.
-            PlanTreeNode node = nodeAt(mouseX, mouseY);
-            if (node != null && node == treeModel.root) {
-                int stepBy = hasShiftDown() ? 10 : 1;
-                int dir = delta > 0 ? 1 : -1;
-                setRepeatCount(clampRepeatCount(currentRepeat + (long) dir * stepBy), true);
                 return true;
             }
             treePanY += delta * 20;
@@ -3021,8 +3051,12 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (recipeCandidatePanel != null && (recipeCandidatePanel.contains(mx, my)
-                || recipeCandidatePanel.contains(mx - dx, my - dy))) return true;
+        if (viewMode == ViewMode.TREE && treeMouseGesture.captures(button)) {
+            PlanTreeMouseGesture.PanDelta movement = treeMouseGesture.drag(mx, my, button);
+            treePanX += movement.deltaX();
+            treePanY += movement.deltaY();
+            return true;
+        }
         // Scrollbar thumb drag takes precedence — map the cursor to a scroll offset.
         if (draggingBar != null) {
             int s = draggingBar.scrollForThumbTop((int) my - scrollbarGrabDy);
@@ -3031,11 +3065,8 @@ public final class CraftingPlanScreen extends Screen {
             else if (draggingBar == missingBar) missingScroll = s;
             return true;
         }
-        if (viewMode == ViewMode.TREE && (button == 1 || button == 2)) {
-            treePanX += dx;
-            treePanY += dy;
-            return true;
-        }
+        if (recipeCandidatePanel != null && (recipeCandidatePanel.contains(mx, my)
+                || recipeCandidatePanel.contains(mx - dx, my - dy))) return true;
         if (dragging) {
             scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) dy));
         }
@@ -3044,6 +3075,9 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        treeMouseGesture.cancel();
+        dragging = false;
+        draggingBar = null;
         if (recipeCandidatePanel != null && recipeCandidatePanel.mouseClicked(mx, my, button)) {
             if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
             return true;
@@ -3057,12 +3091,11 @@ public final class CraftingPlanScreen extends Screen {
             openPlanDiagnostics();
             return true;
         }
-        if (dropdownNode != null && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
+        if (button == 0 && dropdownNode != null
+                && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
             closeRecipeCandidates();
         }
-        if (materialDropdownNode != null && materialPanelW > 0
-                && mx >= materialPanelX && mx < materialPanelX + materialPanelW
-                && my >= materialPanelY && my < materialPanelY + materialPanelH) {
+        if (overMaterialDropdown(mx, my)) {
             if (button == 0 && materialForgetW > 0
                     && mx >= materialForgetX && mx < materialForgetX + materialForgetW
                     && my >= materialForgetY && my < materialForgetY + materialForgetH) {
@@ -3090,20 +3123,18 @@ public final class CraftingPlanScreen extends Screen {
             }
             return true;
         }
-        if (button == 0) {
-            if (machineDropdownOpen) {
-                for (MachineCandidateHit hit : machineCandidateHits) {
-                    if (mx >= hit.x() && mx < hit.x() + hit.w()
-                            && my >= hit.y() && my < hit.y() + hit.h()) {
-                        selectedMachineIndex = hit.index();
-                        if (machineSelectionMode == MachineSelectionMode.AUTO) {
-                            machineSelectionMode = MachineSelectionMode.PREFERRED;
-                        }
-                        machineDropdownOpen = false;
-                        return true;
-                    }
+        MachineCandidateHit machineHit = machineCandidateAt(mx, my);
+        if (machineHit != null) {
+            if (button == 0) {
+                selectedMachineIndex = machineHit.index();
+                if (machineSelectionMode == MachineSelectionMode.AUTO) {
+                    machineSelectionMode = MachineSelectionMode.PREFERRED;
                 }
+                machineDropdownOpen = false;
             }
+            return true;
+        }
+        if (button == 0) {
             if (!plan.machineCandidates().isEmpty()
                     && mx >= machineModeX && mx < machineModeX + 3 * (machineModeW + 3)
                     && my >= machineModeY && my < machineModeY + machineModeH) {
@@ -3128,13 +3159,6 @@ public final class CraftingPlanScreen extends Screen {
             boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
                     && my >= countPillY && my < countPillY + countPillH;
             if (!overRepeatInput) unfocusRepeatCountInput();
-            for (BookmarkHit hit : bookmarkHits) {
-                if (mx >= hit.x() && mx < hit.x() + hit.w()
-                        && my >= hit.y() && my < hit.y() + hit.h()) {
-                    bookmarkMissingMaterial(hit);
-                    return true;
-                }
-            }
             if (overRepeatInput) {
                 if (repeatCountBox != null && repeatCountBox.isFocused()) {
                     repeatCountBox.setX(countPillX + 6);
@@ -3146,17 +3170,13 @@ public final class CraftingPlanScreen extends Screen {
                 return true;
             }
         }
-        // Middle-clicking a missing material is the quick restock/bookmark
-        // action. Keep it available in both RS and BD plans; the actual
-        // storage selection remains server-side and JEI is only the fallback
-        // destination for what cannot be supplied.
-        if (button == 2) {
-            for (BookmarkHit hit : bookmarkHits) {
-                if (mx >= hit.x() && mx < hit.x() + hit.w()
-                        && my >= hit.y() && my < hit.y() + hit.h()) {
+        for (BookmarkHit hit : bookmarkHits) {
+            if (mx >= hit.x() && mx < hit.x() + hit.w()
+                    && my >= hit.y() && my < hit.y() + hit.h()) {
+                if (button == 0 || button == 2) {
                     bookmarkMissingMaterial(hit);
-                    return true;
                 }
+                return true;
             }
         }
         if ((button == 0 || button == 1) && outputSelectorH > 0
@@ -3212,35 +3232,32 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         if (viewMode == ViewMode.TREE) {
-            if (button == 0 && handleStripPageClick(mx, my)) return true;
+            if (handleStripPageClick(mx, my, button)) return true;
             // Expand/Collapse-all toolbar button (top-right of the viewport).
-            if (button == 0 && treeFoldAllHitW > 0
+            if (treeFoldAllHitW > 0
                     && mx >= treeFoldAllHitX && mx < treeFoldAllHitX + treeFoldAllHitW
                     && my >= treeFoldAllHitY && my < treeFoldAllHitY + treeFoldAllHitH) {
-                setAllExpanded(treeModel.root, !treeAllExpanded(treeModel.root));
-                treeLayout.markDirty();
+                if (button == 0) {
+                    setAllExpanded(treeModel.root, !treeAllExpanded(treeModel.root));
+                    treeLayout.markDirty();
+                }
                 return true;
             }
-            if (button == 0) {
-                for (CostHit ch : costHits) {
-                    if (mx >= ch.x() && mx < ch.x() + ch.w()
-                            && my >= ch.y() && my < ch.y() + ch.h()) {
-                        centerOnKey(ch.key());
-                        return true;
-                    }
-                }
-                // Left-edge [+]/[−] fold indicator (sits just outside the node box).
-                PlanTreeNode fold = foldIndicatorAt(mx, my);
-                if (fold != null) {
-                    toggleCollapseSameKey(fold);
+            for (CostHit hit : costHits) {
+                if (mx >= hit.x() && mx < hit.x() + hit.w()
+                        && my >= hit.y() && my < hit.y() + hit.h()) {
+                    if (button == 0) centerOnKey(hit.key());
                     return true;
                 }
             }
+            PlanTreeNode fold = foldIndicatorAt(mx, my);
+            if (fold != null) {
+                if (button == 0) toggleCollapseSameKey(fold);
+                return true;
+            }
             if (inTreeViewport(mx, my)) {
-                if (button == 1) {
-                    PlanTreeNode node = nodeAt(mx, my);
-                    if (node != null) toggleCollapseSameKey(node);
-                } else if (button == 0) {
+                if (treeMouseGesture.begin(mx, my, button, nodeAt(mx, my))) return true;
+                if (button == 0) {
                     PlanTreeNode node = nodeAt(mx, my);
                     if (node != null && node.materialLockKey != null
                             && node.materialOptions.size() > 1) {
@@ -3250,12 +3267,6 @@ public final class CraftingPlanScreen extends Screen {
                         openRecipeCandidates(node);
                     } else {
                         closeMaterialDropdown();
-                    }
-                } else if (button == 2) {
-                    // Middle-click → open recipe in JEI.
-                    PlanTreeNode node = nodeAt(mx, my);
-                    if (node != null && node.step != null) {
-                        openRecipeInJei(node.step.recipeId());
                     }
                 }
                 // Consume in-viewport clicks so card-mode drag/scroll logic doesn't fire.
@@ -3335,12 +3346,13 @@ public final class CraftingPlanScreen extends Screen {
         return super.mouseClicked(mx, my, button);
     }
 
-    private boolean handleStripPageClick(double mx, double my) {
+    private boolean handleStripPageClick(double mx, double my, int button) {
         for (StripPageHit hit : stripPageHits) {
             if (mx < hit.x() || mx >= hit.x() + hit.w()
                     || my < hit.y() || my >= hit.y() + hit.h()) {
                 continue;
             }
+            if (button != 0) return true;
             if (hit.row() == StripRow.TOTAL) {
                 totalStripPage = MaterialStripPaging.movePage(
                         totalStripPage, hit.delta(), cachedTotalStrip.size(), STRIP_PAGE_SIZE);
@@ -3358,6 +3370,13 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (treeMouseGesture.captures(button)) {
+            PlanTreeNode selected = treeMouseGesture.release(mx, my, button, gestureNodeAt(mx, my));
+            if (selected != null && selected.step != null) {
+                openRecipeInJei(selected.step.recipeId());
+            }
+            return true;
+        }
         dragging = false;
         draggingBar = null;
         return super.mouseReleased(mx, my, button);

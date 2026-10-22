@@ -16,6 +16,10 @@ import java.util.List;
 public final class UIRenderer {
 
     private static final int ARC_SEGMENTS = 28;
+    private static final int BORDER_ARC_SEGMENTS = 12;
+    private static final int[] BORDER_GRADIENT_COLORS = {
+            0xFF55D6FF, 0xFF75F7B2, 0xFFFFE27A, 0xFFFF8FC7, 0xFFB79CFF, 0xFF55D6FF
+    };
 
     private UIRenderer() {}
 
@@ -95,6 +99,56 @@ public final class UIRenderer {
         gradientArc(buf, mat, x + w - radius, y + h - radius,   radius,   0f,  90f, y, y + h, colorTop, colorBottom);
         gradientArc(buf, mat, x + radius,     y + h - radius,   radius,  90f, 180f, y, y + h, colorTop, colorBottom);
         gradientArc(buf, mat, x + radius,     y + radius,       radius, 180f, 270f, y, y + h, colorTop, colorBottom);
+
+        tess.end();
+    }
+
+    /**
+     * 绘制沿圆角矩形周长的多色描边，颜色依次经过青、绿、黄、粉和紫。
+     * 仅用于需要强强调的单个卡片，避免同屏出现过多高饱和度边框。
+     */
+    public static void roundedRainbowBorder(GuiGraphics gfx, float x, float y, float w, float h,
+                                            float radius, float thickness) {
+        if (w <= 0 || h <= 0 || thickness <= 0) return;
+        radius = clampRadius(radius, w, h);
+        thickness = Math.min(thickness, Math.min(w, h) / 2f);
+        if (thickness <= 0) return;
+
+        float innerRadius = Math.max(0f, radius - thickness);
+        float perimeter = 2f * (w + h - 4f * radius)
+                + (float) (Math.PI * 2f * radius);
+        if (perimeter <= 0) return;
+
+        Matrix4f mat = gfx.pose().last().pose();
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+
+        Tesselator tess = Tesselator.getInstance();
+        BufferBuilder buf = tess.getBuilder();
+        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+
+        float offset = 0f;
+        offset = ringLine(buf, mat, x + radius, y, x + w - radius, y,
+                x + radius, y + thickness, x + w - radius, y + thickness,
+                offset, perimeter);
+        offset = ringArc(buf, mat, x + w - radius, y + radius, radius, innerRadius,
+                -90f, 0f, offset, perimeter);
+        offset = ringLine(buf, mat, x + w, y + radius, x + w, y + h - radius,
+                x + w - thickness, y + radius, x + w - thickness, y + h - radius,
+                offset, perimeter);
+        offset = ringArc(buf, mat, x + w - radius, y + h - radius, radius, innerRadius,
+                0f, 90f, offset, perimeter);
+        offset = ringLine(buf, mat, x + w - radius, y + h, x + radius, y + h,
+                x + w - radius, y + h - thickness, x + radius, y + h - thickness,
+                offset, perimeter);
+        offset = ringArc(buf, mat, x + radius, y + h - radius, radius, innerRadius,
+                90f, 180f, offset, perimeter);
+        offset = ringLine(buf, mat, x, y + h - radius, x, y + radius,
+                x + thickness, y + h - radius, x + thickness, y + radius,
+                offset, perimeter);
+        ringArc(buf, mat, x + radius, y + radius, radius, innerRadius,
+                180f, 270f, offset, perimeter);
 
         tess.end();
     }
@@ -282,6 +336,56 @@ public final class UIRenderer {
             float t = clamp((y - topY) / (bottomY - topY));
             vertex(buf, mat, x, y, mix(colorTop, colorBottom, t));
         }
+    }
+
+    private static float ringLine(BufferBuilder buf, Matrix4f mat,
+                                  float x1, float y1, float x2, float y2,
+                                  float ix1, float iy1, float ix2, float iy2,
+                                  float offset, float perimeter) {
+        float length = (float) Math.hypot(x2 - x1, y2 - y1);
+        if (length <= 0f) return offset;
+        ringVertex(buf, mat, x1, y1, offset / perimeter);
+        ringVertex(buf, mat, x2, y2, (offset + length) / perimeter);
+        ringVertex(buf, mat, ix2, iy2, (offset + length) / perimeter);
+        ringVertex(buf, mat, ix1, iy1, offset / perimeter);
+        return offset + length;
+    }
+
+    private static float ringArc(BufferBuilder buf, Matrix4f mat, float cx, float cy,
+                                 float radius, float innerRadius,
+                                 float startAngle, float endAngle,
+                                 float offset, float perimeter) {
+        float step = (endAngle - startAngle) / BORDER_ARC_SEGMENTS;
+        float arcLength = (float) (Math.toRadians(endAngle - startAngle) * radius);
+        float segmentLength = arcLength / BORDER_ARC_SEGMENTS;
+        for (int i = 0; i < BORDER_ARC_SEGMENTS; i++) {
+            float a0 = (float) Math.toRadians(startAngle + step * i);
+            float a1 = (float) Math.toRadians(startAngle + step * (i + 1));
+            float t0 = (offset + segmentLength * i) / perimeter;
+            float t1 = (offset + segmentLength * (i + 1)) / perimeter;
+            ringVertex(buf, mat, cx + (float) Math.cos(a0) * radius,
+                    cy + (float) Math.sin(a0) * radius, t0);
+            ringVertex(buf, mat, cx + (float) Math.cos(a1) * radius,
+                    cy + (float) Math.sin(a1) * radius, t1);
+            ringVertex(buf, mat, cx + (float) Math.cos(a1) * innerRadius,
+                    cy + (float) Math.sin(a1) * innerRadius, t1);
+            ringVertex(buf, mat, cx + (float) Math.cos(a0) * innerRadius,
+                    cy + (float) Math.sin(a0) * innerRadius, t0);
+        }
+        return offset + arcLength;
+    }
+
+    private static void ringVertex(BufferBuilder buf, Matrix4f mat,
+                                   float x, float y, float t) {
+        vertex(buf, mat, x, y, borderGradientColor(t));
+    }
+
+    private static int borderGradientColor(float t) {
+        t = t - (float) Math.floor(t);
+        float scaled = t * (BORDER_GRADIENT_COLORS.length - 1);
+        int index = Math.min((int) scaled, BORDER_GRADIENT_COLORS.length - 2);
+        return mix(BORDER_GRADIENT_COLORS[index],
+                BORDER_GRADIENT_COLORS[index + 1], scaled - index);
     }
 
     private static float clampRadius(float radius, float w, float h) {

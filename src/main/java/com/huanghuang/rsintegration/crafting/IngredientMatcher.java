@@ -3,7 +3,9 @@ package com.huanghuang.rsintegration.crafting;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
@@ -15,7 +17,6 @@ import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.item.alchemy.Potions;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import net.minecraft.nbt.NumericTag;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
@@ -215,6 +216,7 @@ public final class IngredientMatcher {
     public static boolean matchesRuntimeIdentity(ItemStack expected, ItemStack actual) {
         if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()
                 || expected.getItem() != actual.getItem()) return false;
+        if (InkFluidSupport.sameIdentity(expected, actual)) return true;
         if (expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())) {
             return matchesProducedOutput(expected, actual);
         }
