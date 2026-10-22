@@ -61,7 +61,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private static final int CONTAINER_SLOT = 4;
     private static final int OUTPUT_SLOT = 5;
     private static final int FUEL_SLOT = 6;
-    private static final int LAPIS_OPERATIONS_PER_ITEM = 4;
+    // 模组每消耗 1 个有效染料，只增加 1 点 residualDye；每次操作消耗 1 点。
+    private static final int LAPIS_OPERATIONS_PER_ITEM = 1;
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -395,8 +396,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         // Phase 2: Ensure enough lapis lazuli for this logical batch.
         ItemStack fuelSlot = itemHandler.getStackInSlot(FUEL_SLOT);
         int existingFuel = fuelSlot.is(Items.LAPIS_LAZULI) ? fuelSlot.getCount() : 0;
-        int requiredFuel = FuelMath.requiredItemsForOperations(
-                operations, LAPIS_OPERATIONS_PER_ITEM, 64);
+        int requiredFuel = requiredLapisForOperations(operations);
         int needed = Math.max(0, requiredFuel - existingFuel);
         if (needed > 0) {
             int inserted = tryInsertFuelFromStorage(itemHandler, needed);
@@ -522,6 +522,10 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         IItemHandler handler = getInventory(be);
         if (handler != null && handler.getSlots() >= 7) {
+            // 任务取消时可能已经产出了部分成品，输出槽也必须交还给存储网络。
+            ItemStack recoveredOutput = extractOwnedOutputForRecovery(
+                    handler, OUTPUT_SLOT, resultItem(), inventoryLease);
+            if (!recoveredOutput.isEmpty()) refundToStorage(recoveredOutput);
             recordFailureRecoveredInputs(cleanupOwnedSlots(handler, !usingSharedLedger));
             be.setChanged();
         } else {
@@ -690,6 +694,17 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return IBatchDelegate.matchesProducedItem(actual, declared);
     }
 
+    static ItemStack extractOwnedOutputForRecovery(IItemHandler handler, int outputSlot,
+                                                   ItemStack expected, boolean ownsInventory) {
+        if (!ownsInventory || handler == null || expected == null || expected.isEmpty()
+                || outputSlot < 0 || outputSlot >= handler.getSlots()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack current = handler.getStackInSlot(outputSlot);
+        if (!matchesExpectedOutput(current, expected)) return ItemStack.EMPTY;
+        return handler.extractItem(outputSlot, current.getCount(), false);
+    }
+
     private static boolean areInputsEmpty(IItemHandler handler) {
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
             if (!handler.getStackInSlot(slot).isEmpty()) return false;
@@ -781,14 +796,18 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!"immortalers_delight".equals(recipeModTypeId)) return;
-        int fuelNeeded = FuelMath.requiredItemsForOperations(
-                repeatCount, LAPIS_OPERATIONS_PER_ITEM, Integer.MAX_VALUE);
+        int fuelNeeded = requiredLapisForOperations(repeatCount);
         neededCounts.merge(Items.LAPIS_LAZULI, (long) fuelNeeded,
                 SaturatingLongMath::signedAdd);
         // Include lapis blocks as an acceptable source — RS recursive
         // resolution will show the decomposition in the plan tree
         itemSource.putIfAbsent(Items.LAPIS_LAZULI,
                 Ingredient.of(Items.LAPIS_LAZULI, Items.LAPIS_BLOCK));
+    }
+
+    static int requiredLapisForOperations(int operations) {
+        return FuelMath.requiredItemsForOperations(
+                operations, LAPIS_OPERATIONS_PER_ITEM, Integer.MAX_VALUE);
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,

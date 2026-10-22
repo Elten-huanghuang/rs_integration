@@ -15,7 +15,16 @@ public final class RecipeCandidatePickerModel {
     /** 对应 3×3 预览卡片的头部、112px 预览区、底部留白和卡片间距。 */
     private static final int PREFERRED_ROW_HEIGHT = 150;
     public record Candidate(ResourceLocation recipeId, String modTypeId, String name,
-                            String machine, String searchText) {}
+                            String machine, String searchText, int outputCount) {
+        public Candidate {
+            outputCount = Math.max(1, outputCount);
+        }
+
+        public Candidate(ResourceLocation recipeId, String modTypeId, String name,
+                         String machine, String searchText) {
+            this(recipeId, modTypeId, name, machine, searchText, 1);
+        }
+    }
 
     private final List<Candidate> candidates;
     private List<Candidate> filtered;
@@ -39,7 +48,8 @@ public final class RecipeCandidatePickerModel {
         List<Candidate> matches = new ArrayList<>();
         for (Candidate candidate : candidates) {
             String text = (candidate.recipeId() + " " + candidate.modTypeId() + " "
-                    + candidate.name() + " " + candidate.machine() + " " + candidate.searchText())
+                    + candidate.name() + " " + candidate.machine() + " x"
+                    + candidate.outputCount() + " " + candidate.searchText())
                     .toLowerCase(Locale.ROOT);
             boolean match = true;
             for (String term : terms) if (!text.contains(term)) { match = false; break; }

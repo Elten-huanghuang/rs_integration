@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collection;
 
@@ -14,7 +15,8 @@ final class GraphExecutionPolicy {
         GRAPH_COMPLETE,
         APPENDED_TERMINAL_NOT_IN_GRAPH,
         MOD_REQUIRES_FLAT_EXECUTION,
-        STATEFUL_GENERIC_REUSE_REQUIRES_FLAT
+        STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
+        SEQUENTIAL_MACHINE_BATCH_REQUIRES_FLAT
     }
 
     record Decision(boolean useGraphExecutor, Reason reason, String detail) {}
@@ -60,11 +62,34 @@ final class GraphExecutionPolicy {
                 }
             }
         }
+        if (requiresFlatSequentialMachineBatch(graph)) {
+            return new Decision(false, Reason.SEQUENTIAL_MACHINE_BATCH_REQUIRES_FLAT,
+                    "Arcane Iterator executes repeated operations sequentially");
+        }
         if (requiresFlatStatefulReuse(graph)) {
             return new Decision(false, Reason.STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
                     "generic catalyst or durability input requires ordered reuse");
         }
         return decide(false, (ModTypeConstraint) null);
+    }
+
+    static boolean requiresFlatSequentialMachineBatch(CraftPlanGraph graph) {
+        if (graph == null) return false;
+        ResourceLocation iteratorType = new ResourceLocation("wizards_reborn", "arcane_iterator");
+        for (var node : graph.nodes()) {
+            if (node.executions() <= 1) continue;
+            if (iteratorType.equals(node.recipeTypeId())
+                    || isArcaneIteratorRecipe(node.recipeId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isArcaneIteratorRecipe(ResourceLocation recipeId) {
+        return recipeId != null && "wizards_reborn".equals(recipeId.getNamespace())
+                && (recipeId.getPath().equals("arcane_iterator")
+                || recipeId.getPath().startsWith("arcane_iterator/"));
     }
 
     static boolean requiresFlatStatefulReuse(CraftPlanGraph graph) {

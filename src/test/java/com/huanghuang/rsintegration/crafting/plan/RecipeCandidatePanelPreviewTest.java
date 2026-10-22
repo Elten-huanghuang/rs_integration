@@ -15,9 +15,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -93,6 +95,46 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
                         RecipeCandidatePanel.MAX_PREVIEW_HEIGHT),
                 capped);
         assertEquals(new RecipePreviewRenderer.PreviewBounds(80, 40), ordinary);
+    }
+
+    @Test
+    void candidateCardsExposePerExecutionOutputCounts() {
+        Font font = mock(Font.class);
+        RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);
+        when(font.width(anyString())).thenReturn(0);
+        when(font.plainSubstrByWidth(anyString(), anyInt()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(preview.candidateDetails(any(), any()))
+                .thenAnswer(invocation -> {
+                    ResourceLocation id = invocation.getArgument(0);
+                    return CURRENT.equals(id)
+                            ? new RecipePreviewRenderer.CandidateDetails("two", "", 2)
+                            : new RecipePreviewRenderer.CandidateDetails("four", "", 4);
+                });
+        when(preview.categoryTitle(any())).thenReturn(
+                Optional.of(Component.literal("machine")));
+        when(preview.previewWidthHint(any())).thenReturn(80);
+        when(preview.previewBounds(any()))
+                .thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
+
+        RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
+                (node, recipe) -> {}, (node, recipe) -> {}, node -> {}, node -> {},
+                tempDir.resolve("candidate_outputs.json"), () -> {}, () -> true);
+        PlanStep step = new PlanStep(CURRENT, new ItemStack(Items.DIAMOND), 1, List.of(),
+                List.of(FIRST_ALTERNATIVE), null, 0, true);
+        PlanTreeNode node = new PlanTreeNode(
+                IngredientKey.of(new ItemStack(Items.DIAMOND)),
+                new ItemStack(Items.DIAMOND), 1, 0, step);
+
+        panel.open(node, Set.of());
+        Map<ResourceLocation, Integer> outputs = panel.visibleCandidates().stream()
+                .collect(Collectors.toMap(
+                        RecipeCandidatePickerModel.Candidate::recipeId,
+                        RecipeCandidatePickerModel.Candidate::outputCount));
+
+        assertEquals(Map.of(CURRENT, 2, FIRST_ALTERNATIVE, 4), outputs);
     }
 
     @Test

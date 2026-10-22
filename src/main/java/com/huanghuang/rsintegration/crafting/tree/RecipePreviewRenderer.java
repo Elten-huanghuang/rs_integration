@@ -572,7 +572,15 @@ public final class RecipePreviewRenderer {
         return null;
     }
 
-    public record CandidateDetails(String name, String searchText) {}
+    public record CandidateDetails(String name, String searchText, int outputCount) {
+        public CandidateDetails {
+            outputCount = Math.max(1, outputCount);
+        }
+
+        public CandidateDetails(String name, String searchText) {
+            this(name, searchText, 1);
+        }
+    }
 
     /** 搜索索引只收集文字；不为屏幕外的数百个候选创建 JEI 布局。 */
     public CandidateDetails candidateDetails(ResourceLocation id, ItemStack fallback) {
@@ -615,8 +623,10 @@ public final class RecipePreviewRenderer {
                         // 个别第三方物品的提示依赖菜单状态，不影响整个候选面板。
                     }
                 }
-                search.append(' ').append(output.getHoverName().getString());
-                return new CandidateDetails(name, search.toString());
+                search.append(' ').append(output.getHoverName().getString())
+                        .append(" x").append(Math.max(1, output.getCount()));
+                return new CandidateDetails(name, search.toString(),
+                        Math.max(1, output.getCount()));
             });
         } finally {
             RecipeBrowserSlowCallDiagnostics.finish("RecipeBrowser", "candidate_details_build",

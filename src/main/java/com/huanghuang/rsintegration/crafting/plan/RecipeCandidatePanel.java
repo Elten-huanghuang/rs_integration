@@ -171,7 +171,8 @@ public final class RecipeCandidatePanel {
             String machine = title != null
                     ? title.getString()
                     : PlanRenderEngine.formatModTypeLabel(mod);
-            candidates.add(new Candidate(id, mod, details.name(), machine, details.searchText()));
+            candidates.add(new Candidate(id, mod, details.name(), machine,
+                    details.searchText(), details.outputCount()));
             widestPreview = Math.max(widestPreview,
                     Math.min(MAX_PREVIEW_WIDTH, preview.previewWidthHint(id)));
         }
@@ -620,12 +621,19 @@ public final class RecipeCandidatePanel {
                         node.depth, filtered.size())
                         && excludedRecipes.contains(candidate.recipeId().toString());
                 int cardBorder = excluded ? 0xFFB23A48
-                        : selected ? 0xFF66D48A
+                        : isDefault ? 0xFFE7BA55
                         : hover ? 0xFF5B8A6B : 0xFF385341;
                 int cardFill = selected ? 0xFF1C3B2A
                         : excluded ? 0xFF28171A
                         : hover ? 0xFF20382A : 0xFF141F19;
-                UIRenderer.rounded(graphics, cardX, cardY, cardW, cardH, 5f, cardBorder);
+                if (selected && !excluded) {
+                    graphics.flush();
+                    UIRenderer.roundedRainbowBorder(
+                            graphics, cardX, cardY, cardW, cardH, 5f, 1.5f);
+                } else {
+                    UIRenderer.rounded(
+                            graphics, cardX, cardY, cardW, cardH, 5f, cardBorder);
+                }
                 UIRenderer.rounded(graphics, cardX + 1, cardY + 1,
                         cardW - 2, cardH - 2, 4f, cardFill);
                 graphics.flush();
@@ -636,7 +644,8 @@ public final class RecipeCandidatePanel {
                 boolean bound = candidate.modTypeId().isEmpty() || "generic".equals(candidate.modTypeId())
                         || modType != null && modType.isVirtual()
                         || boundMachines.contains(candidate.modTypeId());
-                String machine = candidate.machine() + (bound ? "" : " · "
+                String machine = "x" + candidate.outputCount() + " · "
+                        + candidate.machine() + (bound ? "" : " · "
                         + Component.translatable("rsi.plan.recipe_picker.unbound").getString());
                 List<String> badges = new ArrayList<>(3);
                 if (selected) {

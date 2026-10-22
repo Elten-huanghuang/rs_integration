@@ -92,6 +92,35 @@ class GraphExecutionPolicyTest extends BootstrapTest {
     }
 
     @Test
+    void repeatedArcaneIteratorOperationsUseSequentialFlatExecution() {
+        ResourceLocation iteratorType = new ResourceLocation(
+                "wizards_reborn", "arcane_iterator");
+        ResourceLocation recipeId = new ResourceLocation(
+                "wizards_reborn", "arcane_iterator/growing");
+        NodeId nodeId = new NodeId(0);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        InputDemand input = new InputDemand(new InputPortId(nodeId, 0),
+                Ingredient.of(Items.DIAMOND), 1, DemandRole.CONSUMED,
+                new ItemStack(Items.DIAMOND));
+        CraftNode node = new CraftNode(nodeId, recipeId, "wizards_reborn",
+                iteratorType, 3, List.of(), List.of(), false,
+                null, null, List.of(input), List.of(), List.of());
+        RootDemand root = new RootDemand(Ingredient.of(Items.DIAMOND), 3, 0,
+                new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
+                new MaterialSource.InitialPool(diamond), diamond, 3)),
+                DemandRole.CONSUMED);
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), List.of(),
+                List.of(root), List.of(), List.of(nodeId));
+
+        GraphExecutionPolicy.Decision decision = GraphExecutionPolicy.decide(
+                false, List.of(ModType.GENERIC), graph);
+
+        assertFalse(decision.useGraphExecutor());
+        assertEquals(GraphExecutionPolicy.Reason.SEQUENTIAL_MACHINE_BATCH_REQUIRES_FLAT,
+                decision.reason());
+    }
+
+    @Test
     void embersAlchemyUsesFlatExecutionForTabletLocking() {
         EreAlchemyRSModule.INSTANCE.registerModType();
         ModType alchemy = ModType.byId(ModIds.ID_EMBERS_ALCHEMY);
