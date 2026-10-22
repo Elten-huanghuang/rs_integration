@@ -22,6 +22,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.sirplop.aetherworks.blockentity.ToolStationBlockEntity;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -49,6 +50,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     private boolean tempControlAvailable;
     private int abortTimer;
     private boolean craftTimedOut;
+    private boolean recipeInitialized;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -212,6 +214,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         this.failureRefundSafe = true;
         this.abortTimer = 0;
         this.craftTimedOut = false;
+        this.recipeInitialized = false;
 
         RSIntegrationMod.LOGGER.debug("[RSI-Aetherworks] Placed {} materials in tool station",
                 materials.size());
@@ -242,6 +245,21 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
             return true;
         }
 
+        // 原生 onForgeTick 在 cachedRecipe 为空时直接返回，也不会刷新余烬/温度标志。
+        // 首次自动推进前先无进度地解析配方，避免必须由玩家手动敲一次来解冻状态机。
+        if (!recipeInitialized) {
+            if (!initializeNativeRecipe((ToolStationBlockEntity) be)) {
+                abortTimer++;
+                if (abortTimer > 300) {
+                    craftTimedOut = true;
+                    warnOnce("toolstation_recipe_init_failed",
+                            "[RSI-Aetherworks] ToolStation recipe initialization failed >300 ticks, aborting craft");
+                }
+                return false;
+            }
+            recipeInitialized = true;
+        }
+
         // Temperature control
         if (forgeBE != null) {
             try {
@@ -264,8 +282,9 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
                             Reflect.invoke(forgeBE, "transferHeat", 5.0f, false);
                         }
                     } else {
-                        if (Math.abs(currentHeat - target) > 30) {
-                            Reflect.invokeExact(heatCap, "setHeat", new Class<?>[]{double.class}, target);
+                        double directTarget = directHeatTarget(recipeTemperature);
+                        if (currentHeat < directTarget) {
+                            Reflect.invokeExact(heatCap, "setHeat", new Class<?>[]{double.class}, directTarget);
                             double sh = Reflect.<Double>getField(forgeBE, "storedHeat").orElse(0.0);
                             if (sh > 0) Reflect.setField(forgeBE, "storedHeat", 0.0);
                         }
@@ -338,6 +357,22 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         }
 
         return false;
+    }
+
+    static boolean initializeNativeRecipe(ToolStationBlockEntity station) {
+        // 两个标志只在服务端原生 tick 中按当前炉况刷新。先置空可确保
+        // onHit 只负责缓存配方，不会把初始化动作误算为一次锤击。
+        station.hasEmber = false;
+        station.hasHeat = false;
+        station.onHit();
+        if (station.cachedRecipe == null) return false;
+        station.setChanged();
+        return true;
+    }
+
+    static double directHeatTarget(int recipeTemperature) {
+        // 原生 onForgeTick 使用严格大于配方温度来判断可用热量。
+        return recipeTemperature + 1.0;
     }
 
     @Override
