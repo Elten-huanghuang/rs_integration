@@ -176,6 +176,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     @Inject(method = "tick", at = @At("TAIL"), remap = false)
     private void rsi$tickSmithingSlots(int guiLeft, int guiTop, CallbackInfo ci) {
         GridContainerMenu menu = ((GridScreen) (Object) this).getMenu();
+        if (menu.getGrid().getGridType() != GridType.CRAFTING) return;
         if (CraftingStationAccess.access(menu).rsi$getCraftingStationMode() != CraftingStationMode.SMITHING) return;
         rsi$ensureSlotBackgrounds(menu);
         if (rsi$slotBackgrounds == null) return;
@@ -267,6 +268,8 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
                                           CallbackInfoReturnable<Boolean> cir) {
         if (button != 0) return;
         GridScreen screen = (GridScreen) (Object) this;
+        // 样板终端的写入按钮、输出槽与工作站按钮重叠，不能留下不可见的点击区域。
+        if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
         GridContainerMenu menu = screen.getMenu();
         CraftingStationAccess access = CraftingStationAccess.access(menu);
         if (access.rsi$getCraftingStationMode() == CraftingStationMode.ANVIL) {
@@ -348,6 +351,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private void rsi$handleAnvilNameKey(int keyCode, int scanCode, int modifiers,
                                         CallbackInfoReturnable<Boolean> cir) {
         GridScreen screen = (GridScreen) (Object) this;
+        if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
         if (!rsi$anvilNameFocused
                 || CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationMode()
                 != CraftingStationMode.ANVIL) return;
@@ -366,6 +370,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private void rsi$handleAnvilNameCharacter(char character, int modifiers,
                                               CallbackInfoReturnable<Boolean> cir) {
         GridScreen screen = (GridScreen) (Object) this;
+        if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
         if (!rsi$anvilNameFocused
                 || CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationMode()
                 != CraftingStationMode.ANVIL || Character.isISOControl(character)) return;
@@ -387,6 +392,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private void rsi$scrollStonecutterRecipes(double mouseX, double mouseY, double scroll,
                                               CallbackInfoReturnable<Boolean> cir) {
         GridScreen screen = (GridScreen) (Object) this;
+        if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
         GridContainerMenu menu = screen.getMenu();
         if (CraftingStationAccess.access(menu).rsi$getCraftingStationMode() != CraftingStationMode.STONECUTTER
                 || !(CraftingStationAccess.access(menu).rsi$getCraftingStationState()

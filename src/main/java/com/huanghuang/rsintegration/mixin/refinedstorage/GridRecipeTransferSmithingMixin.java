@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.mods.jei.SmithingJeiTransferHandler;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
@@ -21,6 +22,7 @@ public abstract class GridRecipeTransferSmithingMixin {
                                           IRecipeSlotsView recipeSlots, Player player,
                                           boolean maxTransfer, boolean doTransfer,
                                           CallbackInfoReturnable<IRecipeTransferError> cir) {
+        if (container.getGrid().getGridType() != GridType.CRAFTING) return;
         if (!(recipe instanceof SmithingRecipe)
                 && !(recipe instanceof IJeiAnvilRecipe)
                 && !(recipe instanceof StonecutterRecipe)) return;

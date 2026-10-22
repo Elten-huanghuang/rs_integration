@@ -1598,7 +1598,7 @@ public class RecipeGuiLayoutsMixin {
                     RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket (generic): recipeId={}", recipeId, e);
                     return;
                 }
-                pkt = ClientPlanningPreferences.apply(pkt, Minecraft.getInstance().level);
+                pkt = ClientPlanningPreferences.apply(pkt);
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", pkt.recipeId());
                 rsi$showPlanRequestStarted(requestId, pkt.recipeId());
@@ -1652,7 +1652,7 @@ public class RecipeGuiLayoutsMixin {
                 RSIntegrationMod.LOGGER.error("[RSI-JEI] Failed to create GenericCraftPacket: recipeId={} dim={} pos={}", recipeId, dim, machinePos, e);
                 return;
             }
-            pkt = ClientPlanningPreferences.apply(pkt, Minecraft.getInstance().level);
+            pkt = ClientPlanningPreferences.apply(pkt);
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-JEI] Sending GenericCraftPacket: recipeId={} dim={} pos={} baseItem={} targetOutput={}",
                     pkt.recipeId(), dim, machinePos,

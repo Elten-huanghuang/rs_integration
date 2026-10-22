@@ -21,6 +21,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -159,50 +160,49 @@ public final class PlayerUtils {
         }
     }
 
-    /**
-     * Inventory mutations can happen while a custom container is open. Both
-     * menus maintain their own last-sent slot snapshots, so updating only the
-     * active menu leaves the player inventory client-side with ghost stacks
-     * until the screen is reopened.
-     */
+    /** 无修改前快照时同步全部背包槽，扣料和退款也不能只依赖当前菜单的槽位。 */
     public static void broadcastInventoryChanges(ServerPlayer player) {
+        broadcastInventoryChanges(player, null);
+    }
+
+    private static void broadcastInventoryChanges(ServerPlayer player, @Nullable List<ItemStack> before) {
+        if (player.containerMenu != player.inventoryMenu) {
+            // 光标包没有菜单 ID；后台背包菜单只能更新普通槽，不能覆盖当前菜单的光标。
+            player.inventoryMenu.setRemoteCarried(player.inventoryMenu.getCarried());
+        }
         player.inventoryMenu.broadcastChanges();
         if (player.containerMenu != player.inventoryMenu) {
             player.containerMenu.broadcastChanges();
         }
-    }
+        if (player.connection == null || player.hasDisconnected() || player instanceof FakePlayer) return;
 
-    private static void broadcastInventoryChanges(ServerPlayer player, List<ItemStack> before) {
-        broadcastInventoryChanges(player);
-        if (player.connection == null || player instanceof FakePlayer) return;
-
-        int size = Math.min(before.size(), player.getInventory().getContainerSize());
+        Set<Integer> slots = new LinkedHashSet<>();
+        int size = player.getInventory().getContainerSize();
         for (int slot = 0; slot < size; slot++) {
             ItemStack current = player.getInventory().getItem(slot);
-            if (ItemStack.matches(before.get(slot), current)) continue;
-
-            // PLAYER_INVENTORY bypasses the currently open custom menu. This is
-            // necessary for virtual crafts whose output arrives while a screen
-            // owns a different container id; a normal menu diff can otherwise
-            // leave the client rendering a ghost stack until that screen reopens.
-            player.connection.send(new ClientboundContainerSetSlotPacket(
-                    ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
-                    0, slot, current.copy()));
-            DEFERRED_INVENTORY_SYNC.computeIfAbsent(player.getUUID(), ignored ->
-                    ConcurrentHashMap.newKeySet()).add(slot);
+            if (before != null && slot < before.size()
+                    && ItemStack.matches(before.get(slot), current)) continue;
+            slots.add(slot);
         }
 
-        // A virtual craft can finish while the client is using an item from
-        // the selected hotbar slot to keep a remote GUI open. That GUI may
-        // leave the client holding a stale copy even when the server selected
-        // slot itself did not change, so always correct the active hand slot.
+        // 远程界面可能仍持有旧的手持物品副本，未改变的选中槽也需要校正。
         int selected = player.getInventory().selected;
-        if (selected >= 0 && selected < player.getInventory().getContainerSize()) {
-            player.connection.send(new ClientboundContainerSetSlotPacket(
-                    ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
-                    0, selected, player.getInventory().getItem(selected).copy()));
-            DEFERRED_INVENTORY_SYNC.computeIfAbsent(player.getUUID(), ignored ->
-                    ConcurrentHashMap.newKeySet()).add(selected);
+        if (selected >= 0 && selected < size) slots.add(selected);
+        if (before == null) {
+            // 全量内容包即使菜单不活跃也会应用到客户端背包，且不会覆盖当前菜单的光标。
+            // 无快照的扣料路径只发一个全量包，避免每次批量合成都发送几十个单槽包。
+            player.inventoryMenu.sendAllDataToRemote();
+        } else {
+            for (int slot : slots) {
+                // -2 使用背包槽索引，不受当前菜单是否包含玩家槽或菜单 ID 变化影响。
+                player.connection.send(new ClientboundContainerSetSlotPacket(
+                        ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
+                        0, slot, player.getInventory().getItem(slot).copy()));
+            }
+        }
+        if (!slots.isEmpty()) {
+            DEFERRED_INVENTORY_SYNC.computeIfAbsent(player.getUUID(),
+                    ignored -> ConcurrentHashMap.newKeySet()).addAll(slots);
         }
     }
 
@@ -213,9 +213,10 @@ public final class PlayerUtils {
      * client receives.
      */
     public static void flushDeferredInventorySync(ServerPlayer player) {
-        if (player == null || player.connection == null || player instanceof FakePlayer) return;
+        if (player == null) return;
         Set<Integer> slots = DEFERRED_INVENTORY_SYNC.remove(player.getUUID());
-        if (slots == null || slots.isEmpty()) return;
+        if (slots == null || slots.isEmpty() || player.connection == null
+                || player.hasDisconnected() || player instanceof FakePlayer) return;
         for (int slot : slots) {
             if (slot < 0 || slot >= player.getInventory().getContainerSize()) continue;
             player.connection.send(new ClientboundContainerSetSlotPacket(

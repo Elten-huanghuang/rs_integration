@@ -103,6 +103,12 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
     public IRecipeTransferError transferRecipe(GridContainerMenu container, Object recipe,
                                                 IRecipeSlotsView recipeSlots, Player player,
                                                 boolean maxTransfer, boolean doTransfer) {
+        // 样板终端需要 RS 原生加工样板协议，同时填入输入、输出和流体。
+        if (container.getGrid() == null
+                || container.getGrid().getGridType() != GridType.CRAFTING) {
+            return GridRecipeTransferHandler.INSTANCE.transferRecipe(container, recipe, recipeSlots,
+                    player, maxTransfer, doTransfer);
+        }
         CraftingStationMode targetMode = targetMode(recipe);
         if (targetMode == null) {
             return GridRecipeTransferHandler.INSTANCE.transferRecipe(container, recipe, recipeSlots,
@@ -114,10 +120,6 @@ public final class SmithingJeiTransferHandler implements IRecipeTransferHandler<
         // 虚拟工作站不可用时，交还给 RS 原版处理器，将材料填入 3x3 合成网格。
         if (!CraftingStationAvailability.isAvailable(targetMode)) {
             return fallbackToRefinedStorage(container, recipe, recipeSlots, player, maxTransfer, doTransfer);
-        }
-        if (container.getGrid() == null
-                || container.getGrid().getGridType() != GridType.CRAFTING) {
-            return null;
         }
         List<List<ItemStack>> options = new ArrayList<>();
         for (IRecipeSlotView view : recipeSlots.getSlotViews(RecipeIngredientRole.INPUT)) {

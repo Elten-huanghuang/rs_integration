@@ -48,8 +48,7 @@ public final class NativeRecipeBookCrafting {
         GenericCraftPacket packet = ClientPlanningPreferences.apply(
                 new GenericCraftPacket(
                         recipeId, true, Map.of(), null, null, 1, false,
-                        null, null, requestId),
-                minecraft.level);
+                        null, null, requestId));
         PlanningProgressTracker.start(requestId, packet.recipeId());
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 packet);

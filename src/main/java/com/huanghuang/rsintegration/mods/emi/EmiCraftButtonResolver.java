@@ -396,8 +396,7 @@ final class EmiCraftButtonResolver {
                 GenericCraftPacket packet = ClientPlanningPreferences.apply(
                         new GenericCraftPacket(
                                 recipeId, true, Map.of(), null, null, 1, false,
-                                null, null, requestId),
-                        Minecraft.getInstance().level);
+                                null, null, requestId));
                 PlanningProgressTracker.start(requestId, packet.recipeId());
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
                         packet);
@@ -413,8 +412,7 @@ final class EmiCraftButtonResolver {
             GenericCraftPacket packet = ClientPlanningPreferences.apply(
                     new GenericCraftPacket(
                             recipeId, true, Map.of(), dimension, machinePos, 1, false,
-                            capturedBase, capturedOutput, requestId),
-                    Minecraft.getInstance().level);
+                            capturedBase, capturedOutput, requestId));
             PlanningProgressTracker.start(requestId, packet.recipeId());
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     packet);

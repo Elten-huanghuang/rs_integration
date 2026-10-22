@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.feature.craftingstation.SmithingTerminalStat
 import com.huanghuang.rsintegration.feature.craftingstation.StonecutterInputSlot;
 import com.huanghuang.rsintegration.feature.craftingstation.StonecutterTerminalState;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
+import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.container.slot.grid.CraftingGridSlot;
@@ -51,6 +52,7 @@ public abstract class GridContainerSmithingMixin implements CraftingStationAcces
 
     @Inject(method = "initSlots", at = @At("HEAD"), remap = false)
     private void rsi$prepareSmithingState(CallbackInfo ci) {
+        if (((GridContainerMenu) (Object) this).getGrid().getGridType() != GridType.CRAFTING) return;
         if (rsi$smithingState == null) {
             rsi$smithingState = new SmithingTerminalState((GridContainerMenu) (Object) this);
         }
@@ -74,6 +76,7 @@ public abstract class GridContainerSmithingMixin implements CraftingStationAcces
     @Override
     public void rsi$refreshCraftingStationSlots() {
         GridContainerMenu menu = (GridContainerMenu) (Object) this;
+        if (menu.getGrid().getGridType() != GridType.CRAFTING) return;
         for (int slotNumber = 0; slotNumber < menu.slots.size(); slotNumber++) {
             Slot old = menu.slots.get(slotNumber);
             if (old instanceof CraftingGridSlot && old.getSlotIndex() < 9) {
@@ -178,6 +181,7 @@ public abstract class GridContainerSmithingMixin implements CraftingStationAcces
     @Override
     public void rsi$setCraftingStationMode(CraftingStationMode mode) {
         GridContainerMenu menu = (GridContainerMenu) (Object) this;
+        if (menu.getGrid().getGridType() != GridType.CRAFTING) return;
         if (mode == null) mode = CraftingStationMode.CRAFTING;
         if (mode != rsi$stationMode) {
             if (menu.getPlayer().level().isClientSide) {

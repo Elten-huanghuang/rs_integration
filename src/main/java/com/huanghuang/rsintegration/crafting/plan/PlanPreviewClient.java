@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 
 
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;import net.minecraft.client.Minecraft;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -91,8 +91,7 @@ public final class PlanPreviewClient {
         GenericCraftPacket packet = ClientPlanningPreferences.apply(
                 new GenericCraftPacket(recipeId, true,
                         pendingForcedSlots != null ? pendingForcedSlots : Map.of(),
-                        null, null, pendingRepeatCount, false, null, null, requestId),
-                Minecraft.getInstance().level);
+                        null, null, pendingRepeatCount, false, null, null, requestId));
         PlanningProgressTracker.start(requestId, packet.recipeId());
         BatchCraftNetworkHandler.CHANNEL.sendToServer(
                 packet);
