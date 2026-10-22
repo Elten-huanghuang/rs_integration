@@ -1445,14 +1445,15 @@ public final class GenericCraftPacket {
             grouped.computeIfAbsent(key, k -> new IngredientNeed(spec.ingredient(), 0)).count += spec.count();
         }
 
-        if (repeatCount > 1
+        if (!partialPreparation && repeatCount > 1
                 && GoetyRecipeHandler
                 .requiresManualConfirmation(recipe)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.goety.error.manual_single_only"));
             return;
         }
-        if (CraftExecutionPolicy.requiresBoundMachine(recipe, modType)
+        if (!partialPreparation
+                && CraftExecutionPolicy.requiresBoundMachine(recipe, modType)
                 && !CraftMachineBindingSupport.hasBindingForExecutionType(player, recipe, modType)) {
             CraftMachineBindingSupport.logBindingRejection("execute-entry", player, recipe, modType, dim, pos);
             // A wrapped smithing recipe can still reach this guard if a
@@ -1466,7 +1467,7 @@ public final class GenericCraftPacket {
                     "rsi.generic.error.no_bound_machine", bindingTypeId));
             return;
         }
-        if (modType != null && modType.isVirtual()) {
+        if (!partialPreparation && modType != null && modType.isVirtual()) {
             ModRecipeHandler virtualHandler = ModRecipeHandlers.handlerFor(recipe);
             if (virtualHandler == null || virtualHandler.modType() != modType
                     || !virtualHandler.isAvailableForPlanning(recipe, player)) {

@@ -42,6 +42,45 @@ public final class OutputAccounting {
         }
     }
 
+    /**
+     * 合并世界捕获物与委托收集结果。部分委托在世界实体已被捕获后，
+     * 仍会通过配方结果兜底返回同一份产物；这里仅扣除已捕获覆盖的数量，
+     * 真实额外产物、不同物品和副产物均保留。
+     */
+    public static List<ItemStack> mergeLegacyOutputs(
+            List<ItemStack> capturedWorldOutputs,
+            List<ItemStack> collectedResults,
+            ItemStack expectedWorldOutput) {
+        List<ItemStack> merged = new ArrayList<>();
+        int coveredCount = 0;
+        if (capturedWorldOutputs != null) {
+            for (ItemStack captured : capturedWorldOutputs) {
+                if (captured == null || captured.isEmpty()) continue;
+                merged.add(captured.copy());
+                if (expectedWorldOutput != null && !expectedWorldOutput.isEmpty()
+                        && ItemStack.isSameItem(expectedWorldOutput, captured)) {
+                    coveredCount = Math.addExact(coveredCount, captured.getCount());
+                }
+            }
+        }
+
+        if (collectedResults != null) {
+            for (ItemStack collected : collectedResults) {
+                if (collected == null || collected.isEmpty()) continue;
+                ItemStack remaining = collected.copy();
+                if (coveredCount > 0 && expectedWorldOutput != null
+                        && !expectedWorldOutput.isEmpty()
+                        && ItemStack.isSameItem(expectedWorldOutput, remaining)) {
+                    int covered = Math.min(coveredCount, remaining.getCount());
+                    remaining.shrink(covered);
+                    coveredCount -= covered;
+                }
+                if (!remaining.isEmpty()) merged.add(remaining);
+            }
+        }
+        return List.copyOf(merged);
+    }
+
     public static Settlement assess(OutputContract contract, int operations,
                                     List<CollectedOutput> actualOutputs) {
         OutputContract safeContract = contract == null ? OutputContract.none() : contract;

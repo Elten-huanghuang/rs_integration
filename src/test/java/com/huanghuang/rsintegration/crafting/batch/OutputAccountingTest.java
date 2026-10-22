@@ -71,6 +71,48 @@ class OutputAccountingTest extends BootstrapTest {
         assertEquals(1, settlement.unexpected().size());
     }
 
+    @Test
+    void capturedWorldOutputIsNotDuplicatedByRecipeFallback() {
+        ItemStack expected = new ItemStack(Items.IRON_INGOT);
+
+        List<ItemStack> merged = OutputAccounting.mergeLegacyOutputs(
+                List.of(new ItemStack(Items.IRON_INGOT)),
+                List.of(new ItemStack(Items.IRON_INGOT)),
+                expected);
+
+        assertEquals(1, merged.size());
+        assertEquals(1, merged.get(0).getCount());
+        assertTrue(merged.get(0).is(Items.IRON_INGOT));
+    }
+
+    @Test
+    void capturedWorldOutputKeepsFallbackOutputBeyondCapturedQuantity() {
+        ItemStack expected = new ItemStack(Items.IRON_INGOT);
+
+        List<ItemStack> merged = OutputAccounting.mergeLegacyOutputs(
+                List.of(new ItemStack(Items.IRON_INGOT)),
+                List.of(new ItemStack(Items.IRON_INGOT, 2),
+                        new ItemStack(Items.GOLD_INGOT)),
+                expected);
+
+        assertEquals(3, merged.size());
+        assertEquals(1, merged.get(0).getCount());
+        assertEquals(1, merged.get(1).getCount());
+        assertTrue(merged.get(1).is(Items.IRON_INGOT));
+        assertTrue(merged.get(2).is(Items.GOLD_INGOT));
+    }
+
+    @Test
+    void missingWorldCaptureKeepsRecipeFallback() {
+        List<ItemStack> merged = OutputAccounting.mergeLegacyOutputs(
+                List.of(),
+                List.of(new ItemStack(Items.IRON_INGOT)),
+                new ItemStack(Items.IRON_INGOT));
+
+        assertEquals(1, merged.size());
+        assertTrue(merged.get(0).is(Items.IRON_INGOT));
+    }
+
     private static OutputContract.Port port(String id, Integer physicalPort, Item item,
                                             int perOperation, InputBufferPlan.OutputPort.Kind kind,
                                             OutputContract.Source source) {

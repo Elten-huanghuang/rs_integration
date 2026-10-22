@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
@@ -525,16 +526,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private void doSucceed() {
         if (terminal) return;
         terminal = true;
-        List<ItemStack> outputs = new ArrayList<>();
         List<ItemStack> captured = disarmCapture();
-        for (ItemStack s : captured) {
-            if (s != null && !s.isEmpty()) outputs.add(s.copy());
-        }
+        ItemStack expectedWorldOutput = delegate == null ? null : delegate.getExpectedOutput();
         List<ItemStack> results = collectResults(player);
-        for (ItemStack s : results) {
-            if (s != null && !s.isEmpty()) outputs.add(s.copy());
-        }
-        confirmedOutputs = List.copyOf(outputs);
+        confirmedOutputs = OutputAccounting.mergeLegacyOutputs(
+                captured, results, expectedWorldOutput);
         if (delegate != null) {
             try {
                 delegate.onBatchFinished(player);

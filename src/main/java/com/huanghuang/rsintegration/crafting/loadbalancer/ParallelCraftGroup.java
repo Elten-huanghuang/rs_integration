@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
@@ -750,9 +751,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private boolean settleCompletedOperation(WorkerSlot worker) {
         List<Integer> operationIds = worker.operationIds;
-        List<ItemStack> actual = new ArrayList<>(drainCapture(worker));
+        ItemStack expectedWorldOutput = worker.delegate.getExpectedOutput();
+        List<ItemStack> actual;
         try {
-            actual.addAll(worker.delegate.collectAllResults(player));
+            actual = OutputAccounting.mergeLegacyOutputs(
+                    drainCapture(worker), worker.delegate.collectAllResults(player),
+                    expectedWorldOutput);
         } catch (Exception e) {
             operations.abandonBatch(worker.id);
             worker.clearOperations();
@@ -761,7 +765,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             beginDraining("worker result collection failed at " + worker.machine.pos());
             return false;
         }
-        actual.removeIf(stack -> stack == null || stack.isEmpty());
 
         ExpectedProduction expected = worker.delegate.getExpectedProduction();
         if (expected != null && countMatching(actual, expected) < expected.count()) {
@@ -776,8 +779,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             beginDraining("worker output was externally extracted at " + worker.machine.pos());
             return false;
         }
-        ItemStack expectedWorld = worker.delegate.getExpectedOutput();
-        if (expected == null && expectedWorld != null && !expectedWorld.isEmpty() && actual.isEmpty()) {
+        if (expected == null && expectedWorldOutput != null
+                && !expectedWorldOutput.isEmpty() && actual.isEmpty()) {
             settleReservations(operationIds);
             operations.abandonBatch(worker.id);
             worker.clearOperations();

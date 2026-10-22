@@ -665,9 +665,11 @@ public final class AsyncCraftChain {
                 }
                 if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
                     if (currentDelegate.failureConsumesInputs(observation)) {
-                        List<ItemStack> actualResults = new ArrayList<>(disarmOutputCapture());
+                        ItemStack expectedWorldOutput = currentDelegate.getExpectedOutput();
+                        List<ItemStack> actualResults = new ArrayList<>(OutputAccounting.mergeLegacyOutputs(
+                                disarmOutputCapture(), currentDelegate.collectAllResults(online),
+                                expectedWorldOutput));
                         closeFlatOperationScope();
-                        actualResults.addAll(currentDelegate.collectAllResults(online));
                         actualResults.removeIf(stack -> stack == null || stack.isEmpty());
                         reportCraftedPrimaryOutputs(online, actualResults,
                                 currentDelegate.getExpectedProduction(),
@@ -4496,9 +4498,10 @@ public final class AsyncCraftChain {
                                                           List<ItemStack> capturedWorldOutputs) {
         OutputContract contract = delegate.outputContract();
         if (contract == null || contract.ports().isEmpty()) {
-            List<ItemStack> legacy = new ArrayList<>(capturedWorldOutputs);
-            legacy.addAll(delegate.collectAllResults(player));
-            legacy.removeIf(stack -> stack == null || stack.isEmpty());
+            ItemStack expectedWorldOutput = delegate.getExpectedOutput();
+            List<ItemStack> collectedResults = delegate.collectAllResults(player);
+            List<ItemStack> legacy = OutputAccounting.mergeLegacyOutputs(
+                    capturedWorldOutputs, collectedResults, expectedWorldOutput);
             return new OutputCollection(legacy, null);
         }
 
@@ -5068,16 +5071,15 @@ public final class AsyncCraftChain {
      */
     private void collectCompletedDelegateForShutdown(@Nullable ServerPlayer player) {
         if (currentDelegate == null) return;
-        if (player != null) {
-            for (ItemStack result : currentDelegate.collectAllResults(player)) {
-                if (result != null && !result.isEmpty()) addToVirtualInventory(result);
-            }
-        } else {
-            // No player to fall back to, so take the captured world output
-            // directly; recoverCommittedVirtual handles delivery without one.
-            for (ItemStack captured : disarmOutputCapture()) {
-                if (captured != null && !captured.isEmpty()) addToVirtualInventory(captured);
-            }
+        List<ItemStack> captured = disarmOutputCapture();
+        ItemStack expectedWorldOutput = currentDelegate.getExpectedOutput();
+        List<ItemStack> collected = player == null
+                ? List.of() : currentDelegate.collectAllResults(player);
+        for (ItemStack result : OutputAccounting.mergeLegacyOutputs(
+                captured, collected, expectedWorldOutput)) {
+            if (result != null && !result.isEmpty()) addToVirtualInventory(result);
+        }
+        if (player == null) {
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "Server stop: owner offline for a completed craft; settling it so inputs are not refunded twice"));
         }

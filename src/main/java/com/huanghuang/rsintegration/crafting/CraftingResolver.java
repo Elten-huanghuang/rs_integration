@@ -512,7 +512,8 @@ public final class CraftingResolver {
         ResolutionContext ctx = timeoutMs > 0
                 ? new ResolutionContext(level, index, availableKeyed,
                         prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut,
-                        ResolutionContext.deadlineAfterMillis(timeoutMs), true)
+                        ResolutionContext.deadlineAfterMillis(timeoutMs),
+                        shouldAbortOnTimeout(bestEffort))
                 : new ResolutionContext(level, index, availableKeyed,
                         prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut);
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
@@ -677,6 +678,10 @@ public final class CraftingResolver {
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
             ctx.diag("ensureIngredient guard TIMEOUT depth=" + depth + " count=" + count);
+            if (recordBestEffortUnresolved(
+                    ctx, consumer, ingredient, count, "timeout-before-candidates")) {
+                return true;
+            }
             return false;
         }
         if (++ctx.ensureCalls > maxEnsureCalls()) {
@@ -1030,6 +1035,11 @@ public final class CraftingResolver {
                 + " quantity=" + quantity + " ingredient=" + describeFirstItem(ingredient));
         recordUnresolved(ctx, consumer, ingredient, quantity);
         return true;
+    }
+
+    /** 严格规划超时应立即失败；尽力准备超时应保留当前部分图。 */
+    static boolean shouldAbortOnTimeout(boolean bestEffort) {
+        return !bestEffort;
     }
 
     private static void recordUnresolved(ResolutionContext ctx, @Nullable InputPortId consumer,
