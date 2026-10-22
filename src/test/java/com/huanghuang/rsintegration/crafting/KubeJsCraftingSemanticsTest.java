@@ -109,16 +109,21 @@ class KubeJsCraftingSemanticsTest extends BootstrapTest {
     }
 
     @Test
-    void replaceAndDamageActionsScaleConservatively() {
+    void replaceConsumesPerOperationAndDamageUsesDurability() {
         IngredientSpec replaced = apply(recipe("replace", Ingredient.of(Items.POTION)),
                 new FakeAction("replace", -1, Items.POTION)).get(0);
         IngredientSpec damaged = apply(recipe("damage", Ingredient.of(Items.IRON_PICKAXE)),
                 new FakeAction("damage", -1, Items.IRON_PICKAXE)).get(0);
 
         assertEquals(DemandRole.CONTAINER_RETURNING, replaced.role());
-        assertEquals(DemandRole.TRANSFORMED, damaged.role());
+        assertEquals(DemandRole.DURABILITY, damaged.role());
         assertEquals(32, CraftPacketUtils.requiredCount(replaced, 32));
-        assertEquals(32, CraftPacketUtils.requiredCount(damaged, 32));
+        assertEquals(1, CraftPacketUtils.requiredCount(damaged, 32));
+        assertEquals(2, CraftPacketUtils.requiredCount(damaged, 500));
+
+        IngredientSpec heavilyDamaged = apply(recipe("heavy_damage", Ingredient.of(Items.IRON_PICKAXE)),
+                new FakeAction("damage", -1, Items.IRON_PICKAXE, 5)).get(0);
+        assertEquals(10, CraftPacketUtils.requiredCount(heavilyDamaged, 500));
     }
 
     @Test
@@ -157,11 +162,17 @@ class KubeJsCraftingSemanticsTest extends BootstrapTest {
         private final String type;
         private final int index;
         private final Item item;
+        private final int amount;
 
         private FakeAction(String type, int index, Item item) {
+            this(type, index, item, 1);
+        }
+
+        private FakeAction(String type, int index, Item item, int amount) {
             this.type = type;
             this.index = index;
             this.item = item;
+            this.amount = amount;
         }
 
         public String getType() {
@@ -170,6 +181,10 @@ class KubeJsCraftingSemanticsTest extends BootstrapTest {
 
         public boolean checkFilter(int gridIndex, ItemStack candidate) {
             return (index < 0 || gridIndex == index) && candidate.is(item);
+        }
+
+        public int getAmount() {
+            return amount;
         }
     }
 }

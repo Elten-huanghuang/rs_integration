@@ -270,6 +270,7 @@ final class ResolutionContext {
     }
 
     List<IngredientSpec> lockedSpecs(ResourceLocation recipeId, List<IngredientSpec> specs) {
+        if (specs == null || specs.isEmpty()) return specs;
         List<IngredientSpec> hardLocked =
                 MaterialLocks.narrowSpecs(recipeId, specs, materialLocks);
         List<IngredientSpec> preferred = new ArrayList<>(hardLocked.size());

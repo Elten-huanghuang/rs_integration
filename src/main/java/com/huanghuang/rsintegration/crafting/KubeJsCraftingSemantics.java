@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -15,6 +16,7 @@ import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -102,26 +104,42 @@ final class KubeJsCraftingSemantics {
             // candidate, then a damaged/replaced candidate, before falling back
             // to a consumed candidate. This prevents a kept focus/tool from being
             // multiplied just because the same tag also contains a consumable.
-            DemandRole selectedRole = preferredRole(candidates);
+            InputConsumption selectedConsumption = preferredConsumption(candidates);
+            DemandRole selectedRole = selectedConsumption.demandRole();
             List<ItemStack> selected = new ArrayList<>();
             for (CandidateRole candidate : candidates) {
-                if (candidate.role() == selectedRole) {
+                if (candidate.consumption().demandRole() == selectedRole) {
                     selected.add(candidate.stack());
                 }
             }
             Ingredient selectedIngredient = selected.isEmpty()
                     ? ingredient : Ingredient.of(selected.stream());
-            result.add(new IngredientSpec(selectedIngredient, 1, selectedRole));
+            result.add(new IngredientSpec(selectedIngredient, 1, selectedConsumption));
         }
         return result;
     }
 
+    private static InputConsumption preferredConsumption(List<CandidateRole> candidates) {
+        DemandRole selectedRole = preferredRole(candidates);
+        return candidates.stream()
+                .map(CandidateRole::consumption)
+                .filter(consumption -> consumption.demandRole() == selectedRole)
+                .max(Comparator.comparingLong(InputConsumption::unitsPerOperation))
+                .orElse(InputConsumption.consumed());
+    }
+
     private static DemandRole preferredRole(List<CandidateRole> candidates) {
-        boolean catalyst = candidates.stream().anyMatch(c -> c.role() == DemandRole.CATALYST);
+        boolean catalyst = candidates.stream()
+                .anyMatch(c -> c.consumption().demandRole() == DemandRole.CATALYST);
         if (catalyst) return DemandRole.CATALYST;
-        boolean transformed = candidates.stream().anyMatch(c -> c.role() == DemandRole.TRANSFORMED);
+        boolean durability = candidates.stream()
+                .anyMatch(c -> c.consumption().demandRole() == DemandRole.DURABILITY);
+        if (durability) return DemandRole.DURABILITY;
+        boolean transformed = candidates.stream()
+                .anyMatch(c -> c.consumption().demandRole() == DemandRole.TRANSFORMED);
         if (transformed) return DemandRole.TRANSFORMED;
-        boolean returning = candidates.stream().anyMatch(c -> c.role() == DemandRole.CONTAINER_RETURNING);
+        boolean returning = candidates.stream()
+                .anyMatch(c -> c.consumption().demandRole() == DemandRole.CONTAINER_RETURNING);
         return returning ? DemandRole.CONTAINER_RETURNING : DemandRole.CONSUMED;
     }
 
@@ -131,13 +149,12 @@ final class KubeJsCraftingSemantics {
             if (!matchesAction(action, gridIndex, candidate)) continue;
             String type = actionType(action);
             return switch (type) {
-                case "keep" -> new CandidateRole(candidate, DemandRole.CATALYST);
-                case "replace" -> new CandidateRole(candidate, DemandRole.CONTAINER_RETURNING);
-                case "consume" -> new CandidateRole(candidate, DemandRole.CONSUMED);
-                // Conservatively reserve one tool per execution. Both the legacy
-                // batched path and the inline graph path then return exactly one
-                // damaged stack for each reserved input without duplicating it.
-                case "damage" -> new CandidateRole(candidate, DemandRole.TRANSFORMED);
+                case "keep" -> new CandidateRole(candidate, InputConsumption.catalyst());
+                case "replace" -> new CandidateRole(candidate, InputConsumption.containerReturned());
+                case "consume" -> new CandidateRole(candidate, InputConsumption.consumed());
+                // KubeJS 的 damage 动作保留工具，仅消耗耐久，不能按执行次数复制工具。
+                case "damage" -> new CandidateRole(candidate,
+                        InputConsumption.durability(actionDamageAmount(action)));
                 case "custom" -> classifyCustom(recipe, ingredients, gridIndex, candidate);
                 default -> classifyNative(candidate);
             };
@@ -152,11 +169,11 @@ final class KubeJsCraftingSemantics {
         } catch (RuntimeException ignored) {
             remainder = ItemStack.EMPTY;
         }
-        if (remainder.isEmpty()) return new CandidateRole(candidate, DemandRole.CONSUMED);
+        if (remainder.isEmpty()) return new CandidateRole(candidate, InputConsumption.consumed());
         if (ItemStack.isSameItemSameTags(candidate, remainder)) {
-            return new CandidateRole(candidate, DemandRole.CATALYST);
+            return new CandidateRole(candidate, InputConsumption.catalyst());
         }
-        return new CandidateRole(candidate, DemandRole.CONTAINER_RETURNING);
+        return new CandidateRole(candidate, InputConsumption.containerReturned());
     }
 
     private static CandidateRole classifyCustom(CraftingRecipe recipe, List<Ingredient> ingredients,
@@ -178,16 +195,42 @@ final class KubeJsCraftingSemantics {
             ItemStack remainder = gridIndex < remainders.size()
                     ? remainders.get(gridIndex) : ItemStack.EMPTY;
             if (remainder == null || remainder.isEmpty()) {
-                return new CandidateRole(candidate, DemandRole.CONSUMED);
+                return new CandidateRole(candidate, InputConsumption.consumed());
             }
             if (ItemStack.isSameItemSameTags(candidate, remainder)) {
-                return new CandidateRole(candidate, DemandRole.CATALYST);
+                return new CandidateRole(candidate, InputConsumption.catalyst());
             }
-            return new CandidateRole(candidate, DemandRole.CONTAINER_RETURNING);
+            return new CandidateRole(candidate, InputConsumption.containerReturned());
         } catch (Throwable error) {
             RSIntegrationMod.LOGGER.debug("[RSI-KubeJS] custom ingredient action could not be classified", error);
-            return new CandidateRole(candidate, DemandRole.TRANSFORMED);
+            return new CandidateRole(candidate, InputConsumption.transformed());
         }
+    }
+
+    private static int actionDamageAmount(Object action) {
+        for (String name : new String[]{"getAmount", "getDamage"}) {
+            try {
+                Object value = action.getClass().getMethod(name).invoke(action);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (ReflectiveOperationException ignored) {
+                // 尝试字段兼容路径。
+            }
+        }
+        for (String name : new String[]{"amount", "damage"}) {
+            try {
+                Field field = action.getClass().getDeclaredField(name);
+                field.setAccessible(true);
+                Object value = field.get(action);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (ReflectiveOperationException ignored) {
+                // 使用安全的最小伤害值。
+            }
+        }
+        return 1;
     }
 
     private static List<?> ingredientActions(CraftingRecipe recipe) {
@@ -274,5 +317,5 @@ final class KubeJsCraftingSemantics {
         }
     }
 
-    private record CandidateRole(ItemStack stack, DemandRole role) {}
+    private record CandidateRole(ItemStack stack, InputConsumption consumption) {}
 }

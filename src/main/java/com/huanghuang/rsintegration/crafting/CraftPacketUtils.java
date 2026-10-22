@@ -1141,24 +1141,56 @@ public final class CraftPacketUtils {
             return;
         }
 
-        DemandRole role =
-                DemandRole.CONSUMED;
+        InputConsumption consumption = InputConsumption.consumed();
         try {
             Object transformer = type.getMethod("getTransformer").invoke(value);
             if (transformer != null) {
-                String transformerName = transformer.getClass().getName();
-                if (transformerName.endsWith(".TransformReuse")) {
-                    role = DemandRole.CATALYST;
-                } else if (transformerName.endsWith(".TransformReplace")) {
-                    role = DemandRole.CONTAINER_RETURNING;
-                } else {
-                    role = DemandRole.TRANSFORMED;
-                }
+                consumption = craftTweakerTransformerConsumption(transformer);
             }
         } catch (NoSuchMethodException ignored) {
             // Plain CraftTweaker ingredients are consumed normally.
         }
-        result.add(new IngredientSpec(ingredient, 1, role));
+        result.add(new IngredientSpec(ingredient, 1, consumption));
+    }
+
+    static InputConsumption craftTweakerTransformerConsumption(Object transformer) {
+        String transformerName = transformer.getClass().getName();
+        if (transformerName.endsWith(".TransformReuse")) {
+            return InputConsumption.catalyst();
+        }
+        if (transformerName.endsWith(".TransformReplace")) {
+            return InputConsumption.containerReturned();
+        }
+        if (transformerName.endsWith(".TransformDamage")) {
+            return InputConsumption.durability(transformerDamageAmount(transformer));
+        }
+        return InputConsumption.transformed();
+    }
+
+    private static int transformerDamageAmount(Object transformer) {
+        for (String name : new String[]{"getAmount", "getDamage"}) {
+            try {
+                Object value = transformer.getClass().getMethod(name).invoke(transformer);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (ReflectiveOperationException ignored) {
+                // 尝试兼容字段。
+            }
+        }
+        for (String name : new String[]{"amount", "damage"}) {
+            try {
+                Field field = transformer.getClass().getDeclaredField(name);
+                field.setAccessible(true);
+                Object value = field.get(transformer);
+                if (value instanceof Number number && number.intValue() > 0) {
+                    return number.intValue();
+                }
+            } catch (ReflectiveOperationException ignored) {
+                // 使用安全的最小伤害值。
+            }
+        }
+        return 1;
     }
 
     @Nullable

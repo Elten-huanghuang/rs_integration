@@ -1668,6 +1668,10 @@ public final class AsyncCraftChain {
         boolean bufferedNode = canBufferEntireGraphNode(delegate, desiredOperations);
         boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations)
                 && !bufferedNode;
+        if (requiresGraphOperationSlot(desiredOperations, bufferedNode, operationGroup)) {
+            return PreparationResult.retry(
+                    "operation budget is temporarily unavailable for a repeated graph node");
+        }
         boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
         MaterialPlan delegateMaterials = materialPlanFor(delegate);
         List<IBatchDelegate.MaterialReservationScope> graphScopes =
@@ -1701,6 +1705,11 @@ public final class AsyncCraftChain {
 
     static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
         return executions >= 2 && availableOperations >= 1;
+    }
+
+    static boolean requiresGraphOperationSlot(int executions, boolean bufferedNode,
+                                              boolean operationGroup) {
+        return executions > 1 && !bufferedNode && !operationGroup;
     }
 
     static boolean canBufferEntireGraphNode(IBatchDelegate delegate, int executions) {

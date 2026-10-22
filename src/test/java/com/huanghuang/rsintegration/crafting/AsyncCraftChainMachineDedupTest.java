@@ -126,6 +126,14 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
+    void unbufferedRepeatedNodeWaitsForAnOperationSlot() {
+        assertTrue(AsyncCraftChain.requiresGraphOperationSlot(6, false, false));
+        assertFalse(AsyncCraftChain.requiresGraphOperationSlot(6, true, false));
+        assertFalse(AsyncCraftChain.requiresGraphOperationSlot(6, false, true));
+        assertFalse(AsyncCraftChain.requiresGraphOperationSlot(1, false, false));
+    }
+
+    @Test
     void graphNodeUsesDirectBufferOnlyWhenTheWholeNodeFits() {
         IBatchDelegate delegate = (IBatchDelegate) Proxy.newProxyInstance(
                 IBatchDelegate.class.getClassLoader(), new Class<?>[]{IBatchDelegate.class},
