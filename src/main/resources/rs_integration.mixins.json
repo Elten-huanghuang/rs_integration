@@ -121,6 +121,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "malum.SpiritAltarParticleEffectsMixin",
     "farmandcharm.NativeRecipeBookScreenMixin",
     "farmandcharm.NativeRecipeBookWidgetMixin",
     "farmandcharm.CookingPotGuiMixin",

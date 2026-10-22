@@ -92,6 +92,10 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                 || mixinClassName.contains("malum.VoidConduitBlockEntityMixin")) {
             return hasResonanceBackend();
         }
+        if (mixinClassName.endsWith(".malum.SpiritAltarParticleEffectsMixin")) {
+            return isClassPresent(targetClassName)
+                    && hasMethod(targetClassName, "passiveSpiritAltarParticles");
+        }
         if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
             return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
                     && hasMethod(targetClassName, "getWidgets");
