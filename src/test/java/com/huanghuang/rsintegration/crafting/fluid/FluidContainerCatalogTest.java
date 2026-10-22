@@ -238,6 +238,29 @@ class FluidContainerCatalogTest extends BootstrapTest {
         }
     }
 
+    @Test void stackIdentityIgnoresCountButKeepsNbtDistinct() {
+        ItemStack small = new ItemStack(Items.FLINT, 2);
+        small.getOrCreateTag().putInt("capacity", 250);
+        ItemStack smallCopy = new ItemStack(Items.FLINT, 7);
+        smallCopy.setTag(small.getTag().copy());
+        ItemStack large = new ItemStack(Items.FLINT, 2);
+        large.getOrCreateTag().putInt("capacity", 2000);
+
+        var recipes = FluidContainerCatalog.discover(
+                List.of(small, smallCopy, large),
+                List.of(new FluidStack(Fluids.WATER, 1)),
+                NbtContainer::new,
+                FluidContainerCatalogTest::token);
+
+        assertEquals(4, recipes.size());
+        assertEquals(1, recipes.stream().filter(FluidContainerRecipe::filling)
+                .filter(recipe -> recipe.emptyContainer().getTag().getInt("capacity") == 250)
+                .count());
+        assertEquals(1, recipes.stream().filter(FluidContainerRecipe::filling)
+                .filter(recipe -> recipe.emptyContainer().getTag().getInt("capacity") == 2000)
+                .count());
+    }
+
     @Test void nonBucketValidationOnlyProbesTheRequiredRuntimeHandler() {
         FluidContainerRecipe recipe = new FluidContainerRecipe(id("missing_capability"), true,
                 new ItemStack(Items.FLINT), new ItemStack(Items.STICK),

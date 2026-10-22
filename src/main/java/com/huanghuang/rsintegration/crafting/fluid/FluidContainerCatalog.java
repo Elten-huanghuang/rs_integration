@@ -148,12 +148,14 @@ public final class FluidContainerCatalog {
         for (FluidStack fluid : candidates) addFluid(fluids, fluid);
         Set<CompoundTag> seen = new HashSet<>();
         for (ItemStack sample : samples) {
-            if (sample.isEmpty() || !seen.add(stackKey(sample))) continue;
+            if (sample.isEmpty()) continue;
+            CompoundTag sampleKey = stackKey(sample);
+            if (!seen.add(sampleKey)) continue;
             try {
                 IFluidHandlerItem handler = handlers.apply(sample.copyWithCount(1));
                 if (handler == null || handler.getTanks() != 1) continue;
                 FluidStack content = handler.getFluidInTank(0).copy();
-                if (content.isEmpty()) empty.putIfAbsent(stackKey(sample), sample.copyWithCount(1));
+                if (content.isEmpty()) empty.putIfAbsent(sampleKey, sample.copyWithCount(1));
                 else {
                     addFluid(fluids, content);
                     ItemStack drained = drain(sample, content, handlers);
@@ -240,7 +242,10 @@ public final class FluidContainerCatalog {
     }
 
     private static CompoundTag stackKey(ItemStack stack) {
-        return stack.copyWithCount(1).save(new CompoundTag());
+        // 去重忽略数量；直接归一化已保存的键，避免先复制整只堆叠。
+        CompoundTag key = stack.save(new CompoundTag());
+        key.putByte("Count", (byte) 1);
+        return key;
     }
 
     private static void add(Map<ResourceLocation, FluidContainerRecipe> recipes, boolean filling,
