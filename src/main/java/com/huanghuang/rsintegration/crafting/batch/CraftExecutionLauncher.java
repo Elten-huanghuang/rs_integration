@@ -10,7 +10,6 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
-import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -40,12 +39,12 @@ final class CraftExecutionLauncher {
             boolean inferMode, @Nullable ItemStack baseItem,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             MachineSelectionMode machineSelectionMode,
-            Map<String, ItemStack> materialLocks, RepeatRequester repeatRequester) {
+            Map<String, ItemStack> materialLocks, int remainingRepeats,
+            RepeatRequester repeatRequester) {
         UUID playerId = player.getUUID();
         var server = player.getServer();
-        StorageReference repeatReference = storageEndpoint == null
-                ? null : storageEndpoint.session().reference();
-        // 解析步骤已包含请求次数对应的全部物理执行数，不能再次乘中间步骤。
+        // 常规步骤已包含完整物理执行数；顺序机器则由 remainingRepeats
+        // 在链外逐次续跑，避免把单次物理启动误记为整批完成。
         CraftExecutionService.launch(
                 player, storageEndpoint, steps, legacyReason, recipeId,
                 targetOutput, outputDestination, runningChain -> {
@@ -54,8 +53,8 @@ final class CraftExecutionLauncher {
                     runningChain.setMachineSelection(
                             recipeId, machineSelectionMode, dimension, position);
                     runningChain.onDone(() -> ChainRepeatController.scheduleNext(
-                            runningChain, server, playerId, 1,
-                            runningChain.getMachineCount(),
+                            runningChain, server, playerId, Math.max(1, remainingRepeats),
+                            Math.max(1, runningChain.getMachineCount()),
                             repeatRequester::schedule));
                 });
     }

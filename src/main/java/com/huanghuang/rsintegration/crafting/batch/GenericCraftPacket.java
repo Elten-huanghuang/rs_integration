@@ -1211,10 +1211,23 @@ public final class GenericCraftPacket {
                                           MachineSelectionMode machineSelectionMode, Map<String, ItemStack> materialLocks) {
         final StorageReference repeatReference = storageEndpoint == null
                 ? null : storageEndpoint.session().reference();
+        List<ResolutionStep> executionSteps = steps;
+        int remainingRepeats = 1;
+        if (steps.size() == 1
+                && CraftExecutionPolicy.requiresExternalTerminalRepeat(steps.get(0))) {
+            ResolutionStep terminalStep = steps.get(0);
+            executionSteps = List.of(CraftExecutionPolicy.singleExecution(terminalStep));
+            remainingRepeats = terminalStep.executions();
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Craft] sequential terminal repeat recipe={} executions={} "
+                            + "mode=one-physical-start-per-chain",
+                    recipeId, remainingRepeats);
+        }
         CraftExecutionLauncher.launchFlat(
-                player, steps, legacyReason, storageEndpoint, recipeId,
+                player, executionSteps, legacyReason, storageEndpoint, recipeId,
                 forcedRecipes, dim, pos, inferMode, baseItem, targetOutput,
                 outputDestination, machineSelectionMode, materialLocks,
+                remainingRepeats,
                 (p, rem) -> queueExecutionRequest(p,
                         next -> tryResolve(next, recipeId, forcedRecipes, dim, pos, rem,
                                 inferMode, baseItem, targetOutput, outputDestination,

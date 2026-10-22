@@ -2,10 +2,12 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
@@ -68,5 +70,30 @@ public final class CraftExecutionPolicy {
     static boolean canUseDirectCraftingReservation(Recipe<?> recipe,
                                                    RegistryAccess registryAccess) {
         return !isSelfAmplifyingRecipe(recipe, registryAccess);
+    }
+
+    /**
+     * 奥术迭代器每次启动只完成一次物理迭代。直接终端批量订单必须把
+     * 重复次数留在链外，否则执行链会把一次启动误认为已完成整批。
+     */
+    static boolean requiresExternalTerminalRepeat(@Nullable ResolutionStep step) {
+        return step != null && step.executions() > 1
+                && isArcaneIteratorRecipe(step.recipeId());
+    }
+
+    /** 将奥术迭代器终端步骤收窄为一次物理启动，其余执行语义保持不变。 */
+    static ResolutionStep singleExecution(ResolutionStep step) {
+        return new ResolutionStep(
+                step.recipeId(), step.modType(), step.recipeTypeId(),
+                step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
+                1, step.syntheticInput(), step.syntheticOutput(),
+                step.productionTarget(), step.magicCosts());
+    }
+
+    private static boolean isArcaneIteratorRecipe(@Nullable ResourceLocation recipeId) {
+        return recipeId != null
+                && "wizards_reborn".equals(recipeId.getNamespace())
+                && ("arcane_iterator".equals(recipeId.getPath())
+                || recipeId.getPath().startsWith("arcane_iterator/"));
     }
 }
