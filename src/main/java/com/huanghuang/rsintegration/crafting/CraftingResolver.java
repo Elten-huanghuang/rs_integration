@@ -677,7 +677,7 @@ public final class CraftingResolver {
         // spirits resolve last, after costly base-material sub-crafts).
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
-            ctx.diag("ensureIngredient guard TIMEOUT depth=" + depth + " count=" + count);
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient guard TIMEOUT depth=" + depth + " count=" + count);
             if (recordBestEffortUnresolved(
                     ctx, consumer, ingredient, count, "timeout-before-candidates")) {
                 return true;
@@ -685,7 +685,7 @@ public final class CraftingResolver {
             return false;
         }
         if (++ctx.ensureCalls > maxEnsureCalls()) {
-            ctx.diag("ensureIngredient guard ENSURE_CALLS calls=" + ctx.ensureCalls
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient guard ENSURE_CALLS calls=" + ctx.ensureCalls
                     + " max=" + maxEnsureCalls() + " depth=" + depth + " count=" + count);
             return false;
         }
@@ -744,7 +744,7 @@ public final class CraftingResolver {
             recordSupplyConsumption(ctx, consumer, consumedOut, stocked);
             ctx.commitUndo();
             edges.commitUndo();
-            ctx.diag("ensureIngredient stop: no_recipe for "
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient stop: no_recipe for "
                     + describeFirstItem(ingredient) + " missing="
                     + Math.max(0L, count - stocked.supplied()));
             if (recordBestEffortUnresolved(
@@ -761,11 +761,13 @@ public final class CraftingResolver {
                     candidate -> candidate.recipe().getId(), forcedRecipeId);
         }
         long candMs = (System.nanoTime() - candStart) / 1_000_000;
-        ctx.diag("ensureIngredient candidates=" + candidates.size() + " remaining=" + remaining + " depth=" + depth);
-        RSIntegrationMod.debug("[RSI-ensure] countMatch/consume={}ms, findCandidates={}ms, {} candidates for {}",
-                consumeMs, candMs, candidates.size(), describeFirstItem(ingredient));
+        if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient candidates=" + candidates.size() + " remaining=" + remaining + " depth=" + depth);
+        if (RSIntegrationMod.isDebugLoggingEnabled()) {
+            RSIntegrationMod.debug("[RSI-ensure] countMatch/consume={}ms, findCandidates={}ms, {} candidates for {}",
+                    consumeMs, candMs, candidates.size(), describeFirstItem(ingredient));
+        }
         if (candidates.isEmpty()) {
-            ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-candidates")) {
                 return true;
             }
@@ -811,24 +813,26 @@ public final class CraftingResolver {
         if (forceProduction) {
             alive = forcedExecutionCandidates(alive,
                     candidate -> candidate.entry().recipe().getId(), forcedRecipeId);
-            ctx.diag("ensureIngredient forced recipe=" + forcedRecipeId
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient forced recipe=" + forcedRecipeId
                     + " candidates=" + alive.size()
                     + " alternatives=" + selectableAlive.size());
         }
 
         long aliveMs = (System.nanoTime() - aliveStart) / 1_000_000;
         if (alive.isEmpty()) {
-            ctx.diag("ensureIngredient FAILED: no viable candidates (total=" + candidates.size()
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no viable candidates (total=" + candidates.size()
                     + ", all rejected) for " + describeFirstItem(ingredient));
-            RSIntegrationMod.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
-                    describeFirstItem(ingredient), candidates.size(), aliveMs);
+            if (RSIntegrationMod.isDebugLoggingEnabled()) {
+                RSIntegrationMod.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
+                        describeFirstItem(ingredient), candidates.size(), aliveMs);
+            }
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
                 return true;
             }
             return false;
         }
 
-        if (RSIntegrationMod.LOGGER.isDebugEnabled() && alive.size() > 1) {
+        if (RSIntegrationMod.isDebugLoggingEnabled() && alive.size() > 1) {
             StringBuilder sb = new StringBuilder("[RSI-ensure] ").append(alive.size())
                     .append(" alive candidates for ").append(describeFirstItem(ingredient)).append(":");
             for (AliveCandidate a : alive) {
@@ -846,7 +850,7 @@ public final class CraftingResolver {
             if (ownsTwoPhase) {
                 ctx.strictCandidatePass = candidatePass == 0;
                 ctx.bestEffortFallbackPass = candidatePass == 1;
-                ctx.diag(candidatePass == 0
+                if (ctx.diagnosticsEnabled()) ctx.diag(candidatePass == 0
                         ? "ensureIngredient candidate pass=strict"
                         : "ensureIngredient candidate pass=best-effort-fallback");
             }
@@ -856,28 +860,20 @@ public final class CraftingResolver {
             // loop may have exhausted the deadline with expensive result-item probes
             // for mod recipes. The first candidate is the highest-scored and is near-
             // certain to be a vanilla recipe with fast craftBatched.
-            List<ResourceLocation> altIds = new ArrayList<>();
-            List<String> altModTypes = new ArrayList<>();
-            for (AliveCandidate other : selectableAlive) {
-                if (other == a) continue;
-                altIds.add(other.entry.recipe().getId());
-                altModTypes.add(other.entry.modType().id());
-            }
-
             if (ctx.recipeCycles.containsBranch(a.entry.recipe().getId(), a.output)) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": cycle detected");
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": cycle detected");
                 continue;
             }
 
             StackKey outKey = StackKey.of(a.output, a.output.hasTag());
             if (ctx.recipeCycles.containsOutput(a.output)) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": ancestor output cycle detected");
                 continue;
             }
 
             if (requiresMissingSelfInput(a.entry, a.output, ctx)) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": self-input missing");
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": self-input missing");
                 continue;
             }
 
@@ -885,7 +881,7 @@ public final class CraftingResolver {
             // NBT-differentiated items like TACZ attachments (all tacz:attachment).
             Set<StackKey> inKeys = getRecipeInputKeys(a.entry, ctx.level.registryAccess());
             if (ctx.recipeCycles.containsAnyOutput(inKeys)) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": input consumes an ancestor output");
                 continue;
             }
@@ -897,9 +893,18 @@ public final class CraftingResolver {
                 }
             }
             if (isPingPong) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": ping-pong conversion cycle detected");
                 continue;
+            }
+
+            // 被循环/自输入检查排除的候选无需构造供界面展示的备选列表。
+            List<ResourceLocation> altIds = new ArrayList<>();
+            List<String> altModTypes = new ArrayList<>();
+            for (AliveCandidate other : selectableAlive) {
+                if (other == a) continue;
+                altIds.add(other.entry.recipe().getId());
+                altModTypes.add(other.entry.modType().id());
             }
 
             long batches = Math.max(1L,
@@ -947,7 +952,7 @@ public final class CraftingResolver {
             }
 
             if (!allOk) {
-                ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
                 ctx.rollback();
                 edges.rollback();
                 if (ctx.timedOut()) {
@@ -966,13 +971,13 @@ public final class CraftingResolver {
                     : ctx.consumeMatchingDetailed(ingredient, count);
             if (crafted.complete()) {
                 recordSupplyConsumption(ctx, consumer, consumedOut, crafted);
-                ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
                 ctx.commitUndo();
                 edges.commitUndo();
                 return true;
             }
 
-            ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
             ctx.rollback();
             edges.rollback();
             if (ctx.timedOut()) {
@@ -990,7 +995,7 @@ public final class CraftingResolver {
             }
         }
 
-        ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
+        if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
                 + describeFirstItem(ingredient));
         if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "candidates-exhausted")) {
             return true;
@@ -1031,7 +1036,7 @@ public final class CraftingResolver {
                                               long quantity,
                                               String reason) {
         if (!ctx.bestEffort || ctx.strictCandidatePass) return false;
-        ctx.diag("ensureIngredient UNRESOLVED: reason=" + reason + " consumer=" + consumer
+        if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient UNRESOLVED: reason=" + reason + " consumer=" + consumer
                 + " quantity=" + quantity + " ingredient=" + describeFirstItem(ingredient));
         recordUnresolved(ctx, consumer, ingredient, quantity);
         return true;

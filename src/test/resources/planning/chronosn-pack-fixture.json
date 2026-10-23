@@ -1,0 +1,1554 @@
+{
+  "source": "chapter_of_yuusha_3 OpenLoader override, 2026-10-23; grid slots retained; non-blade inputs treated as external materials",
+  "recipes": [
+    {
+      "id": "prinegorerouse:chronosn_blade",
+      "blade": "prinegorerouse:chronosn_blade",
+      "inputs": [
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:rage",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:greedy",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:lust",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:jealous",
+            "refine": 10
+          }
+        },
+        {
+          "item": "yuusha:soul_stone_2"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:lazy",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:arrogant",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "shizuku:teleport_blade",
+            "refine": 10
+          }
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "ak:tai_ti",
+            "refine": 10
+          }
+        }
+      ]
+    },
+    {
+      "id": "ak:rage",
+      "blade": "ak:rage",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "shizuku:tsubame_blade",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "ak:greedy",
+      "blade": "ak:greedy",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "slashblade_addon:kamuy_fire",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "ak:lust",
+      "blade": "ak:lust",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "prinegorerouse:hercules_blade",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "ak:jealous",
+      "blade": "ak:jealous",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "slashblade_addon:nihilbx",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "ak:lazy",
+      "blade": "ak:lazy",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "prinegorerouse:chronos_blade",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "ak:arrogant",
+      "blade": "ak:arrogant",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "shizuku:void_blade",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "shizuku:teleport_blade",
+      "blade": "shizuku:teleport_blade",
+      "inputs": [
+        {
+          "item": "majruszsdifficulty:enderium_ingot"
+        },
+        {
+          "item": "goety:void_bucket"
+        },
+        {
+          "item": "minecraft:crying_obsidian"
+        },
+        {
+          "item": "goety:void_bucket"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:yamato",
+            "sword_type": [
+              "broken",
+              "sealed"
+            ],
+            "kill": 1000,
+            "refine": 10
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "minecraft:crying_obsidian"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "meetyourfight:fortunes_favor"
+        }
+      ]
+    },
+    {
+      "id": "ak:tai_ti",
+      "blade": "ak:tai_ti",
+      "inputs": [
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 1000,
+            "name": "prinegorerouse:erebus_blade",
+            "refine": 10
+          }
+        },
+        {
+          "item": "moonstone:rage_crystal"
+        },
+        {
+          "item": "ak:gem"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "ak:gem"
+        }
+      ]
+    },
+    {
+      "id": "shizuku:tsubame_blade",
+      "blade": "shizuku:tsubame_blade",
+      "inputs": [
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "shizuku:meow_stone"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "ak:child",
+            "refine": 8
+          }
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "callfromthedepth_:soullight"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:kamuy_fire",
+      "blade": "slashblade_addon:kamuy_fire",
+      "inputs": [
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "callfromthedepth_:soulbell"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "slashblade_addon:kamuy_none",
+            "refine": 8
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        }
+      ]
+    },
+    {
+      "id": "prinegorerouse:hercules_blade",
+      "blade": "prinegorerouse:hercules_blade",
+      "inputs": [
+        {
+          "item": "prinegorerouse:hercules"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "prinegorerouse:hercules"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "shizuku:engulfing_lightning",
+            "refine": 8
+          }
+        },
+        {
+          "item": "prinegorerouse:hercules"
+        },
+        {
+          "item": "crockpot:glow_berry_mousse"
+        },
+        {
+          "item": "prinegorerouse:hercules"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:nihilbx",
+      "blade": "slashblade_addon:nihilbx",
+      "inputs": [
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "whisperwoods:hirschgeist_skull"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "slashblade_addon:crimsoncherry",
+            "refine": 8
+          }
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        }
+      ]
+    },
+    {
+      "id": "prinegorerouse:chronos_blade",
+      "blade": "prinegorerouse:chronos_blade",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "hmag:fortune_crystal_plus"
+        },
+        {
+          "item": "whisperwoods:hirschgeist_skull"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "shizuku:moonlight_blade",
+            "refine": 8
+          }
+        },
+        {
+          "item": "whisperwoods:hirschgeist_skull"
+        },
+        {
+          "item": "hmag:fortune_crystal_plus"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "shizuku:void_blade",
+      "blade": "shizuku:void_blade",
+      "inputs": [
+        {
+          "item": "apotheosis:infused_breath"
+        },
+        {
+          "item": "callfromthedepth_:soulbell"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 800,
+            "name": "ak:pocket_knife",
+            "refine": 8
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "celestial_artifacts:nebula_cube"
+        },
+        {
+          "item": "apotheosis:infused_breath"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:yamato_fix",
+      "blade": "slashblade:yamato",
+      "inputs": [
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "yuusha:tomb_stone"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "proud_soul": 100000,
+            "refine": 10,
+            "name": "slashblade:yamato",
+            "sword_type": [
+              "broken",
+              "sealed"
+            ]
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_trapezohedron"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        },
+        {
+          "item": "immortalers_delight:enchanted_golden_himekaido"
+        },
+        {
+          "item": "yuusha:chaos_ingot"
+        }
+      ]
+    },
+    {
+      "id": "prinegorerouse:erebus_blade",
+      "blade": "prinegorerouse:erebus_blade",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "prinegorerouse:erebus"
+        },
+        {
+          "item": "minecraft:crying_obsidian"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "slashblade_addon:tboen",
+            "refine": 6
+          }
+        },
+        {
+          "item": "callfromthedepth_:marble_block"
+        },
+        {
+          "item": "prinegorerouse:erebus"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "ak:child",
+      "blade": "ak:child",
+      "inputs": [
+        {
+          "item": "celestial_core:light_fragment"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "celestial_core:midnight_fragment"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "slashblade:fox_black",
+            "refine": 6
+          }
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "celestial_core:midnight_fragment"
+        },
+        {
+          "item": "forbidden_arcanus:sea_prism"
+        },
+        {
+          "item": "celestial_core:light_fragment"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:kamuy_none",
+      "blade": "slashblade_addon:kamuy_none",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "obscure_api:astral_dust"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "slashblade_addon:aquablaze",
+            "refine": 6
+          }
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "forbidden_arcanus:smelter_prism"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:crimsoncherry",
+      "blade": "slashblade_addon:crimsoncherry",
+      "inputs": [
+        {
+          "item": "moonstone:blood_jelly"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "celestial_core:sakura_steel"
+        },
+        {
+          "item": "bosses_of_mass_destruction:void_thorn"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "slashblade:fox_white",
+            "refine": 6
+          }
+        },
+        {
+          "item": "bosses_of_mass_destruction:void_thorn"
+        },
+        {
+          "item": "celestial_core:sakura_steel"
+        },
+        {
+          "item": "forbidden_arcanus:smelter_prism"
+        },
+        {
+          "item": "moonstone:blood_jelly"
+        }
+      ]
+    },
+    {
+      "id": "shizuku:moonlight_blade",
+      "blade": "shizuku:moonlight_blade",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "bosses_of_mass_destruction:void_thorn"
+        },
+        {
+          "item": "celestial_core:light_fragment"
+        },
+        {
+          "item": "forbidden_arcanus:whirlwind_prism"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "ak:dick_wido",
+            "refine": 6
+          }
+        },
+        {
+          "item": "forbidden_arcanus:whirlwind_prism"
+        },
+        {
+          "item": "celestial_core:light_fragment"
+        },
+        {
+          "item": "bosses_of_mass_destruction:void_thorn"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "ak:pocket_knife",
+      "blade": "ak:pocket_knife",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "obscure_api:astral_dust"
+        },
+        {
+          "item": "bosses_of_mass_destruction:void_thorn"
+        },
+        {
+          "item": "obscure_api:astral_dust"
+        },
+        {
+          "item": "forbidden_arcanus:terrastomp_prism"
+        },
+        {
+          "item": "obscure_api:astral_dust"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 600,
+            "name": "ak:yataghans",
+            "refine": 6
+          }
+        },
+        {
+          "item": "obscure_api:astral_dust"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:tboen",
+      "blade": "slashblade_addon:tboen",
+      "inputs": [
+        {
+          "item": "deep_aether:aerglow_blossom"
+        },
+        {
+          "item": "cataclysm:essence_of_the_storm"
+        },
+        {
+          "item": "deep_aether:aerglow_blossom"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 400,
+            "name": "shizuku:unlimited_blade",
+            "refine": 4
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "deep_aether:aerglow_blossom"
+        },
+        {
+          "item": "meetyourfight:mossy_tooth"
+        },
+        {
+          "item": "deep_aether:aerglow_blossom"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:fox_black",
+      "blade": "slashblade:fox_black",
+      "inputs": [
+        {
+          "tag": "forge:obsidian"
+        },
+        {
+          "item": "eidolon:raven_feather"
+        },
+        {
+          "item": "goety:ominous_orb"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade_addon:dark_raven",
+            "kill": 400,
+            "refine": 4
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "wizards_reborn:arcane_linen"
+        },
+        {
+          "tag": "forge:storage_blocks/quartz"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:aquablaze",
+      "blade": "slashblade_addon:aquablaze",
+      "inputs": [
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "celestial_artifacts:guardian_eye"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 400,
+            "name": "slashblade:rodai_golden",
+            "refine": 4
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "immortalers_delight:leisamboo_block"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:fox_white",
+      "blade": "slashblade:fox_white",
+      "inputs": [
+        {
+          "tag": "forge:obsidian"
+        },
+        {
+          "item": "minecraft:feather"
+        },
+        {
+          "item": "celestial_artifacts:guardian_eye"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade_addon:snow_crow",
+            "kill": 400,
+            "refine": 4
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "wizards_reborn:arcane_linen"
+        },
+        {
+          "tag": "forge:storage_blocks/quartz"
+        }
+      ]
+    },
+    {
+      "id": "ak:dick_wido",
+      "blade": "ak:dick_wido",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_crystal"
+        },
+        {
+          "item": "minecraft:crying_obsidian"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "minecraft:crying_obsidian"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 400,
+            "name": "shizuku:tornado_blade",
+            "refine": 4
+          }
+        },
+        {
+          "item": "minecraft:obsidian"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "minecraft:obsidian"
+        },
+        {
+          "item": "slashblade:proudsoul_crystal"
+        }
+      ]
+    },
+    {
+      "id": "ak:yataghans",
+      "blade": "ak:yataghans",
+      "inputs": [
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "celestial_core:sakura_steel"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 400,
+            "name": "slashblade_addon:wanderer",
+            "refine": 4
+          }
+        },
+        {
+          "item": "celestial_core:death_essence"
+        },
+        {
+          "item": "celestial_core:sakura_steel"
+        },
+        {
+          "item": "celestial_core:death_essence"
+        },
+        {
+          "item": "celestial_core:guardian_ocean_ingot"
+        }
+      ]
+    },
+    {
+      "id": "shizuku:unlimited_blade",
+      "blade": "shizuku:unlimited_blade",
+      "inputs": [
+        {
+          "item": "eidolon:death_essence"
+        },
+        {
+          "item": "shizuku:meow_stone"
+        },
+        {
+          "item": "eidolon:death_essence"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 200,
+            "name": "slashblade_addon:katana",
+            "refine": 2
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "eidolon:death_essence"
+        },
+        {
+          "item": "yuusha:mutant_cube"
+        },
+        {
+          "item": "eidolon:death_essence"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:dark_raven",
+      "blade": "slashblade_addon:dark_raven",
+      "inputs": [
+        {
+          "item": "eidolon:raven_feather"
+        },
+        {
+          "item": "yuusha:mutant_cube"
+        },
+        {
+          "item": "reliquary:molten_core"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_netherite",
+            "kill": 200,
+            "refine": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "slashblade:rodai_golden",
+      "blade": "slashblade:rodai_golden",
+      "inputs": [
+        {
+          "item": "yuusha:mutant_cube"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_diamond",
+            "kill": 200,
+            "refine": 2
+          }
+        },
+        {
+          "item": "celestial_core:sakura_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:snow_crow",
+      "blade": "slashblade_addon:snow_crow",
+      "inputs": [
+        {
+          "item": "minecraft:feather"
+        },
+        {
+          "item": "yuusha:mutant_cube"
+        },
+        {
+          "item": "relics:solid_snowball"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade_addon:blue",
+            "kill": 200,
+            "refine": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "shizuku:tornado_blade",
+      "blade": "shizuku:tornado_blade",
+      "inputs": [
+        {
+          "item": "locusazzurro_icaruswings:zephir_essence"
+        },
+        {
+          "item": "shizuku:meow_stone"
+        },
+        {
+          "item": "locusazzurro_icaruswings:zephir_essence"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:ruby",
+            "kill": 200,
+            "refine": 2
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "locusazzurro_icaruswings:zephir_essence"
+        },
+        {
+          "item": "yuusha:mutant_cube"
+        },
+        {
+          "item": "locusazzurro_icaruswings:zephir_essence"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:wanderer",
+      "blade": "slashblade_addon:wanderer",
+      "inputs": [
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        },
+        {
+          "item": "slashblade:proudsoul_sphere"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade_addon:tachi",
+            "kill": 200,
+            "refine": 2
+          }
+        },
+        {
+          "item": "yuusha:mutant_cube"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:katana",
+      "blade": "slashblade_addon:katana",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:sabigatana",
+            "kill": 100
+          }
+        },
+        {
+          "item": "call_of_yucutan:jade_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:rodai_netherite",
+      "blade": "slashblade:rodai_netherite",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_stone",
+            "kill": 100
+          }
+        },
+        {
+          "item": "minecraft:netherite_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:rodai_diamond",
+      "blade": "slashblade:rodai_diamond",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_wooden",
+            "kill": 100
+          }
+        },
+        {
+          "item": "minecraft:diamond_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:blue",
+      "blade": "slashblade_addon:blue",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "minecraft:coal_block"
+        },
+        {
+          "item": "born_in_chaos_v1:dark_metal_ingot"
+        },
+        {
+          "item": "minecraft:coal_block"
+        },
+        {
+          "item": "born_in_chaos_v1:dark_metal_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_stone",
+            "kill": 100
+          }
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:ruby",
+      "blade": "slashblade:ruby",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "item": "celestial_core:fire_essence"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:rodai_wooden",
+            "kill": 100
+          }
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade_addon:tachi",
+      "blade": "slashblade_addon:tachi",
+      "inputs": [
+        {
+          "item": "avaritia:diamond_lattice"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "name": "slashblade:sabigatana",
+            "kill": 100
+          }
+        },
+        {
+          "item": "deep_aether:skyjade_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:golden_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:sabigatana",
+      "blade": "slashblade:sabigatana",
+      "inputs": [
+        {
+          "item": "crockpot:blackstone_dust"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "item": "crockpot:blackstone_dust"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade",
+          "request": {
+            "kill": 250,
+            "name": "slashblade:sabigatana",
+            "sword_type": [
+              "broken",
+              "sealed"
+            ]
+          }
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "item": "crockpot:blackstone_dust"
+        },
+        {
+          "item": "slashblade:proudsoul_ingot"
+        },
+        {
+          "item": "crockpot:blackstone_dust"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:rodai_stone",
+      "blade": "slashblade:rodai_stone",
+      "inputs": [
+        {
+          "item": "born_in_chaos_v1:pileof_dark_metal"
+        },
+        {
+          "item": "slashblade:proudsoul"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade_white"
+        },
+        {
+          "item": "minecraft:stone_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:linen_string"
+        }
+      ]
+    },
+    {
+      "id": "slashblade:rodai_wooden",
+      "blade": "slashblade:rodai_wooden",
+      "inputs": [
+        {
+          "item": "born_in_chaos_v1:pileof_dark_metal"
+        },
+        {
+          "item": "slashblade:proudsoul"
+        },
+        {
+          "type": "slashblade:blade",
+          "item": "slashblade:slashblade_white"
+        },
+        {
+          "item": "minecraft:wooden_sword"
+        },
+        {
+          "item": "locusazzurro_icaruswings:linen_string"
+        }
+      ]
+    }
+  ]
+}

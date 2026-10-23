@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
@@ -67,10 +68,6 @@ final class CandidateEngine {
         // Diagnostic: Tag ingredient audit
         boolean isTag = items.length > 1;
         int itemsWithRecipes = 0;
-        Set<ResourceLocation> firstItems = new LinkedHashSet<>();
-        for (int s = 0; s < Math.min(items.length, 10); s++) {
-            if (!items[s].isEmpty()) firstItems.add(ForgeRegistries.ITEMS.getKey(items[s].getItem()));
-        }
 
         long loopStart = System.nanoTime();
         for (int idx = 0; idx < items.length; idx++) {
@@ -140,7 +137,11 @@ final class CandidateEngine {
         long loopMs = (System.nanoTime() - loopStart) / 1_000_000;
 
         // Diagnostic: log Tag ingredient candidate search summary
-        if (isTag) {
+        if (isTag && RSIntegrationMod.LOGGER.isDebugEnabled()) {
+            Set<ResourceLocation> firstItems = new LinkedHashSet<>();
+            for (int s = 0; s < Math.min(items.length, 10); s++) {
+                if (!items[s].isEmpty()) firstItems.add(ForgeRegistries.ITEMS.getKey(items[s].getItem()));
+            }
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-Candidate] Phase1: getItems={}ms, loop={}ms, {} items, {} recipes, {} unique candidates, first items: {}",
                     itemsMs, loopMs, items.length, items.length, byId.size(), firstItems);
@@ -168,7 +169,7 @@ final class CandidateEngine {
                         && (NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)
                         || ctx.shouldSkipActiveConversion(cr, output));
                 if (skipConversion) {
-                    ctx.diag("candidate SKIP " + entry.recipe().getId()
+                    if (ctx.diagnosticsEnabled()) ctx.diag("candidate SKIP " + entry.recipe().getId()
                             + ": non-productive tag conversion");
                     if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true,
                             "Non-productive tag conversion");
@@ -242,7 +243,7 @@ final class CandidateEngine {
                             entry.recipe().getId(), Integer.MAX_VALUE)));
         }
 
-        if (isTag) {
+        if (isTag && RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long sortElapsed = System.nanoTime() - sortStart;
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-Candidate] Phase2 sort: {} entries in {}ms",
@@ -291,6 +292,7 @@ final class CandidateEngine {
         }
         ItemStack output = ModRecipeHandlers.tryGetResultItem(
                 entry.recipe(), ctx.level.registryAccess());
+        output = SlashBladeRecipeHandler.planningOutput(entry.recipe(), output, demand);
         output = MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
         return inheritSmithingBaseTag(entry.recipe(), output, demand, ctx);
     }
@@ -709,21 +711,15 @@ final class CandidateEngine {
         return key.toString();
     }
 
-    private static boolean passesOutputCheck(RecipeIndex.Entry entry, ItemStack output,
+    static boolean passesOutputCheck(RecipeIndex.Entry entry, ItemStack output,
                                               Ingredient ingredient, boolean ingredientAllNbt,
                                               boolean nbtStrict,
                                               @Nullable List<CandidateDiagnostic> diag) {
         if (output.isEmpty() || (!IngredientMatcher.test(ingredient, output)
                 && !matchesSemanticSpellScroll(ingredient, output))) {
-            boolean slashBladeChain = false;
-            if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient) && !output.isEmpty()) {
-                for (ItemStack ingItem : ingredient.getItems()) {
-                    if (!ingItem.isEmpty() && ingItem.getItem() == output.getItem()) {
-                        slashBladeChain = true;
-                        break;
-                    }
-                }
-            }
+            boolean slashBladeChain = !output.isEmpty()
+                    && SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)
+                    && SlashBladeRecipeHandler.matchesMaterialKey(ingredient, MaterialKey.of(output));
             if (!slashBladeChain) {
                 if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true, "Output does not match ingredient");
                 return false;

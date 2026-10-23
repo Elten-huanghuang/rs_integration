@@ -325,6 +325,48 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     @Test
+    void oversizedGraphUsesOneBoundedCompactIndexAndKeepsCandidateOrder() {
+        ImmutableRecipeGraph graph = lookupGraph(100_000);
+        MaterialRef wanted = new MaterialRef(TOOL, REQUIRED);
+        List<RecipeNode> expected = referenceCandidates(graph, wanted, NbtMatchMode.PARTIAL);
+        PlanningLookupCache.run(() -> {
+            for (int repetition = 0; repetition < 100; repetition++) {
+                assertEquals(expected, ImmutableRecipeGraphProjector.candidates(
+                        graph, wanted, NbtMatchMode.PARTIAL));
+                assertEquals(1, PlanningLookupCache.outputVariants(
+                        graph, id("unrelated_" + repetition)).size());
+            }
+            PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
+            assertEquals(1, stats.outputIndexBuilds());
+            assertEquals(graph.recipesByOutput().size(), stats.outputScans());
+            assertEquals(1, stats.indexedGraphs());
+            assertTrue(stats.compactIndexBytes() > 0L);
+            assertTrue(stats.compactIndexBytes() <= PlanningLookupCache.DEFAULT_LIMITS.maxCompactIndexBytes());
+            return null;
+        });
+    }
+
+    @Test
+    void compactIndexBudgetIsSharedAcrossGraphsWithoutDroppingFallbackCandidates() {
+        ImmutableRecipeGraph first = lookupGraph(20);
+        ImmutableRecipeGraph second = lookupGraph(21);
+        PlanningLookupCache.Limits limits = new PlanningLookupCache.Limits(0, 0, 2, 16);
+        PlanningLookupCache.run(limits, () -> {
+            for (ImmutableRecipeGraph graph : List.of(first, second, first, second)) {
+                MaterialRef wanted = new MaterialRef(TOOL, "");
+                assertEquals(referenceCandidates(graph, wanted, NbtMatchMode.ANY),
+                        ImmutableRecipeGraphProjector.candidates(graph, wanted, NbtMatchMode.ANY));
+            }
+            PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
+            assertEquals(1, stats.outputIndexBuilds());
+            assertTrue(stats.compactIndexBytes() <= limits.maxCompactIndexBytes());
+            assertEquals(first.recipesByOutput().size() + 2L * second.recipesByOutput().size(),
+                    stats.outputScans());
+            return null;
+        });
+    }
+
+    @Test
     void replacementRecipeGraphDoesNotReuseOldCandidates() {
         MaterialRef output = new MaterialRef(TOOL, REQUIRED);
         RecipeNode oldRecipe = new RecipeNode(id("old_recipe"), output, 1, List.of());
@@ -455,6 +497,8 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     private static List<RecipeNode> referenceCandidates(ImmutableRecipeGraph graph, MaterialRef wanted, NbtMatchMode mode) {
+        // 此参考图只有普通工具 NBT，不包含 bladeState，不能满足拔刀剑条件。
+        if (mode == NbtMatchMode.SLASHBLADE) return List.of();
         if (mode == NbtMatchMode.EXACT && wanted.nbt().isEmpty()) {
             return graph.recipesByOutput().getOrDefault(wanted, List.of());
         }

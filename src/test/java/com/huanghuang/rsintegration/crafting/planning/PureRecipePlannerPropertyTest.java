@@ -39,6 +39,22 @@ class PureRecipePlannerPropertyTest {
 
             assertEquals(expected, actual.feasible(),
                     "case " + caseIndex + " " + generated + " actual=" + actual);
+            // 库存差量键必须区分耗尽/新增/回滚，并且不受未参与合成的库存影响。
+            Map<MaterialRef, Integer> noisyStock = new HashMap<>(generated.available());
+            Map<MaterialRef, Long> expectedRemaining = new HashMap<>(actual.remaining());
+            for (int noise = 0; noise < 16; noise++) {
+                MaterialRef unrelated = new MaterialRef(id("unrelated_" + noise), "{variant:" + noise + "}");
+                noisyStock.put(unrelated, noise + 1);
+                expectedRemaining.put(unrelated, (long) noise + 1L);
+            }
+            for (int memoLimit : List.of(0, 1, 16_384)) {
+                PureRecipePlanner.Result noisy = PureRecipePlanner.resolve(
+                        generated.graph(), noisyStock, generated.roots(), generated.maxSteps(),
+                        200_000, memoLimit);
+                assertEquals(actual.feasible(), noisy.feasible(), "memo=" + memoLimit + " case=" + caseIndex);
+                assertEquals(expectedRemaining, noisy.remaining(), "memo=" + memoLimit + " case=" + caseIndex);
+                if (noisy.feasible()) assertEquals(actual.steps(), noisy.steps(), "case=" + caseIndex);
+            }
             assertTrue(actual.expandedStates() <= 200_001, "case " + caseIndex);
             if (actual.feasible()) {
                 assertTrue(actual.steps().size() <= generated.maxSteps(), "case " + caseIndex);

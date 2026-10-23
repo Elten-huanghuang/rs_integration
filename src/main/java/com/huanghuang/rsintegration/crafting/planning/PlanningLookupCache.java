@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
+
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -18,6 +20,7 @@ import java.util.function.Supplier;
 import java.util.concurrent.ConcurrentHashMap;
 
 final class PlanningLookupCache {
+    private static final int COMPACT_INDEX_THRESHOLD = 4_096;
     // Large networks can contain thousands of distinct NBT variants. Keeping only the
     // first 512 tags makes later variants fall back to TagParser on every comparison.
     // This cache is scoped to one request and is released after planning.
@@ -31,7 +34,9 @@ final class PlanningLookupCache {
     private final Map<String, ParsedNbt> parsedTags = new HashMap<>();
     private final Map<ImmutableRecipeGraph, Map<ResourceLocation, List<MaterialRef>>> outputIndexes =
             new IdentityHashMap<>();
-    private final Map<ImmutableRecipeGraph, Map<ResourceLocation, List<ImmutableRecipeGraph.RecipeNode>>>
+    private final Map<ImmutableRecipeGraph, CompactOutputIndex> compactOutputIndexes =
+            new IdentityHashMap<>();
+    private final Map<ImmutableRecipeGraph, RecipeProducerIndex>
             producerIndexes = new IdentityHashMap<>();
     private final Map<ImmutableRecipeGraph.IngredientRef, Map<MaterialRef, Boolean>> ingredientMatches =
             new IdentityHashMap<>();
@@ -41,6 +46,7 @@ final class PlanningLookupCache {
     private int retainedPreparationUnits;
     private int cachedNbtCharacters;
     private int indexedVariants;
+    private long compactIndexBytes;
     private int cachedIngredientMatches;
     private long nbtParses;
     private long nbtCacheHits;
@@ -80,7 +86,9 @@ final class PlanningLookupCache {
         PlanningLookupCache cache = Objects.requireNonNull(CURRENT.get(), "no planning lookup scope");
         return new Stats(cache.nbtParses, cache.nbtCacheHits, cache.outputIndexBuilds,
                 cache.outputScans, cache.candidateVariants, cache.parsedTags.size(),
-                cache.cachedNbtCharacters, cache.outputIndexes.size(), cache.indexedVariants);
+                cache.cachedNbtCharacters,
+                cache.outputIndexes.size() + cache.compactOutputIndexes.size(), cache.indexedVariants,
+                cache.compactIndexBytes);
     }
 
     static PreparationStats preparationStats(PreparationStage stage) {
@@ -167,6 +175,17 @@ final class PlanningLookupCache {
         ParsedNbt actual = cache == null ? parseUncached(actualSnbt) : cache.parse(actualSnbt);
         return expected.valid() && actual.valid()
                 && IngredientMatcher.nbtMatches(expected.tag(), actual.tag(), partial);
+    }
+
+    static boolean matchesSlashBlade(String expectedSnbt, String actualSnbt) {
+        return SlashBladePlanning.matches(readOnlyTag(expectedSnbt), readOnlyTag(actualSnbt));
+    }
+
+    /** 返回共享只读值；任何调用方需要修改时必须先 copy。 */
+    static CompoundTag readOnlyTag(String snbt) {
+        PlanningLookupCache cache = CURRENT.get();
+        ParsedNbt parsed = cache == null ? parseUncached(snbt) : cache.parse(snbt);
+        return parsed.valid() ? parsed.tag() : null;
     }
 
     static Boolean lookupIngredientMatch(MaterialRef actual,
@@ -272,38 +291,51 @@ final class PlanningLookupCache {
         List<ImmutableRecipeGraph.RecipeNode> published =
                 ImmutableRecipeGraphProjector.publishedProducers(graph, itemId);
         if (published != null) return published;
-        PlanningLookupCache cache = CURRENT.get();
-        if (cache == null) {
-            List<ImmutableRecipeGraph.RecipeNode> result = new ArrayList<>();
-            for (List<ImmutableRecipeGraph.RecipeNode> nodes : graph.recipesByOutput().values()) {
-                for (ImmutableRecipeGraph.RecipeNode node : nodes) {
-                    if (node.output().itemId().equals(itemId)) result.add(node);
-                }
-            }
-            return List.copyOf(result);
-        }
-        Map<ResourceLocation, List<ImmutableRecipeGraph.RecipeNode>> indexed =
-                cache.producerIndexes.get(graph);
-        if (indexed == null) {
-            Map<ResourceLocation, List<ImmutableRecipeGraph.RecipeNode>> building = new HashMap<>();
+        if (CURRENT.get() == null) {
+            List<ImmutableRecipeGraph.RecipeNode> selected = new ArrayList<>();
             for (List<ImmutableRecipeGraph.RecipeNode> nodes : graph.recipesByOutput().values()) {
                 PlanningThreadContext.throwIfCancelled();
                 for (ImmutableRecipeGraph.RecipeNode node : nodes) {
-                    building.computeIfAbsent(node.output().itemId(), ignored -> new ArrayList<>())
-                            .add(node);
+                    if (node.output().itemId().equals(itemId)) selected.add(node);
                 }
             }
-            building.replaceAll((ignored, nodes) -> List.copyOf(nodes));
-            indexed = Map.copyOf(building);
-            cache.producerIndexes.put(graph, indexed);
+            return List.copyOf(selected);
         }
-        return indexed.getOrDefault(itemId, List.of());
+        return producerIndex(graph).producers(itemId);
+    }
+
+    static List<MaterialRef> recipeOutputs(ImmutableRecipeGraph graph, ResourceLocation recipeId) {
+        List<MaterialRef> published = ImmutableRecipeGraphProjector.publishedRecipeOutputs(graph, recipeId);
+        return published != null ? published : producerIndex(graph).outputs(graph, recipeId);
+    }
+
+    private static RecipeProducerIndex producerIndex(ImmutableRecipeGraph graph) {
+        PlanningLookupCache cache = CURRENT.get();
+        return cache == null ? RecipeProducerIndex.build(graph)
+                : cache.producerIndexes.computeIfAbsent(graph, RecipeProducerIndex::build);
     }
 
     private List<MaterialRef> findOutputs(ImmutableRecipeGraph graph, ResourceLocation itemId) {
+        PlanningThreadContext.throwIfCancelled();
         Map<ResourceLocation, List<MaterialRef>> indexed = outputIndexes.get(graph);
-        if (indexed == null && outputIndexes.size() < limits.maxGraphs()
-                && graph.recipesByOutput().size() <= limits.maxOutputVariants() - indexedVariants) {
+        CompactOutputIndex compact = compactOutputIndexes.get(graph);
+        boolean canRetainGraph = outputIndexes.size() + compactOutputIndexes.size() < limits.maxGraphs();
+        int outputCount = graph.recipesByOutput().size();
+        // 大图优先用数组，避免刚好低于旧阈值时反而分配数万个桶对象。
+        if (indexed == null && compact == null && canRetainGraph
+                && (outputCount >= COMPACT_INDEX_THRESHOLD
+                || outputCount > limits.maxOutputVariants() - indexedVariants)) {
+            long bytes = CompactOutputIndex.estimatedBytes(outputCount);
+            if (bytes <= limits.maxCompactIndexBytes() - compactIndexBytes) {
+                compact = new CompactOutputIndex(graph.recipesByOutput().keySet());
+                compactOutputIndexes.put(graph, compact);
+                compactIndexBytes += bytes;
+                outputScans += outputCount;
+                outputIndexBuilds++;
+            }
+        }
+        if (indexed == null && compact == null && canRetainGraph
+                && outputCount <= limits.maxOutputVariants() - indexedVariants) {
             Map<ResourceLocation, List<MaterialRef>> building = new HashMap<>();
             for (MaterialRef output : graph.recipesByOutput().keySet()) {
                 PlanningThreadContext.throwIfCancelled();
@@ -317,7 +349,9 @@ final class PlanningLookupCache {
             outputIndexBuilds++;
         }
         List<MaterialRef> selected;
-        if (indexed == null) {
+        if (compact != null) {
+            selected = compact.find(itemId);
+        } else if (indexed == null) {
             outputScans += graph.recipesByOutput().size();
             selected = scanOutputs(graph, itemId);
         } else {
@@ -329,13 +363,20 @@ final class PlanningLookupCache {
 
     private static List<MaterialRef> scanOutputs(ImmutableRecipeGraph graph, ResourceLocation itemId) {
         List<MaterialRef> selected = new ArrayList<>();
+        int inspected = 0;
         for (MaterialRef output : graph.recipesByOutput().keySet()) {
+            if ((inspected++ & 1023) == 0) PlanningThreadContext.throwIfCancelled();
             if (output.itemId().equals(itemId)) selected.add(output);
         }
         return List.copyOf(selected);
     }
 
     record Limits(int maxTags, int maxNbtCharacters, int maxGraphs, int maxOutputVariants) {
+        // 默认额外使用最多 2MiB 数组索引；多张派生图共用额度，关闭缓存时额度也为零。
+        long maxCompactIndexBytes() {
+            return Math.min(8L * 1024 * 1024, 32L * maxOutputVariants);
+        }
+
         Limits {
             if (maxTags < 0 || maxNbtCharacters < 0 || maxGraphs < 0 || maxOutputVariants < 0) {
                 throw new IllegalArgumentException("negative lookup cache capacity");
@@ -345,7 +386,8 @@ final class PlanningLookupCache {
 
     record Stats(long nbtParses, long nbtCacheHits, long outputIndexBuilds,
                  long outputScans, long candidateVariants, int cachedTags,
-                 int cachedNbtCharacters, int indexedGraphs, int indexedVariants) {}
+                 int cachedNbtCharacters, int indexedGraphs, int indexedVariants,
+                 long compactIndexBytes) {}
 
     private record ParsedNbt(CompoundTag tag, boolean valid) {}
 

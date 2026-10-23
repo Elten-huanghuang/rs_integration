@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
@@ -116,7 +118,15 @@ public final class ImmutableRecipeGraphProjector {
         CompiledIndexes indexes = compiledIndexes;
         GraphIndexes graphIndexes = indexes == null ? null : indexes.forGraph(graph);
         return graphIndexes == null ? null
-                : graphIndexes.producers().getOrDefault(itemId, List.of());
+                : graphIndexes.producers().producers(itemId);
+    }
+
+    @Nullable
+    static List<MaterialRef> publishedRecipeOutputs(ImmutableRecipeGraph graph,
+                                                    ResourceLocation recipeId) {
+        CompiledIndexes indexes = compiledIndexes;
+        GraphIndexes graphIndexes = indexes == null ? null : indexes.forGraph(graph);
+        return graphIndexes == null ? null : graphIndexes.producers().outputs(graph, recipeId);
     }
 
     /** Returns the generation-level output-variant index, or null for an uncompiled test graph. */
@@ -188,6 +198,11 @@ public final class ImmutableRecipeGraphProjector {
         }
         MaterialRef outputRef = includeOutputNbt ? material(output, output.hasTag())
                 : new MaterialRef(BuiltInRegistries.ITEM.getKey(output.getItem()), "", true);
+        if ("slashblade".equals(modTypeId)) {
+            ItemStack minimum = SlashBladePlanning.minimumOutput(output, specs);
+            if (minimum == null) return null;
+            outputRef = new MaterialRef(outputRef.itemId(), minimum.getTag().toString(), false, true);
+        }
         if (outputRef.runtimeNbt() && "smithing".equals(modTypeId)
                 && inputs.size() == 3 && templateProducesOutput(inputs.get(0), outputRef)) {
             ResourceLocation outputItemId = outputRef.itemId();
@@ -247,24 +262,15 @@ public final class ImmutableRecipeGraphProjector {
         }
     }
 
-    private record GraphIndexes(Map<ResourceLocation, List<RecipeNode>> producers,
+    private record GraphIndexes(RecipeProducerIndex producers,
                                 Map<ResourceLocation, List<MaterialRef>> outputs) {
         private static GraphIndexes build(ImmutableRecipeGraph graph) {
-            Map<ResourceLocation, List<RecipeNode>> producers = new HashMap<>();
-            for (List<RecipeNode> nodes : graph.recipesByOutput().values()) {
-                for (RecipeNode node : nodes) {
-                    producers.computeIfAbsent(node.output().itemId(), ignored -> new ArrayList<>())
-                            .add(node);
-                }
-            }
-            producers.replaceAll((ignored, nodes) -> List.copyOf(nodes));
-
             Map<ResourceLocation, List<MaterialRef>> outputs = new HashMap<>();
             for (MaterialRef output : graph.recipesByOutput().keySet()) {
                 outputs.computeIfAbsent(output.itemId(), ignored -> new ArrayList<>()).add(output);
             }
             outputs.replaceAll((ignored, variants) -> List.copyOf(variants));
-            return new GraphIndexes(Map.copyOf(producers), Map.copyOf(outputs));
+            return new GraphIndexes(RecipeProducerIndex.build(graph), Map.copyOf(outputs));
         }
     }
 
@@ -357,12 +363,13 @@ public final class ImmutableRecipeGraphProjector {
      */
     public static ImmutableRecipeGraph restrictToDependencies(ImmutableRecipeGraph graph,
                                                               ResourceLocation targetRecipeId) {
+        PlanningThreadContext.throwIfCancelled();
         CompiledIndexes indexes = compiledIndexes;
         if (indexes != null && indexes.graph() == graph) {
             return indexes.dependencies().getOrBuild(targetRecipeId,
-                    () -> restrictToDependenciesUncached(graph, targetRecipeId));
+                    () -> PlanningLookupCache.run(() -> restrictToDependenciesUncached(graph, targetRecipeId)));
         }
-        return restrictToDependenciesUncached(graph, targetRecipeId);
+        return PlanningLookupCache.run(() -> restrictToDependenciesUncached(graph, targetRecipeId));
     }
 
     private static ImmutableRecipeGraph restrictToDependenciesUncached(
@@ -381,6 +388,7 @@ public final class ImmutableRecipeGraphProjector {
         }
 
         while (!pendingItems.isEmpty()) {
+            PlanningThreadContext.throwIfCancelled();
             ResourceLocation itemId = pendingItems.removeFirst();
             for (RecipeNode producer : PlanningLookupCache.producers(graph, itemId)) {
                 if (!producer.output().itemId().equals(itemId)
@@ -395,15 +403,30 @@ public final class ImmutableRecipeGraphProjector {
             }
         }
 
-        Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
-        for (Map.Entry<MaterialRef, List<RecipeNode>> entry : graph.recipesByOutput().entrySet()) {
-            List<RecipeNode> selected = entry.getValue().stream()
-                    .filter(recipe -> visitedRecipes.contains(recipe.recipeId()))
-                    .toList();
-            if (!selected.isEmpty()) projected.put(entry.getKey(), selected);
+        if (visitedRecipes.size() == graph.recipesById().size()) return graph;
+
+        // 只检查命中配方的输出桶；同 ID 的 NBT/动态变体也必须完整保留。
+        Set<MaterialRef> selectedOutputs = new LinkedHashSet<>();
+        Map<ResourceLocation, RecipeNode> selectedById = new LinkedHashMap<>();
+        for (ResourceLocation recipeId : visitedRecipes) {
+            PlanningThreadContext.throwIfCancelled();
+            selectedOutputs.addAll(PlanningLookupCache.recipeOutputs(graph, recipeId));
+            RecipeNode canonical = graph.recipesById().get(recipeId);
+            if (canonical != null) selectedById.put(recipeId, canonical);
         }
-        return projected.size() == graph.recipesByOutput().size()
-                ? graph : new ImmutableRecipeGraph(projected);
+        Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
+        for (MaterialRef output : selectedOutputs) {
+            PlanningThreadContext.throwIfCancelled();
+            List<RecipeNode> selected = new ArrayList<>();
+            for (RecipeNode recipe : graph.recipesByOutput().getOrDefault(output, List.of())) {
+                if (visitedRecipes.contains(recipe.recipeId())) {
+                    selected.add(recipe);
+                    selectedById.putIfAbsent(recipe.recipeId(), recipe);
+                }
+            }
+            if (!selected.isEmpty()) projected.put(output, selected);
+        }
+        return new ImmutableRecipeGraph(projected, selectedById);
     }
 
     private static ImmutableRecipeGraph bindAvailabilityInScope(
@@ -467,13 +490,13 @@ public final class ImmutableRecipeGraphProjector {
     static ImmutableRecipeGraph bindSmithingStates(
             ImmutableRecipeGraph graph, Map<MaterialRef, ? extends Number> supplied,
             List<IngredientRef> roots) {
-        List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
-        Set<ResourceLocation> relevantItems =
-                stateSensitiveSmithingItems(graph, normalizedRoots);
-        return PlanningLookupCache.run(() -> PlanningLookupCache.reusePreparation(
-                PlanningLookupCache.PreparationStage.SMITHING, graph, supplied,
-                relevantItems, () -> bindSmithingStatesInScope(
-                        graph, supplied, relevantItems)));
+        return PlanningLookupCache.run(() -> {
+            List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
+            Set<ResourceLocation> relevantItems = stateSensitiveSmithingItems(graph, normalizedRoots);
+            return PlanningLookupCache.reusePreparation(
+                    PlanningLookupCache.PreparationStage.SMITHING, graph, supplied,
+                    relevantItems, () -> bindSmithingStatesInScope(graph, supplied, relevantItems));
+        });
     }
 
     private static ImmutableRecipeGraph bindSmithingStatesInScope(
@@ -593,6 +616,8 @@ public final class ImmutableRecipeGraphProjector {
     private static IngredientRef bindIngredientIndexed(
             IngredientRef ingredient,
             Map<ResourceLocation, List<MaterialRef>> availableByItem) {
+        // 这些 alternatives 保存条件，不是整份物品快照；追加库存会错误抬高门槛。
+        if (ingredient.nbtMatchMode() == NbtMatchMode.SLASHBLADE) return ingredient;
         Set<MaterialRef> alternatives = new LinkedHashSet<>(ingredient.alternatives());
         for (MaterialRef expected : ingredient.alternatives()) {
             for (MaterialRef actual : availableByItem.getOrDefault(
@@ -631,6 +656,12 @@ public final class ImmutableRecipeGraphProjector {
             if (!actual.itemId().equals(expected.itemId())) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
             if (actual.runtimeNbt()) continue;
+            if (ingredient.nbtMatchMode() == NbtMatchMode.SLASHBLADE) {
+                if (PlanningLookupCache.matchesSlashBlade(expected.nbt(), actual.nbt())) return true;
+                continue;
+            }
+            // 继承数值的下限不能冒充实际输出的完整 NBT。
+            if (actual.constrainedNbt()) continue;
             if (isTaintedEarthHeart(actual, expected)) return true;
             if (matchesPotionPuritySemantics(expected, actual)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
@@ -685,6 +716,9 @@ public final class ImmutableRecipeGraphProjector {
 
     static RecipeNode withDemandedOutput(RecipeNode recipe, MaterialRef wanted,
                                          NbtMatchMode mode) {
+        if (mode == NbtMatchMode.SLASHBLADE && recipe.output().constrainedNbt()) {
+            return withDemandedBladeState(recipe, wanted);
+        }
         if (wanted.runtimeNbt() || (wanted.nbt().isEmpty() && mode != NbtMatchMode.EXACT)
                 || !"smithing".equals(recipe.modTypeId())
                 || !recipe.output().itemId().equals(wanted.itemId())
@@ -698,6 +732,51 @@ public final class ImmutableRecipeGraphProjector {
         inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT, base.role()));
         return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
                 recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts());
+    }
+
+    /** 单刀升级把更高的目标门槛传回原料；禁止凭空提升产物数值。 */
+    private static RecipeNode withDemandedBladeState(RecipeNode recipe, MaterialRef wanted) {
+        if (!"slashblade".equals(recipe.modTypeId())
+                || !recipe.output().itemId().equals(wanted.itemId())) return null;
+        CompoundTag cachedOutput = PlanningLookupCache.readOnlyTag(recipe.output().nbt());
+        CompoundTag requiredTag = PlanningLookupCache.readOnlyTag(wanted.nbt());
+        if (cachedOutput == null || requiredTag == null
+                || !cachedOutput.getCompound("bladeState").getString("translationKey")
+                .equals(requiredTag.getCompound("bladeState").getString("translationKey"))) return null;
+        int bladeInput = -1;
+        for (int i = 0; i < recipe.inputs().size(); i++) {
+            IngredientRef input = recipe.inputs().get(i);
+            if (input.nbtMatchMode() != NbtMatchMode.SLASHBLADE) continue;
+            if (bladeInput >= 0 || input.count() != 1 || input.alternatives().size() != 1
+                    || input.role() != DemandRole.CONSUMED) return null;
+            bladeInput = i;
+        }
+        if (bladeInput < 0) return null;
+        try {
+            CompoundTag output = cachedOutput.copy();
+            CompoundTag state = output.getCompound("bladeState");
+            CompoundTag required = requiredTag.getCompound("bladeState");
+            IngredientRef original = recipe.inputs().get(bladeInput);
+            MaterialRef source = original.alternatives().get(0);
+            CompoundTag originalTag = PlanningLookupCache.readOnlyTag(source.nbt());
+            if (originalTag == null) return null;
+            CompoundTag input = SlashBladePlanning.raiseInput(originalTag, output, requiredTag);
+            if (input == null) return null;
+            for (String field : List.of("killCount", "proudSoul", "RepairCounter")) {
+                int needed = required.getInt(field);
+                int guaranteed = state.getInt(field);
+                if (needed <= guaranteed) continue;
+                state.putInt(field, needed);
+            }
+            List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
+            inputs.set(bladeInput, new IngredientRef(List.of(new MaterialRef(source.itemId(), input.toString())),
+                    original.count(), NbtMatchMode.SLASHBLADE, original.role()));
+            return new RecipeNode(recipe.recipeId(), new MaterialRef(recipe.output().itemId(),
+                    output.toString(), false, true), recipe.outputCount(), inputs,
+                    recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     static List<RecipeNode> candidates(ImmutableRecipeGraph graph, MaterialRef wanted,
@@ -724,7 +803,8 @@ public final class ImmutableRecipeGraphProjector {
             for (RecipeNode recipe : graph.recipesByOutput().get(output)) {
                 if (matchesIngredient(output, demand)) {
                     candidates.add(recipe);
-                } else if ("smithing".equals(recipe.modTypeId())) {
+                } else if ("smithing".equals(recipe.modTypeId())
+                        || mode == NbtMatchMode.SLASHBLADE && recipe.output().constrainedNbt()) {
                     RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
                     if (specialized != null && matchesIngredient(specialized.output(), demand)) {
                         candidates.add(specialized);
@@ -744,6 +824,18 @@ public final class ImmutableRecipeGraphProjector {
                 && spec.role() != DemandRole.CONTAINER_RETURNING
                 && spec.role() != DemandRole.CATALYST) return null;
         Ingredient ingredient = spec.ingredient();
+        if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)) {
+            CompoundTag requirement = SlashBladePlanning.requirement(ingredient);
+            if (requirement == null) return null;
+            Set<MaterialRef> alternatives = new LinkedHashSet<>();
+            String nbt = requirement.toString();
+            for (ItemStack candidate : ingredient.getItems()) {
+                if (!candidate.isEmpty()) alternatives.add(new MaterialRef(
+                        BuiltInRegistries.ITEM.getKey(candidate.getItem()), nbt));
+            }
+            return alternatives.isEmpty() ? null : new IngredientRef(List.copyOf(alternatives),
+                    spec.count(), NbtMatchMode.SLASHBLADE, spec.role());
+        }
         boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
         NbtMatchMode matchMode = nbtMatchMode(ingredient);
         Set<MaterialRef> alternatives = new LinkedHashSet<>();
@@ -769,6 +861,8 @@ public final class ImmutableRecipeGraphProjector {
 
     /** Determines the immutable planner's NBT semantics for one live ingredient. */
     public static NbtMatchMode nbtMatchMode(Ingredient ingredient) {
+        if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)
+                && SlashBladePlanning.requirement(ingredient) != null) return NbtMatchMode.SLASHBLADE;
         if (!IngredientMatcher.requiresNbt(ingredient)) return NbtMatchMode.ANY;
         return isPartialNbtIngredient(ingredient) ? NbtMatchMode.PARTIAL : NbtMatchMode.EXACT;
     }

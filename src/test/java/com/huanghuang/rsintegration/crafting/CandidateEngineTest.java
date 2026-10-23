@@ -19,8 +19,23 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.blade;
+import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.ingredient;
 
 class CandidateEngineTest extends BootstrapTest {
+
+    @Test
+    void slashBladeOutputCheckDoesNotTreatEverySameItemVariantAsAProducer() {
+        Ingredient required = ingredient("ak:rage", 1000, 10);
+        var recipe = new ShapedRecipe(new ResourceLocation("test:blade"), "", CraftingBookCategory.MISC,
+                1, 1, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK)), blade("ak:rage", 1000, 10));
+        var entry = new RecipeIndex.Entry(recipe, ModType.GENERIC, new ResourceLocation("minecraft:crafting"));
+        assertTrue(CandidateEngine.passesOutputCheck(entry, blade("ak:rage", 1300, 12), required, true, false, null));
+        assertFalse(CandidateEngine.passesOutputCheck(entry, blade("ak:greedy", 1300, 12), required, true, false, null));
+        assertFalse(CandidateEngine.passesOutputCheck(entry, blade("ak:rage", 999, 12), required, true, false, null));
+        assertFalse(CandidateEngine.passesOutputCheck(entry, new ItemStack(Items.IRON_SWORD), required, true, false, null));
+    }
 
     @Test
     void typedSmithingCandidatesCarryTheModifiedWoodenSwordAcrossTwoUpgrades() throws Exception {

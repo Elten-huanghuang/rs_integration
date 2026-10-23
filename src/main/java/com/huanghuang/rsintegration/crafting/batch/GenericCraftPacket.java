@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
@@ -816,30 +819,38 @@ public final class GenericCraftPacket {
             Predicate<ImmutableRecipeGraph.RecipeNode> runtimeAvailable,
             Predicate<ImmutableRecipeGraph.RecipeNode> machineAvailable) {
         Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> filtered =
-                new LinkedHashMap<>();
+                null;
         Set<ResourceLocation> blockedOutputs = new LinkedHashSet<>();
-        boolean[] changed = {false};
-        graph.recipesByOutput().forEach((output, candidates) -> {
-            List<ImmutableRecipeGraph.RecipeNode> runtimeCandidates = new ArrayList<>();
-            List<ImmutableRecipeGraph.RecipeNode> usable = new ArrayList<>();
-            for (ImmutableRecipeGraph.RecipeNode candidate : candidates) {
-                if (!runtimeAvailable.test(candidate)) continue;
-                runtimeCandidates.add(candidate);
-                if (machineAvailable.test(candidate)) usable.add(candidate);
+        for (var entry : graph.recipesByOutput().entrySet()) {
+            List<ImmutableRecipeGraph.RecipeNode> candidates = entry.getValue();
+            List<ImmutableRecipeGraph.RecipeNode> usable = null;
+            boolean hasRuntimeCandidate = false;
+            for (int i = 0; i < candidates.size(); i++) {
+                ImmutableRecipeGraph.RecipeNode candidate = candidates.get(i);
+                boolean runtimeAllowed = runtimeAvailable.test(candidate);
+                hasRuntimeCandidate |= runtimeAllowed;
+                boolean allowed = runtimeAllowed && machineAvailable.test(candidate);
+                if (!allowed && usable == null) {
+                    // 首次删除时才复制已通过的前缀，保留原有候选顺序。
+                    usable = new ArrayList<>(candidates.size());
+                    usable.addAll(candidates.subList(0, i));
+                } else if (allowed && usable != null) {
+                    usable.add(candidate);
+                }
             }
+            if (usable == null) continue;
+            if (filtered == null) filtered = new LinkedHashMap<>(graph.recipesByOutput());
             if (!usable.isEmpty()) {
-                filtered.put(output, List.copyOf(usable));
-                if (usable.size() != candidates.size()) changed[0] = true;
-            } else if (!runtimeCandidates.isEmpty()) {
-                // Only a recipe that passed its non-machine prerequisites may
-                // contribute to the no-bound-machine diagnostic.
-                blockedOutputs.add(output.itemId());
-                changed[0] = true;
-            } else if (!candidates.isEmpty()) {
-                changed[0] = true;
+                filtered.put(entry.getKey(), List.copyOf(usable));
+            } else {
+                filtered.remove(entry.getKey());
+                // 只有通过运行条件校验的配方才参与机器未绑定的诊断。
+                if (hasRuntimeCandidate) blockedOutputs.add(entry.getKey().itemId());
             }
-        });
-        if (!changed[0]) return new BindingAwareGraph(graph, Set.of());
+        }
+        if (filtered == null) return new BindingAwareGraph(graph, Set.of());
+        // 与原过滤行为一致：生成派生图时不保留原图中的空桶。
+        filtered.values().removeIf(List::isEmpty);
         return new BindingAwareGraph(new ImmutableRecipeGraph(filtered),
                 Set.copyOf(blockedOutputs));
     }
@@ -3442,7 +3453,9 @@ public final class GenericCraftPacket {
             }
             ItemStack output = RecipeIndex.tryGetResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
-            if (stepRecipe instanceof SmithingTransformRecipe && mergedRs != null
+            output = SlashBladeRecipeHandler.planningOutput(stepRecipe, output);
+            if ((stepRecipe instanceof SmithingTransformRecipe
+                    || SlashBladeRecipeHandler.isShapedBladeRecipe(stepRecipe)) && mergedRs != null
                     && mergedRs.syntheticOutput() != null) {
                 output = mergedRs.syntheticOutput().copy();
             }
@@ -3460,6 +3473,10 @@ public final class GenericCraftPacket {
             List<DemandRole> inputRoles = new ArrayList<>();
             if (stepRecipe instanceof CraftingRecipe scr) {
                 List<Ingredient> craftingIngredients = scr.getIngredients();
+                if (SlashBladeRecipeHandler.isShapedBladeRecipe(scr) && mergedRs != null) {
+                    craftingIngredients = SlashBladePlanning.requireOutputIngredients(craftingIngredients,
+                            scr.getResultItem(player.serverLevel().registryAccess()), mergedRs.syntheticOutput());
+                }
                 List<DemandRole> craftingRoles = CraftIngredientPlanMath.alignInputRoles(
                         craftingIngredients, CraftIngredientPlanMath.extractPlanIngredientSpecs(scr));
                 if (scr instanceof ShapedRecipe shaped) {
@@ -3841,6 +3858,9 @@ public final class GenericCraftPacket {
                 RSIntegrationMod.LOGGER.debug(sb.toString());
             }
         }
+
+        steps = CraftPreviewSteps.linkSlashBladeInputs(steps,
+                id -> CraftRecipeResolver.resolve(player.serverLevel(), id), player.serverLevel().registryAccess());
 
         // Compute material availability for ALL items in the plan.
         // neededCounts: displayItem → how many needed (negative if produced > consumed)

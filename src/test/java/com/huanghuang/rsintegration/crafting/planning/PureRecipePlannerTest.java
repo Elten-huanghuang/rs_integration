@@ -1518,6 +1518,67 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertEquals(6, result.missing().get(0).count());
     }
 
+    @Test
+    void candidateCoverageIsRecomputedAfterEarlierRecipeConsumesItsSeed() {
+        MaterialRef rawA = material("score_raw_a");
+        MaterialRef rawB = material("score_raw_b");
+        MaterialRef intermediate = material("score_intermediate");
+        MaterialRef first = material("score_first");
+        MaterialRef second = material("score_second");
+        List<RecipeNode> producers = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            producers.add(recipe("a_seed_" + i, intermediate, 1, ingredient(rawA, 1)));
+            producers.add(recipe("b_seed_" + i, intermediate, 1, ingredient(rawB, 1)));
+        }
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                intermediate, producers,
+                first, List.of(recipe("make_first", first, 1, ingredient(intermediate, 1))),
+                second, List.of(recipe("make_second", second, 1, ingredient(intermediate, 1)))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(rawA, 1, rawB, 1), List.of(ingredient(first, 1), ingredient(second, 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(id("a_seed_0"), id("make_first"), id("b_seed_0"), id("make_second")),
+                result.steps().stream().map(PureRecipePlanner.PlannedStep::recipeId).toList());
+        assertTrue(result.remaining().isEmpty());
+    }
+
+    @Test
+    void overlappingNbtAlternativesDoNotCountTheSameStockTwiceForCatalysts() {
+        MaterialRef red = new MaterialRef(id("same_tool"), "{color:1}");
+        MaterialRef blue = new MaterialRef(id("same_tool"), "{color:2}");
+        IngredientRef tool = new IngredientRef(List.of(red, blue), 2,
+                NbtMatchMode.ANY, DemandRole.CATALYST);
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of()),
+                Map.of(red, 1), List.of(tool), 20);
+
+        assertFalse(result.feasible());
+        assertEquals(Map.of(red, 1L), result.remaining());
+    }
+
+    @Test
+    void laterDemandSeesNbtVariantProducedAfterInitialStockMatching() {
+        MaterialRef oldTool = new MaterialRef(id("evolving_tool"), "{version:1}");
+        MaterialRef newTool = new MaterialRef(id("evolving_tool"), "{version:2}");
+        MaterialRef raw = material("new_tool_seed");
+        MaterialRef first = material("tool_first_result");
+        IngredientRef anyTool = new IngredientRef(List.of(oldTool, newTool), 1, NbtMatchMode.ANY);
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                first, List.of(recipe("use_old_tool", first, 1, anyTool)),
+                newTool, List.of(recipe("produce_new_tools", newTool, 2, ingredient(raw, 1)))));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
+                Map.of(oldTool, 1, raw, 1),
+                List.of(ingredient(first, 1), ingredient(newTool, 1), anyTool), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(id("use_old_tool"), id("produce_new_tools")),
+                result.steps().stream().map(PureRecipePlanner.PlannedStep::recipeId).toList());
+        assertTrue(result.remaining().isEmpty());
+    }
+
     private static RecipeNode recipe(String id, MaterialRef output, int count, IngredientRef... inputs) {
         return new RecipeNode(id(id), output, count, List.of(inputs));
     }

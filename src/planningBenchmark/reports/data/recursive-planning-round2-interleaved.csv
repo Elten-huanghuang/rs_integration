@@ -1,0 +1,7 @@
+scenario,size,version,samples,median_ms,allocated_mib_per_op
+chain64_interleaved,100,before,31,1.883300,3.678543
+chain64_interleaved,100,after,31,1.341800,1.689808
+chain64_interleaved,1000,before,31,2.094200,3.967052
+chain64_interleaved,1000,after,31,1.421600,1.977311
+chain64_interleaved,10000,before,31,3.840800,6.874321
+chain64_interleaved,10000,after,31,3.362100,4.885750

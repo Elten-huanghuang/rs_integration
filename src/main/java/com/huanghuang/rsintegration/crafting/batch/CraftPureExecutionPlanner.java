@@ -15,6 +15,8 @@ import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator.StalePlanningResultException;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
@@ -125,16 +127,11 @@ final class CraftPureExecutionPlanner {
         }
         if (inputs.isEmpty()) return false;
 
-        Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected =
-                new HashMap<>();
-        baseGraph.recipesByOutput().forEach((key, value) ->
-                projected.put(key, new ArrayList<>(value)));
-        ImmutableRecipeGraph.MaterialRef outputRef = ImmutableRecipeGraphProjector.material(
+        MaterialRef outputRef = ImmutableRecipeGraphProjector.material(
                 recipeOutput, recipeOutput.hasTag());
-        ImmutableRecipeGraph.RecipeNode syntheticRoot = new ImmutableRecipeGraph.RecipeNode(
+        RecipeNode syntheticRoot = new RecipeNode(
                 recipeId, outputRef, Math.max(1, recipeOutput.getCount()), inputs);
-        projected.computeIfAbsent(outputRef, ignored -> new ArrayList<>()).add(syntheticRoot);
-        ImmutableRecipeGraph planningGraph = new ImmutableRecipeGraph(projected);
+        ImmutableRecipeGraph planningGraph = withPlanningRoot(baseGraph, syntheticRoot);
 
         submit(
                 player, recipeId, forcedRecipes, dimension, position, repeatCount, inferMode,
@@ -145,6 +142,17 @@ final class CraftPureExecutionPlanner {
                         recipeId, terminalType, inferMode, repeatCount),
                 "physical");
         return true;
+    }
+
+    static ImmutableRecipeGraph withPlanningRoot(ImmutableRecipeGraph baseGraph, RecipeNode root) {
+        // 依赖桶已经不可变，只复制新增根节点所在的桶。
+        Map<MaterialRef, List<RecipeNode>> projected = new HashMap<>();
+        baseGraph.recipesByOutput().forEach(projected::put);
+        List<RecipeNode> candidates = new ArrayList<>(
+                projected.getOrDefault(root.output(), List.of()));
+        candidates.add(root);
+        projected.put(root.output(), candidates);
+        return new ImmutableRecipeGraph(projected);
     }
 
     private static void submit(

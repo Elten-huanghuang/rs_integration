@@ -22,6 +22,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
@@ -263,6 +264,10 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+        if (SlashBladeRecipeHandler.isShapedBladeRecipe(recipe)) {
+            specs = SlashBladeRecipeHandler.requireOutput(recipe, specs,
+                    player.serverLevel().registryAccess(), targetOutput);
+        }
         if (recipe instanceof SmithingTransformRecipe smithing) {
             specs = SmithingRecipeHandler.requireDemandedOutputTag(smithing, specs, targetOutput);
         }

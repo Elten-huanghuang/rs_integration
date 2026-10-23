@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
+
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -121,6 +123,7 @@ final class FlatCraftExecutor {
 
             if (recipe instanceof CraftingRecipe craftingRecipe) {
                 List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
+                specs = SlashBladeRecipeHandler.requireOutput(recipe, specs, registryAccess, step.syntheticOutput());
                 specs = MaterialLocks.narrowSpecs(stepId, specs, context.materialLocks());
                 ItemStack terminalOutput = terminalOutputFor(stepId, craftingRecipe, registryAccess, context);
                 if (!terminalOutput.isEmpty()

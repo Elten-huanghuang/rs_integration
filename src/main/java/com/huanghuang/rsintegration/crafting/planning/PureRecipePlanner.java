@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +38,7 @@ public final class PureRecipePlanner {
     private static final int MAX_DIAGNOSTIC_OPERATIONS = 32_768;
     private static final int REACHABILITY_PRECHECK_MIN_CANDIDATES = 5;
     private static final int MAX_LOCAL_SEED_PROBE_NODES = 64;
+    private static final int MAX_MATCHING_ITEM_INDEX_UNITS = 8_192;
 
     private PureRecipePlanner() {}
 
@@ -324,13 +326,15 @@ public final class PureRecipePlanner {
             ancestorInputs = List.copyOf(ancestorInputs);
         }
     }
-    private record FailureKey(List<Task> pending, Map<MaterialRef, Long> stock,
+    private record FailureKey(List<Task> pending, Map<MaterialRef, Long> stockChanges,
                               Set<MaterialRef> resolving, int stepCount) {}
 
     private static final class Search {
         private final ImmutableRecipeGraph graph;
         private final Map<MaterialRef, Long> initialStock;
         private final Map<MaterialRef, Long> stock = new HashMap<>();
+        // 初始库存对一次搜索固定；失败键只需记录变化，零表示已耗尽的初始材料。
+        private final Map<MaterialRef, Long> stockChanges = new HashMap<>();
         private final int maxSteps;
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
@@ -340,6 +344,10 @@ public final class PureRecipePlanner {
         private final PlanningPreferences preferences;
         private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
+        // 只缓存静态物品分类；库存数量和新产生的 NBT 变体仍实时读取。
+        private final Map<List<MaterialRef>, List<ResourceLocation>> matchingItemIndexes =
+                new IdentityHashMap<>();
+        private int matchingItemIndexUnits;
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> resolving = new HashSet<>();
         private final Set<FailureKey> failedStates = new HashSet<>();
@@ -415,9 +423,10 @@ public final class PureRecipePlanner {
             if (++expandedStates > maxSearchStates) throw new SearchLimitException();
             if (pending.isEmpty()) return true;
 
-            FailureKey key = new FailureKey(List.copyOf(pending), Map.copyOf(stock),
-                    Set.copyOf(resolving), steps.size());
-            if (failedStates.contains(key)) {
+            FailureKey key = maxMemoizedFailures == 0 ? null
+                    : new FailureKey(List.copyOf(pending), Map.copyOf(stockChanges),
+                            Set.copyOf(resolving), steps.size());
+            if (key != null && failedStates.contains(key)) {
                 memoHits++;
                 return false;
             }
@@ -427,7 +436,9 @@ public final class PureRecipePlanner {
             boolean solved = current instanceof DemandTask demand
                     ? solveDemand(demand.ingredient(), rest, pending)
                     : completeRecipe((CompleteRecipeTask) current, rest);
-            if (!solved && failedStates.size() < maxMemoizedFailures) failedStates.add(key);
+            if (!solved && key != null && failedStates.size() < maxMemoizedFailures) {
+                failedStates.add(key);
+            }
             return solved;
         }
 
@@ -559,7 +570,8 @@ public final class PureRecipePlanner {
             List<PlannedStep> partial = new ArrayList<>(steps);
             for (Task task : pending) {
                 if (task instanceof CompleteRecipeTask completion) {
-                    partial.add(new PlannedStep(completion.recipeId(), completion.batches()));
+                    partial.add(new PlannedStep(completion.recipeId(), completion.batches(),
+                            completion.output().constrainedNbt() ? completion.output() : null));
                 }
             }
             if (depth < bestFailureDepth
@@ -692,7 +704,8 @@ public final class PureRecipePlanner {
             resolving.remove(completed.resolvingMaterial());
             setStock(completed.output(), afterProduction - completed.consumeCount());
             RecipeNode source = graph.recipesById().get(completed.recipeId());
-            MaterialRef demanded = source != null && "smithing".equals(source.modTypeId())
+            MaterialRef demanded = source != null && ("smithing".equals(source.modTypeId())
+                    || completed.output().constrainedNbt())
                     && !completed.output().nbt().isEmpty() ? completed.output() : null;
             steps.add(new PlannedStep(completed.recipeId(), completed.batches(), demanded));
             if (solve(rest)) return true;
@@ -828,26 +841,56 @@ public final class PureRecipePlanner {
                         .forEach(ordered::add);
             }
             if (ordered.size() < 2) return ordered;
-            Comparator<RecipeNode> coverage = Comparator
-                    .comparingDouble(this::inputStockCoverage).reversed();
-            Comparator<RecipeNode> dependencyCost = Comparator
-                    .comparingInt((RecipeNode candidate) -> dependencyDepth(candidate,
-                            new HashSet<>()))
-                    .thenComparing(Comparator.comparingInt(RecipeNode::outputCount).reversed());
-            Comparator<RecipeNode> structuralCost = Comparator
-                    .comparingInt(this::distinctInputGroups)
-                    .thenComparingInt(this::inputAlternativeCount);
-            // Avoid making the sort itself perform a reachability walk for every recipe of a
-            // broad tag. Those candidates are checked lazily after the family-gain guard.
-            ordered.sort(useReachability
-                    ? coverage.thenComparingInt(reachability()::depth)
+            List<CandidateScore> scores = new ArrayList<>(ordered.size());
+            for (RecipeNode candidate : ordered) scores.add(new CandidateScore(candidate));
+            Comparator<CandidateScore> coverage = Comparator
+                    .comparingDouble((CandidateScore score) -> score.coverage).reversed();
+            Comparator<CandidateScore> dependencyCost = Comparator
+                    .comparingInt(CandidateScore::dependencyCost)
+                    .thenComparing(Comparator.comparingInt(
+                            (CandidateScore score) -> score.candidate.outputCount()).reversed());
+            Comparator<CandidateScore> structuralCost = Comparator
+                    .comparingInt((CandidateScore score) -> distinctInputGroups(score.candidate))
+                    .thenComparingInt(CandidateScore::alternativeCount);
+            // 评分仅在此次排序内复用；昂贵的依赖评分仍按需执行，不提前扩大遍历范围。
+            scores.sort(useReachability
+                    ? coverage.thenComparingInt(score -> reachability().depth(score.candidate))
                             .thenComparing(dependencyCost)
                             .thenComparing(structuralCost)
-                            .thenComparing(candidate -> candidate.recipeId().toString())
+                            .thenComparing(CandidateScore::recipeId)
                     : coverage.thenComparing(dependencyCost)
                             .thenComparing(structuralCost)
-                            .thenComparing(candidate -> candidate.recipeId().toString()));
+                            .thenComparing(CandidateScore::recipeId));
+            for (int i = 0; i < scores.size(); i++) ordered.set(i, scores.get(i).candidate);
             return preferForcedCandidate(wanted, ordered);
+        }
+
+        private final class CandidateScore {
+            private final RecipeNode candidate;
+            private final double coverage;
+            private int dependencyCost = -1;
+            private int alternativeCount = -1;
+            private String recipeId;
+
+            private CandidateScore(RecipeNode candidate) {
+                this.candidate = candidate;
+                coverage = inputStockCoverage(candidate);
+            }
+
+            private int dependencyCost() {
+                if (dependencyCost < 0) dependencyCost = dependencyDepth(candidate, new HashSet<>());
+                return dependencyCost;
+            }
+
+            private int alternativeCount() {
+                if (alternativeCount < 0) alternativeCount = inputAlternativeCount(candidate);
+                return alternativeCount;
+            }
+
+            private String recipeId() {
+                if (recipeId == null) recipeId = candidate.recipeId().toString();
+                return recipeId;
+            }
         }
 
         /**
@@ -857,6 +900,7 @@ public final class PureRecipePlanner {
          * method can never reject a recipe or change feasibility.
          */
         private int dependencyDepth(RecipeNode candidate, Set<MaterialRef> visiting) {
+            checkBudget();
             int best = Integer.MAX_VALUE / 4;
             for (IngredientRef input : normalizedInputs(candidate)) {
                 if (input.role() == DemandRole.CATALYST) continue;
@@ -875,7 +919,8 @@ public final class PureRecipePlanner {
             if (cached != null) return cached;
             if (stockAcross(new IngredientRef(List.of(material), 1, NbtMatchMode.ANY,
                     DemandRole.CONSUMED)) > 0) return 0;
-            if (material.runtimeNbt() || !visiting.add(material)
+            if (material.runtimeNbt() || visiting.size() >= MAX_SEARCH_CALL_DEPTH
+                    || !visiting.add(material)
                     || !producerDepthVisiting.add(material)) {
                 return Integer.MAX_VALUE / 4;
             }
@@ -1056,18 +1101,49 @@ public final class PureRecipePlanner {
         }
 
         private long stockAcross(IngredientRef ingredient) {
+            if (ingredient.alternatives().size() == 1) {
+                return stockAcrossItem(ingredient, ingredient.alternatives().get(0).itemId());
+            }
             long total = 0L;
-            for (MaterialRef material : matchingStock(ingredient).toList()) {
-                total = saturatedAdd(total, stock.getOrDefault(material, 0L));
+            for (ResourceLocation itemId : matchingItemIds(ingredient)) {
+                total = saturatedAdd(total, stockAcrossItem(ingredient, itemId));
             }
             return total;
         }
 
+        private long stockAcrossItem(IngredientRef ingredient, ResourceLocation itemId) {
+            long total = 0L;
+            for (MaterialRef material : stockByItem.getOrDefault(itemId, List.of())) {
+                long count = stock.getOrDefault(material, 0L);
+                if (count <= 0L) continue;
+                checkBudget();
+                if (matchesIngredient(material, ingredient)) total = saturatedAdd(total, count);
+            }
+            return total;
+        }
+
+        private List<ResourceLocation> matchingItemIds(IngredientRef ingredient) {
+            List<MaterialRef> alternatives = ingredient.alternatives();
+            if (alternatives.size() == 1) return List.of(alternatives.get(0).itemId());
+            List<ResourceLocation> cached = matchingItemIndexes.get(alternatives);
+            if (cached != null) return cached;
+            Set<ResourceLocation> unique = new LinkedHashSet<>();
+            for (MaterialRef alternative : alternatives) {
+                checkBudget();
+                unique.add(alternative.itemId());
+            }
+            List<ResourceLocation> itemIds = List.copyOf(unique);
+            long units = 1L + alternatives.size() + itemIds.size();
+            if (units <= MAX_MATCHING_ITEM_INDEX_UNITS - matchingItemIndexUnits) {
+                matchingItemIndexes.put(alternatives, itemIds);
+                matchingItemIndexUnits += (int) units;
+            }
+            return itemIds;
+        }
+
         /** Restricts NBT matching to inventory variants with a compatible item id. */
         private Stream<MaterialRef> matchingStock(IngredientRef ingredient) {
-            return ingredient.alternatives().stream()
-                    .map(MaterialRef::itemId)
-                    .distinct()
+            return matchingItemIds(ingredient).stream()
                     .flatMap(itemId -> stockByItem.getOrDefault(itemId, List.of()).stream())
                     .filter(material -> stock.getOrDefault(material, 0L) > 0L)
                     .filter(material -> {
@@ -1213,6 +1289,14 @@ public final class PureRecipePlanner {
         }
 
         private void setStock(MaterialRef material, long count) {
+            long normalized = Math.max(0L, count);
+            if (maxMemoizedFailures > 0) {
+                if (normalized == initialStock.getOrDefault(material, 0L)) {
+                    stockChanges.remove(material);
+                } else {
+                    stockChanges.put(material, normalized);
+                }
+            }
             if (count <= 0L) {
                 stock.remove(material);
             } else {
@@ -1313,7 +1397,8 @@ public final class PureRecipePlanner {
                     visiting.remove(choice.output());
                 }
                 steps.add(new PlannedStep(recipe.recipeId(), batches,
-                        "smithing".equals(recipe.modTypeId()) && !recipe.output().nbt().isEmpty()
+                        ("smithing".equals(recipe.modTypeId()) || recipe.output().constrainedNbt())
+                                && !recipe.output().nbt().isEmpty()
                                 ? recipe.output() : null));
                 long surplus = recipe.outputCount() * batches
                         - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);

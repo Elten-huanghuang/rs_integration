@@ -353,6 +353,10 @@ final class ResolutionContext {
         return activeForcedRecipes.contains(recipeId);
     }
 
+    boolean diagnosticsEnabled() {
+        return diagLog != null;
+    }
+
     void diag(String msg) {
         if (diagLog != null) diagLog.add(msg);
     }

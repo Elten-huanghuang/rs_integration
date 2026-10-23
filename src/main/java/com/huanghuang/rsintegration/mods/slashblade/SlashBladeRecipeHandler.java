@@ -68,8 +68,34 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
             "mods.flammpfeil.slashblade.recipe.SlashBladeIngredient";
     private static final String SB_INGREDIENT_TYPE = "slashblade:blade";
 
+    public static boolean isShapedBladeRecipe(Recipe<?> recipe) {
+        for (Class<?> type = recipe.getClass(); type != null; type = type.getSuperclass()) {
+            if ("mods.flammpfeil.slashblade.recipe.SlashBladeShapedRecipe".equals(type.getName())) return true;
+        }
+        return false;
+    }
+
+    /** 只供规划和展示使用；真正合成仍由原配方 assemble 执行。 */
+    public static ItemStack planningOutput(Recipe<?> recipe, ItemStack declared) {
+        return planningOutput(recipe, declared, Ingredient.EMPTY);
+    }
+
+    public static ItemStack planningOutput(Recipe<?> recipe, ItemStack declared, Ingredient demand) {
+        if (!isShapedBladeRecipe(recipe)) return declared;
+        List<IngredientSpec> specs = new SlashBladeRecipeHandler().getIngredients(recipe);
+        ItemStack minimum = specs == null ? null : SlashBladePlanning.outputForDemand(declared, specs, demand);
+        return minimum == null ? declared : minimum;
+    }
+
+    public static List<IngredientSpec> requireOutput(Recipe<?> recipe, List<IngredientSpec> specs,
+                                                    RegistryAccess access, @Nullable ItemStack wanted) {
+        return !isShapedBladeRecipe(recipe) ? specs : SlashBladePlanning.requireOutput(
+                specs, recipe.getResultItem(access), wanted);
+    }
+
     /** Check by implementation class first, then by the stable Forge serializer id. */
     public static boolean isSlashBladeIngredient(Ingredient ingredient) {
+        if (ingredient == null || ingredient.getClass() == Ingredient.class) return false;
         if (ingredient.getClass().getName().equals(SB_INGREDIENT_CLASS)) return true;
         try {
             JsonElement json = ingredient.toJson();
@@ -97,11 +123,13 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
 
         List<String> parts = new ArrayList<>();
 
-        // name (ResourceLocation) — "slashblade:none" means any blade name is accepted
+        // name (ResourceLocation) — "slashblade:none" 要求无名刀。
         if (req.has("name")) {
             String name = req.get("name").getAsString();
-            if (!name.endsWith(":none")) {
+            if (!"slashblade:none".equals(name)) {
                 parts.add("刀名: " + name);
+            } else {
+                parts.add("无名刀");
             }
         }
 
@@ -164,19 +192,21 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
      */
     public static boolean matchesMaterialKey(Ingredient ingredient, MaterialKey key) {
         if (!isSlashBladeIngredient(ingredient)) return false;
-        String tag = key.tag();
-        if (tag == null || tag.isEmpty()) {
-            // Some storage providers expose the blade item but not its capability-backed
-            // state. Preserve the resolver's historical item-only fallback in every graph
-            // validation path instead of accepting it only during inventory scanning.
-            for (ItemStack template : ingredient.getItems()) {
-                if (!template.isEmpty() && template.getItem() == key.item()) return true;
+        boolean sameItem = false;
+        for (ItemStack template : ingredient.getItems()) {
+            if (!template.isEmpty() && template.getItem() == key.item()) {
+                sameItem = true;
+                break;
             }
-            return false;
         }
+        if (!sameItem) return false;
+        String tag = key.tag();
+        if (tag == null || tag.isEmpty()) return false;
 
         try {
             CompoundTag fullTag = TagParser.parseTag(tag);
+            CompoundTag requirement = SlashBladePlanning.requirement(ingredient);
+            if (requirement != null) return SlashBladePlanning.matches(requirement, fullTag);
             if (!fullTag.contains("bladeState")) return false;
             CompoundTag blade = fullTag.getCompound("bladeState");
 
@@ -188,13 +218,17 @@ public final class SlashBladeRecipeHandler extends AbstractRecipeHandler {
 
             if (req.has("name")) {
                 String nameStr = req.get("name").getAsString();
-                if (!nameStr.endsWith(":none")) {
+                if (!"slashblade:none".equals(nameStr)) {
                     String actual = blade.getString("translationKey");
                     // RequestDefinition.getTranslationKey() = Util.makeDescriptionId("item", name)
                     String required = Util.makeDescriptionId("item", new ResourceLocation(nameStr));
                     if (!required.equals(actual)) return false;
+                } else if (!blade.getString("translationKey").isBlank()) {
+                    return false;
                 }
             }
+            // 无法仅凭序列化 NBT 证明刀类型时交回原生 predicate，不能忽略条件。
+            if (req.has("sword_type") && !req.getAsJsonArray("sword_type").isEmpty()) return false;
 
             if (req.has("proud_soul") && req.get("proud_soul").getAsInt() > 0) {
                 if (blade.getInt("proudSoul") < req.get("proud_soul").getAsInt()) return false;

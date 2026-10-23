@@ -31,23 +31,33 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
         return indexed;
     }
 
-    /** Runtime NBT is unknown, not a promise that the produced stack is tagless. */
-    public record MaterialRef(ResourceLocation itemId, String nbt, boolean runtimeNbt) {
+    /** runtimeNbt 表示未知；constrainedNbt 仅保证已建模的状态下限，不能用作精确 NBT。 */
+    public record MaterialRef(ResourceLocation itemId, String nbt, boolean runtimeNbt,
+                              boolean constrainedNbt) {
         public MaterialRef(ResourceLocation itemId, String nbt) {
-            this(itemId, nbt, false);
+            this(itemId, nbt, false, false);
+        }
+
+        public MaterialRef(ResourceLocation itemId, String nbt, boolean runtimeNbt) {
+            this(itemId, nbt, runtimeNbt, false);
         }
 
         public MaterialRef {
             if (itemId == null) throw new IllegalArgumentException("itemId");
             nbt = nbt == null ? "" : nbt;
             if (runtimeNbt && !nbt.isEmpty()) throw new IllegalArgumentException("unknown output NBT");
+            if (constrainedNbt && (runtimeNbt || nbt.isEmpty())) {
+                throw new IllegalArgumentException("missing constrained output NBT");
+            }
         }
     }
 
     public enum NbtMatchMode {
         ANY,
         EXACT,
-        PARTIAL
+        PARTIAL,
+        /** 刀名相同且杀敌数、魂、精炼达到下限。 */
+        SLASHBLADE
     }
 
     public record IngredientRef(List<MaterialRef> alternatives, long count,

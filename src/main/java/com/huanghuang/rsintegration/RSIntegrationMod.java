@@ -228,6 +228,11 @@ public final class RSIntegrationMod {
         }
     }
 
+    /** 在热路径构造诊断参数前检查开关，避免无效字符串和展示物品计算。 */
+    public static boolean isDebugLoggingEnabled() {
+        return verboseLogging && LOGGER.isDebugEnabled();
+    }
+
     public static final IEventBus MOD_BUS =
             FMLJavaModLoadingContext.get().getModEventBus();
 

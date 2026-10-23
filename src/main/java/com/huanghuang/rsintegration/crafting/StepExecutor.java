@@ -23,6 +23,8 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
+import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -96,6 +98,7 @@ final class StepExecutor {
         }
 
         ItemStack result = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
+        result = SlashBladeRecipeHandler.planningOutput(recipe, result);
         registerGraphOutput(result, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
 
         for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, ctx.level.registryAccess())) {
@@ -188,6 +191,13 @@ final class StepExecutor {
                     smithing, specs, demandedOutput);
         }
 
+        ItemStack plannedBladeOutput = null;
+        if (SlashBladeRecipeHandler.isShapedBladeRecipe(entry.recipe()) && specs != null) {
+            ItemStack declared = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+            specs = SlashBladePlanning.requireOutput(specs, declared, demandedOutput);
+            plannedBladeOutput = SlashBladePlanning.minimumOutput(declared, specs);
+        }
+
         specs = narrowMaterialLocks(entry.recipe().getId(), specs, ctx);
 
         if (specs == null || specs.isEmpty()) {
@@ -228,6 +238,7 @@ final class StepExecutor {
         }
         // Preserve exact hidden outputs, but leave runtime-derived NBT open.
         result = CraftingResolver.resolveDeclaredOutput(entry.recipe(), result);
+        if (plannedBladeOutput != null) result = plannedBladeOutput;
         // Smithing recipes copy the base item's NBT at assemble-time. The
         // static result is tagless, so restore the exact demanded variant for
         // graph accounting and for strict-NBT downstream inputs.
@@ -257,7 +268,7 @@ final class StepExecutor {
         // batches already represents the physical executions needed for the
         // complete resolver demand; callers must not apply repeatCount again.
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(entry.recipe().getId(), entry.modType(),
-                entry.recipeTypeId(), altIds, altModTypes, false, batches, null, null,
+                entry.recipeTypeId(), altIds, altModTypes, false, batches, null, plannedBladeOutput,
                 targeted ? ProductionTarget.of(plannedPrimary, mulCount(plannedPrimary.getCount(), batches)) : null);
         ctx.steps.add(step);
         ctx.addGraphNode(toGraphNode(graphNodeId, step, graphInputs, graphOutputs));
@@ -306,14 +317,23 @@ final class StepExecutor {
                 .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0)
                 .thenComparingInt(i -> ingredientBreadthClass(physicalSpecs.get(i).ingredient())));
         var handler = ModRecipeHandlers.handlerFor(recipe);
+        boolean bladeCrafting = SlashBladeRecipeHandler.isShapedBladeRecipe(recipe);
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
             int quantity = handler != null
                     ? handler.requiredIngredientCount(recipe, spec, originalIndex, batches)
                     : CraftPacketUtils.requiredCount(spec, batches);
             InputPortId port = new InputPortId(nodeId, originalIndex);
-            Ingredient plannedIngredient = ensureSingleVariantMachineInput(
-                    spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
+            // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
+            Ingredient plannedIngredient;
+            if (bladeCrafting) {
+                boolean resolved = CraftingResolver.ensureIngredient(spec.ingredient(), quantity, ctx,
+                        depth + 1, edges, port, null);
+                plannedIngredient = resolved ? spec.ingredient() : null;
+            } else {
+                plannedIngredient = ensureSingleVariantMachineInput(
+                        spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
+            }
             if (plannedIngredient == null) {
                 return null;
             }
