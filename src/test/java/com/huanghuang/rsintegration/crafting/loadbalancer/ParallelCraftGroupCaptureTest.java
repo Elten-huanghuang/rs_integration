@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.ExpectedProduction;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
@@ -12,6 +13,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ParallelCraftGroupCaptureTest extends BootstrapTest {
     @Test
@@ -60,5 +63,31 @@ class ParallelCraftGroupCaptureTest extends BootstrapTest {
                 expectedBatch, 128, List.of(new ItemStack(Items.DIAMOND, 6))));
         assertEquals(0, ParallelCraftGroup.completedExecutionsFromCapture(
                 expectedBatch, 128, List.of(new ItemStack(Items.EMERALD, 6))));
+    }
+
+    @Test
+    void cancellationUsesBatchProductionToCountMultiItemRecipeExecutions() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND, 2));
+        when(delegate.getExpectedProduction()).thenReturn(
+                new ExpectedProduction(new ItemStack(Items.DIAMOND), 6));
+
+        assertEquals(1, ParallelCraftGroup.completedExecutionsFromCapture(
+                delegate, 3, List.of(new ItemStack(Items.DIAMOND, 2))));
+        assertEquals(2, ParallelCraftGroup.completedExecutionsFromCapture(
+                delegate, 3, List.of(new ItemStack(Items.DIAMOND, 4))));
+        assertEquals(3, ParallelCraftGroup.completedExecutionsFromCapture(
+                delegate, 3, List.of(new ItemStack(Items.DIAMOND, 6))));
+    }
+
+    @Test
+    void legacyBatchCancellationKeepsItsAggregateOutputCount() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND, 6));
+
+        assertEquals(1, ParallelCraftGroup.completedExecutionsFromCapture(
+                delegate, 3, List.of(new ItemStack(Items.DIAMOND, 2))));
+        assertEquals(0, ParallelCraftGroup.completedExecutionsFromCapture(
+                delegate, 3, List.of(new ItemStack(Items.EMERALD, 6))));
     }
 }

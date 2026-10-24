@@ -165,6 +165,7 @@ public final class AsyncCraftChain {
     private int waitTicks;
     private int drainingTicks;
     private int flatObservedCompletedOperations;
+    private long flatObservedCapturedCount;
     private int stepRemaining;
     private final Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> probabilityTargets = new IdentityHashMap<>();
     private Map<ResourceLocation, ResourceLocation> supplementalForcedRecipes = Map.of();
@@ -700,21 +701,15 @@ public final class AsyncCraftChain {
                                     "rsi.async.abort.machine_craft_failed", observation.detail()));
                     return true;
                 }
-                // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
-                // Treat a matching captured output as completion so it settles into the RS inventory.
-                // A world capture is only a completion signal when the whole
-                // operation's production has arrived. getExpectedOutput()
-                // describes one spawned stack and is insufficient for buffered
-                // furnace batches (6 operations must not finish at 1).
-                IBatchDelegate.ExpectedProduction expectedCapturedProduction =
-                        currentDelegate.getExpectedProduction();
-                ItemStack expectedCapturedOutput = expectedCapturedProduction == null
-                        ? currentDelegate.getExpectedOutput() : expectedCapturedProduction.item();
-                int expectedCapturedCount = expectedCapturedProduction == null
-                        ? (expectedCapturedOutput == null ? 0 : expectedCapturedOutput.getCount())
-                        : expectedCapturedProduction.count();
+                List<ItemStack> capturedSnapshot = capturedOutputSnapshot();
+                long capturedCount = capturedSnapshot.stream().mapToLong(ItemStack::getCount).sum();
+                if (capturedCount > flatObservedCapturedCount) {
+                    flatObservedCapturedCount = capturedCount;
+                    waitTicks = 0;
+                }
+                // 捕获会取消原生掉落实体，只有整批产物到齐才能代替机器完成信号。
                 boolean capturedWorldOutput = capturedOutput
-                        && hasCapturedExpectedCount(expectedCapturedOutput, expectedCapturedCount);
+                        && OutputAccounting.hasCapturedExpectedProduction(currentDelegate, capturedSnapshot);
                 if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                     if (!currentDelegate.validateExecutionContext(online)) {
                         abort("Execution context changed before output publication",
@@ -809,6 +804,7 @@ public final class AsyncCraftChain {
                     currentDelegate = null;
                     waitTicks = 0;
                     flatObservedCompletedOperations = 0;
+                    flatObservedCapturedCount = 0;
                     ledger.reset();
                     stepRemaining = probability == null
                             ? remainingAfterFlatBatch(stepRemaining, machineCount)
@@ -905,6 +901,7 @@ public final class AsyncCraftChain {
             }
             currentDelegate = startModStep(step, online);
             flatObservedCompletedOperations = 0;
+            flatObservedCapturedCount = 0;
             if (currentDelegate == null) {
                 if (waitingForMachineLease) {
                     machineLeaseWaitTicks++;
@@ -4413,19 +4410,6 @@ public final class AsyncCraftChain {
         return List.copyOf(captured);
     }
 
-    private boolean hasCapturedExpectedCount(ItemStack expected) {
-        return hasCapturedExpectedCount(expected, expected == null ? 0 : expected.getCount());
-    }
-
-    private boolean hasCapturedExpectedCount(ItemStack expected, int expectedCount) {
-        if (expected == null || expected.isEmpty() || expectedCount <= 0) return false;
-        int captured = capturedOutputSnapshot().stream()
-                .filter(stack -> ItemStack.isSameItem(stack, expected))
-                .mapToInt(ItemStack::getCount)
-                .sum();
-        return captured >= expectedCount;
-    }
-
     private boolean acquireFlatOperationScope(IBatchDelegate delegate, BoundMachine machine,
                                               CraftingResolver.ResolutionStep step) {
         if (flatOperationSession != null) return false;
@@ -5051,9 +5035,8 @@ public final class AsyncCraftChain {
         } else if (currentDelegate != null) {
             try {
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(server.overworld());
-                // World-output capture cancels the spawned ItemEntity before the delegate can observe it.
-                // Treat a matching captured output as completion so it settles into the RS inventory.
-                boolean capturedWorldOutput = hasCapturedExpectedCount(currentDelegate.getExpectedOutput());
+                boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
+                        currentDelegate, capturedOutputSnapshot());
                 if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
                     collectCompletedDelegateForShutdown(resolvePlayer());
                 }

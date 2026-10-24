@@ -52,6 +52,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private int waitTicks;
     private int drainingTicks;
     private int observedCompletedOperations;
+    private long observedCapturedCount;
     /** Logical recipe executions owned by this physical delegate start. */
     private int logicalOperations = 1;
     private boolean progressObserved;
@@ -363,19 +364,21 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             List<ItemStack> capturedSnapshot = new ArrayList<>();
             if (operationSession != null) capturedSnapshot.addAll(operationSession.capturedSnapshot());
             if (capture != null) capturedSnapshot.addAll(capture.snapshot());
-            boolean captureHasOutput = (operationSession != null && operationSession.hasCaptured())
-                    || (capture != null && capture.hasCaptured());
-            ItemStack expectedOutput = delegate.getExpectedOutput();
-            boolean capturedExpectedOutput = containsExpectedOutput(
-                    capturedSnapshot, expectedOutput);
-            boolean capturedWorldOutput = capturedExpectedOutput
-                    && (outputs == null || outputs.canCompleteWith(capturedSnapshot));
+            long capturedCount = capturedSnapshot.stream().mapToLong(ItemStack::getCount).sum();
+            if (capturedCount > observedCapturedCount) {
+                observedCapturedCount = capturedCount;
+                waitTicks = 0;
+                progressObserved = true;
+            }
+            boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
+                    delegate, capturedSnapshot);
             boolean hasWorldCapture = capture != null
                     || (operationSession != null && operationSession.hasCaptureScope());
             boolean requiresWorldCapture = hasWorldCapture
                     && !delegate.canCollectResultWithoutWorldCapture();
-            if (shouldSucceed(observation.phase(), requiresWorldCapture,
-                    captureHasOutput, capturedWorldOutput)) {
+            // 先确认整批实物数量；声明的 NBT 和副产物在收集后统一校验。
+            if ((!requiresWorldCapture && observation.phase() == IBatchDelegate.CraftPhase.DONE)
+                    || capturedWorldOutput) {
                 if (!delegate.validateExecutionContext(player)) {
                     failureReason = "execution context changed before output publication";
                     return ConcurrentNodeExecutor.Observation.FAILED;
@@ -426,24 +429,6 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             if (resolved != null) return resolved;
         }
         return player.serverLevel();
-    }
-
-    static boolean containsExpectedOutput(List<ItemStack> captured, @Nullable ItemStack expected) {
-        if (expected == null || expected.isEmpty()) return false;
-        int count = 0;
-        for (ItemStack stack : captured) {
-            if (stack != null && !stack.isEmpty() && ItemStack.isSameItem(stack, expected)) {
-                count += stack.getCount();
-                if (count >= expected.getCount()) return true;
-            }
-        }
-        return false;
-    }
-
-    static boolean shouldSucceed(IBatchDelegate.CraftPhase phase, boolean requiresWorldCapture,
-                                 boolean captureHasOutput, boolean capturedWorldOutput) {
-        return (!requiresWorldCapture && phase == IBatchDelegate.CraftPhase.DONE)
-                || capturedWorldOutput || (requiresWorldCapture && captureHasOutput);
     }
 
     @Override

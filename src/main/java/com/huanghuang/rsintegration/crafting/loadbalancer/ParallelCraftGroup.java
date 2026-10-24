@@ -1005,13 +1005,20 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private void preserveCapturedProgress(WorkerSlot worker, List<ItemStack> captured) {
         if (captured.isEmpty() || worker.operationIds.isEmpty()) return;
-        ItemStack expectedBatch = worker.delegate.getExpectedOutput();
         int completed = completedExecutionsFromCapture(
-                expectedBatch, worker.operationIds.size(), captured);
+                worker.delegate, worker.operationIds.size(), captured);
         if (completed > 0) {
             settleReservations(worker.operationIds.subList(0, completed));
             settledResults.addAll(StackCopies.excludingEmpty(captured));
         }
+    }
+
+    static int completedExecutionsFromCapture(IBatchDelegate delegate, int batchSize,
+                                              List<ItemStack> captured) {
+        ExpectedProduction production = delegate.getExpectedProduction();
+        ItemStack expectedBatch = production == null ? delegate.getExpectedOutput()
+                : production.item().copyWithCount(production.count());
+        return completedExecutionsFromCapture(expectedBatch, batchSize, captured);
     }
 
     static int completedExecutionsFromCapture(ItemStack expectedBatch, int batchSize,
@@ -1322,7 +1329,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         // inputs must become eligible for virtual recovery. Keep operations
         // already proven by captured output settled to avoid duplicating them.
         int completed = completedExecutionsFromCapture(
-                worker.delegate.getExpectedOutput(), worker.operationIds.size(), captured);
+                worker.delegate, worker.operationIds.size(), captured);
         for (int index = completed; index < worker.operationIds.size(); index++) {
             safelyRecoverableVirtual[worker.operationIds.get(index)] = true;
         }

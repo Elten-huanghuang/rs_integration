@@ -12,8 +12,62 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class OutputAccountingTest extends BootstrapTest {
+
+    @Test
+    void capturedProductionWaitsForTheBatchInsteadOfTheSingleDropPrototype() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedOutput()).thenReturn(new ItemStack(Items.IRON_INGOT));
+        when(delegate.getExpectedProduction()).thenReturn(
+                new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), 6));
+
+        assertFalse(OutputAccounting.hasCapturedExpectedProduction(
+                delegate, List.of(new ItemStack(Items.IRON_INGOT))));
+        assertFalse(OutputAccounting.hasCapturedExpectedProduction(
+                delegate, List.of(new ItemStack(Items.IRON_INGOT, 5), new ItemStack(Items.GOLD_INGOT))));
+        assertTrue(OutputAccounting.hasCapturedExpectedProduction(
+                delegate, List.of(new ItemStack(Items.IRON_INGOT, 4), new ItemStack(Items.IRON_INGOT, 2))));
+    }
+
+    @Test
+    void legacyWorldOutputStillRequiresItsEntireDeclaredStack() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedOutput()).thenReturn(new ItemStack(Items.IRON_INGOT, 2));
+
+        assertFalse(OutputAccounting.hasCapturedExpectedProduction(
+                delegate, List.of(new ItemStack(Items.IRON_INGOT))));
+        assertTrue(OutputAccounting.hasCapturedExpectedProduction(
+                delegate, List.of(new ItemStack(Items.IRON_INGOT, 2))));
+        assertFalse(OutputAccounting.hasCapturedExpectedProduction(
+                mock(IBatchDelegate.class), List.of(new ItemStack(Items.IRON_INGOT))));
+    }
+
+    @Test
+    void capturedProductionKeepsRuntimeNbtForFinalSettlement() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedProduction()).thenReturn(
+                new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), 2));
+        ItemStack captured = new ItemStack(Items.IRON_INGOT, 2);
+        captured.getOrCreateTag().putString("runtime", "preserved");
+
+        assertTrue(OutputAccounting.hasCapturedExpectedProduction(delegate, List.of(captured)));
+        assertEquals(2, captured.getCount());
+        assertEquals("preserved", captured.getTag().getString("runtime"));
+    }
+
+    @Test
+    void capturedProductionCountDoesNotOverflowWhenCaptureExceedsTheTarget() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.getExpectedProduction()).thenReturn(
+                new IBatchDelegate.ExpectedProduction(new ItemStack(Items.IRON_INGOT), Integer.MAX_VALUE));
+
+        assertTrue(OutputAccounting.hasCapturedExpectedProduction(delegate, List.of(
+                new ItemStack(Items.IRON_INGOT, Integer.MAX_VALUE - 1),
+                new ItemStack(Items.IRON_INGOT, 2))));
+    }
 
     @Test
     void settlesPrimaryAndSecondaryPortsIndependently() {

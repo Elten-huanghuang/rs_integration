@@ -43,6 +43,27 @@ public final class OutputAccounting {
     }
 
     /**
+     * 捕获到首份产物不代表批次完成；整批数量由生产声明提供，
+     * 旧适配器则沿用世界产物栈的数量。实际 NBT 留给最终结算验证。
+     */
+    public static boolean hasCapturedExpectedProduction(
+            IBatchDelegate delegate, List<ItemStack> captured) {
+        IBatchDelegate.ExpectedProduction production = delegate.getExpectedProduction();
+        ItemStack expected = production == null ? delegate.getExpectedOutput() : production.item();
+        int required = production == null
+                ? (expected == null ? 0 : expected.getCount()) : production.count();
+        if (expected == null || expected.isEmpty() || required <= 0) return false;
+        long count = 0;
+        for (ItemStack stack : captured) {
+            if (stack != null && !stack.isEmpty() && ItemStack.isSameItem(stack, expected)) {
+                count += stack.getCount();
+                if (count >= required) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 合并世界捕获物与委托收集结果。部分委托在世界实体已被捕获后，
      * 仍会通过配方结果兜底返回同一份产物；这里仅扣除已捕获覆盖的数量，
      * 真实额外产物、不同物品和副产物均保留。

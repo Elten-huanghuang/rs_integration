@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -27,6 +28,8 @@ import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -38,6 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CraftProgressRuntimeTest extends BootstrapTest {
@@ -258,11 +263,97 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
-    void ownedCapturedOutputEndsWorldCaptureWaitEvenBeforeDeclarationProbeMatches() {
-        assertEquals(true, CraftNodeRuntime.shouldSucceed(
-                IBatchDelegate.CraftPhase.WORKING, true, true, false));
-        assertEquals(false, CraftNodeRuntime.shouldSucceed(
-                IBatchDelegate.CraftPhase.DONE, true, false, false));
+    void capturedBatchWithWrongNbtStillReachesOutputValidation() {
+        NodeId node = new NodeId(15);
+        StubDelegate delegate = bufferedDelegate(2, IBatchDelegate.CraftPhase.WORKING);
+        List<ItemStack> captured = new ArrayList<>();
+        CaptureSession capture = capture(captured);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:wrong-nbt", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        runtime.attachCapture(capture);
+        ItemStack declared = new ItemStack(Items.DIAMOND);
+        CompoundTag tag = new CompoundTag();
+        tag.putString("variant", "required");
+        declared.setTag(tag);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+                new OutputPortId(node, 0), MaterialKey.of(declared), 2, OutputKind.PRIMARY))));
+
+        captured.add(new ItemStack(Items.DIAMOND));
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        captured.add(new ItemStack(Items.DIAMOND));
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        assertFalse(runtime.outputsComplete());
+        assertTrue(runtime.outputShortageDetail().contains("missing=2"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "2, WORKING, true",
+            "3, WORKING, true",
+            "4, WORKING, true",
+            "6, DONE, true",
+            "3, WORKING, false"
+    })
+    void bufferedWorldCaptureWaitsForEveryOutputBeforeCleaningTheMachine(
+            int operations, IBatchDelegate.CraftPhase phase, boolean declaredOutputs) {
+        NodeId node = new NodeId(16);
+        StubDelegate delegate = bufferedDelegate(operations, phase);
+        List<ItemStack> captured = new ArrayList<>();
+        CaptureSession capture = capture(captured);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:buffered-capture", delegate, null, null);
+        runtime.setLogicalOperations(operations);
+        runtime.setChainContext(new ArrayList<>(), player);
+        runtime.attachCapture(capture);
+        if (declaredOutputs) {
+            runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+                    new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                    operations, OutputKind.PRIMARY))));
+        }
+
+        for (int count = 1; count < operations; count++) {
+            captured.add(new ItemStack(Items.DIAMOND));
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertEquals(0, runtime.completedOperations());
+            assertEquals(0, delegate.finishCleanups);
+            assertTrue(runtime.consumeProgressSignal());
+            assertEquals(0, runtime.waitTicks());
+            verify(capture, never()).drainAndClose();
+        }
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        assertFalse(runtime.consumeProgressSignal());
+        assertEquals(1, runtime.waitTicks());
+
+        captured.add(new ItemStack(Items.DIAMOND));
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertEquals(operations, runtime.completedOperations());
+        assertEquals(1, delegate.finishCleanups);
+        verify(capture).drainAndClose();
+        if (declaredOutputs) {
+            assertEquals(operations, runtime.drainIncrementalOutputs().stream()
+                    .mapToInt(publication -> publication.stack().getCount()).sum());
+            assertTrue(runtime.outputsComplete());
+            assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        }
+    }
+
+    private static StubDelegate bufferedDelegate(int operations, IBatchDelegate.CraftPhase phase) {
+        return new StubDelegate(phase, "") {
+            @Override
+            public ExpectedProduction getExpectedProduction() {
+                return new ExpectedProduction(new ItemStack(Items.DIAMOND), operations);
+            }
+        };
+    }
+
+    private static CaptureSession capture(List<ItemStack> captured) {
+        CaptureSession capture = mock(CaptureSession.class);
+        when(capture.hasCaptured()).thenAnswer(call -> !captured.isEmpty());
+        when(capture.snapshot()).thenAnswer(call -> List.copyOf(captured));
+        when(capture.drainAndClose()).thenAnswer(call -> List.copyOf(captured));
+        return capture;
     }
 
     @Test
@@ -311,6 +402,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         private final CraftPhase phase;
         private final String detail;
         private int failureCleanups;
+        private int finishCleanups;
         private ServerLevel observedLevel;
         private int observationCalls;
 
@@ -358,7 +450,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         }
 
         @Override
-        public void onBatchFinished(ServerPlayer player) { }
+        public void onBatchFinished(ServerPlayer player) {
+            finishCleanups++;
+        }
 
         @Override
         public BlockPos getMachinePos() {
