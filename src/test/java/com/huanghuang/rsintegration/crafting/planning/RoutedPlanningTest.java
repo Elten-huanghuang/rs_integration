@@ -103,6 +103,27 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
+    void routedPlanningUsesThePreparedForcedRecipeProjectionOnce() {
+        MaterialRef wood = new MaterialRef(new ResourceLocation("minecraft:oak_log"), "");
+        MaterialRef planks = new MaterialRef(new ResourceLocation("minecraft:oak_planks"), "");
+        RecipeNode cheap = new RecipeNode(id("cheap"), planks, 1,
+                List.of(new IngredientRef(List.of(wood), 1)));
+        RecipeNode forced = new RecipeNode(id("forced"), planks, 1,
+                List.of(new IngredientRef(List.of(wood), 1)));
+        var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1, id("forced"),
+                Map.of(new StackKey(Items.OAK_LOG, null), 1L),
+                Map.of(ForcedRecipeGraphProjector.preferenceKey(planks), id("forced")),
+                new ImmutableRecipeGraph(Map.of(planks, List.of(cheap, forced))),
+                "network", "binding", false);
+
+        var routed = compute(snapshot, routing(snapshot, Set.of(), 512), 1);
+
+        assertNotNull(routed.plan());
+        assertTrue(routed.plan().feasible());
+        assertTrue(routed.forcedRecipesProjected());
+    }
+
+    @Test
     void repeatQuantityAndNewInventoryAreNotReusedFromPreviousQuery() {
         var first = snapshot(1, false, false);
         assertFalse(compute(first, routing(first, Set.of(), 512), 2).plan().feasible());
@@ -254,5 +275,9 @@ class RoutedPlanningTest extends BootstrapTest {
                 count > 0 ? Map.of(new StackKey(Items.IRON_INGOT, null), (long) count) : Map.of(),
                 forced ? Map.of(IRON.itemId(), TARGET) : Map.of(),
                 new ImmutableRecipeGraph(Map.of(RESULT, List.of(target))), "network", "binding", mainThreadOnly);
+    }
+
+    private static ResourceLocation id(String path) {
+        return new ResourceLocation("test", path);
     }
 }

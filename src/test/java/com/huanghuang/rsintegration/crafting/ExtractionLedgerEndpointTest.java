@@ -84,6 +84,21 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     }
 
     @Test
+    void batchInspectionUsesStoredAggregateAmountInsteadOfDisplayCount() {
+        when(player.getInventory()).thenReturn(new Inventory(player));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(
+                        stored(new ItemStack(Items.IRON_INGOT, 41))))));
+        ledger.setStorageEndpoint(endpoint);
+
+        ExtractionLedger.BatchMatch match = ledger.inspectBatchMatching(
+                Ingredient.of(Items.IRON_INGOT), player);
+
+        assertTrue(match.snapshotReadable());
+        assertEquals(41, match.available());
+    }
+
+    @Test
     void selectedEndpointAndPlayerInventoryShareOneReservation() {
         Inventory inventory = new Inventory(player);
         inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 5));

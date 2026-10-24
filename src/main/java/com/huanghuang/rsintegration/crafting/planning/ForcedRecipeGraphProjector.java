@@ -30,49 +30,53 @@ public final class ForcedRecipeGraphProjector {
 
         Map<MaterialRef, List<RecipeNode>> projected =
                 new LinkedHashMap<>(graph.recipesByOutput());
+        Map<ResourceLocation, List<MaterialRef>> outputsByPreference = new LinkedHashMap<>();
+        for (MaterialRef output : graph.recipesByOutput().keySet()) {
+            outputsByPreference.computeIfAbsent(preferenceKey(output),
+                    ignored -> new ArrayList<>()).add(output);
+        }
+        boolean changed = false;
         for (Map.Entry<ResourceLocation, ResourceLocation> forced : forcedRecipes.entrySet()) {
             ResourceLocation preferenceKey = forced.getKey();
-            boolean keyInScope = projected.keySet().stream()
-                    .anyMatch(output -> matchesOutput(output, preferenceKey));
+            List<MaterialRef> matchingOutputs = outputsByPreference.get(preferenceKey);
             // 客户端可能保留其他配方树的显式选择。只处理当前依赖范围内存在的输出，
             // 否则一个无关的旧偏好会把普通工作台链整体推回 typed 解析器。
-            if (!keyInScope) continue;
+            if (matchingOutputs == null || matchingOutputs.isEmpty()) continue;
 
             RecipeNode forcedNode = graph.recipesById().get(forced.getValue());
-            if (forcedNode == null || !matchesOutput(forcedNode.output(), preferenceKey)) {
+            if (forcedNode == null
+                    || !preferenceKey(forcedNode.output()).equals(preferenceKey)) {
                 return null;
             }
 
             boolean applied = false;
-            for (MaterialRef output : List.copyOf(projected.keySet())) {
-                if (!matchesOutput(output, preferenceKey)) continue;
+            for (MaterialRef output : matchingOutputs) {
                 // 强制选择只影响执行优先级，不删除其他候选；否则响应里的配方树
                 // 会只剩当前配方，玩家无法从 B 再切回 A。
                 List<RecipeNode> candidates = new ArrayList<>(
                         projected.getOrDefault(output, List.of()));
+                if (!candidates.isEmpty()
+                        && candidates.get(0).recipeId().equals(forcedNode.recipeId())) {
+                    applied = true;
+                    continue;
+                }
                 candidates.removeIf(candidate ->
                         candidate.recipeId().equals(forcedNode.recipeId()));
                 candidates.add(0, forcedNode);
                 projected.put(output, candidates);
                 applied = true;
+                changed = true;
             }
             if (!applied) return null;
         }
-        return new ImmutableRecipeGraph(projected);
+        return changed ? new ImmutableRecipeGraph(projected) : graph;
     }
 
     /** 返回该输出上玩家显式选择的配方；未选择时返回 null。 */
     @Nullable
     public static ResourceLocation forcedRecipeFor(
             MaterialRef output, Map<ResourceLocation, ResourceLocation> forcedRecipes) {
-        for (Map.Entry<ResourceLocation, ResourceLocation> forced : forcedRecipes.entrySet()) {
-            if (matchesOutput(output, forced.getKey())) return forced.getValue();
-        }
-        return null;
-    }
-
-    private static boolean matchesOutput(MaterialRef output, ResourceLocation preferenceKey) {
-        return preferenceKey(output).equals(preferenceKey);
+        return forcedRecipes.get(preferenceKey(output));
     }
 
     public static ResourceLocation preferenceKey(MaterialRef output) {

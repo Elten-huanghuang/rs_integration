@@ -7,12 +7,14 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Recip
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class ForcedRecipeGraphProjectorTest {
 
@@ -67,6 +69,39 @@ class ForcedRecipeGraphProjectorTest {
         assertNotNull(projected);
         assertEquals(graph.recipesByOutput(), projected.recipesByOutput());
         assertEquals(graph.recipesById(), projected.recipesById());
+    }
+
+    @Test
+    void reapplyingPreparedProjectionKeepsTheSameGraph() {
+        MaterialRef output = new MaterialRef(id("forced_nbt_output"), "{variant:1}");
+        MaterialRef input = material("forced_nbt_input");
+        RecipeNode first = recipe("forced_nbt_first", output, 1, ingredient(input, 1));
+        RecipeNode second = recipe("forced_nbt_second", output, 1, ingredient(input, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(first, second)));
+        Map<ResourceLocation, ResourceLocation> forced =
+                Map.of(ForcedRecipeGraphProjector.preferenceKey(output), second.recipeId());
+
+        ImmutableRecipeGraph projected = ForcedRecipeGraphProjector.apply(graph, forced);
+
+        assertNotNull(projected);
+        assertEquals(second, projected.recipesByOutput().get(output).get(0));
+        assertSame(projected, ForcedRecipeGraphProjector.apply(projected, forced));
+    }
+
+    @Test
+    void forcedRecipeLookupUsesTheExactNbtPreferenceKey() {
+        MaterialRef plain = material("forced_direct_plain");
+        MaterialRef tagged = new MaterialRef(plain.itemId(), "{variant:2}");
+        MaterialRef otherTagged = new MaterialRef(plain.itemId(), "{variant:3}");
+        Map<ResourceLocation, ResourceLocation> forced = new LinkedHashMap<>();
+        forced.put(ForcedRecipeGraphProjector.preferenceKey(otherTagged), id("wrong_recipe"));
+        forced.put(ForcedRecipeGraphProjector.preferenceKey(tagged), id("tagged_recipe"));
+
+        assertNull(ForcedRecipeGraphProjector.forcedRecipeFor(plain, forced));
+        assertEquals(id("tagged_recipe"),
+                ForcedRecipeGraphProjector.forcedRecipeFor(tagged, forced));
+        assertEquals(id("wrong_recipe"),
+                ForcedRecipeGraphProjector.forcedRecipeFor(otherTagged, forced));
     }
 
     private static MaterialRef material(String path) {

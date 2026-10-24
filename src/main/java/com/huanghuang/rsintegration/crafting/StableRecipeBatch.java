@@ -4,7 +4,10 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -73,7 +76,9 @@ final class StableRecipeBatch {
         if (availability.availableCrafts() < requested) {
             logBatch(context, step, "insufficient", requested, availability);
             String detail = "requested=" + requested
-                    + " available=" + availability.availableCrafts();
+                    + " available=" + availability.availableCrafts()
+                    + (availability.bottleneck() == null ? ""
+                    : " bottleneck=" + availability.bottleneck());
             return new Result(Outcome.DEFERRED, detail);
         }
 
@@ -252,13 +257,52 @@ final class StableRecipeBatch {
     private static Availability maximumAvailableCrafts(
             BatchPlan plan, long requested, List<ItemStack> workingInventory,
             ExtractionLedger ledger, ServerPlayer player) {
+        List<CraftStorageEndpoint> endpoints = batchEndpoints(ledger, player);
+        if (endpoints.isEmpty()) {
+            ledger.setStorageEndpoint(null);
+            return inspectMaximumAvailableCrafts(
+                    plan, requested, workingInventory, ledger, player, null);
+        }
+
+        Availability best = null;
+        CraftStorageEndpoint bestEndpoint = null;
+        for (CraftStorageEndpoint endpoint : endpoints) {
+            ledger.setStorageEndpoint(endpoint);
+            Availability candidate;
+            try {
+                candidate = inspectMaximumAvailableCrafts(
+                        plan, requested, workingInventory, ledger, player, endpoint);
+            } catch (RuntimeException | LinkageError failure) {
+                candidate = new Availability(0L, false,
+                        "snapshot exception " + failure.getClass().getSimpleName(),
+                        endpoint, null);
+            }
+            if (best == null || preferredAvailability(candidate, best)) {
+                best = candidate;
+                bestEndpoint = endpoint;
+            }
+            if (candidate.snapshotReadable()
+                    && candidate.availableCrafts() >= requested) {
+                break;
+            }
+        }
+        ledger.setStorageEndpoint(bestEndpoint);
+        return best;
+    }
+
+    private static Availability inspectMaximumAvailableCrafts(
+            BatchPlan plan, long requested, List<ItemStack> workingInventory,
+            ExtractionLedger ledger, ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint) {
         long upperBound = Long.MAX_VALUE;
+        long bottleneckCrafts = Long.MAX_VALUE;
+        String bottleneck = null;
         for (SlotRequirement slot : plan.slots()) {
             long slotAvailable = 0L;
             ExtractionLedger.BatchMatch backing =
                     ledger.inspectBatchMatching(slot.spec().ingredient(), player);
             if (!backing.snapshotReadable()) {
-                return new Availability(0L, false, backing.detail());
+                return new Availability(0L, false, backing.detail(), endpoint, null);
             }
             for (ItemStack candidate : matchingWorkingStacks(
                     slot.spec().ingredient(), workingInventory)) {
@@ -267,19 +311,71 @@ final class StableRecipeBatch {
             for (ItemStack candidate : backing.stacks()) {
                 slotAvailable = saturatedAdd(slotAvailable, candidate.getCount());
             }
-            upperBound = Math.min(upperBound, slotAvailable / slot.perCraft());
+            long craftsForSlot = slotAvailable / slot.perCraft();
+            if (craftsForSlot < bottleneckCrafts) {
+                bottleneckCrafts = craftsForSlot;
+                bottleneck = ingredientLabel(slot.spec().ingredient());
+            }
+            upperBound = Math.min(upperBound, craftsForSlot);
         }
         long requestedCrafts = Math.max(1L, requested);
         long bounded = upperBound == Long.MAX_VALUE
                 ? requestedCrafts : Math.min(upperBound, requestedCrafts);
         if (bounded < requestedCrafts) {
-            return new Availability(bounded, true, "slot upper bound");
+            return new Availability(
+                    bounded, true, "slot upper bound", endpoint, bottleneck);
         }
         // 同一物品可能出现在多个输入槽。各槽独立看都有库存并不代表总量足够，
         // 因此用真实批量分配再确认一次，避免把硬缺料误报成执行期库存变化。
         long available = maximumAllocatableCrafts(
                 plan, requestedCrafts, workingInventory, ledger, player);
-        return new Availability(available, true, "allocation aware");
+        return new Availability(
+                available, true, "allocation aware", endpoint, bottleneck);
+    }
+
+    private static List<CraftStorageEndpoint> batchEndpoints(
+            ExtractionLedger ledger, ServerPlayer player) {
+        List<CraftStorageEndpoint> endpoints = new ArrayList<>();
+        CraftStorageEndpoint current = ledger.storageEndpoint();
+        if (current != null) endpoints.add(current);
+        try {
+            for (CraftStorageEndpoint candidate :
+                    CraftPacketUtils.resolveEndpointCandidatesForCraft(player, null, null)) {
+                boolean duplicate = endpoints.stream()
+                        .anyMatch(existing -> sameEndpoint(existing, candidate));
+                if (!duplicate) endpoints.add(candidate);
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // 当前端点仍然可用于批量预检，候选解析失败不应让已知库存失效。
+        }
+        return List.copyOf(endpoints);
+    }
+
+    private static boolean sameEndpoint(
+            CraftStorageEndpoint left, CraftStorageEndpoint right) {
+        if (left == right) return true;
+        try {
+            return left.session().reference().equals(right.session().reference());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean preferredAvailability(
+            Availability candidate, Availability current) {
+        if (candidate.snapshotReadable() != current.snapshotReadable()) {
+            return candidate.snapshotReadable();
+        }
+        return candidate.availableCrafts() > current.availableCrafts();
+    }
+
+    private static String ingredientLabel(Ingredient ingredient) {
+        for (ItemStack candidate : ingredient.getItems()) {
+            if (candidate.isEmpty()) continue;
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(candidate.getItem());
+            if (itemId != null) return itemId.toString();
+        }
+        return "<unknown ingredient>";
     }
 
     private static long maximumAllocatableCrafts(
@@ -408,7 +504,8 @@ final class StableRecipeBatch {
     private record SlotRequirement(IngredientSpec spec, long perCraft) {}
     private record BatchPlan(ItemStack output, List<SlotRequirement> slots) {}
     private record Availability(long availableCrafts, boolean snapshotReadable,
-                                String detail) {}
+                                String detail, @Nullable CraftStorageEndpoint endpoint,
+                                @Nullable String bottleneck) {}
     record Result(Outcome outcome, String detail) {
         Result {
             detail = detail == null ? "" : detail;

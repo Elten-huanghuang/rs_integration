@@ -129,8 +129,8 @@ public final class PureRecipePlanner {
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes,
                 preferences);
-        List<Task> pending = normalizedRoots.stream()
-                .map(DemandTask::new).map(Task.class::cast).toList();
+        PersistentTaskQueue<Task> pending = PersistentTaskQueue.from(
+                normalizedRoots.stream().map(DemandTask::new).map(Task.class::cast).toList());
         Status status;
         try {
             status = search.solve(pending) ? Status.SUCCESS
@@ -326,7 +326,7 @@ public final class PureRecipePlanner {
             ancestorInputs = List.copyOf(ancestorInputs);
         }
     }
-    private record FailureKey(List<Task> pending, Map<MaterialRef, Long> stockChanges,
+    private record FailureKey(PersistentTaskQueue<Task> pending, Map<MaterialRef, Long> stockChanges,
                               Set<MaterialRef> resolving, int stepCount) {}
 
     private static final class Search {
@@ -406,7 +406,7 @@ public final class PureRecipePlanner {
 
         }
 
-        private boolean solve(List<Task> pending) {
+        private boolean solve(PersistentTaskQueue<Task> pending) {
             checkBudget();
             if (++callDepth > MAX_SEARCH_CALL_DEPTH) {
                 callDepth--;
@@ -419,20 +419,20 @@ public final class PureRecipePlanner {
             }
         }
 
-        private boolean solveWithinDepth(List<Task> pending) {
+        private boolean solveWithinDepth(PersistentTaskQueue<Task> pending) {
             if (++expandedStates > maxSearchStates) throw new SearchLimitException();
             if (pending.isEmpty()) return true;
 
             FailureKey key = maxMemoizedFailures == 0 ? null
-                    : new FailureKey(List.copyOf(pending), Map.copyOf(stockChanges),
+                    : new FailureKey(pending, Map.copyOf(stockChanges),
                             Set.copyOf(resolving), steps.size());
             if (key != null && failedStates.contains(key)) {
                 memoHits++;
                 return false;
             }
 
-            Task current = pending.get(0);
-            List<Task> rest = pending.subList(1, pending.size());
+            Task current = pending.head();
+            PersistentTaskQueue<Task> rest = pending.tail();
             boolean solved = current instanceof DemandTask demand
                     ? solveDemand(demand.ingredient(), rest, pending)
                     : completeRecipe((CompleteRecipeTask) current, rest);
@@ -442,8 +442,9 @@ public final class PureRecipePlanner {
             return solved;
         }
 
-        private boolean solveDemand(IngredientRef ingredient, List<Task> rest,
-                                    List<Task> pending) {
+        private boolean solveDemand(IngredientRef ingredient,
+                                    PersistentTaskQueue<Task> rest,
+                                    PersistentTaskQueue<Task> pending) {
             boolean catalyst = ingredient.role() == DemandRole.CATALYST;
             boolean cycleBlocked = false;
             boolean noRecipeBlocked = false;
@@ -527,28 +528,23 @@ public final class PureRecipePlanner {
                     }
                     long scheduledBatches = batches;
                     long consumeCount = catalyst ? 0L : ingredient.count();
-                    List<Task> continuation = rest;
+                    PersistentTaskQueue<Task> continuation = rest;
                     if (selfConsumed > 0) {
                         if (netGain <= 0) continue;
                         scheduledBatches = Math.min(batches, have / selfConsumed);
                         if (scheduledBatches <= 0) continue;
                         consumeCount = 0;
-                        continuation = new ArrayList<>(rest.size() + 1);
-                        continuation.add(new DemandTask(ingredient));
-                        continuation.addAll(rest);
+                        continuation = rest.prepend(new DemandTask(ingredient));
                     }
                     // Production may have a different NBT identity than the demand.
                     // Consume the combined existing and new variants through the matcher.
                     if (selfConsumed == 0 && !catalyst
                             && (broadFamily || !candidate.output().equals(wanted))) {
                         consumeCount = 0;
-                        continuation = new ArrayList<>(rest.size() + 1);
-                        continuation.add(new DemandTask(ingredient));
-                        continuation.addAll(rest);
+                        continuation = rest.prepend(new DemandTask(ingredient));
                     }
-                    List<Task> branch = recipeBranch(candidate, scheduledBatches,
+                    PersistentTaskQueue<Task> branch = recipeBranch(candidate, scheduledBatches,
                             consumeCount, continuation, wanted);
-                    if (branch == null) continue;
                     resolving.add(wanted);
                     if (solve(branch)) return true;
                     resolving.remove(wanted);
@@ -561,7 +557,8 @@ public final class PureRecipePlanner {
             return false;
         }
 
-        private void recordFailure(IngredientRef ingredient, List<Task> pending,
+        private void recordFailure(IngredientRef ingredient,
+                                   PersistentTaskQueue<Task> pending,
                                    FailureReason reason) {
             if (reason == FailureReason.MISSING_INPUTS) {
                 sawMissingInputFailure = true;
@@ -591,7 +588,7 @@ public final class PureRecipePlanner {
          * broad tag (for example wool or fuels) does not consume a later exact material.
          */
         private Map<MaterialRef, Long> consumeAcrossAlternatives(
-                IngredientRef ingredient, List<Task> rest) {
+                IngredientRef ingredient, PersistentTaskQueue<Task> rest) {
             List<MaterialRef> stocked = ingredient.alternatives().stream()
                     .filter(material -> stock.getOrDefault(material, 0L) > 0L)
                     .sorted(Comparator
@@ -622,7 +619,7 @@ public final class PureRecipePlanner {
         }
 
         private Map<MaterialRef, Long> consumeMatchingVariants(
-                IngredientRef ingredient, List<Task> rest) {
+                IngredientRef ingredient, PersistentTaskQueue<Task> rest) {
             List<MaterialRef> stocked = matchingStock(ingredient)
                     .sorted(Comparator
                             .comparingInt((MaterialRef material) ->
@@ -645,7 +642,8 @@ public final class PureRecipePlanner {
         }
 
         private Map<MaterialRef, Long> consumeStocked(
-                List<MaterialRef> stocked, long count, List<Task> rest) {
+                List<MaterialRef> stocked, long count,
+                PersistentTaskQueue<Task> rest) {
             long remaining = count;
             Map<MaterialRef, Long> previous = new HashMap<>();
             // Consume only stock above later exact demands first. This makes the soft
@@ -667,12 +665,14 @@ public final class PureRecipePlanner {
             return previous;
         }
 
-        private long unreservedStock(List<Task> rest, MaterialRef material) {
+        private long unreservedStock(
+                PersistentTaskQueue<Task> rest, MaterialRef material) {
             return Math.max(0L, stock.getOrDefault(material, 0L)
                     - singletonDemand(rest, material));
         }
 
-        private long unreservedStockAcross(IngredientRef ingredient, List<Task> rest) {
+        private long unreservedStockAcross(
+                IngredientRef ingredient, PersistentTaskQueue<Task> rest) {
             long total = 0L;
             var matching = matchingStock(ingredient).iterator();
             while (matching.hasNext()) {
@@ -682,7 +682,8 @@ public final class PureRecipePlanner {
             return total;
         }
 
-        private static long singletonDemand(List<Task> tasks, MaterialRef material) {
+        private static long singletonDemand(
+                PersistentTaskQueue<Task> tasks, MaterialRef material) {
             long demand = 0L;
             for (Task task : tasks) {
                 if (!(task instanceof DemandTask needed)
@@ -693,7 +694,8 @@ public final class PureRecipePlanner {
             return demand;
         }
 
-        private boolean completeRecipe(CompleteRecipeTask completed, List<Task> rest) {
+        private boolean completeRecipe(
+                CompleteRecipeTask completed, PersistentTaskQueue<Task> rest) {
             long before = stock.getOrDefault(completed.output(), 0L);
             long afterProduction = before
                     + (long) completed.outputCount() * completed.batches();
@@ -716,18 +718,20 @@ public final class PureRecipePlanner {
             return false;
         }
 
-        private List<Task> recipeBranch(RecipeNode candidate, long batches, long consumeCount,
-                                        List<Task> rest, MaterialRef resolvingMaterial) {
+        private PersistentTaskQueue<Task> recipeBranch(
+                RecipeNode candidate, long batches, long consumeCount,
+                PersistentTaskQueue<Task> rest, MaterialRef resolvingMaterial) {
             List<IngredientRef> inputs = normalizedInputs(candidate);
-            List<Task> branch = new ArrayList<>(inputs.size() + 1 + rest.size());
-            for (IngredientRef input : inputs) {
+            PersistentTaskQueue<Task> branch = rest;
+            branch = branch.prepend(new CompleteRecipeTask(candidate.output(),
+                    candidate.outputCount(), consumeCount, candidate.recipeId(),
+                    batches, resolvingMaterial));
+            for (int index = inputs.size() - 1; index >= 0; index--) {
+                IngredientRef input = inputs.get(index);
                 long scaled = scaledInputCount(input, batches);
-                branch.add(new DemandTask(input.withCount(scaled)));
+                branch = branch.prepend(new DemandTask(input.withCount(scaled)));
             }
-            branch.add(new CompleteRecipeTask(candidate.output(), candidate.outputCount(),
-                    consumeCount, candidate.recipeId(), batches, resolvingMaterial));
-            branch.addAll(rest);
-            return List.copyOf(branch);
+            return branch;
         }
 
         /**
@@ -1280,7 +1284,7 @@ public final class PureRecipePlanner {
             return (int) consumed;
         }
 
-        private static int scheduledRecipes(List<Task> pending) {
+        private static int scheduledRecipes(PersistentTaskQueue<Task> pending) {
             int count = 0;
             for (Task task : pending) {
                 if (task instanceof CompleteRecipeTask) count++;

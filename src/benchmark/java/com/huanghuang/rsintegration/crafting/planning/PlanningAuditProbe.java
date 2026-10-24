@@ -93,9 +93,18 @@ public final class PlanningAuditProbe extends BootstrapTest {
             for (int count : new int[] {50000, 65536, 65537, 100000}) {
                 ImmutableRecipeGraph original = catalog(count, 1, 1);
                 ImmutableRecipeGraphProjector.publishCompiled(null, count, original, 0L);
-                ImmutableRecipeGraph derived = ForcedRecipeGraphProjector.apply(original,
-                        Map.of(material("chain_1").itemId(), id("recipe_1")));
-                if (derived == null || derived == original) throw new AssertionError("derived graph missing");
+                RecipeNode forcedRecipe = original.recipesById().get(id("recipe_1"));
+                RecipeNode alternate = new RecipeNode(id("recipe_1_alternate"),
+                        forcedRecipe.output(), forcedRecipe.outputCount(), forcedRecipe.inputs());
+                Map<MaterialRef, List<RecipeNode>> outputs =
+                        new LinkedHashMap<>(original.recipesByOutput());
+                outputs.put(forcedRecipe.output(), List.of(alternate, forcedRecipe));
+                ImmutableRecipeGraph forcedSource = new ImmutableRecipeGraph(outputs);
+                ImmutableRecipeGraph derived = ForcedRecipeGraphProjector.apply(forcedSource,
+                        Map.of(forcedRecipe.output().itemId(), id("recipe_1")));
+                if (derived == null || derived == forcedSource) {
+                    throw new AssertionError("derived graph missing");
+                }
                 measure(csv, "published_output_lookup100", count,
                         index -> lookup(original));
                 measure(csv, "derived_output_lookup100", count,

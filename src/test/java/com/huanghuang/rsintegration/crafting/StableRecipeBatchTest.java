@@ -6,10 +6,13 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import net.minecraft.core.NonNullList;
@@ -402,6 +405,35 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void fallsBackToAnotherEndpointBeforeDeferringStableBatch() {
+        ResourceLocation recipeId = new ResourceLocation("test", "endpoint_fallback");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        CraftStorageEndpoint preferred = storageEndpoint(
+                fixture.player(), "preferred", new ItemStack(Items.COBBLESTONE, 8));
+        CraftStorageEndpoint fallback = storageEndpoint(
+                fixture.player(), "fallback", new ItemStack(Items.COBBLESTONE, 27));
+        List<ItemStack> inventory = new ArrayList<>();
+
+        try (var endpointCandidates = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS);
+             ExtractionLedger ledger = new ExtractionLedger()) {
+            endpointCandidates.when(() -> CraftPacketUtils.resolveEndpointCandidatesForCraft(
+                    fixture.player(), null, null)).thenReturn(List.of(preferred, fallback));
+            ledger.setStorageEndpoint(preferred);
+
+            StableRecipeBatch.Result result =
+                    executeDetailed(fixture, recipeId, 3, inventory, ledger);
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    result.outcome(), result.detail());
+            assertEquals(fallback, ledger.storageEndpoint());
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.STONE));
+        assertEquals(3, inventory.get(0).getCount());
+    }
+
+    @Test
     void preservesEmptyShapedRecipeSlotsDuringBatchAssembly() {
         ResourceLocation recipeId = new ResourceLocation("test", "sparse_compression");
         NonNullList<Ingredient> ingredients = NonNullList.of(
@@ -429,6 +461,12 @@ class StableRecipeBatchTest extends BootstrapTest {
     private static StableRecipeBatch.Outcome execute(
             Fixture fixture, ResourceLocation recipeId, int executions,
             List<ItemStack> inventory, ExtractionLedger ledger) {
+        return executeDetailed(fixture, recipeId, executions, inventory, ledger).outcome();
+    }
+
+    private static StableRecipeBatch.Result executeDetailed(
+            Fixture fixture, ResourceLocation recipeId, int executions,
+            List<ItemStack> inventory, ExtractionLedger ledger) {
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
                 recipeId, ModType.GENERIC, new ResourceLocation("minecraft", "crafting"),
                 List.of(), List.of(), false, executions);
@@ -436,7 +474,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
                 List.of(step), null, host, Map.of());
-        return StableRecipeBatch.tryExecute(
+        return StableRecipeBatch.tryExecuteDetailed(
                 fixture.level(), step, fixture.player(), inventory, ledger, context);
     }
 
@@ -461,6 +499,19 @@ class StableRecipeBatchTest extends BootstrapTest {
             throw new IllegalStateException("failed to install test server", exception);
         }
         return new Fixture(level, player);
+    }
+
+    private static CraftStorageEndpoint storageEndpoint(
+            ServerPlayer player, String id, ItemStack... items) {
+        StorageBackendId backend = new StorageBackendId(id);
+        StorageSession session = mock(StorageSession.class, CALLS_REAL_METHODS);
+        when(session.reference()).thenReturn(new StorageReference(backend, id));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, java.util.Arrays.stream(items)
+                        .map(stack -> new StoredItem(
+                                StorageItemKey.fromItemStack(backend, stack), stack.getCount()))
+                        .toList())));
+        return () -> session;
     }
 
     private static ShapedRecipe compressionRecipe(ResourceLocation id,

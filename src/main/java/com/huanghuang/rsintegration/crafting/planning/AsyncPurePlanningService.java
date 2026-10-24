@@ -148,21 +148,27 @@ public final class AsyncPurePlanningService {
                                                             int maxSteps, int maxSearchStates,
                                                             int maxMemoizedFailures,
                                                             PlanningSession session,
-                                                            ImmutableRecipeGraph routedGraph) {
+                                                            ImmutableRecipeGraph projectedGraph) {
         PlanningThreadContext.throwIfCancelled();
         setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Long> stock =
                 ImmutableRecipeGraphProjector.projectAvailability(
                         snapshot.availableItems());
-        setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
-        ImmutableRecipeGraph scopedGraph = routedGraph != null ? routedGraph
-                : ImmutableRecipeGraphProjector.restrictToDependencies(
-                        snapshot.recipeGraph(), snapshot.recipeId());
-        // Inventory matching is performed lazily against the request-local stock buckets.
-        // Only smithing needs a derived graph because its output inherits the base NBT;
-        // PureRecipePlanner creates that single specialization layer.
-        ImmutableRecipeGraph planningGraph = ForcedRecipeGraphProjector.apply(
-                scopedGraph, snapshot.forcedRecipes());
+        ImmutableRecipeGraph planningGraph;
+        if (projectedGraph != null) {
+            // 路由阶段已经完成依赖裁剪和强制选择投影，直接复用该图。
+            planningGraph = projectedGraph;
+        } else {
+            setPhase(session, snapshot, PlanningSession.Phase.DEPENDENCY_PROJECTION);
+            ImmutableRecipeGraph scopedGraph =
+                    ImmutableRecipeGraphProjector.restrictToDependencies(
+                            snapshot.recipeGraph(), snapshot.recipeId());
+            // Inventory matching is performed lazily against the request-local stock buckets.
+            // Only smithing needs a derived graph because its output inherits the base NBT;
+            // PureRecipePlanner creates that single specialization layer.
+            planningGraph = ForcedRecipeGraphProjector.apply(
+                    scopedGraph, snapshot.forcedRecipes());
+        }
         if (planningGraph == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }

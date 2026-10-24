@@ -190,9 +190,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             StorageSnapshot loaded = snapshot.snapshot().orElseThrow();
             for (StoredItem stored : loaded.match(ingredient).items()) {
-                collectMatchingStack(stored.stack(), ingredient, matches, counts,
-                        pendingNet.getOrDefault(
-                                CraftingResolver.StackKey.of(stored.stack(), true), 0L));
+                collectMatchingStored(stored, ingredient, matches, counts);
             }
         }
 
@@ -238,6 +236,27 @@ public final class ExtractionLedger implements AutoCloseable {
         if (amount <= 0L) return;
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
         matches.putIfAbsent(key, stack.copyWithCount(1));
+        counts.merge(key, amount, ExtractionLedger::saturatedAdd);
+    }
+
+    private void collectMatchingStored(
+            StoredItem stored, Ingredient ingredient,
+            Map<CraftingResolver.StackKey, ItemStack> matches,
+            Map<CraftingResolver.StackKey, Long> counts) {
+        ItemStack display = stored.stack();
+        if (display == null || display.isEmpty()) return;
+        boolean accepted;
+        try {
+            accepted = IngredientMatcher.test(ingredient, display);
+        } catch (RuntimeException | LinkageError ignored) {
+            return;
+        }
+        if (!accepted) return;
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(display, true);
+        long amount = Math.max(0L, stored.amount()
+                - pendingNet.getOrDefault(key, 0L));
+        if (amount <= 0L) return;
+        matches.putIfAbsent(key, display.copyWithCount(1));
         counts.merge(key, amount, ExtractionLedger::saturatedAdd);
     }
 
