@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ResonanceCraftingSource;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
@@ -21,6 +22,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -404,10 +406,17 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     public static ToolPlanCheck getPlanCheck(ServerPlayer player, Recipe<?> recipe,
                                              @Nullable CraftStorageEndpoint endpoint) {
+        return getPlanCheck(player, recipe, endpoint, List.of());
+    }
+
+    public static ToolPlanCheck getPlanCheck(ServerPlayer player, Recipe<?> recipe,
+                                             @Nullable CraftStorageEndpoint endpoint,
+                                             List<PlanStep> plannedSteps) {
         ToolSelection selection = selectTool(player, recipe, endpoint);
         if (selection == null) {
-            return new ToolPlanCheck(List.of(Component.translatable(
-                    "rsi.farmersdelight.cutting_board.tool_missing")), true);
+            return missingToolCheck(
+                    FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe),
+                    plannedSteps);
         }
         ItemStack tool = selection.stack();
         Component source = Component.translatable(selection.resonance()
@@ -424,6 +433,34 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 Component.translatable("rsi.farmersdelight.cutting_board.tool_selected",
                         tool.getHoverName(), source, durability, unbreaking),
                 Component.translatable("rsi.farmersdelight.cutting_board.tool_warning")), false);
+    }
+
+    static ToolPlanCheck missingToolCheck(@Nullable Ingredient toolIngredient,
+                                          List<PlanStep> plannedSteps) {
+        ItemStack plannedTool = plannedTool(toolIngredient, plannedSteps);
+        if (plannedTool != null) {
+            return new ToolPlanCheck(List.of(Component.translatable(
+                    "rsi.farmersdelight.cutting_board.tool_planned",
+                    plannedTool.getHoverName())), false);
+        }
+        return new ToolPlanCheck(List.of(Component.translatable(
+                "rsi.farmersdelight.cutting_board.tool_missing")), true);
+    }
+
+    @Nullable
+    private static ItemStack plannedTool(@Nullable Ingredient toolIngredient,
+                                         List<PlanStep> plannedSteps) {
+        if (toolIngredient == null || toolIngredient.isEmpty()
+                || plannedSteps == null || plannedSteps.isEmpty()) return null;
+        for (PlanStep step : plannedSteps) {
+            if (step == null || step.output().isEmpty()
+                    || !IngredientMatcher.test(toolIngredient, step.output())
+                    || CuttingBoardToolSemantics.remainingDurability(step.output()) <= 0) {
+                continue;
+            }
+            return step.output().copyWithCount(1);
+        }
+        return null;
     }
 
     public static List<Component> getPlanWarnings(ServerPlayer player, Recipe<?> recipe,

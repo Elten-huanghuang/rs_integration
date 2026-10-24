@@ -137,6 +137,13 @@ public final class PlanWarnings {
     public static Result collectResult(String typeId, ServerPlayer player, Recipe<?> recipe,
                                        @Nullable ResourceLocation dim, @Nullable BlockPos pos,
                                        @Nullable CraftStorageEndpoint endpoint) {
+        return collectResult(typeId, player, recipe, dim, pos, endpoint, List.of());
+    }
+
+    public static Result collectResult(String typeId, ServerPlayer player, Recipe<?> recipe,
+                                       @Nullable ResourceLocation dim, @Nullable BlockPos pos,
+                                       @Nullable CraftStorageEndpoint endpoint,
+                                       List<PlanStep> plannedSteps) {
         List<Component> warnings = new ArrayList<>();
         boolean blocksExecution = false;
         switch (typeId) {
@@ -220,7 +227,8 @@ public final class PlanWarnings {
                 warnings.addAll(SkilletBatchDelegate.getPlanWarnings(player, recipe, dim, pos));
                 break;
             case ModIds.ID_FD_CUTTING_BOARD:
-                var cuttingBoardCheck = CuttingBoardBatchDelegate.getPlanCheck(player, recipe, endpoint);
+                var cuttingBoardCheck = CuttingBoardBatchDelegate.getPlanCheck(
+                        player, recipe, endpoint, plannedSteps);
                 warnings.addAll(cuttingBoardCheck.warnings());
                 blocksExecution = cuttingBoardCheck.blocksExecution();
                 break;

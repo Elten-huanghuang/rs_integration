@@ -3797,7 +3797,8 @@ public final class GenericCraftPacket {
             // These render in the "unavailable" area, not inside step cards.
             if (recipeModType != null) {
                 PlanWarnings.Result warningResult = PlanWarnings.collectResult(
-                        recipeModType.id(), player, recipe, dim, pos, planningEndpoint);
+                        recipeModType.id(), player, recipe, dim, pos,
+                        planningEndpoint, steps);
                 modWarnings.addAll(warningResult.warnings());
                 blockingPrerequisiteFailure |= warningResult.blocksExecution();
             }

@@ -1117,6 +1117,7 @@
   "rsi.farmersdelight.cutting_board.source_storage": "所选存储网络（后备）",
   "rsi.farmersdelight.cutting_board.unbreakable": "无法破坏",
   "rsi.farmersdelight.cutting_board.tool_missing": "§c共振磁盘和所选存储网络中均没有有效的砧板切割工具",
+  "rsi.farmersdelight.cutting_board.tool_planned": "§7未找到现成切割工具，将按递归计划制作：%s",
   "rsi.farmersdelight.cutting_board.tool_durability_insufficient": "§c%1$s 只剩 %2$s 点耐久，本批次至少需要 %3$s 点",
   "rsi.farmersdelight.cutting_board.tool_broke": "§e切割工具 %s 已在合成过程中损坏",
   "gui.rs_integration.jei.yhk_moka_craft": "通过摩卡壶远程冲泡",

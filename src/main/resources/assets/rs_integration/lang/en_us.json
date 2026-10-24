@@ -1114,6 +1114,7 @@
   "rsi.farmersdelight.cutting_board.source_storage": "Selected storage network (fallback)",
   "rsi.farmersdelight.cutting_board.unbreakable": "Unbreakable",
   "rsi.farmersdelight.cutting_board.tool_missing": "§cNo valid Cutting Board tool was found in the Resonance Disk or selected storage network",
+  "rsi.farmersdelight.cutting_board.tool_planned": "§7No stored Cutting Board tool was found; the recursive plan will craft %s",
   "rsi.farmersdelight.cutting_board.tool_durability_insufficient": "§c%1$s has only %2$s durability remaining; this batch needs at least %3$s",
   "rsi.farmersdelight.cutting_board.tool_broke": "§eCutting tool %s broke during crafting",
   "gui.rs_integration.jei.yhk_moka_craft": "Brew via Moka Pot",
