@@ -51,10 +51,25 @@ class GunHudOverlayAmmoMixinTest {
     }
 
     @Test
-    void doesNotAppendResonanceAmmoWhenNativeCacheWasNotRefreshed() {
-        assertTrue(GunHudOverlayAmmoMixin.rsi$shouldIncludeCache(20L, Long.MIN_VALUE));
-        assertFalse(GunHudOverlayAmmoMixin.rsi$shouldIncludeCache(20L, 20L));
-        assertTrue(GunHudOverlayAmmoMixin.rsi$shouldIncludeCache(21L, 20L));
+    void everyStaticMethodInTheMixinClassIsPrivate() {
+        for (Method method : GunHudOverlayAmmoMixin.class.getDeclaredMethods()) {
+            if (Modifier.isStatic(method.getModifiers())) {
+                assertTrue(Modifier.isPrivate(method.getModifiers()), method.toString());
+            }
+        }
+    }
+
+    @Test
+    void doesNotAppendResonanceAmmoWhenNativeCacheWasNotRefreshed() throws Exception {
+        Method decision = GunHudOverlayAmmoMixin.class.getDeclaredMethod(
+                "rsi$shouldIncludeCache", long.class, long.class);
+        decision.setAccessible(true);
+
+        assertTrue(Modifier.isPrivate(decision.getModifiers()));
+        assertTrue(Modifier.isStatic(decision.getModifiers()));
+        assertTrue((boolean) decision.invoke(null, 20L, Long.MIN_VALUE));
+        assertFalse((boolean) decision.invoke(null, 20L, 20L));
+        assertTrue((boolean) decision.invoke(null, 21L, 20L));
     }
 
     @Test

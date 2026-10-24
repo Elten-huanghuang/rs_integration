@@ -49,6 +49,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Batch delegate for Aether furnace-type machines (Freezer, Incubator, Altar).
@@ -107,6 +108,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     record FuelChoice(Item item, int burnDuration, int requiredItems) {}
+
+    record BatchInput(ItemStack stack, int operations) {}
 
     private record FuelFillResult(boolean ready, ItemStack inserted) {
         private static FuelFillResult failed() {
@@ -371,28 +374,45 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(true);
 
         // ── Phase 1: Insert into input slot (slot 0 for all three machines) ──
-        if (!materials.isEmpty() && !materials.get(0).isEmpty()) {
-            ItemStack toInsert = materials.get(0).copy();
-            if (!handler.insertItem(0, toInsert, true).isEmpty()) {
-                resetInventoryOwnership();
-                forceChunkLoad(false);
-                return false;
-            }
-            ItemStack remainder = handler.insertItem(0, toInsert, false);
-            if (!remainder.isEmpty()) {
-                resetInventoryOwnership();
-                forceChunkLoad(false);
-                return false;
-            }
-            suppliedInput = toInsert.copyWithCount(1);
-            suppliedInputCount = toInsert.getCount();
+        List<IngredientSpec> inputSpecs = getRequiredMaterials();
+        if (inputSpecs == null || inputSpecs.size() != 1) {
+            resetInventoryOwnership();
+            forceChunkLoad(false);
+            return false;
         }
+        IngredientSpec inputSpec = inputSpecs.get(0);
+        int inputCapacity = Math.min(handler.getSlotLimit(0),
+                ingredientPrototype(inputSpec).getMaxStackSize());
+        BatchInput batchInput = mergeBatchInput(
+                materials, plannedOperations, inputSpec, inputCapacity,
+                fuelMapForMachine(be).keySet());
+        if (batchInput == null) {
+            resetInventoryOwnership();
+            forceChunkLoad(false);
+            return false;
+        }
+        ItemStack toInsert = batchInput.stack();
+        if (!handler.insertItem(0, toInsert, true).isEmpty()) {
+            resetInventoryOwnership();
+            forceChunkLoad(false);
+            return false;
+        }
+        ItemStack remainder = handler.insertItem(0, toInsert, false);
+        if (!remainder.isEmpty()) {
+            resetInventoryOwnership();
+            forceChunkLoad(false);
+            return false;
+        }
+        suppliedInput = toInsert.copyWithCount(1);
+        suppliedInputCount = toInsert.getCount();
+        plannedOperations = batchInput.operations();
+        activeOperations = batchInput.operations();
 
         // ── Phase 2: Ensure enough fuel (slot 1 for all three machines) ──
         // Aether machines use machine-specific burn values, so calculate the
         // count from the recipe burn units and that value.
         long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(
-                recipe, Math.max(1, plannedOperations));
+                recipe, Math.max(1, activeOperations));
         FuelFillResult fuelFill = fillFuelSlot(
                 be, handler, player, requiredBurnUnits);
         if (!fuelFill.inserted().isEmpty()) {
@@ -405,10 +425,42 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
 
         be.setChanged();
-        activeOperations = supportsInputBuffer() ? Math.max(1, plannedOperations) : 1;
         markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Materials inserted at {}, waiting for cooking", myPos);
         return true;
+    }
+
+    @Nullable
+    static BatchInput mergeBatchInput(
+            List<ItemStack> materials, int operations, IngredientSpec inputSpec,
+            int inputCapacity, Set<Item> allowedExtras) {
+        if (materials == null || materials.isEmpty() || operations <= 0
+                || inputSpec == null || inputSpec.isEmpty()
+                || inputSpec.count() <= 0 || inputCapacity <= 0) return null;
+        long required = (long) inputSpec.count() * operations;
+        if (required <= 0L || required > inputCapacity || required > Integer.MAX_VALUE) {
+            return null;
+        }
+
+        ItemStack merged = ItemStack.EMPTY;
+        long total = 0L;
+        for (ItemStack material : materials) {
+            if (material == null || material.isEmpty()) continue;
+            if (!inputSpec.ingredient().test(material)) {
+                if (allowedExtras != null && allowedExtras.contains(material.getItem())) continue;
+                return null;
+            }
+            if (merged.isEmpty()) {
+                merged = material.copy();
+                total = material.getCount();
+            } else {
+                if (!ItemStack.isSameItemSameTags(merged, material)) return null;
+                total += material.getCount();
+                if (total > Integer.MAX_VALUE) return null;
+            }
+        }
+        if (merged.isEmpty() || total != required) return null;
+        return new BatchInput(merged.copyWithCount((int) total), operations);
     }
 
     @Override

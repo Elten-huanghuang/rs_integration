@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FarmersDelightRecipeHandlerTest extends BootstrapTest {
@@ -64,32 +63,32 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
     }
 
     @Test
-    void cuttingBoardToolNeverEntersRecursiveMaterialGraph() {
+    void cuttingBoardToolEntersRecursiveMaterialGraph() {
         List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
                 Ingredient.of(Items.STONE), Ingredient.of(Items.DIAMOND_PICKAXE));
 
         List<IngredientSpec> graphSpecs =
                 FarmersDelightRecipeHandler.cuttingBoardGraphIngredients(specs);
 
-        assertEquals(1, graphSpecs.size());
+        assertEquals(2, graphSpecs.size());
         assertEquals(DemandRole.CONSUMED, graphSpecs.get(0).role());
         assertTrue(graphSpecs.get(0).ingredient().test(new ItemStack(Items.STONE)));
-        assertFalse(graphSpecs.stream().anyMatch(spec ->
-                spec.ingredient().test(new ItemStack(Items.DIAMOND_PICKAXE))));
+        assertEquals(DemandRole.DURABILITY, graphSpecs.get(1).role());
+        assertTrue(graphSpecs.get(1).ingredient().test(new ItemStack(Items.DIAMOND_PICKAXE)));
     }
 
     @Test
-    void cuttingBoardBatchSizeNeverCreatesRecursiveToolDemand() {
+    void cuttingBoardBatchSizeRetainsTheRecursiveToolDemand() {
         List<IngredientSpec> scaled = List.of(
                 new IngredientSpec(Ingredient.of(Items.STONE), 12, DemandRole.CONSUMED),
-                new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, DemandRole.CATALYST));
+                new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, DemandRole.DURABILITY));
 
         List<IngredientSpec> graphSpecs =
                 FarmersDelightRecipeHandler.cuttingBoardGraphIngredients(scaled);
 
-        assertEquals(1, graphSpecs.size());
+        assertEquals(2, graphSpecs.size());
         assertEquals(12, graphSpecs.get(0).count());
-        assertFalse(graphSpecs.stream().anyMatch(spec ->
-                spec.ingredient().test(new ItemStack(Items.IRON_SWORD))));
+        assertEquals(DemandRole.DURABILITY, graphSpecs.get(1).role());
+        assertTrue(graphSpecs.get(1).ingredient().test(new ItemStack(Items.IRON_SWORD)));
     }
 }

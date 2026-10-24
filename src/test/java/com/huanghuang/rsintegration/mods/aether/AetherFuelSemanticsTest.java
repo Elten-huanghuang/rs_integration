@@ -1,7 +1,9 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.NonNullList;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -12,9 +14,12 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class AetherFuelSemanticsTest extends BootstrapTest {
@@ -69,6 +74,54 @@ class AetherFuelSemanticsTest extends BootstrapTest {
                 AetherFurnaceBatchDelegate.fuelFamilyForRecipe(new AltarRepairRecipe()));
         assertSame(AetherFurnaceBatchDelegate.FuelFamily.INCUBATOR,
                 AetherFurnaceBatchDelegate.fuelFamilyForRecipe(new IncubationRecipe()));
+    }
+
+    @Test
+    void mergesInputFragmentsIntoTheExactPlannedBatchCount() {
+        IngredientSpec input = new IngredientSpec(Ingredient.of(Items.APPLE), 1);
+
+        AetherFurnaceBatchDelegate.BatchInput batch =
+                AetherFurnaceBatchDelegate.mergeBatchInput(
+                        List.of(new ItemStack(Items.APPLE, 32),
+                                new ItemStack(Items.APPLE, 32)),
+                        64, input, 64, Set.of(Items.COAL));
+
+        assertNotNull(batch);
+        assertEquals(64, batch.stack().getCount());
+        assertEquals(64, batch.operations());
+    }
+
+    @Test
+    void ignoresReservedFuelButRejectsShortOrDifferentInputs() {
+        IngredientSpec input = new IngredientSpec(Ingredient.of(Items.APPLE), 1);
+
+        assertNotNull(AetherFurnaceBatchDelegate.mergeBatchInput(
+                List.of(new ItemStack(Items.APPLE, 16),
+                        new ItemStack(Items.COAL, 8)),
+                16, input, 64, Set.of(Items.COAL)));
+        assertNull(AetherFurnaceBatchDelegate.mergeBatchInput(
+                List.of(new ItemStack(Items.APPLE, 15)),
+                16, input, 64, Set.of(Items.COAL)));
+        assertNull(AetherFurnaceBatchDelegate.mergeBatchInput(
+                List.of(new ItemStack(Items.APPLE, 16),
+                        new ItemStack(Items.CARROT, 1)),
+                16, input, 64, Set.of(Items.COAL)));
+    }
+
+    @Test
+    void rejectsMixedNbtAndBatchesLargerThanTheInputSlot() {
+        IngredientSpec input = new IngredientSpec(Ingredient.of(Items.APPLE), 1);
+        ItemStack tagged = new ItemStack(Items.APPLE, 4);
+        CompoundTag tag = new CompoundTag();
+        tag.putString("variant", "test");
+        tagged.setTag(tag);
+
+        assertNull(AetherFurnaceBatchDelegate.mergeBatchInput(
+                List.of(new ItemStack(Items.APPLE, 4), tagged),
+                8, input, 64, Set.of(Items.COAL)));
+        assertNull(AetherFurnaceBatchDelegate.mergeBatchInput(
+                List.of(new ItemStack(Items.APPLE, 65)),
+                65, input, 64, Set.of(Items.COAL)));
     }
 
     private static class FreezingRecipe extends TestRecipe {

@@ -24,14 +24,15 @@ class FarmersDelightCuttingBoardConsumptionTest extends BootstrapTest {
     }
 
     @Test
-    void durabilityToolStaysARuntimeResourceInsteadOfARecursiveDemand() {
+    void durabilityToolCanBeProducedRecursively() {
         List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
                 Ingredient.of(Items.CARROT), Ingredient.of(Items.IRON_SWORD));
 
         List<IngredientSpec> recursive =
                 FarmersDelightRecipeHandler.cuttingBoardGraphIngredients(specs);
 
-        assertEquals(1, recursive.size());
+        assertEquals(2, recursive.size());
         assertEquals(DemandRole.CONSUMED, recursive.get(0).role());
+        assertEquals(DemandRole.DURABILITY, recursive.get(1).role());
     }
 }

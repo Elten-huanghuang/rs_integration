@@ -186,9 +186,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public List<IngredientSpec> getSupplementalSpecs() {
-        List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.size() != 2) return List.of();
-        return List.of(specs.get(1));
+        // 工具已进入递归图，不能再作为 supplemental 重复预留。
+        return List.of();
     }
 
     @Override

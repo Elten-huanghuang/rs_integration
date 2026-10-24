@@ -31,7 +31,8 @@ public abstract class GunHudOverlayAmmoMixin {
                 TaczResonanceAmmoHandler.includeClientAmmoCount(gun, cacheInventoryAmmoCount);
     }
 
-    static boolean rsi$shouldIncludeCache(long nativeTimestamp, long lastIncludedTimestamp) {
+    private static boolean rsi$shouldIncludeCache(
+            long nativeTimestamp, long lastIncludedTimestamp) {
         return nativeTimestamp != lastIncludedTimestamp;
     }
 }

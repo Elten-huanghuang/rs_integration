@@ -375,6 +375,27 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void missingDurabilityToolIsProducedBeforeTheCuttingRecipe() {
+        MaterialRef iron = material("cutting_tool_iron");
+        MaterialRef carrot = material("cutting_tool_carrot");
+        MaterialRef knife = material("cutting_tool_knife");
+        MaterialRef slices = material("cutting_tool_slices");
+        RecipeNode makeKnife = recipe("make_cutting_knife", knife, 1, ingredient(iron, 1));
+        RecipeNode cutCarrot = recipe("cut_carrot", slices, 1,
+                ingredient(carrot, 1), durability(knife, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                knife, List.of(makeKnife), slices, List.of(cutCarrot)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(iron, 1, carrot, 1),
+                List.of(ingredient(slices, 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(id("make_cutting_knife"), id("cut_carrot")),
+                result.steps().stream().map(PureRecipePlanner.PlannedStep::recipeId).toList());
+    }
+
+    @Test
     void twoCatalystSlotsStillRequireTwoTools() {
         MaterialRef raw = material("double_tool_raw");
         MaterialRef tool = material("double_tool");
@@ -1599,6 +1620,11 @@ class PureRecipePlannerTest extends BootstrapTest {
     private static IngredientRef catalyst(MaterialRef material, int count) {
         return new IngredientRef(List.of(material), count, NbtMatchMode.EXACT,
                 DemandRole.CATALYST);
+    }
+
+    private static IngredientRef durability(MaterialRef material, int count) {
+        return new IngredientRef(List.of(material), count, NbtMatchMode.EXACT,
+                DemandRole.DURABILITY);
     }
 
     private static MaterialRef material(String path) {

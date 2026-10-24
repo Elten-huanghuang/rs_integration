@@ -195,17 +195,12 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         return cuttingBoardGraphIngredients(ingredients);
     }
 
-    /**
-     * 砧板工具只属于运行时资源，不能成为递归合成需求。批处理代理会优先从
-     * 共振存储中选择工具，其次才使用当前存储后端中的工具。
-     */
+    /** 砧板输入和耐久工具都进入递归图；执行阶段仍按实际耐久消耗结算。 */
     public static List<IngredientSpec> cuttingBoardGraphIngredients(
             List<IngredientSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
         return specs.stream()
-                .filter(spec -> !spec.isEmpty()
-                        && spec.role() != DemandRole.CATALYST
-                        && spec.role() != DemandRole.DURABILITY)
+                .filter(spec -> spec != null && !spec.isEmpty())
                 .toList();
     }
 
