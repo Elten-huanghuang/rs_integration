@@ -145,7 +145,7 @@ public record PlanResponseDraft(
         storageNetworks = storageNetworks == null ? List.of() : List.copyOf(storageNetworks);
         diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
         if (outcome == null) {
-            outcome = inferOutcome(success, materials, missing, executionBlocked);
+            outcome = PlanOutcome.infer(success, materials, missing, executionBlocked);
         }
     }
 
@@ -234,21 +234,6 @@ public record PlanResponseDraft(
                 leftovers, copyNullable(clickedOutput), graph == null ? null : copyGraph(graph),
                 executionBlocked, machineCandidates, stepIssues, storageReference, storageNetworks,
                 outcome, diagnostics);
-    }
-
-    private static PlanOutcome inferOutcome(boolean success,
-                                            Map<IngredientKey, PlanResponse.Availability> materials,
-                                            List<String> missing,
-                                            boolean executionBlocked) {
-        if (success) return PlanOutcome.READY;
-        if (materials != null && materials.values().stream()
-                .anyMatch(availability -> availability != null
-                        && availability.missingCount() > 0)) {
-            return PlanOutcome.MISSING_INPUTS;
-        }
-        if (missing != null && !missing.isEmpty()) return PlanOutcome.MISSING_INPUTS;
-        if (executionBlocked) return PlanOutcome.RUNTIME_UNAVAILABLE;
-        return PlanOutcome.NO_RECIPE;
     }
 
     private static PlanStep copyStep(PlanStep step) {

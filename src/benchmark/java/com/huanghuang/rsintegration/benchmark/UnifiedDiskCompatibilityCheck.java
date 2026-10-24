@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.benchmark;
 
 import com.google.gson.GsonBuilder;
-import com.huanghuang.rsintegration.disk.persistence.DiskFileStore;
+import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;

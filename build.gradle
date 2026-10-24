@@ -91,10 +91,6 @@ sourceSets {
         compileClasspath += sourceSets.test.runtimeClasspath
         runtimeClasspath += sourceSets.test.runtimeClasspath
     }
-    planningBenchmark {
-        compileClasspath += sourceSets.test.runtimeClasspath
-        runtimeClasspath += sourceSets.test.runtimeClasspath
-    }
 }
 
 dependencies {
@@ -208,25 +204,11 @@ tasks.register('diskBenchmark', JavaExec) {
     args providers.gradleProperty('benchmarkArgs').getOrElse('-l').split(' ').findAll { !it.isEmpty() }
 }
 
-// 直接调用生产规划器的诊断探针；用于比较扫描量、状态数和线程分配，不代表服务器 TPS。
-tasks.named('compilePlanningBenchmarkJava') {
-    options.encoding = 'UTF-8'
-}
-
-tasks.register('planningBenchmarkClasspath', Jar) {
-    dependsOn tasks.named('planningBenchmarkClasses')
-    archiveFileName = 'planning-classpath.jar'
-    destinationDirectory = layout.buildDirectory.dir('benchmark/planning')
-    doFirst {
-        manifest.attributes('Class-Path': sourceSets.planningBenchmark.runtimeClasspath.files
-                .collect { it.toURI().toASCIIString() }.join(' '))
-    }
-}
-
+// 直接调用生产规划器的诊断探针；与磁盘基准共用同一个 benchmark 源集。
 tasks.register('planningPerformanceProbe', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
-    dependsOn tasks.named('planningBenchmarkClasspath')
-    classpath = files(tasks.named('planningBenchmarkClasspath').flatMap { it.archiveFile })
+    dependsOn tasks.named('benchmarkClasspath')
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
     mainClass = 'com.huanghuang.rsintegration.crafting.planning.PlanningAuditProbe'
     minHeapSize = '512m'
     maxHeapSize = '2g'

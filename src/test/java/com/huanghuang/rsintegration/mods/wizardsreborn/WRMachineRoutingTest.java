@@ -76,6 +76,14 @@ class WRMachineRoutingTest {
                 new ResourceLocation("wizards_reborn", "crystal_infusion/irons_spellbooks_gold_crown")));
     }
 
+    @Test
+    void playerWissenTransferOnlyFillsTheMachineDeficitAndCapacity() {
+        assertEquals(100, WRWissenSupport.transferAmount(0, 100, 150, 10_000));
+        assertEquals(60, WRWissenSupport.transferAmount(40, 100, 80, 10_000));
+        assertEquals(10, WRWissenSupport.transferAmount(9_990, 10_000, 100, 10_000));
+        assertEquals(0, WRWissenSupport.transferAmount(100, 100, 500, 10_000));
+    }
+
     private static class ArcaneWorkbenchRecipe {}
     private static final class AddonWorkbenchRecipe extends ArcaneWorkbenchRecipe {}
     private static final class UnknownRecipe {}

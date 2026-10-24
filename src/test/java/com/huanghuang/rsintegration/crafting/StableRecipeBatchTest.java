@@ -197,6 +197,27 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void acceptsRuntimeNbtVariantForPlainItemIngredient() {
+        ResourceLocation recipeId = new ResourceLocation("test", "nbt_agnostic_input");
+        ShapelessRecipe recipe = new ShapelessRecipe(
+                recipeId, "", CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.withSize(1, Ingredient.of(Items.IRON_SWORD)));
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        ItemStack taggedSword = new ItemStack(Items.IRON_SWORD);
+        taggedSword.getOrCreateTag().putString("runtime_marker", "kept");
+        fixture.player().getInventory().setItem(0, taggedSword);
+        List<ItemStack> inventory = new ArrayList<>();
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    execute(fixture, recipeId, 1, inventory, ledger));
+        }
+
+        assertTrue(inventory.stream().anyMatch(stack ->
+                stack.is(Items.DIAMOND) && stack.getCount() == 1));
+    }
+
+    @Test
     void rejectsCraftingRecipeSubclassesUsedByDynamicRecipeSystems() {
         ResourceLocation recipeId = new ResourceLocation("test", "dynamic_recipe");
         ShapelessRecipe dynamicRecipe = new ShapelessRecipe(

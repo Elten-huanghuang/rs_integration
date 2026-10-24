@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.function.IntFunction;
 
-/** 独立规划诊断探针：图构建和预热不计入测量，直接调用当前生产实现。 */
+/** 统一基准源集中的规划诊断探针：图构建和预热不计入测量，直接调用当前生产实现。 */
 public final class PlanningAuditProbe extends BootstrapTest {
     private static final ThreadMXBean THREADS = (ThreadMXBean) ManagementFactory.getThreadMXBean();
     private static final int WARMUP = 4;

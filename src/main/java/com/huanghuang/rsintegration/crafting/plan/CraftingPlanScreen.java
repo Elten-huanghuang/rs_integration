@@ -3480,7 +3480,7 @@ public final class CraftingPlanScreen extends Screen {
 
         // Mod color dot.
         if (step.modType() != null) {
-            int dotColor = modLabelColor(step.modType().id());
+            int dotColor = PlanRenderEngine.modLabelColor(step.modType().id());
             gfx.fill(tx, y + (rowH - 4) / 2, tx + 4, y + (rowH - 4) / 2 + 4, dotColor);
             tx += 8;
         }
@@ -3506,20 +3506,6 @@ public final class CraftingPlanScreen extends Screen {
 
         if (slideX != 0) gfx.pose().popPose();
         return y + rowH;
-    }
-
-    private static int modLabelColor(String modTypeId) {
-        if (modTypeId == null) return 0xFF8B8B8B;
-        return switch (modTypeId) {
-            case ModIds.MALUM -> 0xFF442288;
-            case ModIds.EIDOLON -> 0xFF226644;
-            case ModIds.FORBIDDEN_ARCANUS -> 0xFF663322;
-            case ModIds.GOETY, "goety_brazier" -> 0xFF222244;
-            case ModIds.WIZARDS_REBORN -> 0xFF444466;
-            case ModIds.EMBERS -> 0xFFCC6633;
-            case ModIds.AETHERWORKS -> 0xFF3388AA;
-            default -> 0xFF8B8B8B;
-        };
     }
 
     private int stepAccent(PlanStep step, long batches) {

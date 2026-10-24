@@ -158,16 +158,8 @@ public final class CraftingResolver {
                 available,
                 buildPreferredRecipes(level));
 
-        EdgeTracker edges = new EdgeTracker();
-        for (Ingredient ing : needed) {
-            if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
-                if (missingOut != null) {
-                    missingOut.add(describeFirstItem(ing));
-                }
-            }
-        }
-        return ctx.steps.stream().map(ResolutionStep::recipeId).collect(Collectors.toList());
+        return resolveIngredientRoots(needed, ctx, missingOut).stream()
+                .map(ResolutionStep::recipeId).collect(Collectors.toList());
     }
 
     public static List<ResourceLocation> resolveStepsForIngredients(
@@ -185,16 +177,8 @@ public final class CraftingResolver {
                 null,
                 null);
 
-        EdgeTracker edges = new EdgeTracker();
-        for (Ingredient ing : needed) {
-            if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
-                if (missingOut != null) {
-                    missingOut.add(describeFirstItem(ing));
-                }
-            }
-        }
-        return ctx.steps.stream().map(ResolutionStep::recipeId).collect(Collectors.toList());
+        return resolveIngredientRoots(needed, ctx, missingOut).stream()
+                .map(ResolutionStep::recipeId).collect(Collectors.toList());
     }
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
@@ -211,16 +195,7 @@ public final class CraftingResolver {
                 player,
                 storageEndpoint);
 
-        EdgeTracker edges = new EdgeTracker();
-        for (Ingredient ing : needed) {
-            if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
-                if (missingOut != null) {
-                    missingOut.add(describeFirstItem(ing));
-                }
-            }
-        }
-        return new ArrayList<>(ctx.steps);
+        return resolveIngredientRoots(needed, ctx, missingOut);
     }
 
     public static List<ResolutionStep> resolveStepsForIngredientsWithTypes(
@@ -266,13 +241,18 @@ public final class CraftingResolver {
                 bestEffort,
                 missingOut);
 
+        return resolveIngredientRoots(needed, ctx, missingOut);
+    }
+
+    private static List<ResolutionStep> resolveIngredientRoots(
+            List<Ingredient> needed, ResolutionContext ctx,
+            @Nullable List<String> missingOut) {
         EdgeTracker edges = new EdgeTracker();
-        for (Ingredient ing : needed) {
-            if (ing.isEmpty()) continue;
-            if (!ensureIngredient(ing, 1, ctx, 0, edges)) {
-                if (missingOut != null) {
-                    missingOut.add(describeFirstItem(ing));
-                }
+        for (Ingredient ingredient : needed) {
+            if (ingredient.isEmpty()) continue;
+            if (!ensureIngredient(ingredient, 1, ctx, 0, edges)
+                    && missingOut != null) {
+                missingOut.add(describeFirstItem(ingredient));
             }
         }
         return new ArrayList<>(ctx.steps);

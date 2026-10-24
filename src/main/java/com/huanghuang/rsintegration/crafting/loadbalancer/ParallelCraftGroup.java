@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
 import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
+import com.huanghuang.rsintegration.crafting.StackCopies;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
@@ -384,13 +385,17 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     public void setVirtualDebits(List<List<ItemStack>> debits) {
         List<List<ItemStack>> copies = new ArrayList<>(debits.size());
-        for (List<ItemStack> debit : debits) copies.add(List.copyOf(copyStacks(debit)));
+        for (List<ItemStack> debit : debits) {
+            copies.add(List.copyOf(StackCopies.excludingEmpty(debit)));
+        }
         this.virtualDebits = List.copyOf(copies);
     }
 
     public void setProducerDebits(List<List<ItemStack>> debits) {
         List<List<ItemStack>> copies = new ArrayList<>(debits.size());
-        for (List<ItemStack> debit : debits) copies.add(List.copyOf(copyStacks(debit)));
+        for (List<ItemStack> debit : debits) {
+            copies.add(List.copyOf(StackCopies.excludingEmpty(debit)));
+        }
         this.producerDebits = List.copyOf(copies);
     }
 
@@ -770,7 +775,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (expected != null && countMatching(actual, expected) < expected.count()) {
             // DONE proves the inputs were consumed. Preserve the residual output and
             // settle this token so an externally extracted result cannot pair with a refund.
-            settledResults.addAll(copyStacks(actual));
+            settledResults.addAll(StackCopies.excludingEmpty(actual));
             settleReservations(operationIds);
             operations.abandonBatch(worker.id);
             worker.clearOperations();
@@ -793,7 +798,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         // Output ownership is already proven at this point. Commit the operation
         // before cleanup so a cleanup exception cannot pair real output with an input refund.
         settleReservations(operationIds);
-        settledResults.addAll(copyStacks(actual));
+        settledResults.addAll(StackCopies.excludingEmpty(actual));
         addSecondaryOutputs(worker.delegate);
         try {
             worker.delegate.onBatchFinished(player);
@@ -828,7 +833,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     /** Drain newly settled outputs without waiting for the entire group. */
     public List<ItemStack> drainSettledResults() {
         if (settledResults.isEmpty()) return List.of();
-        List<ItemStack> drained = copyStacks(settledResults);
+        List<ItemStack> drained = StackCopies.excludingEmpty(settledResults);
         settledResults.clear();
         return List.copyOf(drained);
     }
@@ -840,7 +845,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         List<ItemStack> recovery = new ArrayList<>();
         for (int operation = 0; operation < virtualDebits.size(); operation++) {
             if (safelyRecoverableVirtual[operation]) {
-                recovery.addAll(copyStacks(virtualDebits.get(operation)));
+                recovery.addAll(StackCopies.excludingEmpty(virtualDebits.get(operation)));
             }
         }
         return List.copyOf(recovery);
@@ -851,7 +856,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         List<ItemStack> recovery = new ArrayList<>();
         for (int operation = 0; operation < producerDebits.size(); operation++) {
             if (safelyRecoverableVirtual[operation]) {
-                recovery.addAll(copyStacks(producerDebits.get(operation)));
+                recovery.addAll(StackCopies.excludingEmpty(producerDebits.get(operation)));
             }
         }
         producerDebits = List.of();
@@ -1005,7 +1010,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 expectedBatch, worker.operationIds.size(), captured);
         if (completed > 0) {
             settleReservations(worker.operationIds.subList(0, completed));
-            settledResults.addAll(copyStacks(captured));
+            settledResults.addAll(StackCopies.excludingEmpty(captured));
         }
     }
 
@@ -1344,22 +1349,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (ItemStack.isSameItem(expected.item(), stack)) count += stack.getCount();
         }
         return count;
-    }
-
-    private static List<ItemStack> copyStacksKeepingEmpty(List<ItemStack> stacks) {
-        List<ItemStack> copies = new ArrayList<>(stacks.size());
-        for (ItemStack stack : stacks) {
-            copies.add(stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copy());
-        }
-        return copies;
-    }
-
-    private static List<ItemStack> copyStacks(List<ItemStack> stacks) {
-        List<ItemStack> copies = new ArrayList<>(stacks.size());
-        for (ItemStack stack : stacks) {
-            if (stack != null && !stack.isEmpty()) copies.add(stack.copy());
-        }
-        return copies;
     }
 
     private IBatchDelegate createChildDelegate(ModType type) {

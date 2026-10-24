@@ -10,6 +10,7 @@ import net.minecraft.client.resources.language.I18n;
 import net.minecraftforge.fml.ModList;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -77,6 +78,21 @@ public final class PlanRenderEngine {
 
     public PlanAnimationController animation() {
         return animation;
+    }
+
+    /** 计划步骤和树节点共用的模组标签颜色。 */
+    public static int modLabelColor(@Nullable String modTypeId) {
+        if (modTypeId == null) return 0xFF8B8B8B;
+        return switch (modTypeId) {
+            case ModIds.MALUM -> 0xFF442288;
+            case ModIds.EIDOLON -> 0xFF226644;
+            case ModIds.FORBIDDEN_ARCANUS -> 0xFF663322;
+            case ModIds.GOETY, "goety_brazier" -> 0xFF222244;
+            case ModIds.WIZARDS_REBORN -> 0xFF444466;
+            case ModIds.EMBERS -> 0xFFCC6633;
+            case ModIds.AETHERWORKS -> 0xFF3388AA;
+            default -> 0xFF8B8B8B;
+        };
     }
 
     // ── Step cards — reference implementation ────────────────────────

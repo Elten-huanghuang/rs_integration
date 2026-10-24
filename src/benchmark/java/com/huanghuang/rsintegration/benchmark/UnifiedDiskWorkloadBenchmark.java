@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.benchmark;
 
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
 import com.refinedmods.refinedstorage.api.util.IStackList;
@@ -31,7 +31,7 @@ public class UnifiedDiskWorkloadBenchmark {
         }
     }
 
-    private int insert(BatchData data, int i, boolean perform) {
+    private long insert(BatchData data, int i, boolean perform) {
         if (data.core != null) return data.kind.equals("item")
                 ? data.core.insertItem(data.itemQueries[i], data.batchAmount, perform)
                 : data.core.insertFluid(data.fluidQueries[i], data.batchAmount, perform);
@@ -40,14 +40,15 @@ public class UnifiedDiskWorkloadBenchmark {
                 : data.batchAmount - data.rsFluids.insert(data.fluidQueries[i], data.batchAmount, action).getAmount();
     }
 
-    private int extract(BatchData data, int i, boolean perform, Blackhole sink) {
+    private long extract(BatchData data, int i, boolean perform, Blackhole sink) {
         if (data.core != null) {
             FrozenKey.Kind kind = data.keys[i].kind();
             int slot = data.kind.equals("item") ? data.core.items.exactSlot(data.itemQueries[i]) : data.core.fluids.exactSlot(data.fluidQueries[i]);
             FrozenKey key = data.core.table(kind).key(slot);
-            int taken = data.core.extract(kind, slot, data.batchAmount, perform);
+            long taken = data.core.extract(kind, slot, data.batchAmount, perform);
             // 消费真实提取副本，避免把没有构造返回 Stack 的核心耗时放进公平比较。
-            Object result = kind == FrozenKey.Kind.ITEM ? key.itemStack(taken) : key.fluidStack(taken);
+            Object result = kind == FrozenKey.Kind.ITEM
+                    ? key.itemStack(Math.toIntExact(taken)) : key.fluidStack(Math.toIntExact(taken));
             sink.consume(result); return taken;
         }
         Action action = perform ? Action.PERFORM : Action.SIMULATE;
@@ -57,17 +58,17 @@ public class UnifiedDiskWorkloadBenchmark {
         return result instanceof ItemStack stack ? stack.getCount() : ((FluidStack) result).getAmount();
     }
 
-    @Benchmark public int transferPair(BatchData data, Blackhole sink) {
+    @Benchmark public long transferPair(BatchData data, Blackhole sink) {
         int i = data.next(); return extract(data, i, true, sink) + insert(data, i, true);
     }
-    @Benchmark public int simulatedInsert(BatchData data) { return insert(data, data.next(), false); }
-    @Benchmark public int simulatedExtract(BatchData data, Blackhole sink) { return extract(data, data.next(), false, sink); }
+    @Benchmark public long simulatedInsert(BatchData data) { return insert(data, data.next(), false); }
+    @Benchmark public long simulatedExtract(BatchData data, Blackhole sink) { return extract(data, data.next(), false, sink); }
     @Benchmark public Object missingExtract(BatchData data) {
         if (data.core != null) return data.kind.equals("item") ? data.core.items.exactSlot(data.missingItem) : data.core.fluids.exactSlot(data.missingFluid);
         return data.kind.equals("item") ? data.rsItems.extract(data.missingItem, data.batchAmount, IComparer.COMPARE_NBT, Action.PERFORM)
                 : data.rsFluids.extract(data.missingFluid, data.batchAmount, IComparer.COMPARE_NBT, Action.PERFORM);
     }
-    @Benchmark public int rejectedNewKey(BatchData data) {
+    @Benchmark public long rejectedNewKey(BatchData data) {
         if (data.core == null) throw new IllegalStateException("原版无限盘没有对应的 Key 容量拒绝语义");
         return data.kind.equals("item") ? data.core.insertItem(data.missingItem, data.batchAmount, true)
                 : data.core.insertFluid(data.missingFluid, data.batchAmount, true);

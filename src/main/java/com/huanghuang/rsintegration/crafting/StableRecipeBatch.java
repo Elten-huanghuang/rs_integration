@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
@@ -183,7 +184,7 @@ final class StableRecipeBatch {
             samples.add(sample);
             int perCraft = CraftPacketUtils.requiredCount(spec, 1);
             if (perCraft <= 0) return null;
-            slots.add(new SlotRequirement(List.copyOf(candidates), perCraft));
+            slots.add(new SlotRequirement(spec, perCraft));
         }
         if (slots.isEmpty()) return null;
 
@@ -226,13 +227,15 @@ final class StableRecipeBatch {
         Map<CraftingResolver.StackKey, Long> assigned = new LinkedHashMap<>();
         for (SlotRequirement slot : plan.slots()) {
             long remaining = slot.perCraft() * crafts;
-            for (ItemStack candidate : slot.candidates()) {
+            Map<CraftingResolver.StackKey, ItemStack> available =
+                    matchingAvailable(slot.spec().ingredient(), workingInventory, ledger, player);
+            for (Map.Entry<CraftingResolver.StackKey, ItemStack> entry : available.entrySet()) {
                 if (remaining <= 0) break;
-                long available = countInWorkingInventory(workingInventory, candidate)
-                        + ledger.countAvailableExactForBatch(candidate, player);
-                CraftingResolver.StackKey key = CraftingResolver.StackKey.of(candidate, true);
+                CraftingResolver.StackKey key = entry.getKey();
+                ItemStack candidate = entry.getValue();
+                long existing = available.getOrDefault(key, ItemStack.EMPTY).getCount();
                 long alreadyAssigned = assigned.getOrDefault(key, 0L);
-                long take = Math.min(remaining, Math.max(0L, available - alreadyAssigned));
+                long take = Math.min(remaining, Math.max(0L, existing - alreadyAssigned));
                 if (take <= 0) continue;
                 assigned.merge(key, take, StableRecipeBatch::saturatedAdd);
                 Requirement previous = selected.get(key);
@@ -252,19 +255,17 @@ final class StableRecipeBatch {
         long upperBound = Long.MAX_VALUE;
         for (SlotRequirement slot : plan.slots()) {
             long slotAvailable = 0L;
-            Map<CraftingResolver.StackKey, ItemStack> unique = new LinkedHashMap<>();
-            for (ItemStack candidate : slot.candidates()) {
-                unique.putIfAbsent(CraftingResolver.StackKey.of(candidate, true), candidate);
+            ExtractionLedger.BatchMatch backing =
+                    ledger.inspectBatchMatching(slot.spec().ingredient(), player);
+            if (!backing.snapshotReadable()) {
+                return new Availability(0L, false, backing.detail());
             }
-            for (ItemStack candidate : unique.values()) {
-                ExtractionLedger.BatchAvailability backing =
-                        ledger.inspectBatchAvailability(candidate, player);
-                if (!backing.snapshotReadable()) {
-                    return new Availability(0L, false, backing.detail());
-                }
-                slotAvailable = saturatedAdd(slotAvailable,
-                        countInWorkingInventory(workingInventory, candidate)
-                                + backing.available());
+            for (ItemStack candidate : matchingWorkingStacks(
+                    slot.spec().ingredient(), workingInventory)) {
+                slotAvailable = saturatedAdd(slotAvailable, candidate.getCount());
+            }
+            for (ItemStack candidate : backing.stacks()) {
+                slotAvailable = saturatedAdd(slotAvailable, candidate.getCount());
             }
             upperBound = Math.min(upperBound, slotAvailable / slot.perCraft());
         }
@@ -300,6 +301,40 @@ final class StableRecipeBatch {
             }
         }
         return low;
+    }
+
+    private static Map<CraftingResolver.StackKey, ItemStack> matchingAvailable(
+            Ingredient ingredient, List<ItemStack> workingInventory,
+            ExtractionLedger ledger, ServerPlayer player) {
+        Map<CraftingResolver.StackKey, ItemStack> available = new LinkedHashMap<>();
+        for (ItemStack stack : matchingWorkingStacks(ingredient, workingInventory)) {
+            mergeAvailable(available, stack);
+        }
+        ExtractionLedger.BatchMatch stored = ledger.inspectBatchMatching(ingredient, player);
+        for (ItemStack stack : stored.stacks()) mergeAvailable(available, stack);
+        return available;
+    }
+
+    private static List<ItemStack> matchingWorkingStacks(
+            Ingredient ingredient, List<ItemStack> inventory) {
+        Map<CraftingResolver.StackKey, ItemStack> matches = new LinkedHashMap<>();
+        for (ItemStack stack : inventory) {
+            if (stack == null || stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
+            mergeAvailable(matches, stack);
+        }
+        return List.copyOf(matches.values());
+    }
+
+    private static void mergeAvailable(Map<CraftingResolver.StackKey, ItemStack> available,
+                                       ItemStack addition) {
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(addition, true);
+        ItemStack existing = available.get(key);
+        if (existing == null) {
+            available.put(key, addition.copyWithCount(addition.getCount()));
+            return;
+        }
+        long combined = (long) existing.getCount() + addition.getCount();
+        existing.setCount((int) Math.min(Integer.MAX_VALUE, combined));
     }
 
     private static void logBatch(FlatCraftExecutor.Context context,
@@ -370,7 +405,7 @@ final class StableRecipeBatch {
     }
 
     private record Requirement(ItemStack template, long count) {}
-    private record SlotRequirement(List<ItemStack> candidates, long perCraft) {}
+    private record SlotRequirement(IngredientSpec spec, long perCraft) {}
     private record BatchPlan(ItemStack output, List<SlotRequirement> slots) {}
     private record Availability(long availableCrafts, boolean snapshotReadable,
                                 String detail) {}

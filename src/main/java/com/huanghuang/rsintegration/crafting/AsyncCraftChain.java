@@ -2211,7 +2211,8 @@ public final class AsyncCraftChain {
     }
 
     private void publishNodeOutputs(NodeId nodeId, List<ItemStack> actualOutputs) {
-        if (!publishDeclaredNodeOutputs(nodeId, new ArrayList<>(copyStacks(actualOutputs)))) {
+        if (!publishDeclaredNodeOutputs(nodeId,
+                new ArrayList<>(StackCopies.excludingEmpty(actualOutputs)))) {
             throw new IllegalStateException("Graph node output did not satisfy its declarations: " + nodeId);
         }
     }
@@ -2221,7 +2222,7 @@ public final class AsyncCraftChain {
         CraftNode node = graphNodes.get(nodeId);
         if (node == null || graphMaterials == null) return false;
 
-        List<ItemStack> remaining = copyStacks(actualOutputs);
+        List<ItemStack> remaining = StackCopies.excludingEmpty(actualOutputs);
         Map<OutputDeclaration, List<ItemStack>> matched = new LinkedHashMap<>();
         List<String> checks = new ArrayList<>();
         for (OutputDeclaration output : node.outputs()) {
@@ -2377,7 +2378,7 @@ public final class AsyncCraftChain {
             }
             for (int operation = 0; operation < group.getTotalOperations(); operation++) {
                 int mark = ledger.reservationMark();
-                List<ItemStack> producerBefore = copyStacks(producerPool);
+                List<ItemStack> producerBefore = StackCopies.excludingEmpty(producerPool);
                 List<ItemStack> slice = reserveGraphMaterials(
                         perOperationSpecs, online, ledger, initialPool, producerPool);
                 if (slice == null) {
@@ -2395,7 +2396,7 @@ public final class AsyncCraftChain {
                         full.add(slice.get(consumedIndex++));
                     }
                 }
-                materials.addAll(copyStacksKeepingEmpty(full));
+                materials.addAll(StackCopies.includingEmpty(full));
                 tokens.add(ledger.tokenSince(mark));
                 virtualDebits.add(List.of());
                 producerDebits.add(consumedFragments(producerBefore, producerPool));
@@ -4044,9 +4045,9 @@ public final class AsyncCraftChain {
                         List<ExtractionLedger.ReservationToken> tokens = new ArrayList<>();
                         List<List<ItemStack>> virtualDebits = new ArrayList<>();
                         for (ReservedOperation operation : reserved.operations()) {
-                            materials.addAll(copyStacksKeepingEmpty(operation.materials()));
+                            materials.addAll(StackCopies.includingEmpty(operation.materials()));
                             tokens.add(operation.token());
-                            virtualDebits.add(copyStacks(operation.virtualDebits()));
+                            virtualDebits.add(StackCopies.excludingEmpty(operation.virtualDebits()));
                         }
                         parallel.setReservationTokens(tokens);
                         parallel.setReusableReservationTokens(reserved.reusableTokens());
@@ -4144,7 +4145,7 @@ public final class AsyncCraftChain {
             List<IngredientSpec> specs,
             List<IBatchDelegate.MaterialReservationScope> scopes,
             int workerCount, int operationCount, ServerPlayer online) {
-        List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
+        List<ItemStack> virtualSnapshot = StackCopies.excludingEmpty(virtualInventory);
         List<ReservedOperation> reservations = new ArrayList<>();
         int effectiveWorkers = Math.min(Math.max(1, workerCount), operationCount);
         List<ItemStack> reusable = new ArrayList<>();
@@ -4208,25 +4209,9 @@ public final class AsyncCraftChain {
         return preReserveParallelOperations(specs, List.of(), 1, operationCount, online);
     }
 
-    private static List<ItemStack> copyStacksKeepingEmpty(List<ItemStack> stacks) {
-        List<ItemStack> copies = new ArrayList<>(stacks.size());
-        for (ItemStack stack : stacks) {
-            copies.add(stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copy());
-        }
-        return copies;
-    }
-
-    private static List<ItemStack> copyStacks(List<ItemStack> stacks) {
-        List<ItemStack> copies = new ArrayList<>(stacks.size());
-        for (ItemStack stack : stacks) {
-            if (stack != null && !stack.isEmpty()) copies.add(stack.copy());
-        }
-        return copies;
-    }
-
     private void restoreVirtualSnapshot(List<ItemStack> snapshot) {
         virtualInventory.clear();
-        virtualInventory.addAll(copyStacks(snapshot));
+        virtualInventory.addAll(StackCopies.excludingEmpty(snapshot));
     }
 
     record FlatMaterialBatch(int executions, List<ItemStack> materials) {}
@@ -4257,7 +4242,7 @@ public final class AsyncCraftChain {
         }
         int mark = ledger.reservationMark();
         int debitMark = virtualDebits == null ? 0 : virtualDebits.size();
-        List<ItemStack> virtualSnapshot = copyStacks(virtualInventory);
+        List<ItemStack> virtualSnapshot = StackCopies.excludingEmpty(virtualInventory);
         boolean reserved = false;
         try {
             List<ItemStack> materials = reserveStepMaterials(specs, online, virtualDebits, logFailure);
@@ -4305,19 +4290,9 @@ public final class AsyncCraftChain {
                 }
             }
 
-            if (needed > 0 && storageEndpoint != null) {
-                ItemStack reserved = ledger.reserveFromEndpoint(spec.ingredient(), needed, storageEndpoint, online);
-                if (!reserved.isEmpty()) {
-                    if (material.isEmpty()) {
-                        material = reserved;
-                    } else {
-                        material.grow(reserved.getCount());
-                    }
-                    needed -= reserved.getCount();
-                }
-            }
             if (needed > 0) {
-                ItemStack reserved = ledger.reserveFromInventory(spec.ingredient(), needed, online);
+                ItemStack reserved = reserveIngredient(
+                        ledger, spec.ingredient(), needed, online);
                 if (!reserved.isEmpty()) {
                     if (material.isEmpty()) {
                         material = reserved;
@@ -4361,8 +4336,8 @@ public final class AsyncCraftChain {
                 materials.add(ItemStack.EMPTY);
                 continue;
             }
-            ItemStack reserved = targetLedger.reserve(spec.ingredient(), spec.count(),
-                    storageEndpoint, online, null, null);
+            ItemStack reserved = reserveIngredient(
+                    targetLedger, spec.ingredient(), spec.count(), online);
             if (reserved.isEmpty() || reserved.getCount() != spec.count()) {
                 while (targetLedger.reservationMark() > mark) {
                     targetLedger.cancelLastReservation();
@@ -4955,11 +4930,27 @@ public final class AsyncCraftChain {
     private ItemStack reserveIngredient(ExtractionLedger target, Ingredient ingredient,
                                         int amount, ServerPlayer player) {
         if (amount <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        Map<String, CraftStorageEndpoint> candidates = new LinkedHashMap<>();
         if (storageEndpoint != null) {
-            ItemStack stored = target.reserveFromEndpoint(ingredient, amount, storageEndpoint, player);
+            candidates.put(endpointKey(storageEndpoint), storageEndpoint);
+        }
+        for (CraftStorageEndpoint candidate :
+                CraftPacketUtils.resolveEndpointCandidatesForCraft(player, null, null)) {
+            candidates.putIfAbsent(endpointKey(candidate), candidate);
+        }
+        for (CraftStorageEndpoint candidate : candidates.values()) {
+            ItemStack stored = target.reserveFromEndpoint(ingredient, amount, candidate, player);
             if (!stored.isEmpty()) return stored;
         }
         return target.reserveFromInventory(ingredient, amount, player);
+    }
+
+    private static String endpointKey(CraftStorageEndpoint endpoint) {
+        try {
+            return endpoint.session().reference().toString();
+        } catch (RuntimeException ignored) {
+            return "endpoint@" + System.identityHashCode(endpoint);
+        }
     }
 
     private ItemStack reserveExact(ExtractionLedger target, ItemStack template,

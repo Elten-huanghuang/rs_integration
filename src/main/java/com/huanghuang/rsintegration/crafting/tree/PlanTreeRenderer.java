@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanRenderEngine;
-import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -275,7 +274,7 @@ public final class PlanTreeRenderer {
         // 9. Mod color dot below count.
         if (node.step != null && node.step.modType() != null) {
             String modName = node.step.modType().id();
-            int dotColor = modLabelColor(modName);
+            int dotColor = PlanRenderEngine.modLabelColor(modName);
             int dotY = cy + font.lineHeight + 1;
             // Small color dot.
             gfx.fill(box.itemCenterX() - 3, dotY, box.itemCenterX() + 3, dotY + 4, dotColor);
@@ -322,21 +321,6 @@ public final class PlanTreeRenderer {
     }
 
     // ── Helpers ────────────────────────────────────────────────────
-
-    /** Mod label dot color from mod type id. */
-    private static int modLabelColor(String modTypeId) {
-        if (modTypeId == null) return 0xFF8B8B8B;
-        return switch (modTypeId) {
-            case ModIds.MALUM -> 0xFF442288;
-            case ModIds.EIDOLON -> 0xFF226644;
-            case ModIds.FORBIDDEN_ARCANUS -> 0xFF663322;
-            case ModIds.GOETY, "goety_brazier" -> 0xFF222244;
-            case ModIds.WIZARDS_REBORN -> 0xFF444466;
-            case ModIds.EMBERS -> 0xFFCC6633;
-            case ModIds.AETHERWORKS -> 0xFF3388AA;
-            default -> 0xFF8B8B8B;
-        };
-    }
 
     /** Distinct dropdown button (border + fill + down triangle) marking a switchable node. */
     private static void drawSwitchButton(GuiGraphics gfx, int x, int y, boolean hovered, boolean selected) {

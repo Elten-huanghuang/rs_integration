@@ -64,7 +64,7 @@ public record PlanResponse(
         storageNetworks = storageNetworks == null ? List.of() : List.copyOf(storageNetworks);
         diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
         if (outcome == null) {
-            outcome = inferOutcome(success, materials, missing, executionBlocked);
+            outcome = PlanOutcome.infer(success, materials, missing, executionBlocked);
         }
     }
 
@@ -105,21 +105,6 @@ public record PlanResponse(
                 Collections.emptySet(), Collections.emptyMap(), null, null,
                 outcome == PlanOutcome.RUNTIME_UNAVAILABLE, List.of(), Map.of(), null,
                 List.of(), outcome, diagnostics);
-    }
-
-    private static PlanOutcome inferOutcome(boolean success,
-                                            Map<IngredientKey, Availability> materials,
-                                            List<String> missing,
-                                            boolean executionBlocked) {
-        if (success) return PlanOutcome.READY;
-        if (materials != null && materials.values().stream()
-                .anyMatch(availability -> availability != null
-                        && availability.missingCount() > 0)) {
-            return PlanOutcome.MISSING_INPUTS;
-        }
-        if (missing != null && !missing.isEmpty()) return PlanOutcome.MISSING_INPUTS;
-        if (executionBlocked) return PlanOutcome.RUNTIME_UNAVAILABLE;
-        return PlanOutcome.NO_RECIPE;
     }
 
     public record StepIssue(List<Component> warnings, boolean blocked) {

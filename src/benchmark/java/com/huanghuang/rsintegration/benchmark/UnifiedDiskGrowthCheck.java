@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.benchmark;
 
 import com.google.gson.GsonBuilder;
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.storage.disk.ItemStorageDisk;
@@ -41,7 +41,7 @@ public final class UnifiedDiskGrowthCheck {
                 int end = Math.min(count, start + 256);
                 long began = System.nanoTime();
                 for (int i = start; i < end; i++) {
-                    int accepted;
+                    long accepted;
                     if (implementation.equals("unifiedKeyPath")) accepted = kind.equals("item") ? core.insertItem(items[i], 64, true) : core.insertFluid(fluids[i], 1000, true);
                     else accepted = kind.equals("item") ? 64 - rsItems.insert(items[i], 64, Action.PERFORM).getCount() : 1000 - rsFluids.insert(fluids[i], 1000, Action.PERFORM).getAmount();
                     UnifiedDiskBenchmark.check(accepted == (kind.equals("item") ? 64 : 1000));
@@ -54,7 +54,7 @@ public final class UnifiedDiskGrowthCheck {
             UnifiedDiskBenchmark.check(size == count);
             // 逐项核对，验证持续增长和扩容后仍能精确提取每一种身份。
             for (int i = 0; i < count; i++) {
-                int actual;
+                long actual;
                 if (implementation.equals("unifiedKeyPath")) actual = kind.equals("item") ? core.items.amount(core.items.exactSlot(items[i])) : core.fluids.amount(core.fluids.exactSlot(fluids[i]));
                 else actual = kind.equals("item") ? rsItems.extract(items[i], 64, 1, Action.SIMULATE).getCount() : rsFluids.extract(fluids[i], 1000, 1, Action.SIMULATE).getAmount();
                 UnifiedDiskBenchmark.check(actual == (kind.equals("item") ? 64 : 1000));

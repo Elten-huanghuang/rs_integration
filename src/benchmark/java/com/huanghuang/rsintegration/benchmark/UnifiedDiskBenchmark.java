@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.benchmark;
 
-import com.huanghuang.rsintegration.disk.core.FrozenKey;
-import com.huanghuang.rsintegration.disk.core.UnifiedDiskCore;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
 import com.refinedmods.refinedstorage.api.storage.AccessType;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
@@ -137,7 +137,7 @@ public class UnifiedDiskBenchmark {
             for (int i = 0; i < keys.length; i++) {
                 if (core != null) {
                     int slot = core.table(keys[i].kind()).exactSlot(keys[i]);
-                    int current = core.table(keys[i].kind()).amount(slot);
+                    long current = core.table(keys[i].kind()).amount(slot);
                     if (current < initialAmount) core.insert(keys[i], initialAmount - current, true);
                     else if (current > initialAmount) core.extract(keys[i].kind(), slot, current - initialAmount, true);
                 } else if (kind.equals("item")) rsItemTemplates[i].setCount(initialAmount);
@@ -148,7 +148,7 @@ public class UnifiedDiskBenchmark {
 
         @TearDown(Level.Iteration) public void validate() {
             for (int i = 0; i < keys.length; i++) {
-                int amount = core != null ? core.table(keys[i].kind()).amount(keys[i])
+                long amount = core != null ? core.table(keys[i].kind()).amount(keys[i])
                         : kind.equals("item") ? rsItemTemplates[i].getCount() : rsFluidTemplates[i].getAmount();
                 check(amount > 0 && amount <= Integer.MAX_VALUE);
             }
@@ -160,7 +160,7 @@ public class UnifiedDiskBenchmark {
 
     static void check(boolean value) { if (!value) throw new IllegalStateException("基准库存数量或容量不符合预期"); }
 
-    @Benchmark public int existingInsert(Data data) {
+    @Benchmark public long existingInsert(Data data) {
         int i = data.next();
         if (data.core != null) return data.implementation.equals("unifiedCore") ? data.core.insert(data.keys[i], 1, true)
                 : data.kind.equals("item") ? data.core.insertItem(data.itemQueries[i], 1, true)
@@ -177,10 +177,10 @@ public class UnifiedDiskBenchmark {
                     : data.kind.equals("item") ? data.core.items.exactSlot(data.itemQueries[i])
                     : data.core.fluids.exactSlot(data.fluidQueries[i]);
             FrozenKey key = data.core.table(kind).key(slot);
-            int taken = data.core.extract(kind, slot, 1, true);
+            long taken = data.core.extract(kind, slot, 1, true);
             // KeyPath 包含模板返回副本，与原版 extract 返回 Stack 的成本相符。
             if (data.implementation.equals("unifiedKeyPath")) return key.kind() == FrozenKey.Kind.ITEM
-                    ? key.itemStack(taken) : key.fluidStack(taken);
+                    ? key.itemStack(Math.toIntExact(taken)) : key.fluidStack(Math.toIntExact(taken));
             return taken;
         }
         return data.kind.equals("item") ? data.rsItems.extract(data.itemQueries[i], 1, IComparer.COMPARE_NBT, Action.PERFORM)
@@ -212,7 +212,7 @@ public class UnifiedDiskBenchmark {
         @Override @TearDown(Level.Iteration) public void validate() { removePrevious(); super.validate(); }
     }
 
-    @Benchmark public int newEntryInsert(NewData data) {
+    @Benchmark public long newEntryInsert(NewData data) {
         if (data.core != null) {
             return data.implementation.equals("unifiedCore") ? data.core.insert(data.newKey, 1, true)
                     : data.kind.equals("item") ? data.core.insertItem(data.newItem, 1, true)

@@ -2192,15 +2192,10 @@ public final class GenericCraftPacket {
                 if (storageEndpoint != null) ledger.setStorageEndpoint(storageEndpoint);
                 // Plan all extractions atomically — nothing physically moved yet
                 for (IngredientNeed need : grouped.values()) {
-                    ItemStack reserved = storageEndpoint != null
-                            ? ledger.reserveFromEndpoint(need.ingredient, need.count, storageEndpoint, player)
-                            : CraftPacketUtils.ensureMaterialAvailable(
+                    ItemStack reserved = CraftPacketUtils.ensureMaterialAvailable(
                             player, player.serverLevel().dimension(),
-                            player.blockPosition(), need.ingredient, need.count, ledger,
-                            storageEndpoint);
-                    if (reserved.isEmpty() && storageEndpoint != null) {
-                        reserved = ledger.reserveFromInventory(need.ingredient, need.count, player);
-                    }
+                            player.blockPosition(), need.ingredient, need.count,
+                            ledger, storageEndpoint);
                     if (reserved.isEmpty()) {
                         String missingName = CraftPacketUtils.describeIngredient(need.ingredient).getString();
                         if (FAILURE_LOG_SAMPLER.allow("extract:" + recipeId + ":" + missingName)) {

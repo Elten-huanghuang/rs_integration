@@ -4,7 +4,7 @@
 
 这次改动降低了规划 CPU 开销及分配量，但没有把所有特殊配方兼容求解改成可跨 tick 恢复的任务。真实服务器 MSPT/TPS 稳定性仍需按后文方案验证。
 
-后续已完成候选评分、库存计数、派生图复制及兼容诊断分配四项优化，见[第二轮实现与验证](D:/sd/rs-integration/src/planningBenchmark/reports/recursive-planning-round2-2026-10-23.md)。下方第一轮数据与补充审查保留为历史记录。
+后续已完成候选评分、库存计数、派生图复制及兼容诊断分配四项优化，见[第二轮实现与验证](D:/sd/rs-integration/src/benchmark/reports/recursive-planning-round2-2026-10-23.md)。下方第一轮数据与补充审查保留为历史记录。
 
 **范围与测量条件**
 
@@ -35,7 +35,7 @@
 
 64 步链的前后结果均为 SUCCESS、130 个搜索状态、0 次回溯、0 次记忆命中。生产代码仍然接收并保留完整库存，没有靠丢弃无关库存或剪掉可行配方取得这个结果。小库存场景耗时没有一致提升，不应从这组短样本断言它更快；大库存场景的分配下降和扫描量变化则可直接解释。
 
-原始数据：[修改前](D:/sd/rs-integration/src/planningBenchmark/reports/data/recursive-planning-before.csv)、[修改后](D:/sd/rs-integration/src/planningBenchmark/reports/data/recursive-planning-after.csv)。
+原始数据：[修改前](D:/sd/rs-integration/src/benchmark/reports/data/recursive-planning-before.csv)、[修改后](D:/sd/rs-integration/src/benchmark/reports/data/recursive-planning-after.csv)。
 
 **已落地：按命中的配方构建依赖子图**
 
@@ -123,9 +123,9 @@
 .\gradlew.bat --offline planningPerformanceProbe --console=plain
 ```
 
-探针为 [PlanningAuditProbe.java](D:/sd/rs-integration/src/planningBenchmark/java/com/huanghuang/rsintegration/crafting/planning/PlanningAuditProbe.java)，输出至 `build/benchmark/planning/results.csv`。使用独立 `planningBenchmark` 源集，不进入生产模组；通过 manifest 承载 classpath，避免 Windows 命令长度限制。首次构建若缺少本地依赖，需先使 Gradle 依赖可用。
+探针为 [PlanningAuditProbe.java](D:/sd/rs-integration/src/benchmark/java/com/huanghuang/rsintegration/crafting/planning/PlanningAuditProbe.java)，输出至 `build/benchmark/planning/results.csv`。它与磁盘基准共用 `benchmark` 源集，不进入生产模组；通过 manifest 承载 classpath，避免 Windows 命令长度限制。首次构建若缺少本地依赖，需先使 Gradle 依赖可用。
 
-原有磁盘 benchmark 源码仍引用已迁移的包，首次尝试复用该源集时编译失败；本次没有改动这些无关源码，独立规划源集已成功运行。报告和前后 CSV 与探针一同保存在 `src/planningBenchmark/reports`，不会被 `gradlew clean` 清除。
+磁盘基准与规划探针现已统一使用 `benchmark` 源集。三份报告、前后 CSV 与探针源码分别保存在 `src/benchmark/reports` 和 `src/benchmark/java`，不会被 `gradlew clean` 清除。
 
 **补充审查：继续加速且控制服务器开销的具体位置**
 

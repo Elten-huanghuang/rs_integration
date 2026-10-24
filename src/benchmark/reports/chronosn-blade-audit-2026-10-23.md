@@ -76,7 +76,7 @@ chronosn_blade → ak:rage → shizuku:tsubame_blade → ak:child
 
 后续实服验收应在安装包含这些修改的版本后重新加载配方，打开目标树并验证更深层展开；分别使用低数值与达标库存确认缺料/可执行判定，再对比同场景规划日志、MSPT 和 GC 数据。当前未部署，因此这些运行结果仍待验证。
 
-前两轮报告：[第一轮](D:/sd/rs-integration/src/planningBenchmark/reports/recursive-planning-audit-2026-10-23.md)、[第二轮](D:/sd/rs-integration/src/planningBenchmark/reports/recursive-planning-round2-2026-10-23.md)。前两轮微基准数字保持原报告的场景和限制，不与本轮样本结果混合计算收益。
+前两轮报告：[第一轮](D:/sd/rs-integration/src/benchmark/reports/recursive-planning-audit-2026-10-23.md)、[第二轮](D:/sd/rs-integration/src/benchmark/reports/recursive-planning-round2-2026-10-23.md)。前两轮微基准数字保持原报告的场景和限制，不与本轮样本结果混合计算收益。
 
 **复现命令**
 

@@ -1421,16 +1421,28 @@ public final class CraftPacketUtils {
         if (ledger != null) {
             CraftStorageEndpoint endpoint = preferredEndpoint != null
                     ? preferredEndpoint : ledger.storageEndpoint();
-            List<CraftStorageEndpoint> candidates = endpoint == null
-                    ? resolveEndpointCandidatesForCraft(player, altarDim, altarPos)
-                    : List.of(endpoint);
+            List<CraftStorageEndpoint> candidates = new ArrayList<>();
+            if (endpoint != null) {
+                ItemStack preferred = ledger.reserve(
+                        ingredient, count, endpoint, player, altarDim, altarPos);
+                if (!preferred.isEmpty()) return preferred;
+                candidates.add(endpoint);
+            }
+            for (CraftStorageEndpoint resolved :
+                    resolveEndpointCandidatesForCraft(player, altarDim, altarPos)) {
+                boolean duplicate = candidates.stream().anyMatch(existing ->
+                        endpointEquals(existing, resolved));
+                if (!duplicate) candidates.add(resolved);
+            }
             ItemStack reserved = ItemStack.EMPTY;
             if (candidates.isEmpty()) {
                 reserved = ledger.reserve(
                         ingredient, count, (CraftStorageEndpoint) null,
                         player, altarDim, altarPos);
             } else {
-                for (CraftStorageEndpoint candidate : candidates) {
+                int firstUntried = endpoint == null ? 0 : 1;
+                for (int i = firstUntried; i < candidates.size(); i++) {
+                    CraftStorageEndpoint candidate = candidates.get(i);
                     reserved = ledger.reserve(
                             ingredient, count, candidate, player, altarDim, altarPos);
                     if (!reserved.isEmpty()) {
@@ -1504,6 +1516,16 @@ public final class CraftPacketUtils {
         return ItemStack.EMPTY;
     }
 
+    private static boolean endpointEquals(CraftStorageEndpoint left,
+                                          CraftStorageEndpoint right) {
+        if (left == right) return true;
+        try {
+            return left.session().reference().equals(right.session().reference());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     /** Resolves the machine binding first, then the player's current/default endpoint. */
     public static Optional<CraftStorageEndpoint> resolveEndpointForCraft(
             ServerPlayer player, @Nullable ResourceKey<Level> altarDim,
@@ -1514,7 +1536,7 @@ public final class CraftPacketUtils {
     }
 
     /** 机器绑定优先，当前终端/默认存储作为后备。 */
-    private static List<CraftStorageEndpoint> resolveEndpointCandidatesForCraft(
+    static List<CraftStorageEndpoint> resolveEndpointCandidatesForCraft(
             ServerPlayer player, @Nullable ResourceKey<Level> altarDim,
             @Nullable BlockPos altarPos) {
         List<CraftStorageEndpoint> endpoints = new ArrayList<>(2);

@@ -157,6 +157,90 @@ public final class ExtractionLedger implements AutoCloseable {
         return new BatchAvailability(available, true, "success");
     }
 
+    /**
+     * 按 Ingredient 的真实匹配语义统计批量材料。
+     *
+     * <p>普通物品配方不能只用无 NBT 的模板做精确计数；库存中带运行时 NBT 的
+     * 同类物品仍然可能被原生 Ingredient 接受。</p>
+     */
+    public BatchMatch inspectBatchMatching(@Nonnull Ingredient ingredient,
+                                           @Nonnull ServerPlayer player) {
+        requireState(State.IDLE, State.RESERVING);
+        if (ingredient.isEmpty()) return new BatchMatch(true, List.of(), "empty ingredient");
+
+        Map<CraftingResolver.StackKey, ItemStack> matches = new LinkedHashMap<>();
+        Map<CraftingResolver.StackKey, Long> counts = new LinkedHashMap<>();
+        collectMatchingInventory(player.getInventory().items, ingredient, matches, counts);
+        collectMatchingInventory(player.getInventory().offhand, ingredient, matches, counts);
+        try {
+            for (IItemHandler backpack : findAllBackpackInventories(player)) {
+                for (int slot = 0; slot < backpack.getSlots(); slot++) {
+                    collectMatchingStack(backpack.getStackInSlot(slot), ingredient, matches, counts);
+                }
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.debug(fmt("Backpack material probe failed for batch inspection"), exception);
+        }
+
+        if (storageEndpoint != null) {
+            StorageSnapshotResult snapshot = reservationSnapshotResult(storageEndpoint, player);
+            if (!snapshot.successful()) {
+                return new BatchMatch(false, List.of(),
+                        snapshot.status() + "/" + snapshot.diagnosticCode());
+            }
+            StorageSnapshot loaded = snapshot.snapshot().orElseThrow();
+            for (StoredItem stored : loaded.match(ingredient).items()) {
+                collectMatchingStack(stored.stack(), ingredient, matches, counts,
+                        pendingNet.getOrDefault(
+                                CraftingResolver.StackKey.of(stored.stack(), true), 0L));
+            }
+        }
+
+        List<ItemStack> available = new ArrayList<>();
+        counts.forEach((key, count) -> {
+            long remaining = Math.max(0L, count - pendingInv.getOrDefault(key, 0L));
+            if (remaining <= 0L) return;
+            available.add(matches.get(key).copyWithCount(
+                    (int) Math.min(Integer.MAX_VALUE, remaining)));
+        });
+        return new BatchMatch(true, List.copyOf(available), "success");
+    }
+
+    private static void collectMatchingInventory(
+            Iterable<ItemStack> stacks, Ingredient ingredient,
+            Map<CraftingResolver.StackKey, ItemStack> matches,
+            Map<CraftingResolver.StackKey, Long> counts) {
+        for (ItemStack stack : stacks) {
+            collectMatchingStack(stack, ingredient, matches, counts);
+        }
+    }
+
+    private static void collectMatchingStack(
+            ItemStack stack, Ingredient ingredient,
+            Map<CraftingResolver.StackKey, ItemStack> matches,
+            Map<CraftingResolver.StackKey, Long> counts) {
+        collectMatchingStack(stack, ingredient, matches, counts, 0L);
+    }
+
+    private static void collectMatchingStack(
+            ItemStack stack, Ingredient ingredient,
+            Map<CraftingResolver.StackKey, ItemStack> matches,
+            Map<CraftingResolver.StackKey, Long> counts, long alreadyPending) {
+        if (stack == null || stack.isEmpty()) return;
+        boolean accepted;
+        try {
+            accepted = IngredientMatcher.test(ingredient, stack);
+        } catch (RuntimeException | LinkageError ignored) {
+            return;
+        }
+        if (!accepted) return;
+        long amount = Math.max(0L, stack.getCount() - alreadyPending);
+        if (amount <= 0L) return;
+        CraftingResolver.StackKey key = CraftingResolver.StackKey.of(stack, true);
+        matches.putIfAbsent(key, stack.copyWithCount(1));
+        counts.merge(key, amount, ExtractionLedger::saturatedAdd);
+    }
+
     public long countAvailableExactForBatch(@Nonnull ItemStack template,
                                             @Nonnull ServerPlayer player) {
         return inspectBatchAvailability(template, player).available();
@@ -1116,6 +1200,21 @@ public final class ExtractionLedger implements AutoCloseable {
         public BatchAvailability {
             available = Math.max(0L, available);
             detail = detail == null ? "" : detail;
+        }
+    }
+
+    public record BatchMatch(boolean snapshotReadable, List<ItemStack> stacks, String detail) {
+        public BatchMatch {
+            stacks = List.copyOf(stacks);
+            detail = detail == null ? "" : detail;
+        }
+
+        public long available() {
+            long total = 0L;
+            for (ItemStack stack : stacks) {
+                total = saturatedAdd(total, stack.getCount());
+            }
+            return total;
         }
     }
 

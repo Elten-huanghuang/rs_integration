@@ -739,6 +739,11 @@ public final class WRWandCraftPacket {
 
         int current = readCurrentWissen(be);
         if (current < cost) {
+            int transferred = WRWissenSupport.transferFromPlayerItems(
+                    player, be, current, cost - current);
+            if (transferred > 0) current = readCurrentWissen(be);
+        }
+        if (current < cost) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.wr.error.insufficient_wissen",
                     String.format("%,d", current), String.format("%,d", cost)));

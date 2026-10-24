@@ -20,6 +20,8 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
@@ -528,6 +530,53 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         return new MaterialPlan(entries);
     }
 
+    /**
+     * 图材料可能按生产者或库存碎片拆成多个栈。祭坛接收的是一个逻辑槽一个栈，
+     * 因此放置前按 recipe 槽位重新归并，不能把碎片数误当成槽位数。
+     */
+    @Nullable
+    static List<ItemStack> normalizePlacementMaterials(
+            @Nullable List<IngredientSpec> specs, int extraCount, int spiritCount,
+            int operations, List<ItemStack> materials) {
+        int expected = 1 + Math.max(0, extraCount) + Math.max(0, spiritCount);
+        if (specs == null || specs.size() != expected || operations <= 0) return null;
+
+        List<ItemStack> remaining = new ArrayList<>();
+        for (ItemStack stack : materials) {
+            if (stack != null && !stack.isEmpty()) remaining.add(stack.copy());
+        }
+        List<ItemStack> normalized = new ArrayList<>(expected);
+        for (IngredientSpec spec : specs) {
+            if (spec == null || spec.isEmpty()) return null;
+            long requiredLong = (long) spec.count() * operations;
+            if (requiredLong <= 0L || requiredLong > Integer.MAX_VALUE) return null;
+            int required = (int) requiredLong;
+            ItemStack combined = ItemStack.EMPTY;
+            int collected = 0;
+            var iterator = remaining.iterator();
+            while (iterator.hasNext() && collected < required) {
+                ItemStack candidate = iterator.next();
+                if (!IngredientMatcher.test(spec.ingredient(), candidate)) continue;
+                if (!combined.isEmpty()
+                        && !MaterialMatcher.equivalentRuntimeFragment(combined, candidate)) {
+                    continue;
+                }
+                int take = Math.min(required - collected, candidate.getCount());
+                if (combined.isEmpty()) {
+                    combined = candidate.copyWithCount(take);
+                } else {
+                    combined.grow(take);
+                }
+                candidate.shrink(take);
+                collected += take;
+                if (candidate.isEmpty()) iterator.remove();
+            }
+            if (collected != required) return null;
+            normalized.add(combined);
+        }
+        return remaining.isEmpty() ? List.copyOf(normalized) : null;
+    }
+
     @Override
     public OutputContract outputContract() {
         if (!supportsInputBuffer()) return OutputContract.none();
@@ -580,6 +629,21 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        List<IngredientSpec> specs = getRequiredMaterials();
+        int normalizedExtraCount = recipeListSize("extraItems");
+        int normalizedSpiritCount = recipeListSize("spirits");
+        List<ItemStack> placementMaterials = normalizePlacementMaterials(
+                specs, normalizedExtraCount, normalizedSpiritCount,
+                Math.max(1, bufferedOperations), materials);
+        if (placementMaterials == null) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Batch-Malum] Material layout mismatch before altar placement: recipe={} pos={} expectedSlots={} actualStacks={} operations={}",
+                    recipe.getId(), myPos,
+                    1 + normalizedExtraCount + normalizedSpiritCount,
+                    materials.size(), Math.max(1, bufferedOperations));
+            return false;
+        }
+
         Object inputObj = getField(recipe, "input");
         List<?> extraItems = (List<?>) getField(recipe, "extraItems");
         List<?> spirits = (List<?>) getField(recipe, "spirits");
@@ -587,17 +651,17 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         int extraCount = extraItems != null ? extraItems.size() : 0;
         int spiritCount = spirits != null ? spirits.size() : 0;
         int expectedMaterialCount = (inputObj != null ? 1 : 0) + extraCount + spiritCount;
-        if (materials.size() != expectedMaterialCount) {
+        if (placementMaterials.size() != expectedMaterialCount) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-Malum] Material count mismatch before altar placement: recipe={} pos={} expected={} actual={}",
-                    recipe.getId(), myPos, expectedMaterialCount, materials.size());
+                    recipe.getId(), myPos, expectedMaterialCount, placementMaterials.size());
             return false;
         }
 
         RSIntegrationMod.LOGGER.info(
                 "[RSI-Batch-Malum] Placing materials: recipe={} pos={} center={} extras={} spirits={} materials={}",
                 recipe.getId(), myPos, inputObj != null, extraCount, spiritCount,
-                describeMaterials(materials));
+                describeMaterials(placementMaterials));
 
         try {
             pedestals = capturePedestals();
@@ -615,8 +679,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
         try {
             // Center
-            if (inputObj != null && matIdx < materials.size()) {
-                ItemStack stack = materials.get(matIdx++);
+            if (inputObj != null && matIdx < placementMaterials.size()) {
+                ItemStack stack = placementMaterials.get(matIdx++);
                 if (!stack.isEmpty()) {
                     setIHandlerSlot(invMain, 0, stack);
                 }
@@ -625,8 +689,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             // Extra items → pedestals
             int pedIdx = 0;
             if (extraItems != null) {
-                for (int i = 0; i < extraCount && matIdx < materials.size(); i++) {
-                    ItemStack stack = materials.get(matIdx++);
+                for (int i = 0; i < extraCount && matIdx < placementMaterials.size(); i++) {
+                    ItemStack stack = placementMaterials.get(matIdx++);
                     if (stack.isEmpty()) continue;
                     pedIdx = placeAcrossPedestals(pedestals, pedIdx, stack);
                 }
@@ -634,8 +698,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
             // Spirits → invSpirit
             if (spirits != null) {
-                for (int i = 0; i < spiritCount && matIdx < materials.size(); i++) {
-                    ItemStack stack = materials.get(matIdx++);
+                for (int i = 0; i < spiritCount && matIdx < placementMaterials.size(); i++) {
+                    ItemStack stack = placementMaterials.get(matIdx++);
                     if (!stack.isEmpty()) {
                         setIHandlerSlot(invSpirit, i, stack);
                     }

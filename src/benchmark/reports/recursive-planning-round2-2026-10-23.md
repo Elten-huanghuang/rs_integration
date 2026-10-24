@@ -28,7 +28,7 @@
 
 512 候选场景的分配量下降约 96.5%。这是人工压力样本，不能据此推导整服倍率；它说明搜索状态很少时，排序及反复库存统计仍可能是主要开销。
 
-原始数据：[本轮修改前](D:/sd/rs-integration/src/planningBenchmark/reports/data/recursive-planning-round2-before.csv)、[本轮修改后](D:/sd/rs-integration/src/planningBenchmark/reports/data/recursive-planning-round2-after.csv)。
+原始数据：[本轮修改前](D:/sd/rs-integration/src/benchmark/reports/data/recursive-planning-round2-before.csv)、[本轮修改后](D:/sd/rs-integration/src/benchmark/reports/data/recursive-planning-round2-after.csv)。
 
 **短链交替对照与测量限制**
 
@@ -42,7 +42,7 @@
 
 此对照中三个规模均减少耗时和分配，前后结果一致。它仍是单 JVM 机制诊断，不是多 fork JMH、真实服务器基准或可靠 p95/p99 估计。不能把交替对照数字与独立 JVM 的数字混成同一套测量。
 
-交替对照数据：[CSV](D:/sd/rs-integration/src/planningBenchmark/reports/data/recursive-planning-round2-interleaved.csv)。额外一次性对照源码及旧规划器备份在 `build/planning-audit/round2-comparison` 和 `build/planning-audit/round2-baseline`，执行 `clean` 会删除这些临时资料。正式探针和上述三个 CSV 保留在 `src/planningBenchmark`。
+交替对照数据：[CSV](D:/sd/rs-integration/src/benchmark/reports/data/recursive-planning-round2-interleaved.csv)。额外一次性对照源码及旧规划器备份已清理；正式探针和上述三个 CSV 保留在 `src/benchmark`。
 
 **验证**
 

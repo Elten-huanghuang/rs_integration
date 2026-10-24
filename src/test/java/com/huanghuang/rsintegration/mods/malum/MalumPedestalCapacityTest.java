@@ -6,14 +6,17 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class MalumPedestalCapacityTest extends BootstrapTest {
     @Test
@@ -65,5 +68,34 @@ class MalumPedestalCapacityTest extends BootstrapTest {
         assertEquals(16, plan.operations());
         assertEquals(List.of(16, 32, 64),
                 plan.inputs().stream().map(input -> input.stack().getCount()).toList());
+    }
+
+    @Test
+    void altarNormalizesGraphMaterialFragmentsIntoSingleSlotStacks() {
+        List<IngredientSpec> specs = List.of(
+                new IngredientSpec(Ingredient.of(Items.GLASS), 4, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.REDSTONE), 4, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.GUNPOWDER), 4, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.BLAZE_POWDER), 4, DemandRole.CONSUMED),
+                new IngredientSpec(Ingredient.of(Items.SOUL_SAND), 4, DemandRole.CONSUMED));
+        List<ItemStack> fragments = new ArrayList<>();
+        addFragments(fragments, Items.GLASS, 4, 4, 4, 4);
+        addFragments(fragments, Items.REDSTONE, 4, 4, 4, 4);
+        addFragments(fragments, Items.GUNPOWDER, 4, 4, 4, 4);
+        addFragments(fragments, Items.BLAZE_POWDER, 5, 5, 6);
+        addFragments(fragments, Items.SOUL_SAND, 5, 5, 6);
+
+        List<ItemStack> normalized = MalumBatchDelegate.normalizePlacementMaterials(
+                specs, 2, 2, 4, fragments);
+
+        assertNotNull(normalized);
+        assertEquals(5, normalized.size());
+        assertEquals(List.of(16, 16, 16, 16, 16),
+                normalized.stream().map(ItemStack::getCount).toList());
+    }
+
+    private static void addFragments(List<ItemStack> stacks, Item item,
+                                     int... counts) {
+        for (int count : counts) stacks.add(new ItemStack(item, count));
     }
 }

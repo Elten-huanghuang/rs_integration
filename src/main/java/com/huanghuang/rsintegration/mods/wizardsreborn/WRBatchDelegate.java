@@ -2230,6 +2230,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         int current = readCurrentWissen();
         if (current < cost) {
+            int transferred = WRWissenSupport.transferFromPlayerItems(
+                    player, be, current, cost - current);
+            if (transferred > 0) current = readCurrentWissen();
+        }
+        if (current < cost) {
             insufficientWissenCurrent = current;
             insufficientWissenRequired = cost;
             player.sendSystemMessage(Component.translatable(
