@@ -16,6 +16,7 @@ public final class AnvilTerminalState implements CraftingStationState {
     private final AnvilMenu anvilMenu;
     private final Container inputs;
     private String itemName = "";
+    private boolean itemNameEdited;
     private boolean returned;
 
     public AnvilTerminalState(GridContainerMenu menu) {
@@ -47,7 +48,19 @@ public final class AnvilTerminalState implements CraftingStationState {
     @Override
     public void setInput(int index, ItemStack stack) {
         if (index < 0 || index >= inputCount()) return;
+        ItemStack current = inputs.getItem(index);
+        if (index == 0 && (current.isEmpty() != stack.isEmpty()
+                || !current.isEmpty() && !stack.isEmpty()
+                && !ItemStack.isSameItemSameTags(current, stack))) {
+            itemName = "";
+            itemNameEdited = false;
+            anvilMenu.setItemName("");
+        }
         anvilMenu.getSlot(index).set(stack);
+        if (index == 0 && !stack.isEmpty() && stack.hasCustomHoverName()) {
+            itemName = stack.getHoverName().getString();
+            anvilMenu.setItemName(itemName);
+        }
         returned = false;
     }
 
@@ -83,12 +96,19 @@ public final class AnvilTerminalState implements CraftingStationState {
 
     public boolean setItemName(String name) {
         boolean changed = anvilMenu.setItemName(name);
-        if (changed) itemName = name;
+        itemNameEdited = true;
+        itemName = name;
         return changed;
     }
 
     public String itemName() {
-        return itemName;
+        return visibleItemName(inputs.getItem(0), itemName, itemNameEdited);
+    }
+
+    static String visibleItemName(ItemStack input, String itemName, boolean itemNameEdited) {
+        if (input.isEmpty()) return "";
+        if (itemNameEdited) return itemName;
+        return input.getHoverName().getString();
     }
 
     public int cost() {

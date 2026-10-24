@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationState;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
+import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationResultSlot;
 import com.huanghuang.rsintegration.feature.craftingstation.AnvilTerminalState;
 import com.huanghuang.rsintegration.network.craftingstation.AnvilNamePacket;
 import com.huanghuang.rsintegration.feature.craftingstation.SmithingTerminalState;
@@ -52,6 +53,27 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private static final ResourceLocation RSI_RS_CRAFTING_TEXTURE =
             new ResourceLocation("refinedstorage", "textures/gui/crafting_grid.png");
     @Unique
+    private static final int RSI_PANEL_WIDTH = 140;
+    @Unique
+    private static final int RSI_PANEL_HEIGHT = 60;
+    @Unique
+    // RS 工作台图集中的纯底色、单个九宫格槽框和合成箭头。
+    private static final int RSI_PANEL_BACKGROUND_U = 100;
+    @Unique
+    private static final int RSI_PANEL_BACKGROUND_V = 137;
+    @Unique
+    private static final int RSI_CRAFTING_SLOT_U = 24;
+    @Unique
+    private static final int RSI_CRAFTING_SLOT_V = 77;
+    @Unique
+    private static final int RSI_CRAFTING_ARROW_U = 95;
+    @Unique
+    private static final int RSI_CRAFTING_ARROW_V = 96;
+    @Unique
+    private static final int RSI_CRAFTING_ARROW_WIDTH = 22;
+    @Unique
+    private static final int RSI_CRAFTING_ARROW_HEIGHT = 15;
+    @Unique
     private static final int RSI_BUTTON_SIZE = 18;
     @Unique
     private static final int RSI_BUTTON_GAP = 2;
@@ -74,7 +96,7 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     @Unique
     private static final int RSI_ANVIL_NAME_HEIGHT = 16;
     @Unique
-    // 切石机配方面板在原版贴图中的位置和尺寸。
+    // 切石机原版配方选择面板的局部裁切。
     private static final int RSI_STONECUTTER_PANEL_U = 51;
     @Unique
     private static final int RSI_STONECUTTER_PANEL_V = 14;
@@ -83,36 +105,18 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     @Unique
     private static final int RSI_STONECUTTER_PANEL_HEIGHT = 54;
     @Unique
-    // 配方面板整体向左上微调，图标、滚动条和交互区域使用同一组坐标。
-    private static final int RSI_STONECUTTER_PANEL_X = 49;
+    // 配方列表整体向左上微调，图标、滚动条和交互区域使用同一组坐标。
+    private static final int RSI_STONECUTTER_LIST_X = 49;
     @Unique
-    private static final int RSI_STONECUTTER_PANEL_Y = 11;
+    private static final int RSI_STONECUTTER_LIST_Y = 11;
     @Unique
-    private static final int RSI_STONECUTTER_RECIPE_X = RSI_STONECUTTER_PANEL_X + 1;
+    private static final int RSI_STONECUTTER_RECIPE_X = RSI_STONECUTTER_LIST_X + 1;
     @Unique
-    private static final int RSI_STONECUTTER_RECIPE_Y = RSI_STONECUTTER_PANEL_Y + 1;
+    private static final int RSI_STONECUTTER_RECIPE_Y = RSI_STONECUTTER_LIST_Y + 1;
     @Unique
-    private static final int RSI_STONECUTTER_TRACK_X = RSI_STONECUTTER_PANEL_X + 68;
+    private static final int RSI_STONECUTTER_TRACK_X = RSI_STONECUTTER_LIST_X + 68;
     @Unique
-    private static final int RSI_STONECUTTER_TRACK_Y = RSI_STONECUTTER_PANEL_Y + 1;
-    @Unique
-    private static final int RSI_STONECUTTER_INPUT_X = 19;
-    @Unique
-    private static final int RSI_STONECUTTER_INPUT_Y = 18;
-    @Unique
-    // 原版切石机结果槽框位于贴图 x=137；面板裁切起点在目标 x=49。
-    private static final int RSI_STONECUTTER_RESULT_X = RSI_STONECUTTER_PANEL_X + 92;
-    @Unique
-    private static final int RSI_STONECUTTER_RESULT_Y = RSI_STONECUTTER_PANEL_Y + 18;
-    @Unique
-    private static final int RSI_STONECUTTER_RESULT_U = 137;
-    @Unique
-    private static final int RSI_STONECUTTER_RESULT_V = 28;
-    // smithing.png 的 u=0..3 是整张 GUI 的黑色左外框，不能带入终端合成区。
-    @Unique
-    private static final int RSI_CROP_U = 4;
-    @Unique
-    private static final int RSI_CROP_WIDTH = 136;
+    private static final int RSI_STONECUTTER_TRACK_Y = RSI_STONECUTTER_LIST_Y + 1;
     @Unique
     private static final List<ResourceLocation> RSI_TEMPLATE_ICONS = List.of(
             new ResourceLocation("item/empty_slot_smithing_template_armor_trim"),
@@ -140,24 +144,21 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         if (mode == CraftingStationMode.CRAFTING) return;
         int y = guiTop + screen.getTopHeight() + screen.getVisibleRows() * 18;
         if (mode == CraftingStationMode.STONECUTTER) {
-            rsi$renderStonecutterBackground(graphics, guiLeft, y, mouseX - guiLeft, mouseY - y,
-                    CraftingStationAccess.access(menu).rsi$getCraftingStationState());
+            rsi$renderStonecutterBackground(graphics, guiLeft, guiTop, y, mouseX - guiLeft, mouseY - y,
+                    CraftingStationAccess.access(menu).rsi$getCraftingStationState(), menu);
             graphics.blit(RSI_RS_CRAFTING_TEXTURE, guiLeft + RSI_CLEAR_X, y + RSI_CLEAR_Y,
                     82, 77, 7, 7, 256, 256);
             return;
         }
         if (mode == CraftingStationMode.ANVIL) {
-            rsi$renderAnvilBackground(graphics, guiLeft, y);
+            rsi$renderAnvilBackground(graphics, guiLeft, guiTop, y, menu);
             graphics.blit(RSI_RS_CRAFTING_TEXTURE, guiLeft + RSI_CLEAR_X, y + RSI_CLEAR_Y,
                     82, 77, 7, 7, 256, 256);
             return;
         }
-        // 先用锻造台底色完整覆盖 RS 原 3x3 区域，避免旧槽框残留。
-        graphics.fill(guiLeft + 18, y, guiLeft + 158, y + 60, 0xFFC6C6C6);
-        // 将原版锻造台的操作条裁切到 3x3 区域的中间一排。
-        // 源槽位 y=48，目标槽位 y=基准+22，正好对齐原 3x3 中排。
-        graphics.blit(RSI_SMITHING_TEXTURE, guiLeft + 22, y + 14,
-                RSI_CROP_U, 40, RSI_CROP_WIDTH, 36, 256, 256);
+        rsi$renderCraftingStationPanel(graphics, guiLeft, y);
+        rsi$renderCraftingStationSlotFrames(graphics, guiLeft, guiTop, menu);
+        rsi$renderCraftingArrow(graphics, guiLeft + 87, y + 22);
         // 保留 RS 自带的清空图标及资源包贴图，坐标与 RS 原生 isOverClear 一致。
         graphics.blit(RSI_RS_CRAFTING_TEXTURE, guiLeft + RSI_CLEAR_X, y + RSI_CLEAR_Y,
                 82, 77, 7, 7, 256, 256);
@@ -411,21 +412,14 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     }
 
     @Unique
-    private void rsi$renderStonecutterBackground(GuiGraphics graphics, int guiLeft, int y,
-                                                 int mouseX, int mouseY, Object state) {
-        graphics.fill(guiLeft + 18, y, guiLeft + 158, y + 60, 0xFFC6C6C6);
-        // 保留原版切石机的棕色配方面板，只裁出配方区，避免带入右侧无关内容。
-        graphics.blit(RSI_STONECUTTER_TEXTURE, guiLeft + RSI_STONECUTTER_PANEL_X,
-                y + RSI_STONECUTTER_PANEL_Y, RSI_STONECUTTER_PANEL_U, RSI_STONECUTTER_PANEL_V,
+    private void rsi$renderStonecutterBackground(GuiGraphics graphics, int guiLeft, int guiTop, int y,
+                                                 int mouseX, int mouseY, Object state,
+                                                 GridContainerMenu menu) {
+        rsi$renderCraftingStationPanel(graphics, guiLeft, y);
+        graphics.blit(RSI_STONECUTTER_TEXTURE, guiLeft + RSI_STONECUTTER_LIST_X,
+                y + RSI_STONECUTTER_LIST_Y, RSI_STONECUTTER_PANEL_U, RSI_STONECUTTER_PANEL_V,
                 RSI_STONECUTTER_PANEL_WIDTH, RSI_STONECUTTER_PANEL_HEIGHT, 256, 256);
-        // 输入/输出槽框直接裁自原版贴图，槽位本身由容器槽负责渲染物品。
-        graphics.blit(RSI_STONECUTTER_TEXTURE,
-                guiLeft + RSI_STONECUTTER_INPUT_X, y + RSI_STONECUTTER_INPUT_Y,
-                18, 32, 18, 18, 256, 256);
-        graphics.blit(RSI_STONECUTTER_TEXTURE,
-                guiLeft + RSI_STONECUTTER_RESULT_X, y + RSI_STONECUTTER_RESULT_Y,
-                RSI_STONECUTTER_RESULT_U, RSI_STONECUTTER_RESULT_V,
-                18, 18, 256, 256);
+        rsi$renderCraftingStationSlotFrames(graphics, guiLeft, guiTop, menu);
         if (!(state instanceof StonecutterTerminalState stonecutter)) return;
         rsi$clampStonecutterStartIndex(stonecutter);
         // 轨道和滚动块都始终绘制；配方不足一页时使用原版禁用态滚动块。
@@ -456,17 +450,18 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
                     : rsi$inside(mouseX, mouseY, x - guiLeft, buttonY - y, 16, 18) ? 202 : 166;
             graphics.blit(RSI_STONECUTTER_TEXTURE, x, buttonY - 1, 0, sourceY, 16, 18, 256, 256);
             graphics.renderItem(stonecutter.recipes().get(index).getResultItem(
-                    Minecraft.getInstance().level.registryAccess()), x, buttonY + 2);
+                    Minecraft.getInstance().level.registryAccess()), x, buttonY);
         }
     }
 
     @Unique
-    private void rsi$renderAnvilBackground(GuiGraphics graphics, int guiLeft, int y) {
-        // 直接裁切原版铁砧操作区，保留锤子、名称栏、加号、箭头和所有槽框。
-        // 原版槽框位于贴图 y=47，因此整块裁切后容器槽位也使用同一坐标。
-        graphics.blit(RSI_ANVIL_TEXTURE, guiLeft, y,
-                0, 0, 176, 64, 256, 256);
-        // 原版贴图的名称栏是占位色，覆盖为原版铁砧的深色输入框，并避开 RS 的 X。
+    private void rsi$renderAnvilBackground(GuiGraphics graphics, int guiLeft, int guiTop, int y,
+                                           GridContainerMenu menu) {
+        rsi$renderCraftingStationPanel(graphics, guiLeft, y);
+        rsi$renderCraftingStationSlotFrames(graphics, guiLeft, guiTop, menu);
+        graphics.drawCenteredString(Minecraft.getInstance().font, "+", guiLeft + 61, y + 50, 0x404040);
+        rsi$renderCraftingArrow(graphics, guiLeft + 103, y + 48);
+        // 名称框与 RS 清空按钮错开，输入状态使用更亮的边框提示。
         int nameX = guiLeft + RSI_ANVIL_NAME_X;
         int nameY = y + RSI_ANVIL_NAME_Y;
         int nameBackground = rsi$anvilNameFocused ? 0xFFB0A184 : 0xFF4B4639;
@@ -481,6 +476,34 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
                 rsi$anvilNameFocused ? 0xFFE7DEC9 : 0xFF777062);
         graphics.drawCenteredString(Minecraft.getInstance().font,
                 Component.translatable("container.repair"), guiLeft + 88, y + 6, 0x404040);
+    }
+
+    @Unique
+    private static void rsi$renderCraftingStationPanel(GuiGraphics graphics, int guiLeft, int y) {
+        graphics.blit(RSI_RS_CRAFTING_TEXTURE,
+                guiLeft + 18, y, RSI_PANEL_WIDTH, RSI_PANEL_HEIGHT,
+                RSI_PANEL_BACKGROUND_U, RSI_PANEL_BACKGROUND_V, 1, 1, 256, 256);
+    }
+
+    @Unique
+    private static void rsi$renderCraftingStationSlotFrames(GuiGraphics graphics,
+                                                             int guiLeft, int guiTop,
+                                                             GridContainerMenu menu) {
+        for (Slot slot : menu.slots) {
+            if ((slot instanceof CraftingStationInputSlot input && input.isActive())
+                    || slot instanceof CraftingStationResultSlot) {
+                graphics.blit(RSI_RS_CRAFTING_TEXTURE,
+                        guiLeft + slot.x - 1, guiTop + slot.y - 1, 18, 18,
+                        RSI_CRAFTING_SLOT_U, RSI_CRAFTING_SLOT_V, 18, 18, 256, 256);
+            }
+        }
+    }
+
+    @Unique
+    private static void rsi$renderCraftingArrow(GuiGraphics graphics, int x, int y) {
+        graphics.blit(RSI_RS_CRAFTING_TEXTURE, x, y,
+                RSI_CRAFTING_ARROW_U, RSI_CRAFTING_ARROW_V,
+                RSI_CRAFTING_ARROW_WIDTH, RSI_CRAFTING_ARROW_HEIGHT, 256, 256);
     }
 
     @Unique
