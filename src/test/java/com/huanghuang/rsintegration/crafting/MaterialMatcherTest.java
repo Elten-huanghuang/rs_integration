@@ -13,6 +13,9 @@ import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -20,6 +23,22 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialMatcherTest extends BootstrapTest {
+    @Test
+    void normalizesLegacyIntegerQuantitiesAtStorageBoundary() {
+        var key = new CraftingResolver.StackKey(Items.DIAMOND, null);
+        var other = new CraftingResolver.StackKey(Items.GOLD_INGOT, null);
+        var legacy = new HashMap<Object, Object>();
+        legacy.put(key, Integer.valueOf(3));
+        legacy.put(other, Long.valueOf(5L));
+
+        Map<CraftingResolver.StackKey, Long> normalized = MaterialSources.toLongCounts(legacy);
+
+        assertEquals(Long.valueOf(3L), normalized.get(key));
+        assertEquals(Long.valueOf(5L), normalized.get(other));
+        assertEquals(Long.class, normalized.get(key).getClass());
+        assertEquals(Long.class, normalized.get(other).getClass());
+    }
+
     @Test
     void largeExternalStockSaturatesInsteadOfWrappingNegative() {
         assertEquals(Integer.MAX_VALUE,

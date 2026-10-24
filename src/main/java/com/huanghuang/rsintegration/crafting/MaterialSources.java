@@ -33,6 +33,25 @@ public final class MaterialSources {
         return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
     }
 
+    /**
+     * 将外部或旧版本调用方传入的数量表归一为 Long。
+     *
+     * <p>数量表的泛型在运行时会被擦除；升级过程中仍可能收到
+     * {@link Integer} 值。统一在存储边界转换，避免后续读取时发生
+     * {@code Integer cannot be cast to Long}。</p>
+     */
+    public static Map<StackKey, Long> toLongCounts(Map<?, ?> supplied) {
+        if (supplied == null || supplied.isEmpty()) return Map.of();
+        Map<StackKey, Long> normalized = new HashMap<>(supplied.size());
+        supplied.forEach((rawKey, rawAmount) -> {
+            if (!(rawKey instanceof StackKey key) || !(rawAmount instanceof Number number)) return;
+            long amount = number.longValue();
+            if (amount <= 0L) return;
+            normalized.merge(key, amount, MaterialSources::saturatedAdd);
+        });
+        return Map.copyOf(normalized);
+    }
+
     static int saturatedAdd(int left, int right) {
         if (right <= 0) return left;
         return left > Integer.MAX_VALUE - right ? Integer.MAX_VALUE : left + right;
@@ -107,9 +126,13 @@ public final class MaterialSources {
         String cacheKey = cacheKey(player, endpoint);
         rotateCache(currentTick);
         Map<StackKey, Long> cached = cache.get(cacheKey);
-        if (cached != null) return cached;
+        if (cached != null) {
+            Map<StackKey, Long> normalized = toLongCounts(cached);
+            if (!normalized.equals(cached)) cache.put(cacheKey, normalized);
+            return normalized;
+        }
 
-        Map<StackKey, Long> available = countInventory(player);
+        Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
         if (endpoint == null) {
             Map<StackKey, Long> snapshot = Map.copyOf(available);
             cache.putIfAbsent(cacheKey, snapshot);
@@ -162,7 +185,7 @@ public final class MaterialSources {
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
             Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
-        Map<StackKey, Long> available = countInventory(player);
+        Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
         available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
         if (endpoint == null) return Map.copyOf(available);
 

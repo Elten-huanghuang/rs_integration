@@ -91,9 +91,11 @@ public final class TaczRecipeHandler extends AbstractRecipeHandler {
         //    so it's safe to call.
         try {
             Method m = clazz.getMethod("getResultItem");
-            ItemStack result = (ItemStack) m.invoke(recipe);
-            if (result != null && !result.isEmpty()) return result.copy();
-        } catch (Exception e) {
+            Object value = m.invoke(recipe);
+            if (value instanceof ItemStack result && !result.isEmpty()) return result.copy();
+        } catch (NoSuchMethodException ignored) {
+            // 1.20.1 的 Recipe 接口没有无参重载，属于正常情况。
+        } catch (ReflectiveOperationException e) {
             RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
         }
 
@@ -101,11 +103,13 @@ public final class TaczRecipeHandler extends AbstractRecipeHandler {
         for (String methodName : new String[]{"getResult", "getOutput", "getRecipeOutput"}) {
             try {
                 Method m = clazz.getMethod(methodName);
-                ItemStack result = (ItemStack) m.invoke(recipe);
-                if (result != null && !result.isEmpty()) return result.copy();
-            } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
-        }
+                Object value = m.invoke(recipe);
+                if (value instanceof ItemStack result && !result.isEmpty()) return result.copy();
+            } catch (NoSuchMethodException ignored) {
+                // 不同 TACZ 版本只提供其中一部分访问器。
+            } catch (ReflectiveOperationException e) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Recipe] reflection probe failed", e);
+            }
         }
 
         // 4. Smart field scan: walk the class hierarchy, skip input fields,

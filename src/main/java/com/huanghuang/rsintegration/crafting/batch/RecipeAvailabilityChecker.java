@@ -73,7 +73,8 @@ public final class RecipeAvailabilityChecker {
                     player, key.dimension(), key.machinePos(), type);
             if (resolved != null) endpoint = resolved;
         }
-        Map<StackKey, Long> available = new HashMap<>(MaterialSources.countInventory(player));
+        Map<StackKey, Long> available = new HashMap<>(
+                MaterialSources.toLongCounts(MaterialSources.countInventory(player)));
         if (endpoint != null) {
             if (!StorageRestockSupport.canExtract(endpoint, player)) return MaterialAvailability.UNKNOWN;
             // Availability checks only need variants whose item type can satisfy
