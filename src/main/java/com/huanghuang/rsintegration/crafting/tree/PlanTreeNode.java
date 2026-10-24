@@ -22,7 +22,10 @@ import java.util.List;
 public final class PlanTreeNode {
     public final IngredientKey key;
     public final ItemStack displayStack;
+    /** 当前分支的材料总需求，包含已有库存可满足的部分。 */
     public long amount;
+    /** 配方节点计划实际产出的数量，用于和材料总需求区分。 */
+    public long productionAmount;
     public final int depth;
     @Nullable
     public final PlanStep step;    // null = leaf (raw material)
@@ -102,6 +105,11 @@ public final class PlanTreeNode {
 
     public boolean isLeaf() {
         return step == null && children.isEmpty();
+    }
+
+    /** 配方节点显示补做产量，原料叶节点仍显示材料需求。 */
+    public long displayAmount() {
+        return step != null && productionAmount > 0L ? productionAmount : amount;
     }
 
     /** True when this node is produced by a step that has selectable alternative recipes. */

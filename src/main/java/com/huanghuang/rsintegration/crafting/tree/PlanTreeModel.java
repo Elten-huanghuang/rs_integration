@@ -139,6 +139,7 @@ public final class PlanTreeModel {
                 IngredientKey.of(target), target,
                 target.getCount() * Math.max(1, plan.repeatCount()), 0, targetStep);
         if (targetStep != null) {
+            root.productionAmount = targetStep.totalOutputCount();
             root.limited = targetStep.alternatives().size() > maxTreeCandidates();
         }
         applyAvailability(root, plan, target);
@@ -181,6 +182,7 @@ public final class PlanTreeModel {
             long amount = Math.max(1L, step.totalOutputCount());
             PlanTreeNode unlinked = new PlanTreeNode(IngredientKey.of(output), output,
                     amount, 1, step);
+            unlinked.productionAmount = step.totalOutputCount();
             unlinked.limited = step.alternatives().size() > maxTreeCandidates();
             applyAvailability(unlinked, plan, output);
             Set<IngredientKey> path = new LinkedHashSet<>();
@@ -228,6 +230,7 @@ public final class PlanTreeModel {
         PlanTreeNode root = new PlanTreeNode(IngredientKey.of(target), target,
                 target.getCount() * Math.max(1, plan.repeatCount()), 0, targetStep);
         if (targetStep != null) {
+            root.productionAmount = targetStep.totalOutputCount();
             root.limited = targetStep.alternatives().size()
                     > maxTreeCandidates();
         }
@@ -298,6 +301,7 @@ public final class PlanTreeModel {
                     : Math.max(1, display.getCount() * graphNode.executions());
             PlanTreeNode omitted = new PlanTreeNode(IngredientKey.of(display), display,
                     quantity, 1, step, nodeId);
+            omitted.productionAmount = quantity;
             omitted.limited = step.alternatives().size() > maxTreeCandidates();
             applyAvailability(omitted, plan, display);
             expandedProducers.add(nodeId);
@@ -377,6 +381,7 @@ public final class PlanTreeModel {
         for (PlanGraphView.OutputView output : producer.outputs()) {
             if (output.portIndex() == source.producerPortIndex()) {
                 node.outputKindOrdinal = output.kindOrdinal();
+                node.productionAmount = output.quantity();
                 break;
             }
         }
@@ -462,6 +467,8 @@ public final class PlanTreeModel {
             // quantity. Keep one copy; amount carries the summed branch demand.
             existing.available = Math.max(existing.available, child.available);
             existing.needed = Math.max(existing.needed, child.needed);
+            existing.productionAmount = Math.max(
+                    existing.productionAmount, child.productionAmount);
             existing.children.addAll(child.children);
             mergeEquivalentProducedChildren(existing);
         }
@@ -699,6 +706,7 @@ public final class PlanTreeModel {
 
                 PlanTreeNode child = new PlanTreeNode(
                         inputKey, childStep.output(), amount, parent.depth + 1, childStep, role);
+                child.productionAmount = childStep.totalOutputCount();
                 child.limited = childStep.alternatives().size()
                         > maxTreeCandidates();
                 applyAvailability(child, plan, input);

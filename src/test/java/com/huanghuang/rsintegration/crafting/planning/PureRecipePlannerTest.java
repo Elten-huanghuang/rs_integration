@@ -1349,6 +1349,23 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void partialStockOnlyPlansRemainingProductionBatches() {
+        MaterialRef ingot = material("partially_stocked_ingot");
+        MaterialRef ore = material("partially_stocked_ore");
+        RecipeNode smelt = recipe("smelt_remaining_ingots", ingot, 1, ingredient(ore, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(ingot, List.of(smelt)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, Map.of(ingot, 77, ore, 7),
+                List.of(ingredient(ingot, 84)), 20, 256);
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("smelt_remaining_ingots"), 7)),
+                result.steps());
+    }
+
+    @Test
     void quartzConversionsPruneReverseLoopInsteadOfReportingChiseledQuartzMissing() {
         MaterialRef quartz = material("quartz_block");
         MaterialRef slab = material("quartz_slab");

@@ -2608,6 +2608,7 @@ public final class CraftingPlanScreen extends Screen {
         PlanTreeNode candidateNode = new PlanTreeNode(
                 node.key, node.displayStack, node.amount, node.depth,
                 retained, node.graphNodeId, node.demandRole);
+        candidateNode.productionAmount = node.productionAmount;
         candidateNode.cycle = node.cycle;
         candidateNode.limited = node.limited;
         candidateNode.lockedMaterial = node.lockedMaterial;

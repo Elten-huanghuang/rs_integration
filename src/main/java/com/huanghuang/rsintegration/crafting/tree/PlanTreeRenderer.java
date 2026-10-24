@@ -264,7 +264,7 @@ public final class PlanTreeRenderer {
         }
 
         // 8. Count label under node.
-        String count = InkFluidRenderer.compactQuantity(stack, node.amount);
+        String count = InkFluidRenderer.compactQuantity(stack, node.displayAmount());
         int tw = font.width(count);
         int cx = box.itemCenterX() - tw / 2;
         int cy = box.bottom() + 2;
