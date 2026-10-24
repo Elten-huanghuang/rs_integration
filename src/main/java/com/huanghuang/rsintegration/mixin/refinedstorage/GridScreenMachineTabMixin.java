@@ -4,6 +4,7 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 import com.huanghuang.rsintegration.network.machine.MachineNetworkHandler;
 import java.lang.reflect.Method;
 
+import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -16,7 +17,9 @@ import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -30,14 +33,10 @@ public abstract class GridScreenMachineTabMixin {
 
     private static final int BUTTON_SIZE = 18;
     private static final int BUTTON_GAP = 2;
-    private static final ResourceLocation MACHINE_CENTER_TEX =
-            new ResourceLocation("rs_integration", "textures/gui/machine_center_sidebutton.png");
-    private static final ResourceLocation MACHINE_CENTER_HOVER_TEX =
-            new ResourceLocation("rs_integration", "textures/gui/machine_center_sidebutton_hover.png");
-    private static final ResourceLocation RESONANCE_BACKPACK_TEX =
-            new ResourceLocation("rs_integration", "textures/gui/resonance_backpack_sidebutton.png");
-    private static final ResourceLocation RESONANCE_BACKPACK_HOVER_TEX =
-            new ResourceLocation("rs_integration", "textures/gui/resonance_backpack_sidebutton_hover.png");
+    private static final ResourceLocation MACHINE_CENTER_ICON_TEX =
+            new ResourceLocation("rs_integration", "textures/gui/machine_center_.png");
+    private static final ResourceLocation RS_ICONS =
+            new ResourceLocation("refinedstorage", "textures/icons.png");
 
     @Unique
     private boolean rsi$bindingSyncRequested;
@@ -53,6 +52,8 @@ public abstract class GridScreenMachineTabMixin {
     private int rsi$resonanceBackpackRelY;
     @Unique
     private boolean rsi$resonanceBackpackHovered;
+    @Unique
+    private ItemStack rsi$resonanceDiskIcon;
 
     @Inject(method = "renderForeground", at = @At("TAIL"), remap = false)
     private void rsi$renderMachineTabs(GuiGraphics gfx, int mouseX, int mouseY, CallbackInfo ci) {
@@ -102,11 +103,20 @@ public abstract class GridScreenMachineTabMixin {
         MachineTabHandler.setMachineCenterHovered(rsi$machineCenterHovered && hasBinding);
 
         if (hasBinding) {
-            ResourceLocation mcTex = rsi$machineCenterHovered
-                    ? MACHINE_CENTER_HOVER_TEX : MACHINE_CENTER_TEX;
-            RenderSystem.setShaderTexture(0, mcTex);
-            gfx.blit(mcTex, rsi$machineCenterRelX, rsi$machineCenterRelY,
-                    0, 0, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE);
+            int buttonTextureY = rsi$machineCenterHovered ? 35 : 16;
+            gfx.blit(RS_ICONS, rsi$machineCenterRelX, rsi$machineCenterRelY,
+                    238, buttonTextureY, BUTTON_SIZE, BUTTON_SIZE);
+            if (rsi$machineCenterHovered) {
+                RenderSystem.enableBlend();
+                RenderSystem.defaultBlendFunc();
+                gfx.setColor(1.0F, 1.0F, 1.0F, 0.5F);
+                gfx.blit(RS_ICONS, rsi$machineCenterRelX, rsi$machineCenterRelY,
+                        238, 54, BUTTON_SIZE, BUTTON_SIZE);
+                gfx.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+                RenderSystem.disableBlend();
+            }
+            gfx.blit(MACHINE_CENTER_ICON_TEX, rsi$machineCenterRelX + 1,
+                    rsi$machineCenterRelY + 1, 0, 0, 16, 16, 16, 16);
             int cnt = allMachines.size();
             String label = cnt > 99 ? "…" : String.valueOf(cnt);
             int labelW = Minecraft.getInstance().font.width(label);
@@ -130,9 +140,29 @@ public abstract class GridScreenMachineTabMixin {
 
         MachineTabHandler.setResonanceBackpackHovered(rsi$resonanceBackpackHovered);
 
-        ResourceLocation rbTex = rsi$resonanceBackpackHovered ? RESONANCE_BACKPACK_HOVER_TEX : RESONANCE_BACKPACK_TEX;
-        RenderSystem.setShaderTexture(0, rbTex);
-        gfx.blit(rbTex, rsi$resonanceBackpackRelX, rsi$resonanceBackpackRelY, 0, 0, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE, BUTTON_SIZE);
+        int buttonTextureY = rsi$resonanceBackpackHovered ? 35 : 16;
+        gfx.blit(RS_ICONS, rsi$resonanceBackpackRelX, rsi$resonanceBackpackRelY,
+                238, buttonTextureY, BUTTON_SIZE, BUTTON_SIZE);
+        if (rsi$resonanceBackpackHovered) {
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            gfx.setColor(1.0F, 1.0F, 1.0F, 0.5F);
+            gfx.blit(RS_ICONS, rsi$resonanceBackpackRelX, rsi$resonanceBackpackRelY,
+                    238, 54, BUTTON_SIZE, BUTTON_SIZE);
+            gfx.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+            RenderSystem.disableBlend();
+        }
+        if (rsi$resonanceDiskIcon == null && ModItems.RESONANCE_STORAGE_DISK != null) {
+            rsi$resonanceDiskIcon = new ItemStack(ModItems.RESONANCE_STORAGE_DISK.get());
+        }
+        if (rsi$resonanceDiskIcon != null) {
+            gfx.renderItem(rsi$resonanceDiskIcon, rsi$resonanceBackpackRelX + 1,
+                    rsi$resonanceBackpackRelY + 1);
+        }
+        if (rsi$resonanceBackpackHovered && !MachineHub.isVisible()) {
+            gfx.renderTooltip(Minecraft.getInstance().font,
+                    Component.translatable("rsi.resonance_backpack.tooltip_click"), mouseX, mouseY);
+        }
     }
 
     @Inject(method = "removed", at = @At("HEAD"), remap = false)

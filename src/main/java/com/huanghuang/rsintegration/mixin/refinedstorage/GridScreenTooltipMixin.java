@@ -56,14 +56,6 @@ public abstract class GridScreenTooltipMixin {
             return;
         }
 
-        if (MachineTabHandler.isResonanceBackpackHovered()) {
-            List<Component> lines = new ArrayList<>();
-            lines.add(Component.translatable("rsi.resonance_backpack.title"));
-            lines.add(Component.translatable("rsi.resonance_backpack.tooltip_click")
-                    .withStyle(ChatFormatting.AQUA));
-            gfx.renderTooltip(Minecraft.getInstance().font, lines, Optional.empty(), mouseX, mouseY);
-            ci.cancel();
-        }
     }
 
     @Inject(method = "drawGridTooltip", at = @At("HEAD"), cancellable = true, remap = false)

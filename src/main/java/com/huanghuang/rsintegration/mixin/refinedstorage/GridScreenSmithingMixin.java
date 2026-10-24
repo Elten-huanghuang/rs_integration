@@ -53,6 +53,9 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private static final ResourceLocation RSI_RS_CRAFTING_TEXTURE =
             new ResourceLocation("refinedstorage", "textures/gui/crafting_grid.png");
     @Unique
+    private static final ResourceLocation RSI_RS_ICONS_TEXTURE =
+            new ResourceLocation("refinedstorage", "textures/icons.png");
+    @Unique
     private static final int RSI_PANEL_WIDTH = 140;
     @Unique
     private static final int RSI_PANEL_HEIGHT = 60;
@@ -117,6 +120,21 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     private static final int RSI_STONECUTTER_TRACK_X = RSI_STONECUTTER_LIST_X + 68;
     @Unique
     private static final int RSI_STONECUTTER_TRACK_Y = RSI_STONECUTTER_LIST_Y + 1;
+    @Unique
+    // RS 主物品区右侧的完整滚动槽：外框 14x54，内部 12x52。
+    private static final int RSI_RS_SCROLLBAR_TRACK_U = 173;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_TRACK_V = 19;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_TRACK_WIDTH = 12;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_TRACK_HEIGHT = 52;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_THUMB_ENABLED_U = 232;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_THUMB_DISABLED_U = 244;
+    @Unique
+    private static final int RSI_RS_SCROLLBAR_THUMB_HEIGHT = 15;
     @Unique
     private static final List<ResourceLocation> RSI_TEMPLATE_ICONS = List.of(
             new ResourceLocation("item/empty_slot_smithing_template_armor_trim"),
@@ -422,24 +440,23 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         rsi$renderCraftingStationSlotFrames(graphics, guiLeft, guiTop, menu);
         if (!(state instanceof StonecutterTerminalState stonecutter)) return;
         rsi$clampStonecutterStartIndex(stonecutter);
-        // 轨道和滚动块都始终绘制；配方不足一页时使用原版禁用态滚动块。
-        graphics.blit(RSI_STONECUTTER_TEXTURE, guiLeft + RSI_STONECUTTER_TRACK_X,
-                y + RSI_STONECUTTER_TRACK_Y,
-                119, 15, 12, 54, 256, 256);
-        if (stonecutter.recipes().size() > 12) {
+        boolean canScroll = stonecutter.recipes().size() > 12;
+        int thumbOffset = 0;
+        if (canScroll) {
             int rows = (stonecutter.recipes().size() + 3) / 4;
-            int maxStart = Math.max(0, (rows - 3) * 4);
-            int offsetRows = maxStart == 0 ? 0 : rsi$stonecutterStartIndex / 4;
             int maxOffsetRows = Math.max(1, rows - 3);
-            int thumbOffset = Math.round(41.0f * offsetRows / maxOffsetRows);
-            graphics.blit(RSI_STONECUTTER_TEXTURE, guiLeft + RSI_STONECUTTER_TRACK_X,
-                    y + RSI_STONECUTTER_TRACK_Y + 1 + thumbOffset,
-                    176, 0, 12, 15, 256, 256);
-        } else {
-            graphics.blit(RSI_STONECUTTER_TEXTURE, guiLeft + RSI_STONECUTTER_TRACK_X,
-                    y + RSI_STONECUTTER_TRACK_Y + 1,
-                    188, 0, 12, 15, 256, 256);
+            int offsetRows = rsi$stonecutterStartIndex / 4;
+            thumbOffset = Math.round((RSI_RS_SCROLLBAR_TRACK_HEIGHT - RSI_RS_SCROLLBAR_THUMB_HEIGHT)
+                    * (float) offsetRows / maxOffsetRows);
         }
+        graphics.blit(RSI_RS_CRAFTING_TEXTURE, guiLeft + RSI_STONECUTTER_TRACK_X - 1,
+                y + RSI_STONECUTTER_TRACK_Y - 1, RSI_RS_SCROLLBAR_TRACK_U,
+                RSI_RS_SCROLLBAR_TRACK_V, RSI_RS_SCROLLBAR_TRACK_WIDTH + 2,
+                RSI_RS_SCROLLBAR_TRACK_HEIGHT + 2, 256, 256);
+        graphics.blit(RSI_RS_ICONS_TEXTURE, guiLeft + RSI_STONECUTTER_TRACK_X,
+                y + RSI_STONECUTTER_TRACK_Y + thumbOffset,
+                canScroll ? RSI_RS_SCROLLBAR_THUMB_ENABLED_U : RSI_RS_SCROLLBAR_THUMB_DISABLED_U,
+                0, RSI_RS_SCROLLBAR_TRACK_WIDTH, RSI_RS_SCROLLBAR_THUMB_HEIGHT, 256, 256);
         int end = Math.min(stonecutter.recipes().size(), rsi$stonecutterStartIndex + 12);
         for (int index = rsi$stonecutterStartIndex; index < end; index++) {
             int relative = index - rsi$stonecutterStartIndex;
