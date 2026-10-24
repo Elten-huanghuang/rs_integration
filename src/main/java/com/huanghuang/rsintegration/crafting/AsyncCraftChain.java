@@ -1073,6 +1073,9 @@ public final class AsyncCraftChain {
             ExtractionLedger nodeLedger = new ExtractionLedger();
             nodeLedger.setLogContext(ctx);
             if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
+            ExtractionLedger executionLedger = new ExtractionLedger();
+            executionLedger.setLogContext(ctx);
+            if (storageEndpoint != null) executionLedger.setStorageEndpoint(storageEndpoint);
             OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
             MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
             List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
@@ -1090,17 +1093,22 @@ public final class AsyncCraftChain {
                 if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
                 else nodeLedger.rollback(online);
                 operation.close();
+                executionLedger.close();
                 graphScheduler.releaseClaim(vanillaNode);
                 break;
             }
             graphAdmissions.commit(admission);
             boolean executed;
             try {
-                executed = operation.tryStart(() -> executeVanillaStepsInline(
-                        List.of(step), online, operationInventory, nodeLedger, false));
+                executed = operation.tryStart(() ->
+                        executeVanillaStepsInline(List.of(step), online, operationInventory,
+                                executionLedger, false)
+                                && commitLedger(executionLedger, online));
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Graph vanilla operation threw for {}"),
                         vanillaNode, exception);
+                graphFailureDetails.put(vanillaNode,
+                        "synchronous vanilla execution threw: " + exception.getMessage());
                 executed = false;
             }
             if (!executed || state == State.ABORTED) {
@@ -1108,8 +1116,12 @@ public final class AsyncCraftChain {
                 // effect. A failed logical start can therefore refund exact inputs.
                 graphAdmissions.refundCommittedMaterial(admission);
                 if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
+                executionLedger.rollback(online);
+                graphFailureDetails.putIfAbsent(vanillaNode,
+                        "synchronous vanilla execution failed before producing outputs");
                 operation.close();
                 nodeLedger.close();
+                executionLedger.close();
                 if (graphScheduler.state(vanillaNode) == DagScheduler.NodeState.RUNNING) {
                     graphScheduler.fail(vanillaNode);
                 }
@@ -1120,9 +1132,13 @@ public final class AsyncCraftChain {
                     () -> outputsComplete, () -> {
                         graphAdmissions.settleMaterial(admission);
                         nodeLedger.settleAllCommitted();
+                        if (executionLedger.isCommitted()) {
+                            executionLedger.settleAllCommitted();
+                        }
                     });
             operation.close();
             nodeLedger.close();
+            executionLedger.close();
             if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE) {
                 String detail = "output shortage after synchronous crafting";
                 graphFailureDetails.put(vanillaNode, detail);

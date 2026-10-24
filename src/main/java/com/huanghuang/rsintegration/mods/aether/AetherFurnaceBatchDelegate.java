@@ -45,6 +45,8 @@ import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,29 +64,60 @@ import java.util.Map;
  * {@code getBurnDuration()} (furnace) or {@code getIncubatingMap()} (incubator).
  */
 public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
-    record FuelProfile(String itemId, int burnDuration) {
-        InputConsumption consumption() {
-            return InputConsumption.fuel(1L);
+    enum FuelFamily {
+        FREEZER("freezing", "FreezingRecipe",
+                "com.aetherteam.aether.blockentity.FreezerBlockEntity",
+                "getFreezingMap", "aether:icestone",
+                Map.of("aether:icestone", 400, "aether:icestone_slab", 200,
+                        "aether:icestone_stairs", 400, "aether:icestone_wall", 400)),
+        ALTAR("enchanting", "EnchantingRecipe",
+                "com.aetherteam.aether.blockentity.AltarBlockEntity",
+                "getEnchantingMap", "aether:ambrosium_shard",
+                Map.of("aether:ambrosium_shard", 250, "aether:ambrosium_block", 2500)),
+        INCUBATOR("incubating", "IncubationRecipe",
+                "com.aetherteam.aether.blockentity.IncubatorBlockEntity",
+                "getIncubatingMap", "aether:ambrosium_torch",
+                Map.of("aether:ambrosium_torch", 500));
+
+        private final String recipePrefix;
+        private final String recipeClass;
+        private final String blockEntityClass;
+        private final String fuelMapMethod;
+        private final String preferredItemId;
+        private final Map<String, Integer> fallbackFuel;
+
+        FuelFamily(String recipePrefix, String recipeClass, String blockEntityClass,
+                   String fuelMapMethod, String preferredItemId,
+                   Map<String, Integer> fallbackFuel) {
+            this.recipePrefix = recipePrefix;
+            this.recipeClass = recipeClass;
+            this.blockEntityClass = blockEntityClass;
+            this.fuelMapMethod = fuelMapMethod;
+            this.preferredItemId = preferredItemId;
+            this.fallbackFuel = fallbackFuel;
         }
 
-        int requiredItems(long requiredBurnUnits) {
-            return (int) Math.min(Integer.MAX_VALUE,
-                    consumption().requiredPhysicalAmount(
-                            requiredBurnUnits, 1L, burnDuration));
+        boolean matchesRecipe(Recipe<?> recipe) {
+            if (recipe == null) return false;
+            String name = recipe.getClass().getSimpleName();
+            if (this == ALTAR && "AltarRepairRecipe".equals(name)) return true;
+            return recipeClass.equals(name)
+                    || name.toLowerCase().contains(recipePrefix);
         }
     }
-    private static final FuelProfile FREEZER_FUEL =
-            new FuelProfile("aether:icestone", 400);
-    private static final FuelProfile ALTAR_FUEL =
-            new FuelProfile("aether:ambrosium_shard", 250);
-    private static final FuelProfile INCUBATOR_FUEL =
-            new FuelProfile("aether:ambrosium_torch", 500);
 
-    // Cached incubator fuel map — resolved once via reflection (no SRG names needed
-    // because this is a public static method, not a vanilla method).
-    @Nullable
-    private static volatile Map<Item, Integer> cachedIncubatorMap;
-    private static volatile boolean incubatorMapProbed;
+    record FuelChoice(Item item, int burnDuration, int requiredItems) {}
+
+    private record FuelFillResult(boolean ready, ItemStack inserted) {
+        private static FuelFillResult failed() {
+            return new FuelFillResult(false, ItemStack.EMPTY);
+        }
+
+        private static FuelFillResult ready(ItemStack inserted) {
+            return new FuelFillResult(true,
+                    inserted == null ? ItemStack.EMPTY : inserted);
+        }
+    }
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -220,6 +253,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         int outputCapacity = Math.min(handler.getSlotLimit(2), output.getMaxStackSize());
         int operations = bufferedOperationCapacity(aetherInputBufferLimit(),
                 input.count(), inputCapacity, output.getCount(), outputCapacity);
+        operations = Math.min(operations, fuelBufferOperationCapacity(be, handler));
         if (operations <= 0) return InputBufferContract.none();
         return new InputBufferContract(operations,
                 List.of(new InputBufferContract.InputSlot(
@@ -228,6 +262,20 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                 List.of(new OutputContract.Port(
                         "aether:furnace:output", 2, output, output.getCount(),
                         InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+    }
+
+    private int fuelBufferOperationCapacity(BlockEntity be, IItemHandler handler) {
+        int burnUnitsPerOperation = (int) Math.min(Integer.MAX_VALUE,
+                CraftPacketUtils.estimatedFuelBurnUnits(recipe, 1));
+        int minimumBurnDuration = fuelMapForMachine(be).values().stream()
+                .filter(duration -> duration != null && duration > 0)
+                .mapToInt(Integer::intValue)
+                .min()
+                .orElse(0);
+        if (burnUnitsPerOperation <= 0 || minimumBurnDuration <= 0) return 0;
+        long capacityUnits = (long) handler.getSlotLimit(1) * minimumBurnDuration;
+        return (int) Math.min(Integer.MAX_VALUE,
+                capacityUnits / burnUnitsPerOperation);
     }
 
     @Override
@@ -343,15 +391,17 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         // ── Phase 2: Ensure enough fuel (slot 1 for all three machines) ──
         // Aether machines use machine-specific burn values, so calculate the
         // count from the recipe burn units and that value.
-        if (hasStorageAccess()) {
-            long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(
-                    recipe, Math.max(1, plannedOperations));
-            ItemStack insertedFuel = fillFuelSlot(
-                    be, handler, player, requiredBurnUnits);
-            if (!insertedFuel.isEmpty()) {
-                suppliedFuel = insertedFuel.copyWithCount(1);
-                suppliedFuelCount += insertedFuel.getCount();
-            }
+        long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(
+                recipe, Math.max(1, plannedOperations));
+        FuelFillResult fuelFill = fillFuelSlot(
+                be, handler, player, requiredBurnUnits);
+        if (!fuelFill.inserted().isEmpty()) {
+            suppliedFuel = fuelFill.inserted().copyWithCount(1);
+            suppliedFuelCount += fuelFill.inserted().getCount();
+        }
+        if (!fuelFill.ready()) {
+            rollbackPreparedStart(be);
+            return false;
         }
 
         be.setChanged();
@@ -459,6 +509,24 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
+    private void rollbackPreparedStart(BlockEntity be) {
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (be instanceof AbstractFurnaceBlockEntity furnace) {
+            ItemStack recovered = removeOwnedInput(furnace, false);
+            if (!recovered.isEmpty()) recoveredInputs.add(recovered);
+        } else {
+            IItemHandler handler = getInventory(be);
+            if (handler != null) {
+                ItemStack recovered = removeOwnedInput(handler, false);
+                if (!recovered.isEmpty()) recoveredInputs.add(recovered);
+            }
+        }
+        recordFailureRecoveredInputs(recoveredInputs);
+        refundLeftoverFuel(be);
+        resetInventoryOwnership();
+        forceChunkLoad(false);
+    }
+
     private void refundToRSNetwork(ItemStack stack) {
         ItemStack leftover = insertIntoStorage(player, stack, false);
         if (!leftover.isEmpty() && player != null) {
@@ -517,7 +585,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return warnings;
     }
 
-    /** 为目标 Aether 机器补充默认燃料需求，冷冻器主燃料固定为 Icestone。 */
+    /** 为目标 Aether 机器补充一个实际可用的燃料候选。 */
     public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
                                        Recipe<?> recipe,
                                        Map<Item, Long> itemAvailable,
@@ -525,14 +593,15 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                                        Map<Item, Long> neededCounts,
                                        int repeatCount) {
         if (!isAetherMachineType(recipeModTypeId) || recipe == null) return;
-        FuelProfile profile = fuelProfileForRecipe(recipe);
-        if (profile == null) return;
-        Item fuel = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(profile.itemId()));
-        if (fuel == null || fuel == Items.AIR) return;
-        int fuelNeeded = fuelAmountForRecipe(recipe, repeatCount);
-        neededCounts.merge(fuel, (long) Math.max(1, fuelNeeded),
+        FuelFamily family = fuelFamilyForRecipe(recipe);
+        if (family == null) return;
+        long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(recipe, repeatCount);
+        FuelChoice choice = chooseFuel(fuelMap(family), itemAvailable,
+                preferredFuelItem(family), requiredBurnUnits);
+        if (choice == null) return;
+        neededCounts.merge(choice.item(), (long) choice.requiredItems(),
                 SaturatingLongMath::signedAdd);
-        itemSource.putIfAbsent(fuel, Ingredient.of(fuel));
+        itemSource.putIfAbsent(choice.item(), Ingredient.of(choice.item()));
     }
 
     static boolean isAetherMachineType(@Nullable String recipeModTypeId) {
@@ -541,22 +610,100 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     static int fuelAmountForRecipe(Recipe<?> recipe, int repeatCount) {
-        FuelProfile profile = fuelProfileForRecipe(recipe);
-        if (profile == null) return 0;
+        FuelFamily family = fuelFamilyForRecipe(recipe);
+        if (family == null) return 0;
         long requiredBurnUnits = CraftPacketUtils.estimatedFuelBurnUnits(recipe, repeatCount);
-        return profile.requiredItems(requiredBurnUnits);
+        FuelChoice choice = chooseFuel(fuelMap(family), Map.of(),
+                preferredFuelItem(family), requiredBurnUnits);
+        return choice == null ? 0 : choice.requiredItems();
     }
 
     @Nullable
-    static FuelProfile fuelProfileForRecipe(Recipe<?> recipe) {
+    static FuelFamily fuelFamilyForRecipe(Recipe<?> recipe) {
         if (recipe == null) return null;
-        String name = recipe.getClass().getSimpleName();
-        if ("FreezingRecipe".equals(name)) return FREEZER_FUEL;
-        if ("EnchantingRecipe".equals(name) || "AltarRepairRecipe".equals(name)) {
-            return ALTAR_FUEL;
+        for (FuelFamily family : FuelFamily.values()) {
+            if (family.matchesRecipe(recipe)) return family;
         }
-        if ("IncubationRecipe".equals(name)) return INCUBATOR_FUEL;
         return null;
+    }
+
+    static Map<Item, Integer> fuelMap(FuelFamily family) {
+        if (family == null) return Map.of();
+        try {
+            Class<?> type = Class.forName(family.blockEntityClass);
+            @SuppressWarnings("unchecked")
+            Map<Item, Integer> live = (Map<Item, Integer>)
+                    type.getMethod(family.fuelMapMethod).invoke(null);
+            return live == null ? fallbackFuelMap(family) : Map.copyOf(live);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-Batch-Aether] {} fuel map probe failed",
+                    family.name(), failure);
+            return fallbackFuelMap(family);
+        }
+    }
+
+    private static Map<Item, Integer> fallbackFuelMap(FuelFamily family) {
+        Map<Item, Integer> fallback = new HashMap<>();
+        family.fallbackFuel.forEach((itemId, duration) -> {
+            Item item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(itemId));
+            if (item != null && item != Items.AIR && duration > 0) {
+                fallback.put(item, duration);
+            }
+        });
+        return Map.copyOf(fallback);
+    }
+
+    @Nullable
+    static FuelChoice chooseFuel(Map<Item, Integer> fuelMap,
+                                 Map<Item, Long> available,
+                                 @Nullable Item preferred,
+                                 long requiredBurnUnits) {
+        if (fuelMap == null || fuelMap.isEmpty() || requiredBurnUnits <= 0L) return null;
+        List<FuelChoice> candidates = fuelMap.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getKey() != Items.AIR
+                        && entry.getValue() != null && entry.getValue() > 0)
+                .map(entry -> new FuelChoice(entry.getKey(), entry.getValue(),
+                        requiredItems(requiredBurnUnits, entry.getValue())))
+                .sorted(Comparator.comparing(choice ->
+                        BuiltInRegistries.ITEM.getKey(choice.item()).toString()))
+                .toList();
+        if (candidates.isEmpty()) return null;
+
+        Comparator<FuelChoice> practical = Comparator
+                .comparingInt(FuelChoice::requiredItems)
+                .thenComparingInt(choice -> choice.item().equals(preferred) ? 0 : 1)
+                .thenComparing(choice ->
+                        BuiltInRegistries.ITEM.getKey(choice.item()).toString());
+        FuelChoice affordable = candidates.stream()
+                .filter(choice -> available.getOrDefault(choice.item(), 0L)
+                        >= choice.requiredItems())
+                .min(practical)
+                .orElse(null);
+        if (affordable != null) return affordable;
+
+        FuelChoice partial = candidates.stream()
+                .filter(choice -> available.getOrDefault(choice.item(), 0L) > 0L)
+                .max(Comparator
+                        .comparingDouble((FuelChoice choice) ->
+                                (double) available.getOrDefault(choice.item(), 0L)
+                                        / choice.requiredItems())
+                        .thenComparingLong(choice ->
+                                available.getOrDefault(choice.item(), 0L))
+                        .thenComparing((left, right) -> practical.compare(right, left)))
+                .orElse(null);
+        if (partial != null) return partial;
+
+        return candidates.stream()
+                .filter(choice -> choice.item().equals(preferred))
+                .findFirst()
+                .orElseGet(() -> candidates.stream().min(practical).orElseThrow());
+    }
+
+    private static int requiredItems(long burnUnits, int burnDuration) {
+        return (int) Math.min(Integer.MAX_VALUE,
+                InputConsumption.fuel(1L).requiredPhysicalAmount(
+                        burnUnits, 1L, Math.max(1, burnDuration)));
     }
 
     // ── fuel helpers ──
@@ -570,55 +717,47 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return fuelBurnDuration(be, stack) > 0;
     }
 
-    /** Resolve the incubator fuel map once, caching the result. */
-    private static Map<Item, Integer> getIncubatorFuelMap() {
-        if (incubatorMapProbed) return cachedIncubatorMap;
-        incubatorMapProbed = true;
-        try {
-            Class<?> clz = Class.forName("com.aetherteam.aether.blockentity.IncubatorBlockEntity");
-            @SuppressWarnings("unchecked")
-            Map<Item, Integer> map = (Map<Item, Integer>) clz.getMethod("getIncubatingMap").invoke(null);
-            cachedIncubatorMap = map;
-            return map;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Incubator fuel probe failed", e);
-            return null;
-        }
-    }
-
     /** Fill slot 1 with enough of one valid fuel type for the requested burn units. */
-    private ItemStack fillFuelSlot(BlockEntity be, IItemHandler handler,
-                                   ServerPlayer player, long requiredBurnUnits) {
+    private FuelFillResult fillFuelSlot(BlockEntity be, IItemHandler handler,
+                                        ServerPlayer player, long requiredBurnUnits) {
         ItemStack fuelSlot = handler.getStackInSlot(1);
 
         // Slot occupied by a non-fuel item — leave it alone.
-        if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) return ItemStack.EMPTY;
+        if (!fuelSlot.isEmpty() && !isValidFuelForMachine(be, fuelSlot)) {
+            return FuelFillResult.failed();
+        }
 
-        // Match the existing fuel type, else pick any valid fuel present in RS.
-        ItemStack fuelType = fuelSlot.isEmpty() ? findFuelInStorage(be, player) : fuelSlot;
-        if (fuelType.isEmpty()) return ItemStack.EMPTY;
+        // Match the existing fuel type, else choose the best available valid fuel in RS.
+        ItemStack fuelType = fuelSlot.isEmpty()
+                ? findFuelInStorage(be, player, requiredBurnUnits) : fuelSlot;
+        if (fuelType.isEmpty()) return FuelFillResult.failed();
 
         int slotLimit = Math.min(handler.getSlotLimit(1), fuelType.getMaxStackSize());
         int room = slotLimit - fuelSlot.getCount();
-        if (room <= 0) return ItemStack.EMPTY;
+        if (room <= 0) return FuelFillResult.failed();
 
         int burnDuration = Math.max(1, fuelBurnDuration(be, fuelType));
-        long requiredAmount = InputConsumption.fuel(1L).requiredPhysicalAmount(
-                requiredBurnUnits, 1L, burnDuration);
-        int required = (int) Math.min(Integer.MAX_VALUE, requiredAmount);
+        int required = requiredItems(requiredBurnUnits, burnDuration);
         int missing = Math.max(0, required - fuelSlot.getCount());
-        if (missing <= 0) return ItemStack.EMPTY;
-        room = Math.min(room, missing);
+        if (missing <= 0) return FuelFillResult.ready(ItemStack.EMPTY);
+        if (room < missing) return FuelFillResult.failed();
 
-        ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), room, false);
-        if (extracted.isEmpty()) return ItemStack.EMPTY;
+        ItemStack extracted = extractExactFromStorage(
+                player, fuelType.copyWithCount(1), missing, false);
+        if (extracted.getCount() != missing) {
+            if (!extracted.isEmpty()) insertIntoStorage(player, extracted, false);
+            return FuelFillResult.failed();
+        }
 
         ItemStack remainder = handler.insertItem(1, extracted, false);
         if (!remainder.isEmpty()) {
             insertIntoStorage(player, remainder, false);
         }
         int inserted = extracted.getCount() - remainder.getCount();
-        return inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
+        ItemStack insertedFuel = inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
+        return inserted == missing
+                ? FuelFillResult.ready(insertedFuel)
+                : new FuelFillResult(false, insertedFuel);
     }
 
     private static int fuelBurnDuration(BlockEntity be, ItemStack stack) {
@@ -633,48 +772,51 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                 return ForgeHooks.getBurnTime(stack, null);
             }
         }
-        Map<Item, Integer> map = getIncubatorFuelMap();
-        return map == null ? 0 : map.getOrDefault(stack.getItem(), 0);
+        return fuelMapForMachine(be).getOrDefault(stack.getItem(), 0);
     }
 
-    /** Find the first valid fuel type for this machine present in the RS network. */
-    private ItemStack findFuelInStorage(BlockEntity be, ServerPlayer player) {
+    /** Choose one valid fuel type for this machine from the RS network. */
+    private ItemStack findFuelInStorage(BlockEntity be, ServerPlayer player,
+                                        long requiredBurnUnits) {
         var endpoint = storageEndpoint();
         if (endpoint == null) return ItemStack.EMPTY;
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
-        Item preferred = preferredFuelItem(be);
-        if (preferred != null && preferred != Items.AIR) {
-            for (var entry : snapshot.items()) {
-                ItemStack stack = entry.stack();
-                if (!stack.isEmpty() && stack.is(preferred)
-                        && isValidFuelForMachine(be, stack)) {
-                    return stack;
-                }
-            }
+        Map<Item, Long> available = new HashMap<>();
+        for (var entry : snapshot.items()) {
+            if (entry.stack().isEmpty()) continue;
+            available.merge(entry.stack().getItem(), entry.amount(),
+                    SaturatingLongMath::signedAdd);
         }
+        FuelFamily family = fuelFamilyForMachine(be);
+        FuelChoice choice = chooseFuel(fuelMapForMachine(be), available,
+                preferredFuelItem(family), requiredBurnUnits);
+        if (choice == null) return ItemStack.EMPTY;
         for (var entry : snapshot.items()) {
             ItemStack stack = entry.stack();
-            if (stack.isEmpty()) continue;
-            if (isValidFuelForMachine(be, stack)) return stack;
+            if (!stack.isEmpty() && stack.is(choice.item())) return stack;
         }
         return ItemStack.EMPTY;
     }
 
     @Nullable
-    private static Item preferredFuelItem(BlockEntity be) {
+    private static FuelFamily fuelFamilyForMachine(BlockEntity be) {
         String name = be.getClass().getSimpleName();
-        FuelProfile profile;
-        if (name.contains("Freezer")) {
-            profile = FREEZER_FUEL;
-        } else if (name.contains("Altar")) {
-            profile = ALTAR_FUEL;
-        } else if (name.contains("Incubator")) {
-            profile = INCUBATOR_FUEL;
-        } else {
-            return null;
-        }
-        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(profile.itemId()));
+        if (name.contains("Freezer")) return FuelFamily.FREEZER;
+        if (name.contains("Altar")) return FuelFamily.ALTAR;
+        if (name.contains("Incubator")) return FuelFamily.INCUBATOR;
+        return null;
+    }
+
+    private static Map<Item, Integer> fuelMapForMachine(BlockEntity be) {
+        return fuelMap(fuelFamilyForMachine(be));
+    }
+
+    @Nullable
+    private static Item preferredFuelItem(@Nullable FuelFamily family) {
+        if (family == null) return null;
+        Item item = BuiltInRegistries.ITEM.get(
+                ResourceLocation.tryParse(family.preferredItemId));
         return item == Items.AIR ? null : item;
     }
 

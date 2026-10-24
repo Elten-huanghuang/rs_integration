@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.feature.ftbquests;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -11,6 +14,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import dev.ftb.mods.ftbquests.quest.TeamData;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -23,6 +27,22 @@ import java.util.stream.Stream;
 /** Atomically owns inventory-first item consumption for an explicit FTB submit click. */
 public final class NativeItemTaskSubmissionService {
     private NativeItemTaskSubmissionService() {}
+
+    private enum SubmissionStatus {
+        NO_MUTATION,
+        SETTLED,
+        HANDLED
+    }
+
+    private record SubmissionResult(SubmissionStatus status, long remaining) {
+        private boolean handled() {
+            return status != SubmissionStatus.NO_MUTATION;
+        }
+
+        private boolean canCraftRemaining() {
+            return status == SubmissionStatus.SETTLED;
+        }
+    }
 
     /** Returns true when the native submit callback must be cancelled. */
     public static boolean handleExplicitSubmission(ItemTask task, TeamData data, ServerPlayer player) {
@@ -99,14 +119,109 @@ public final class NativeItemTaskSubmissionService {
             transactionEndpoint = null;
             network = null;
         }
-        return submitTransaction(task, data, player, transactionEndpoint,
+        SubmissionResult direct = submitTransaction(task, data, player, transactionEndpoint,
                 (int) remaining, display);
+        if (NativeSubmissionRecoveryPolicy.shouldCraftRemainder(
+                direct.handled(), direct.canCraftRemaining(), direct.remaining())) {
+            return startRecursiveSubmission(task, data, player, transactionEndpoint,
+                    network, display, direct.handled());
+        }
+        if (direct.remaining() > 0L) {
+            sendMissing(player, display, direct.remaining());
+        }
+        return direct.handled();
     }
 
-    /** Returns false only when no mutation occurred and FTB may safely retry natively. */
-    private static boolean submitTransaction(ItemTask task, TeamData data, ServerPlayer player,
-                                             @Nullable CraftStorageEndpoint endpoint,
-                                             int count, ItemStack display) {
+    /**
+     * Native FTB submission only consumes items already available. If that fails,
+     * retain the explicit submit intent and build the same recursive graph used by
+     * the quest submission planner before falling back to FTB's missing-item hint.
+     */
+    private static boolean startRecursiveSubmission(
+            ItemTask task, TeamData data, ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint, @Nullable INetwork network,
+            ItemStack display, boolean handledBeforePlanning) {
+        QuestItemRequirement requirement = new QuestItemRequirement(
+                FtbQuestObjectId.getId(task), display.copyWithCount(1), List.of(display.copyWithCount(1)),
+                task.getMaxProgress(), data.getProgress(task), true,
+                false, false, false);
+        QuestSubmissionSnapshot snapshot = new QuestSubmissionSnapshot(
+                FtbQuestObjectId.getId(task.getQuest()), task.getQuest().getTitle().getString(),
+                display.copyWithCount(1), false, false,
+                QuestSubmissionEligibility.ELIGIBLE, List.of(requirement),
+                List.of(), 0, false);
+
+        QuestSubmissionPlan plan;
+        try {
+            plan = FtbQuestSubmissionPlanner.plan(player, snapshot, endpoint, network);
+        } catch (CraftingPlanningTimeoutException timeout) {
+            player.sendSystemMessage(Component.translatable("rsi.plan.failure.planning_timeout"));
+            return true;
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-FTBQuests] Recursive submit planning failed task={}",
+                    FtbQuestObjectId.getId(task), failure);
+            if (handledBeforePlanning) {
+                sendMissing(player, display,
+                        Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+            }
+            return handledBeforePlanning;
+        }
+        if (!plan.feasible() || plan.graph().nodes().isEmpty()) {
+            if (handledBeforePlanning) {
+                sendMissing(player, display,
+                        Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+            }
+            return handledBeforePlanning;
+        }
+
+        try {
+            AsyncCraftChain chain = new AsyncCraftChain(
+                    player.getUUID(), player.getServer(), endpoint, plan.graph());
+            chain.onDone(() -> {
+                ServerPlayer current = player.getServer().getPlayerList().getPlayer(player.getUUID());
+                if (current == null) return;
+                if (chain.state() != AsyncCraftChain.State.COMPLETED) {
+                    current.sendSystemMessage(Component.translatable(
+                            "rsi.ftb_quest.error.crafting_failed", chain.abortReason()));
+                    return;
+                }
+                TeamData currentData = TeamData.get(current);
+                long currentRemaining = currentData == null ? 0L
+                        : Math.max(0L, task.getMaxProgress() - currentData.getProgress(task));
+                if (currentData == null || currentRemaining <= 0L) {
+                    if (currentRemaining > 0L) sendMissing(current, display, currentRemaining);
+                    return;
+                }
+                SubmissionResult finalSubmission = submitTransaction(
+                        task, currentData, current, endpoint,
+                        (int) Math.min(Integer.MAX_VALUE, currentRemaining), display);
+                if (finalSubmission.remaining() > 0L) {
+                    sendMissing(current, display, finalSubmission.remaining());
+                }
+            });
+            boolean completed = AsyncCraftManager.getInstance()
+                    .submitAndAdvance(chain, player.getServer());
+            if (!completed) {
+                player.sendSystemMessage(Component.translatable(
+                    "rsi.ftb_quest.info.crafting_started", plan.graph().nodes().size()));
+            }
+            return true;
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-FTBQuests] Failed to start recursive submit task={}",
+                    FtbQuestObjectId.getId(task), failure);
+            if (handledBeforePlanning) {
+                sendMissing(player, display,
+                        Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
+            }
+            return handledBeforePlanning;
+        }
+    }
+
+    private static SubmissionResult submitTransaction(
+            ItemTask task, TeamData data, ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint, int count, ItemStack display) {
         try (ExtractionLedger ledger = new ExtractionLedger()) {
             ledger.setStorageEndpoint(endpoint);
             int mark = ledger.reservationMark();
@@ -118,7 +233,7 @@ public final class NativeItemTaskSubmissionService {
                         "[RSI-FTBQuests] No ledger match for task={} endpoint={}; trying native inventory submission",
                         FtbQuestObjectId.getId(task), endpoint == null ? "none"
                                 : endpoint.session().reference().backendId());
-                return false;
+                return new SubmissionResult(SubmissionStatus.NO_MUTATION, count);
             }
             RSIntegrationMod.LOGGER.info(
                     "[RSI-FTBQuests] Reserved task={} requested={} reserved={} endpoint={}",
@@ -134,7 +249,8 @@ public final class NativeItemTaskSubmissionService {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-FTBQuests] Ledger commit rejected task={}; trying native inventory submission",
                         FtbQuestObjectId.getId(task));
-                return false;
+                return new SubmissionResult(SubmissionStatus.NO_MUTATION,
+                        Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
             }
 
             // Inventory extraction can synchronously trigger other FTB callbacks. Re-check
@@ -145,10 +261,11 @@ public final class NativeItemTaskSubmissionService {
                         "[RSI-FTBQuests] Team data locked after reserving task {}; refunding {} item(s)",
                         FtbQuestObjectId.getId(task), reserved);
                 ledger.refundCommittedToEndpoint(token, endpoint, player);
-                return true;
+                return new SubmissionResult(SubmissionStatus.HANDLED,
+                        Math.max(0L, task.getMaxProgress() - beforeProgress(data, task)));
             }
 
-            long before = data.getProgress(task);
+            long before = beforeProgress(data, task);
             long expectedAccepted = QuestProgressSettlement.expectedAccepted(
                     before, task.getMaxProgress(), reserved);
             if (expectedAccepted != reserved) {
@@ -156,9 +273,8 @@ public final class NativeItemTaskSubmissionService {
                         "[RSI-FTBQuests] Reservation exceeds task capacity task={} reserved={} before={} max={}",
                         FtbQuestObjectId.getId(task), reserved, before, task.getMaxProgress());
                 ledger.refundCommittedToEndpoint(token, endpoint, player);
-                sendMissing(player, display,
+                return new SubmissionResult(SubmissionStatus.HANDLED,
                         Math.max(0L, task.getMaxProgress() - before));
-                return true;
             }
             long after;
             boolean reachedCompletion;
@@ -175,16 +291,14 @@ public final class NativeItemTaskSubmissionService {
                         FtbQuestObjectId.getId(task), reserved, accepted);
                 if (QuestProgressSettlement.shouldRefundRejectedProgress(accepted)) {
                     ledger.refundCommittedToEndpoint(token, endpoint, player);
-                    sendMissing(player, display,
+                    return new SubmissionResult(SubmissionStatus.HANDLED,
                             Math.max(0L, task.getMaxProgress() - after));
-                    return true;
                 }
                 // Preserve the established partial-progress behavior. The task
                 // has already accepted part of the reservation.
                 ledger.settleCommitted(token);
-                sendMissing(player, display,
+                return new SubmissionResult(SubmissionStatus.HANDLED,
                         Math.max(0L, task.getMaxProgress() - after));
-                return true;
             }
             ledger.settleCommitted(token);
             RSIntegrationMod.LOGGER.info(
@@ -197,16 +311,18 @@ public final class NativeItemTaskSubmissionService {
             }
             long stillMissing = reachedCompletion
                     ? 0L : Math.max(0L, task.getMaxProgress() - after);
-            if (stillMissing > 0L) sendMissing(player, display, stillMissing);
-            return true;
+            return new SubmissionResult(SubmissionStatus.SETTLED, stillMissing);
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.error(
                     "[RSI-FTBQuests] Explicit transaction failed for task {}",
                     FtbQuestObjectId.getId(task), exception);
-            sendMissing(player, display,
-                    Math.max(0L, task.getMaxProgress() - data.getProgress(task)));
-            return true;
+            return new SubmissionResult(SubmissionStatus.HANDLED,
+                    Math.max(0L, task.getMaxProgress() - beforeProgress(data, task)));
         }
+    }
+
+    private static long beforeProgress(TeamData data, ItemTask task) {
+        return data == null ? 0L : data.getProgress(task);
     }
 
     private static boolean canExtract(INetwork network, ServerPlayer player) {

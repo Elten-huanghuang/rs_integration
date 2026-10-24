@@ -434,6 +434,34 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void graphExecutionUsesAFreshLedgerAfterNodeInputsWereCommitted() {
+        ResourceLocation recipeId = new ResourceLocation("test", "graph_fresh_ledger");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        CraftStorageEndpoint endpoint = storageEndpoint(
+                fixture.player(), "graph-fresh", new ItemStack(Items.COBBLESTONE, 9));
+        List<ItemStack> inventory = new ArrayList<>();
+
+        try (ExtractionLedger nodeLedger = new ExtractionLedger();
+             ExtractionLedger executionLedger = new ExtractionLedger()) {
+            nodeLedger.setStorageEndpoint(endpoint);
+            assertTrue(nodeLedger.commitToEndpoint(endpoint, fixture.player()));
+            assertTrue(nodeLedger.isCommitted());
+            executionLedger.setStorageEndpoint(endpoint);
+
+            StableRecipeBatch.Result result =
+                    executeDetailed(fixture, recipeId, 1, inventory, executionLedger);
+
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    result.outcome(), result.detail());
+            assertEquals(ExtractionLedger.State.RESERVING, executionLedger.state());
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.STONE));
+    }
+
+    @Test
     void preservesEmptyShapedRecipeSlotsDuringBatchAssembly() {
         ResourceLocation recipeId = new ResourceLocation("test", "sparse_compression");
         NonNullList<Ingredient> ingredients = NonNullList.of(

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.plugin;
 
+import com.huanghuang.rsintegration.mixin.tacz.TaczMixinTargets;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -36,6 +37,19 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerMixin")) {
             return hasMethod(targetClassName, "customClickHandler")
                     && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
+        }
+        if (mixinClassName.endsWith(".tacz.GunHudOverlayAmmoMixin")) {
+            return isClassPresent(targetClassName)
+                    && isClassPresent("com.tacz.guns.api.item.IAmmo")
+                    && hasField(targetClassName,
+                    TaczMixinTargets.GUN_HUD_CACHE_INVENTORY_AMMO_FIELD,
+                    TaczMixinTargets.GUN_HUD_CACHE_INVENTORY_AMMO_DESCRIPTOR)
+                    && hasField(targetClassName,
+                    TaczMixinTargets.GUN_HUD_CHECK_AMMO_TIMESTAMP_FIELD,
+                    TaczMixinTargets.GUN_HUD_CHECK_AMMO_TIMESTAMP_DESCRIPTOR)
+                    && hasMethod(targetClassName, TaczMixinTargets.GUN_HUD_HANDLE_CACHE_COUNT,
+                    TaczMixinTargets.GUN_HUD_HANDLE_CACHE_COUNT_DESCRIPTOR)
+                    && hasResonanceBackend();
         }
         if (mixinClassName.contains(".tacz.")) {
             return isClassPresent(targetClassName)
@@ -544,9 +558,23 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                 .anyMatch(field -> fieldName.equals(field.name)));
     }
 
+    private static boolean hasField(
+            String className, String fieldName, String fieldDescriptor) {
+        return readClass(className, node -> node.fields.stream()
+                .anyMatch(field -> fieldName.equals(field.name)
+                        && fieldDescriptor.equals(field.desc)));
+    }
+
     private static boolean hasMethod(String className, String methodName) {
         return readClass(className, node -> node.methods.stream()
                 .anyMatch(method -> methodName.equals(method.name)));
+    }
+
+    private static boolean hasMethod(
+            String className, String methodName, String methodDescriptor) {
+        return readClass(className, node -> node.methods.stream()
+                .anyMatch(method -> methodName.equals(method.name)
+                        && methodDescriptor.equals(method.desc)));
     }
 
     private interface ClassPredicate {
