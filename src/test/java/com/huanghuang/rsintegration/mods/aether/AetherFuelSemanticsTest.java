@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
@@ -23,6 +25,33 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class AetherFuelSemanticsTest extends BootstrapTest {
+    @Test
+    void readsTheProductionSrgCookingMethodInsteadOfFallingBackToTwoHundredTicks() {
+        TestRecipe recipe = new SrgCookingRecipe(600);
+
+        assertEquals(600L, CraftPacketUtils.estimatedFuelBurnUnits(recipe, 1));
+        assertEquals(1_800L, CraftPacketUtils.estimatedFuelBurnUnits(recipe, 3));
+    }
+
+    @Test
+    void usesIncubationDurationForItsFuelBudget() {
+        TestRecipe recipe = new IncubationDurationRecipe(5_700);
+
+        assertEquals(5_700L, CraftPacketUtils.estimatedFuelBurnUnits(recipe, 1));
+        assertEquals(11_400L, CraftPacketUtils.estimatedFuelBurnUnits(recipe, 2));
+    }
+
+    @Test
+    void severalThirtySecondOperationsRequireTheFullPhysicalFuelAmount() {
+        TestRecipe recipe = new SrgCookingRecipe(600);
+
+        long burnUnits = CraftPacketUtils.estimatedFuelBurnUnits(recipe, 3);
+        long icestone = InputConsumption.fuel(1L).requiredPhysicalAmount(
+                burnUnits, 1L, 400);
+
+        assertEquals(5L, icestone);
+    }
+
     @Test
     void selectsOnePracticalFuelInsteadOfRequiringEveryValidFuel() {
         Map<Item, Integer> fuels = Map.of(
@@ -145,6 +174,32 @@ class AetherFuelSemanticsTest extends BootstrapTest {
     private static class IncubationRecipe extends TestRecipe {
         IncubationRecipe() {
             super("incubation");
+        }
+    }
+
+    private static class SrgCookingRecipe extends TestRecipe {
+        private final int duration;
+
+        SrgCookingRecipe(int duration) {
+            super("srg_cooking");
+            this.duration = duration;
+        }
+
+        public int m_43753_() {
+            return duration;
+        }
+    }
+
+    private static class IncubationDurationRecipe extends TestRecipe {
+        private final int duration;
+
+        IncubationDurationRecipe(int duration) {
+            super("incubation");
+            this.duration = duration;
+        }
+
+        public int getIncubationTime() {
+            return duration;
         }
     }
 

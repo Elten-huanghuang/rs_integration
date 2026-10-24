@@ -47,6 +47,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -1603,9 +1604,17 @@ public final class CraftPacketUtils {
 
     private static int fuelBurnUnitsPerOperation(@Nullable Recipe<?> recipe) {
         if (recipe == null) return 200;
-        for (String methodName : List.of("getCookTime", "getCookingTime")) {
+        // 直接类型化读取避免生产环境只有 SRG 方法名时误回退到 200 刻。
+        if (recipe instanceof AbstractCookingRecipe cookingRecipe) {
+            int cookingTime = cookingRecipe.getCookingTime();
+            if (cookingTime > 0) return cookingTime;
+        }
+        for (String methodName : List.of(
+                "getCookTime", "getCookingTime", "getIncubationTime", "m_43753_")) {
             try {
-                Object value = recipe.getClass().getMethod(methodName).invoke(recipe);
+                Method method = recipe.getClass().getMethod(methodName);
+                method.trySetAccessible();
+                Object value = method.invoke(recipe);
                 if (value instanceof Number number && number.intValue() > 0) {
                     return number.intValue();
                 }
@@ -1613,7 +1622,8 @@ public final class CraftPacketUtils {
                 // Fall through to known field names.
             }
         }
-        for (String fieldName : List.of("cookingTime", "cookTime")) {
+        for (String fieldName : List.of(
+                "cookingTime", "cookTime", "incubationTime", "f_43732_")) {
             Optional<Field> field = Reflect.findField(recipe.getClass(), fieldName);
             if (field.isEmpty()) continue;
             try {
