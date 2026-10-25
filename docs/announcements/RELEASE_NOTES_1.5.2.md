@@ -1,7 +1,7 @@
 # RS Integration 1.5.2 更新公告
 
 - 当前版本：1.5.2
-- 公告整理：2026 年 10 月 24 日
+- 公告整理：2026 年 10 月 25 日
 - 适用环境：Minecraft 1.20.1 / Forge 47+
 - 公告范围：从版本号改为 1.5.1 起，到当前 1.5.2 的全部玩家可见更新。
 
@@ -46,7 +46,7 @@
 
 ## 超大库存与磁盘
 
-- 万界归墟盘中的单个物品、单种流体和魔法资源都可以保存特别大的数量。
+- 万界归墟盘中的单个物品、单种流体和魔法资源都可以保存long级别数量。
 - 旧版磁盘和旧数量格式继续兼容，加载时会自动整理重复记录，避免同一资源被重复计算。
 - 混合终端、配方树和容器提示可以正常显示超大数量，完整数量会保留在详细提示中。
 - 安装的模组暂时缺失时，只隔离对应物品或流体，其他库存仍可使用；原数据不会直接删除。
@@ -142,42 +142,6 @@
 - 修复切换维度或存储网络后，仍然固定使用旧网络并误报中间材料不足的问题。
 - 修复 Malum 祭坛材料被拆成多个小堆后无法开始批量合成，以及 Wizards Reborn 秘蕴不足时准备失败的问题。
 
-## 物品与流体退款
-
-## 常用配置
-
-| 配置项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `storage.diskManipulator.enabled` | `true` | 开启磁盘操纵器快速搬运；关闭后恢复 RS 原版速度。 |
-| `storage.diskManipulator.budgetMicros` | `1000` | 所有磁盘操纵器每 tick 共用的处理时间。 |
-| `storage.diskManipulator.maxOperationsPerTick` | `1024` | 单台磁盘操纵器每 tick 最多处理多少次。 |
-| `storage.diskManipulator.maxItemsPerOperation` | 不限 | 单次最多搬运多少资源。 |
-| `storage.diskManipulator.noProgressCooldownTicks` | `20` | 无法继续搬运时等待多少 tick 再重试。 |
-| `magicResources.pinnedBackend` | 空 | 终端没有明确所属网络时，默认使用哪一边的魔法资源。 |
-| `magicResources.creativeMagicDepositAmount` | `2100000000` | 创造容器一次存入的魔法资源数量。 |
-| `integrations.enableGoetySoulReverseRefill` | `false` | 是否允许灵魂方舟从 RS 网络自动补充灵魂。 |
-| `integrations.goetyBrazierVirtualCandleCount` | `64` | 自动合成亡灵火炉时使用多少个虚拟烛台。 |
-| `craftingMaxGraphNodes` | `16384` | 单次合成计划最多包含多少配方节点。 |
-| `craftingPlanCacheMaxNodes` | `131072` | 后台计划最多保留多少配方节点。 |
-| `craftingStableBatchRetrySeconds` | `5` | 库存暂时不可读取时最多重试多少秒。 |
-| `craftingVirtualExchangeBatchLimit` | `0` | 纯兑换每批最多执行多少次；`0` 表示不额外限制。 |
-| `machineTabThreshold` | `5` | 机器较多时何时自动改用机器中心。 |
-
-料理机器还可以分别关闭输入预载并调整上限。默认上限均为 `64`，实际数量仍会受到材料、容器、输出空间和配方耗时限制。
-
-相关配置项包括：
-
-`enableTwilightDelightFieryPotInputBuffer`
-
-`enableYoukaisHomecomingCookingPotInputBuffer`
-
-`enableYoukaisHomecomingSteamerInputBuffer`
-
-`enableLetsDoCookingPotInputBuffer`
-
-`enableBossesDelightSoulCookingPotInputBuffer`
-
-`enableCasualnessDelightDeepFryingPanInputBuffer`
 
 ## 升级提醒
 
