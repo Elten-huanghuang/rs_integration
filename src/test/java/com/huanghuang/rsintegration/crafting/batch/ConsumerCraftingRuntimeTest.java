@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.api.consumer.ConsumerOutputDestination;
+import com.huanghuang.rsintegration.api.consumer.ConsumerOutputResult;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -8,6 +10,8 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -66,6 +70,24 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
                 PureRecipePlanner.Feasibility.INFEASIBLE,
                 excluded.feasibility()
         );
+    }
+
+    @Test
+    void observedOutputsMergeOnlyRealRuntimeStacks() {
+        List<ConsumerOutputResult> outputs =
+                ConsumerCraftingRuntime.observedOutputs(
+                List.of(
+                        new ItemStack(Items.DIAMOND, 2),
+                        new ItemStack(Items.DIAMOND, 3),
+                        ItemStack.EMPTY
+                ),
+                ConsumerOutputDestination.RS_NETWORK,
+                true
+        );
+
+        assertEquals(1, outputs.size());
+        assertEquals(5L, outputs.get(0).amount());
+        assertTrue(outputs.get(0).delivered());
     }
 
     private static MaterialRef material(String path) {

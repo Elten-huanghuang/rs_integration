@@ -40,6 +40,7 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.execution.FailureReason;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
@@ -362,7 +363,8 @@ public final class ConsumerCraftingRuntime {
             }
             List<ConsumerCraftability> results;
             try {
-                results = session.future.join();
+                results = preflightPlans(
+                        player, session.future.join());
             } catch (RuntimeException failure) {
                 session.closed = true;
                 return reject(
@@ -809,6 +811,71 @@ public final class ConsumerCraftingRuntime {
             results.add(inspectOne(session, recipe, capabilities));
         }
         return List.copyOf(results);
+    }
+
+    private List<ConsumerCraftability> preflightPlans(
+            ServerPlayer player,
+            List<ConsumerCraftability> results
+    ) {
+        List<ConsumerCraftability> checked =
+                new ArrayList<>(results.size());
+        for (ConsumerCraftability result : results) {
+            if (!result.canSubmit() || result.planId() == null) {
+                checked.add(result);
+                continue;
+            }
+            PlanLease plan = plans.get(result.planId());
+            if (plan == null) {
+                checked.add(unavailable(
+                        result.recipe(),
+                        ConsumerCraftabilityStatus.INTERNAL_ERROR,
+                        ConsumerDiagnosticCode.INTERNAL_ERROR,
+                        "consumer plan disappeared during inspection"
+                ));
+                continue;
+            }
+            RecipeNode node = plan.planningGraph.recipesById()
+                    .get(plan.recipeId);
+            ModType type = node == null
+                    ? ModType.GENERIC
+                    : ModType.byId(node.modTypeId());
+            if (CraftExecutionPolicy.requiresBoundMachine(type)) {
+                List<AltarBindingRegistry.BoundMachine> machines =
+                        AltarBindingRegistry.getBoundMachinesForRecipe(
+                                player, type, plan.recipeId);
+                if (machines.isEmpty()
+                        || AsyncCraftManager.getInstance()
+                        .areAllMachinesLeased(machines, type.id())) {
+                    plans.remove(plan.id, plan);
+                    checked.add(unavailable(
+                            result.recipe(),
+                            ConsumerCraftabilityStatus.MACHINE_UNAVAILABLE,
+                            ConsumerDiagnosticCode.MACHINE_UNAVAILABLE,
+                            "all eligible machines are unavailable or leased"
+                    ));
+                    continue;
+                }
+            }
+            if (plan.destination
+                    == ConsumerOutputDestination.RS_NETWORK) {
+                CraftStorageEndpoint endpoint = plan.storageReference == null
+                        ? null
+                        : CraftStorageEndpoints.resolve(
+                                plan.storageReference, player).orElse(null);
+                if (endpoint == null) {
+                    plans.remove(plan.id, plan);
+                    checked.add(unavailable(
+                            result.recipe(),
+                            ConsumerCraftabilityStatus.OUTPUT_UNAVAILABLE,
+                            ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE,
+                            "selected network output is unavailable"
+                    ));
+                    continue;
+                }
+            }
+            checked.add(result);
+        }
+        return List.copyOf(checked);
     }
 
     private ConsumerCraftability inspectOne(
@@ -1371,9 +1438,40 @@ public final class ConsumerCraftingRuntime {
         order.totalOperations = Math.max(
                 order.totalOperations, snapshot.totalNodes());
         order.runningOperations = 0L;
+        order.outputs = observedOutputs(
+                order.chain.virtualInventory(),
+                order.destination,
+                order.state == ConsumerOrderState.SUCCEEDED
+        );
         if (order.state == ConsumerOrderState.FAILED) {
             order.failureReason = failureReason(snapshot.reason());
         }
+    }
+
+    static List<ConsumerOutputResult> observedOutputs(
+            List<ItemStack> stacks,
+            ConsumerOutputDestination destination,
+            boolean delivered
+    ) {
+        Map<IntegrationResourceKey, Long> amounts = new LinkedHashMap<>();
+        for (ItemStack stack : stacks) {
+            if (stack == null || stack.isEmpty()) continue;
+            IntegrationResourceKey key =
+                    IntegrationResourceKey.item(stack);
+            amounts.merge(
+                    key,
+                    (long) stack.getCount(),
+                    SaturatingLongMath::add
+            );
+        }
+        return amounts.entrySet().stream()
+                .map(entry -> new ConsumerOutputResult(
+                        entry.getKey(),
+                        entry.getValue(),
+                        destination,
+                        delivered
+                ))
+                .toList();
     }
 
     private static FailureReason failureReason(
@@ -1701,6 +1799,7 @@ public final class ConsumerCraftingRuntime {
         private volatile long totalOperations;
         private volatile long runningOperations;
         private volatile FailureReason failureReason;
+        private volatile List<ConsumerOutputResult> outputs = List.of();
 
         OrderRecord(
                 ConsumerOrderId id,
@@ -1770,7 +1869,7 @@ public final class ConsumerCraftingRuntime {
                     completed,
                     total,
                     running,
-                    List.<ConsumerOutputResult>of(),
+                    outputs,
                     failure,
                     current == ConsumerOrderState.FAILED
                             ? List.of(publicDiagnostic(
@@ -1790,7 +1889,7 @@ public final class ConsumerCraftingRuntime {
                     completedOperations,
                     totalOperations,
                     runningOperations,
-                    List.<ConsumerOutputResult>of(),
+                    outputs,
                     failureReason,
                     state == ConsumerOrderState.FAILED
                             ? List.of(publicDiagnostic(
@@ -2068,6 +2167,7 @@ public final class ConsumerCraftingRuntime {
             order.totalOperations = status.totalOperations();
             order.runningOperations = status.runningOperations();
             order.failureReason = failure;
+            order.outputs = status.outputs();
             return order;
         }
 
