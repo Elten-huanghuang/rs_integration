@@ -159,14 +159,17 @@ class PureRecipePlannerPropertyTest {
                     for (RecipeNode recipe : generated.graph().recipesByOutput()
                             .getOrDefault(wanted, List.of())) {
                         if (state.steps() + scheduled(rest) >= generated.maxSteps()) continue;
-                        int batches = (missing + recipe.outputCount() - 1) / recipe.outputCount();
+                        int batches = Math.toIntExact(
+                                (missing + recipe.outputCount() - 1)
+                                        / recipe.outputCount());
                         List<ReferenceTask> pending = new ArrayList<>();
                         for (IngredientRef input : recipe.inputs()) {
                             pending.add(new ReferenceNeed(new IngredientRef(input.alternatives(),
                                     (int) input.count() * batches)));
                         }
                         boolean aggregateDemand = need.ingredient().alternatives().size() > 1;
-                        pending.add(new ReferenceProduce(recipe.output(), recipe.outputCount(),
+                        pending.add(new ReferenceProduce(recipe.output(),
+                                Math.toIntExact(recipe.outputCount()),
                                 aggregateDemand ? 0 : (int) need.ingredient().count(), batches));
                         if (aggregateDemand) pending.add(new ReferenceNeed(need.ingredient()));
                         pending.addAll(rest);
@@ -217,7 +220,8 @@ class PureRecipePlannerPropertyTest {
             Set<Map<MaterialRef, Integer>> produced = new HashSet<>();
             for (Map<MaterialRef, Integer> state : states) {
                 int count = state.getOrDefault(recipe.output(), 0)
-                        + recipe.outputCount() * (int) step.batches();
+                        + Math.toIntExact(
+                        recipe.outputCount() * step.batches());
                 produced.add(withCount(state, recipe.output(), count));
             }
             states = produced;

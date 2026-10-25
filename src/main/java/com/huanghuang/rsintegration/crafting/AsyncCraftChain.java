@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 
 
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;import java.lang.reflect.Field;
@@ -153,6 +154,7 @@ public final class AsyncCraftChain {
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     private final List<ItemStack> deliveredFinalOutputs = new ArrayList<>();
     private final List<ItemStack> recoveryFinalOutputs = new ArrayList<>();
+    private final List<CollectedOutput> reportedResources = new ArrayList<>();
     /**
      * Snapshot of {@link #virtualInventory} at the last <i>settled</i> commit
      * boundary -i.e. the set of intermediate products whose backing inputs were
@@ -704,6 +706,7 @@ public final class AsyncCraftChain {
                         List<ItemStack> actualResults = new ArrayList<>(OutputAccounting.mergeLegacyOutputs(
                                 disarmOutputCapture(), currentDelegate.collectAllResults(online),
                                 expectedWorldOutput));
+                        recordReportedResources(currentDelegate);
                         closeFlatOperationScope();
                         actualResults.removeIf(stack -> stack == null || stack.isEmpty());
                         reportCraftedPrimaryOutputs(online, actualResults,
@@ -754,9 +757,23 @@ public final class AsyncCraftChain {
                     }
                     OutputCollection collectedOutputs = collectOutputsForSettlement(
                             currentDelegate, online, disarmOutputCapture());
+                    recordReportedResources(currentDelegate);
                     closeFlatOperationScope();
                     List<ItemStack> actualResults = collectedOutputs.stacks();
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
+                    String resourceFailure =
+                            currentDelegate.reportedResourceFailure();
+                    if (resourceFailure != null) {
+                        snapshotCommittedVirtual();
+                        ledger.reset();
+                        abortWithoutRefund(
+                                "Direct resource delivery failed: "
+                                        + resourceFailure,
+                                Component.literal(resourceFailure),
+                                CraftFailureCode.OUTPUT_MISSING
+                        );
+                        return true;
+                    }
                     ProbabilisticProduction probability = probabilityTargets.get(steps.get(currentStepIdx));
                     if (probability != null) probability.settle(actualResults);
 
@@ -4645,6 +4662,18 @@ public final class AsyncCraftChain {
                 .toList();
         return new OutputCollection(stacks, OutputAccounting.assess(
                 contract, Math.max(1, machineCount), structured));
+    }
+
+    private void recordReportedResources(IBatchDelegate delegate) {
+        if (delegate == null) return;
+        for (CollectedOutput output : delegate.drainReportedResources()) {
+            if (output == null || output.amount() <= 0L) continue;
+            reportedResources.add(output);
+        }
+    }
+
+    public List<CollectedOutput> reportedResources() {
+        return List.copyOf(reportedResources);
     }
 
     static List<OutputAccounting.CollectedOutput> capturedWorldOutputRecords(

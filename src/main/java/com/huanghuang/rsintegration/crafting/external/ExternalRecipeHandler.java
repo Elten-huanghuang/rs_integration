@@ -20,6 +20,8 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -285,17 +287,52 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
     public boolean indexPrimaryOutput(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
         if (!projection.available()) return false;
-        OutputDeclaration primary =
-                ExternalRecipeProjection.primaryOutput(projection.view());
-        return primary != null
-                && primary.resource().kind()
-                == IntegrationResourceKey.ResourceKind.ITEM;
+        return ExternalRecipeProjection.primaryOutput(projection.view()) != null;
     }
 
     @Nullable
     RecipeView recipeView(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
         return projection.available() ? projection.view() : null;
+    }
+
+    List<RecipeNode> pureRecipeNodes(Recipe<?> recipe) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        return projection.available()
+                ? ExternalRecipeProjection.pureRecipeNodes(
+                        recipe,
+                        projection.view(),
+                        modType.id()
+                )
+                : List.of();
+    }
+
+    @Override
+    public List<RecipeNode> projectImmutableRecipes(Recipe<?> recipe) {
+        return pureRecipeNodes(recipe);
+    }
+
+    @Override
+    public MaterialRef preferredImmutableOutput(Recipe<?> recipe) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        if (!projection.available()) return null;
+        OutputDeclaration primary =
+                ExternalRecipeProjection.primaryOutput(projection.view());
+        return primary == null
+                ? null
+                : ExternalRecipeProjection.pureMaterial(
+                        primary.resource(),
+                        primary.dynamicIdentity()
+                );
+    }
+
+    @Override
+    public boolean hasFluidOutputs(Recipe<?> recipe) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        return projection.available()
+                && projection.view().outputs().stream().anyMatch(output ->
+                output.resource().kind()
+                        == IntegrationResourceKey.ResourceKind.FLUID);
     }
 
     RecipeExecutionKind executionKind() {

@@ -356,7 +356,8 @@ public final class RecipeIndex {
         final Iterator<Recipe<?>> recipes;
         final Map<Item, List<Entry>> index = new HashMap<>();
         final Set<ResourceLocation> seen = new HashSet<>();
-        final Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected = new HashMap<>();
+        final Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected =
+                new LinkedHashMap<>();
         final Map<Item, List<ReusableCatalystRoute>> catalystRoutes = new HashMap<>();
         final Set<ResourceLocation> catalystOutputs = new LinkedHashSet<>();
         final Set<ResourceLocation> catalystRecipes = new LinkedHashSet<>();
@@ -506,6 +507,8 @@ public final class RecipeIndex {
         if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
 
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
+        List<ImmutableRecipeGraph.RecipeNode> resourceNodes =
+                handler == null ? null : handler.projectImmutableRecipes(recipe);
         ModType type;
         ItemStack result;
         if (handler != null) {
@@ -521,8 +524,14 @@ public final class RecipeIndex {
             return IndexOutcome.UNKNOWN;
         }
 
-        if (result.isEmpty()) return IndexOutcome.EMPTY_RESULT;
-        if (isIdentityRecipe(recipe, result, handler)) return IndexOutcome.IDENTITY;
+        if (result.isEmpty()
+                && (resourceNodes == null || resourceNodes.isEmpty())) {
+            return IndexOutcome.EMPTY_RESULT;
+        }
+        if (!result.isEmpty()
+                && isIdentityRecipe(recipe, result, handler)) {
+            return IndexOutcome.IDENTITY;
+        }
 
         ResourceLocation typeId = recipe.getType() != null
                 ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
@@ -532,8 +541,11 @@ public final class RecipeIndex {
         if (typeId == null) typeId = new ResourceLocation("minecraft:crafting");
 
         Entry entry = new Entry(recipe, type, typeId);
-        target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
-        if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)
+        if (!result.isEmpty()) {
+            target.computeIfAbsent(result.getItem(), key -> new ArrayList<>()).add(entry);
+        }
+        if (!result.isEmpty()
+                && ModList.get().isLoaded(ModIds.MINERS_DELIGHT)
                 && MinersDelightCopperPotSupport.isCompatibleRecipe(recipe)) {
             ModType copperPotType = ModType.findById(ModIds.ID_MD_COPPER_POT);
             if (copperPotType != null) {
@@ -546,7 +558,7 @@ public final class RecipeIndex {
             }
         }
         List<IngredientSpec> craftingSpecs = null;
-        if (recipe instanceof CraftingRecipe crafting) {
+        if (!result.isEmpty() && recipe instanceof CraftingRecipe crafting) {
             craftingSpecs = CraftPacketUtils.extractCraftingIngredientSpecs(crafting);
             if (craftingSpecs.stream().anyMatch(spec -> spec.role() == DemandRole.CATALYST)) {
                 ResourceLocation outputId = ForgeRegistries.ITEMS.getKey(result.getItem());
@@ -556,7 +568,12 @@ public final class RecipeIndex {
                         .add(new ReusableCatalystRoute(recipe.getId(), result, craftingSpecs));
             }
         }
-        if (type == ModType.GENERIC && recipe instanceof CraftingRecipe crafting) {
+        if (resourceNodes != null) {
+            for (ImmutableRecipeGraph.RecipeNode node : resourceNodes) {
+                projected.computeIfAbsent(
+                        node.output(), ignored -> new ArrayList<>()).add(node);
+            }
+        } else if (type == ModType.GENERIC && recipe instanceof CraftingRecipe crafting) {
             long graphStarted = System.nanoTime();
             ImmutableRecipeGraph.RecipeNode node =
                     ImmutableRecipeGraphProjector.projectCraftingRecipe(

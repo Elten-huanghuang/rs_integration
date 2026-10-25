@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ExternalRecipeProjectionTest extends BootstrapTest {
     @Test
@@ -206,6 +208,72 @@ class ExternalRecipeProjectionTest extends BootstrapTest {
 
         assertTrue(result.available());
         assertEquals(1000L, result.view().fluids().get(0).amount());
+    }
+
+    @Test
+    void fluidOnlyOutputProjectsIntoTheImmutableResourceGraph() {
+        CompoundTag identity = new CompoundTag();
+        identity.putString("temperature", "hot");
+        FluidStack molten = new FluidStack(Fluids.WATER, 1);
+        molten.setTag(identity.copy());
+        IntegrationResourceKey fluid = IntegrationResourceKey.fluid(molten);
+        FluidRequirement input = new FluidRequirement(
+                id("water"),
+                new FluidIngredientView(
+                        List.of(fluid),
+                        ResourceMatchMode.EXACT_IDENTITY
+                ),
+                1_500L,
+                InputConsumption.consumed(),
+                "fluids",
+                0,
+                true
+        );
+        OutputDeclaration output = new OutputDeclaration(
+                id("molten"),
+                "output",
+                fluid,
+                OutputAmount.exactly(2_000L),
+                OutputKind.PRIMARY,
+                OutputProbability.guaranteed(),
+                false,
+                true,
+                null
+        );
+        RecipeView view = new RecipeView(
+                id("fluid_only_recipe"),
+                id("fluid_process"),
+                List.of(),
+                List.of(input),
+                List.of(output),
+                new RecipeFlags(
+                        true,
+                        true,
+                        true,
+                        false,
+                        false,
+                        true,
+                        false
+                )
+        );
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(view.recipeId());
+
+        List<ImmutableRecipeGraph.RecipeNode> nodes =
+                ExternalRecipeProjection.pureRecipeNodes(
+                        recipe, view, "integration_api");
+
+        assertEquals(1, nodes.size());
+        ImmutableRecipeGraph.RecipeNode node = nodes.get(0);
+        assertEquals(ImmutableRecipeGraph.ResourceKind.FLUID,
+                node.output().kind());
+        assertEquals(fluid.id(), node.output().resourceId());
+        assertEquals(2_000L, node.outputCount());
+        assertTrue(node.hasFluidOutputs());
+        assertEquals(1, node.inputs().size());
+        assertEquals(ImmutableRecipeGraph.ResourceKind.FLUID,
+                node.inputs().get(0).alternatives().get(0).kind());
+        assertEquals(1_500L, node.inputs().get(0).count());
     }
 
     private static ExternalRecipeProjection.Result inspect(RecipeView view) {

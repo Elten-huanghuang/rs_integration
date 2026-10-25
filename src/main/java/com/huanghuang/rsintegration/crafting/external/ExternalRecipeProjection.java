@@ -17,10 +17,17 @@ import com.huanghuang.rsintegration.api.recipe.RecipeContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
+import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption.Kind;
+import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.ResourceKind;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -32,9 +39,11 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +107,7 @@ final class ExternalRecipeProjection {
                 return new Result(null, result.diagnostics(), revision);
             }
             List<IntegrationDiagnostic> validation =
-                    validateForItemProjection(result.view(), integration.id());
+                    validateForProjection(result.view(), integration.id());
             return validation.isEmpty()
                     ? new Result(result.view(), result.diagnostics(), revision)
                     : new Result(null, validation, revision);
@@ -181,6 +190,110 @@ final class ExternalRecipeProjection {
 
     static boolean targetProducing(RecipeView view) {
         return view.outputs().stream().anyMatch(OutputDeclaration::targetProducing);
+    }
+
+    static List<RecipeNode> pureRecipeNodes(
+            Recipe<?> recipe,
+            RecipeView view,
+            String modTypeId
+    ) {
+        List<IngredientRef> inputs = pureInputs(view);
+        boolean hasFluidOutputs = view.outputs().stream()
+                .anyMatch(output -> output.resource().kind()
+                        == IntegrationResourceKey.ResourceKind.FLUID);
+        List<RecipeNode> nodes = new ArrayList<>();
+        List<OutputDeclaration> orderedOutputs = view.outputs().stream()
+                .sorted(Comparator
+                        .comparing((OutputDeclaration output) ->
+                                output.outputKind() != OutputKind.PRIMARY)
+                        .thenComparing(output -> output.portId().toString()))
+                .toList();
+        for (OutputDeclaration output : orderedOutputs) {
+            if ((output.outputKind() != OutputKind.PRIMARY
+                    && !output.targetProducing())
+                    || output.dynamicIdentity()
+                    || output.probability().mode() != OutputProbabilityMode.GUARANTEED
+                    || output.amount().min() != output.amount().max()
+                    || output.amount().max() <= 0L) {
+                continue;
+            }
+            nodes.add(new RecipeNode(
+                    recipe.getId(),
+                    pureMaterial(output.resource(), false),
+                    output.amount().max(),
+                    inputs,
+                    modTypeId,
+                    recipe.getType() == null
+                            ? new ResourceLocation("minecraft", "crafting")
+                            : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()),
+                    MagicResourceCostCatalog.costsFor(recipe),
+                    hasFluidOutputs
+            ));
+        }
+        return List.copyOf(nodes);
+    }
+
+    private static List<IngredientRef> pureInputs(RecipeView view) {
+        List<IngredientRef> inputs = new ArrayList<>(
+                view.materials().size() + view.fluids().size());
+        for (MaterialRequirement requirement : view.materials()) {
+            List<MaterialRef> alternatives = requirement.ingredient()
+                    .alternatives().stream()
+                    .map(ItemAlternative::resource)
+                    .map(resource -> pureMaterial(resource, false))
+                    .toList();
+            inputs.add(new IngredientRef(
+                    alternatives,
+                    requirement.amount(),
+                    nbtMatchMode(requirement.ingredient().matchMode()),
+                    consumption(requirement.consumption()).demandRole(),
+                    requirement.recursive()
+            ));
+        }
+        for (FluidRequirement requirement : view.fluids()) {
+            List<MaterialRef> alternatives = requirement.fluid()
+                    .alternatives().stream()
+                    .map(resource -> pureMaterial(resource, false))
+                    .toList();
+            inputs.add(new IngredientRef(
+                    alternatives,
+                    requirement.amount(),
+                    nbtMatchMode(requirement.fluid().matchMode()),
+                    consumption(requirement.consumption()).demandRole(),
+                    requirement.recursive()
+            ));
+        }
+        return List.copyOf(inputs);
+    }
+
+    static MaterialRef pureMaterial(
+            IntegrationResourceKey resource,
+            boolean runtimeIdentity
+    ) {
+        String identity = runtimeIdentity
+                ? "" : CanonicalNbt.exactSnbt(resource.identity());
+        return switch (resource.kind()) {
+            case ITEM -> new MaterialRef(
+                    resource.id(),
+                    identity,
+                    runtimeIdentity
+            );
+            case FLUID -> new MaterialRef(
+                    ResourceKind.FLUID,
+                    resource.id(),
+                    identity,
+                    runtimeIdentity,
+                    false
+            );
+        };
+    }
+
+    private static NbtMatchMode nbtMatchMode(ResourceMatchMode mode) {
+        return switch (mode) {
+            case ANY_IDENTITY -> NbtMatchMode.ANY;
+            case EXACT_IDENTITY -> NbtMatchMode.EXACT;
+            case PARTIAL_IDENTITY -> NbtMatchMode.PARTIAL;
+        };
     }
 
     static com.huanghuang.rsintegration.crafting.graph.OutputKind kind(
@@ -370,7 +483,7 @@ final class ExternalRecipeProjection {
         return new InputConsumption(kind, units, linked);
     }
 
-    private static List<IntegrationDiagnostic> validateForItemProjection(
+    private static List<IntegrationDiagnostic> validateForProjection(
             RecipeView view,
             ResourceLocation integrationId
     ) {
@@ -410,15 +523,14 @@ final class ExternalRecipeProjection {
             }
         }
         for (OutputDeclaration output : view.outputs()) {
-            if (!isItem(output.resource())) {
+            if (output.amount().max() <= 0L) {
                 diagnostics.add(diagnostic(
                         IntegrationDiagnosticCode.OUTPUT_DECLARATION_INVALID,
                         integrationId,
-                        "non_item_output:" + output.portId()
+                        "output_quantity:" + output.portId()
                 ));
-                continue;
-            }
-            if (output.amount().max() > Integer.MAX_VALUE) {
+            } else if (isItem(output.resource())
+                    && output.amount().max() > Integer.MAX_VALUE) {
                 diagnostics.add(diagnostic(
                         IntegrationDiagnosticCode.QUANTITY_OVERFLOW,
                         integrationId,

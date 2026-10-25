@@ -347,7 +347,7 @@ public final class PureRecipePlanner {
 
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
     private record DemandTask(IngredientRef ingredient) implements Task {}
-    private record CompleteRecipeTask(MaterialRef output, int outputCount, long consumeCount,
+    private record CompleteRecipeTask(MaterialRef output, long outputCount, long consumeCount,
                                       ResourceLocation recipeId, long batches,
                                       MaterialRef resolvingMaterial) implements Task {}
     private record CandidateLookup(MaterialRef material, NbtMatchMode mode) {}
@@ -515,6 +515,10 @@ public final class PureRecipePlanner {
                 backtracks++;
             }
 
+            if (!ingredient.recursive()) {
+                return false;
+            }
+
             for (MaterialRef wanted : productionFirst(ingredient.alternatives())) {
                 checkBudget();
                 if (preferences.isNoRecipe(wanted)) {
@@ -542,8 +546,8 @@ public final class PureRecipePlanner {
                         stepLimitReached = true;
                         continue;
                     }
-                    int selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
-                    int netGain = candidate.outputCount() - selfConsumed;
+                    long selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
+                    long netGain = candidate.outputCount() - selfConsumed;
                     long batches = batchesFor(needed,
                             selfConsumed > 0 ? netGain : candidate.outputCount());
                     if (batches <= 0L) continue;
@@ -883,7 +887,7 @@ public final class PureRecipePlanner {
                     .comparingDouble((CandidateScore score) -> score.coverage).reversed();
             Comparator<CandidateScore> dependencyCost = Comparator
                     .comparingInt(CandidateScore::dependencyCost)
-                    .thenComparing(Comparator.comparingInt(
+                    .thenComparing(Comparator.comparingLong(
                             (CandidateScore score) -> score.candidate.outputCount()).reversed());
             Comparator<CandidateScore> structuralCost = Comparator
                     .comparingInt((CandidateScore score) -> distinctInputGroups(score.candidate))
@@ -1299,21 +1303,20 @@ public final class PureRecipePlanner {
             }
         }
 
-        private static long batchesFor(long needed, int outputCount) {
+        private static long batchesFor(long needed, long outputCount) {
             if (outputCount <= 0 || needed <= 0L) return -1L;
             return Math.max(1L, saturatedAdd(needed, outputCount - 1L)
                     / outputCount);
         }
 
-        private static int selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
+        private static long selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
             long consumed = 0;
             for (IngredientRef input : candidate.inputs()) {
                 if (SelfAmplifyingRecipePolicy.isSelfInput(input, output)) {
                     consumed += input.count();
-                    if (consumed > Integer.MAX_VALUE) return Integer.MAX_VALUE;
                 }
             }
-            return (int) consumed;
+            return consumed;
         }
 
         private static int scheduledRecipes(PersistentTaskQueue<Task> pending) {
@@ -1397,6 +1400,10 @@ public final class PureRecipePlanner {
             long remaining = consumeAvailable(ingredient);
             if (remaining == 0L) return true;
             if (steps.size() >= maxSteps || visiting.size() >= MAX_SEARCH_CALL_DEPTH) {
+                noteMissing(ingredient, remaining);
+                return false;
+            }
+            if (!ingredient.recursive()) {
                 noteMissing(ingredient, remaining);
                 return false;
             }

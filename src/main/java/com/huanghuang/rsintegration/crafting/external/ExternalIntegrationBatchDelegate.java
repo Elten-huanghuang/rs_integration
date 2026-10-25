@@ -139,6 +139,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             new LinkedHashMap<>();
     private final Map<FluidSlotKey, FluidStack> fluidOutputBaseline =
             new LinkedHashMap<>();
+    private final List<CollectedOutput> reportedResources =
+            new ArrayList<>();
+    @Nullable
+    private String reportedResourceFailure;
     private final List<InsertedMaterial> insertedMaterials = new ArrayList<>();
     private final List<ItemStack> uninsertedMaterials = new ArrayList<>();
     private final List<ItemStack> pendingInputRefunds = new ArrayList<>();
@@ -361,6 +365,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.outputBaseline.clear();
         this.fluidInputBaseline.clear();
         this.fluidOutputBaseline.clear();
+        this.reportedResources.clear();
+        this.reportedResourceFailure = null;
         this.insertedMaterials.clear();
         this.uninsertedMaterials.clear();
         this.pendingInputRefunds.clear();
@@ -404,6 +410,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.ledger = sharedLedger;
         this.operationStarted = false;
         this.resultsCollected = false;
+        this.reportedResources.clear();
+        this.reportedResourceFailure = null;
         this.startedAtTick = level.getGameTime();
         this.insertedMaterials.clear();
         this.uninsertedMaterials.clear();
@@ -586,6 +594,19 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    public List<CollectedOutput> drainReportedResources() {
+        if (reportedResources.isEmpty()) return List.of();
+        List<CollectedOutput> result = List.copyOf(reportedResources);
+        reportedResources.clear();
+        return result;
+    }
+
+    @Override
+    public String reportedResourceFailure() {
+        return reportedResourceFailure;
+    }
+
+    @Override
     public boolean collectsPhysicalSecondaryOutputs() {
         return true;
     }
@@ -593,6 +614,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     @Override
     public OutputContract outputContract() {
         if (recipeView == null) return OutputContract.none();
+        if (recipeView.outputs().stream().anyMatch(output ->
+                output.resource().kind()
+                        == IntegrationResourceKey.ResourceKind.FLUID)) {
+            // 流体不能进入物品 OutputContract；混合输出统一走 legacy collector，
+            // 让物品与流体在同一次收集里按真实结果结算。
+            return OutputContract.none();
+        }
         List<OutputContract.Port> ports = new ArrayList<>();
         for (OutputDeclaration output : recipeView.outputs()) {
             if (output.resource().kind()
@@ -996,12 +1024,23 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private void collectFluidOutputs(ServerPlayer player) {
-        if (!hasStorageAccess()) return;
+        if (recipeView.outputs().stream().noneMatch(output ->
+                output.resource().kind()
+                        == IntegrationResourceKey.ResourceKind.FLUID)) {
+            return;
+        }
+        if (!hasStorageAccess()) {
+            failReportedResource("selected storage has no fluid capability");
+            return;
+        }
         for (OutputDeclaration output : recipeView.outputs()) {
             if (output.resource().kind()
                     != IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
+            long expected = output.probability().mode()
+                    == OutputProbabilityMode.GUARANTEED
+                    ? output.amount().min() : 0L;
             long remaining = Math.min(
                     Integer.MAX_VALUE, output.amount().max());
             for (MachineFluidPort port : fluidOutputPorts(
@@ -1020,20 +1059,80 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 int available = Math.max(
                         0, current.getAmount() - protectedAmount);
                 if (available <= 0) continue;
+                int requested = (int) Math.min(
+                        remaining, available);
+                FluidStack candidate = current.copy();
+                candidate.setAmount(requested);
+                StorageFluidOperationResult simulated =
+                        storageEndpoint().session().insertFluid(
+                                player, candidate, true);
+                long simulatedAccepted =
+                        simulated.transferredAmountExact().orElse(-1L);
+                if (simulatedAccepted != requested) {
+                    failReportedResource(
+                            "storage rejected fluid output before extraction");
+                    return;
+                }
                 FluidStack extracted = extractFluid(
-                        port, (int) Math.min(remaining, available));
-                if (extracted.isEmpty()) continue;
+                        port, requested);
+                if (extracted.isEmpty()) {
+                    failReportedResource(
+                            "machine did not release the declared fluid output");
+                    return;
+                }
                 remaining -= extracted.getAmount();
                 StorageFluidOperationResult inserted =
                         storageEndpoint().session().insertFluid(
                                 player, extracted, false);
-                if (inserted.remainder() != null
-                        && !inserted.remainder().isEmpty()) {
+                long accepted = inserted.transferredAmountExact()
+                        .orElse(-1L);
+                if (accepted > 0L) {
+                    reportedResources.add(new CollectedOutput(
+                            IntegrationResourceKey.fluid(extracted),
+                            accepted,
+                            output.outputKind(),
+                            output.portId()
+                    ));
+                }
+                if (accepted != extracted.getAmount()) {
+                    if (inserted.remainder() != null
+                            && !inserted.remainder().isEmpty()) {
+                        returnFluidToPort(port, inserted.remainder());
+                    }
+                    failReportedResource(
+                            "storage accepted only part of the fluid output");
                     RSIntegrationMod.LOGGER.error(
-                            "[RSI-API] failed to insert collected fluid {} mB into storage",
-                            inserted.remainder().getAmount());
+                            "[RSI-API] failed to insert every collected fluid mB into storage: expected={}, accepted={}",
+                            extracted.getAmount(), accepted);
+                    return;
                 }
             }
+            if (expected > 0L && remaining > 0L) {
+                failReportedResource(
+                        "declared fluid output was not fully collected");
+                return;
+            }
+        }
+    }
+
+    private void returnFluidToPort(
+            MachineFluidPort port,
+            FluidStack remainder
+    ) {
+        IFluidHandler handler = fluidHandler(port.side());
+        if (handler == null) return;
+        FluidStack returned = remainder.copy();
+        int accepted = handler.fill(returned, FluidAction.EXECUTE);
+        if (accepted < remainder.getAmount()) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-API] failed to return {} mB of fluid output to the machine",
+                    remainder.getAmount() - Math.max(0, accepted));
+        }
+    }
+
+    private void failReportedResource(String detail) {
+        if (reportedResourceFailure == null) {
+            reportedResourceFailure = detail;
         }
     }
 

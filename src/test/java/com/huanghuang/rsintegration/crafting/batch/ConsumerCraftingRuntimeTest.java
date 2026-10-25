@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputDestination;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputResult;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -12,6 +15,8 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -87,6 +92,36 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
 
         assertEquals(1, outputs.size());
         assertEquals(5L, outputs.get(0).amount());
+        assertTrue(outputs.get(0).delivered());
+    }
+
+    @Test
+    void reportedFluidOutputsRemainFluidResourcesInOrderStatus() {
+        IntegrationResourceKey water = IntegrationResourceKey.fluid(
+                new FluidStack(Fluids.WATER, 1));
+        List<ConsumerOutputResult> outputs =
+                ConsumerCraftingRuntime.observedReportedOutputs(
+                        List.of(
+                                new CollectedOutput(
+                                        water,
+                                        750L,
+                                        OutputKind.PRIMARY,
+                                        resource("water")
+                                ),
+                                new CollectedOutput(
+                                        water,
+                                        250L,
+                                        OutputKind.SECONDARY,
+                                        resource("water")
+                                )
+                        ),
+                        ConsumerOutputDestination.RS_NETWORK
+                );
+
+        assertEquals(1, outputs.size());
+        assertEquals(IntegrationResourceKey.ResourceKind.FLUID,
+                outputs.get(0).resource().kind());
+        assertEquals(1_000L, outputs.get(0).amount());
         assertTrue(outputs.get(0).delivered());
     }
 

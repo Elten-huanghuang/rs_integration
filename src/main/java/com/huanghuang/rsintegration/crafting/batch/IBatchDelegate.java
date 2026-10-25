@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import java.lang.reflect.Method;
 
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.BlockPos;
@@ -431,6 +432,18 @@ public interface IBatchDelegate {
     default List<OutputAccounting.CollectedOutput> collectStructuredResults(
             @Nonnull ServerPlayer player) {
         return List.of();
+    }
+
+    /** 取出已由 delegate 直接安全交付、但不在物品槽结算中的资源。 */
+    @Nonnull
+    default List<CollectedOutput> drainReportedResources() {
+        return List.of();
+    }
+
+    /** 直接资源交付失败时返回稳定详情，使订单不能伪装成成功。 */
+    @Nullable
+    default String reportedResourceFailure() {
+        return null;
     }
 
     /**

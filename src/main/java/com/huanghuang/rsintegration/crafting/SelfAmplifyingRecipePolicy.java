@@ -197,7 +197,8 @@ public final class SelfAmplifyingRecipePolicy {
 
     private static boolean referencesOutput(IngredientRef input, MaterialRef output) {
         for (MaterialRef alternative : input.alternatives()) {
-            if (!alternative.itemId().equals(output.itemId())) continue;
+            if (alternative.kind() != output.kind()
+                    || !alternative.resourceId().equals(output.resourceId())) continue;
             if (output.runtimeNbt() || alternative.runtimeNbt()
                     || alternative.equals(output)) {
                 return true;

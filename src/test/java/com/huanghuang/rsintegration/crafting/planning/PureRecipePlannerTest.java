@@ -1708,6 +1708,63 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertTrue(result.remaining().isEmpty());
     }
 
+    @Test
+    void recursivelyPlansFluidProducersWithLongMillibucketAmounts() {
+        MaterialRef ore = material("fluid_ore");
+        MaterialRef molten = MaterialRef.fluid(id("molten_metal"));
+        MaterialRef target = material("cast_plate");
+        RecipeNode melt = recipe("melt_ore", molten, 750, ingredient(ore, 1));
+        RecipeNode cast = recipe("cast_plate", target, 1,
+                ingredient(molten, 1_500));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                molten, List.of(melt),
+                target, List.of(cast)
+        ));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph,
+                Map.of(ore, 2),
+                List.of(ingredient(target, 1)),
+                20
+        );
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(List.of(
+                new PureRecipePlanner.PlannedStep(id("melt_ore"), 2),
+                new PureRecipePlanner.PlannedStep(id("cast_plate"), 1)
+        ), result.steps());
+        assertTrue(result.remaining().isEmpty(), result.remaining().toString());
+    }
+
+    @Test
+    void nonRecursiveFluidInputCannotUseAProducer() {
+        MaterialRef ore = material("nonrecursive_fluid_ore");
+        MaterialRef molten = MaterialRef.fluid(id("nonrecursive_molten"));
+        MaterialRef target = material("nonrecursive_target");
+        RecipeNode melt = recipe("nonrecursive_melt", molten, 1_000,
+                ingredient(ore, 1));
+        IngredientRef directOnly = new IngredientRef(
+                List.of(molten), 1_000, NbtMatchMode.EXACT,
+                DemandRole.CONSUMED, false);
+        RecipeNode consumer = recipe(
+                "nonrecursive_consumer", target, 1, directOnly);
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                molten, List.of(melt),
+                target, List.of(consumer)
+        ));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph,
+                Map.of(ore, 1),
+                List.of(ingredient(target, 1)),
+                20
+        );
+
+        assertFalse(result.feasible(), result.toString());
+        assertEquals(PureRecipePlanner.FailureReason.MISSING_INPUTS,
+                result.failureReason(), result.toString());
+    }
+
     private static RecipeNode recipe(String id, MaterialRef output, int count, IngredientRef... inputs) {
         return new RecipeNode(id(id), output, count, List.of(inputs));
     }

@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import java.util.ArrayList;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -154,6 +156,28 @@ public interface ModRecipeHandler {
             ));
         }
         return List.copyOf(outputs);
+    }
+
+    /**
+     * 资源感知处理器可一次性提交完整的不可变配方节点。
+     *
+     * <p>返回 null 表示沿用旧物品投影；返回空列表表示该处理器负责资源投影，
+     * 但当前配方没有可递归的确定性输出。</p>
+     */
+    @Nullable
+    default List<RecipeNode> projectImmutableRecipes(@Nonnull Recipe<?> recipe) {
+        return null;
+    }
+
+    /** 资源感知处理器可声明无显式 target 时的权威根资源。 */
+    @Nullable
+    default MaterialRef preferredImmutableOutput(@Nonnull Recipe<?> recipe) {
+        return null;
+    }
+
+    /** 配方是否声明了必须由流体存储接收的标准输出。 */
+    default boolean hasFluidOutputs(@Nonnull Recipe<?> recipe) {
+        return false;
     }
 
     /** 是否由处理器提供完整声明输出，而不是仅依赖主产物/副产物兼容投影。 */

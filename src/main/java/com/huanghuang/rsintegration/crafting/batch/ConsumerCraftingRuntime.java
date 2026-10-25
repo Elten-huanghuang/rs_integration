@@ -39,9 +39,11 @@ import com.huanghuang.rsintegration.api.consumer.ConsumerStorageId;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.FailureReason;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
+import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -76,6 +78,9 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
+import com.huanghuang.rsintegration.storage.StoredFluid;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.BlockPos;
@@ -97,6 +102,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.ApiStatus;
 
 import javax.annotation.Nullable;
@@ -944,11 +951,33 @@ public final class ConsumerCraftingRuntime {
                     ));
                     continue;
                 }
-                ItemStack preview = plan.targetOutput.copyWithCount(
-                        Math.max(1, SaturatingLongMath.clampToInt(
-                                plan.requestedOutputUnits)));
-                if (!endpoint.insert(player, preview, true)
-                        .remainder().orElse(ItemStack.EMPTY).isEmpty()) {
+                if (plan.hasFluidOutputs
+                        && !endpoint.session().supports(
+                        StorageCapability.FLUID_STORAGE)) {
+                    plans.remove(plan.id, plan);
+                    checked.add(unavailable(
+                            result.recipe(),
+                            ConsumerCraftabilityStatus.OUTPUT_UNAVAILABLE,
+                            ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE,
+                            "selected network has no fluid capacity"
+                    ));
+                    continue;
+                }
+                boolean accepted = plan.targetResource.kind()
+                        == IntegrationResourceKey.ResourceKind.ITEM
+                        ? itemOutputCanFit(
+                                player,
+                                endpoint,
+                                Objects.requireNonNull(plan.targetOutput),
+                                plan.plannedOutputUnits
+                        )
+                        : fluidOutputCanFit(
+                                player,
+                                endpoint,
+                                plan.targetResource,
+                                plan.plannedOutputUnits
+                        );
+                if (!accepted) {
                     plans.remove(plan.id, plan);
                     checked.add(unavailable(
                             result.recipe(),
@@ -958,10 +987,14 @@ public final class ConsumerCraftingRuntime {
                     ));
                     continue;
                 }
-            } else if (!playerInventoryCanAccept(
+            } else if (plan.hasFluidOutputs
+                    || plan.targetResource.kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM
+                    || plan.targetOutput == null
+                    || !playerInventoryCanAccept(
                     player,
                     plan.targetOutput,
-                    plan.requestedOutputUnits
+                    plan.plannedOutputUnits
             )) {
                 plans.remove(plan.id, plan);
                 checked.add(unavailable(
@@ -975,6 +1008,65 @@ public final class ConsumerCraftingRuntime {
             checked.add(result);
         }
         return List.copyOf(checked);
+    }
+
+    private static boolean itemOutputCanFit(
+            ServerPlayer player,
+            CraftStorageEndpoint endpoint,
+            ItemStack target,
+            long requested
+    ) {
+        ItemStack preview = target.copyWithCount(
+                Math.max(1, SaturatingLongMath.clampToInt(requested)));
+        return endpoint.insert(player, preview, true)
+                .remainder().orElse(ItemStack.EMPTY).isEmpty();
+    }
+
+    private static boolean fluidOutputCanFit(
+            ServerPlayer player,
+            CraftStorageEndpoint endpoint,
+            IntegrationResourceKey target,
+            long requested
+    ) {
+        if (requested <= 0L
+                || !endpoint.session().supports(
+                StorageCapability.FLUID_STORAGE)) {
+            return false;
+        }
+        long remaining = requested;
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE, remaining);
+            FluidStack stack = fluidStack(target, chunk);
+            if (stack.isEmpty()) return false;
+            var result = endpoint.session().insertFluid(
+                    player, stack, true);
+            long accepted = result.transferredAmountExact()
+                    .orElse(-1L);
+            if (accepted != chunk) return false;
+            remaining -= chunk;
+        }
+        return true;
+    }
+
+    private static FluidStack fluidStack(
+            IntegrationResourceKey resource,
+            long amount
+    ) {
+        if (resource.kind()
+                != IntegrationResourceKey.ResourceKind.FLUID
+                || amount <= 0L) {
+            return FluidStack.EMPTY;
+        }
+        var fluid = ForgeRegistries.FLUIDS.getValue(resource.id());
+        if (fluid == null) return FluidStack.EMPTY;
+        FluidStack stack = new FluidStack(
+                fluid,
+                (int) Math.min(Integer.MAX_VALUE, amount)
+        );
+        CompoundTag identity = resource.identity();
+        if (!identity.isEmpty()) stack.setTag(identity);
+        return stack;
     }
 
     private static boolean playerInventoryCanAccept(
@@ -1029,7 +1121,8 @@ public final class ConsumerCraftingRuntime {
                     "target output cannot be represented by the recursive planner"
             ));
         }
-        if (session.capture.blockedOutputIds.contains(
+        if (material.material.isItem()
+                && session.capture.blockedOutputIds.contains(
                 material.material.itemId())) {
             return InspectionEntry.result(unavailable(
                     key,
@@ -1076,8 +1169,8 @@ public final class ConsumerCraftingRuntime {
                     requested, 32L);
             result = PureRecipePlanner.resolveConfigured(
                     projected,
-                    ImmutableRecipeGraphProjector.projectAvailability(
-                            session.capture.available),
+                    ImmutableRecipeGraphProjector.copyAvailability(
+                            session.capture.availableResources),
                     List.of(new IngredientRef(
                             List.of(material.material),
                             requested,
@@ -1154,9 +1247,14 @@ public final class ConsumerCraftingRuntime {
                 projected,
                 PurePlanAdapter.toResolutionSteps(result, projected),
                 key.recipeId(),
+                material.targetResource,
                 material.targetOutput,
                 material.requestedCount,
+                plannedOutputQuantity(result, projected, material.material),
                 indexed.modTypeId(),
+                graphHasFluidOutputs(projected)
+                        || session.capture.fluidOutputRecipeIds.contains(
+                        key.recipeId()),
                 session.capture.dimension,
                 session.capture.position,
                 machineSelectionMode(session.request.machineSelector()),
@@ -1164,9 +1262,11 @@ public final class ConsumerCraftingRuntime {
                 session.capture.storageReference
         );
         plans.put(planId, lease);
+        long plannedOutputs = plannedOutputQuantity(
+                result, projected, material.material);
         long executable = key.amount()
                 instanceof ConsumerRequestAmount.OutputUnits
-                ? requested : 0L;
+                ? plannedOutputs : 0L;
         return InspectionEntry.result(new ConsumerCraftability(
                 key,
                 ConsumerCraftabilityStatus.READY,
@@ -1475,9 +1575,13 @@ public final class ConsumerCraftingRuntime {
                 session.capture.graph,
                 steps,
                 key.recipeId(),
+                itemTarget(target),
                 target,
                 requested,
+                requested,
                 type.id(),
+                session.capture.fluidOutputRecipeIds.contains(
+                        key.recipeId()),
                 session.capture.dimension,
                 session.capture.position,
                 machineSelectionMode(session.request.machineSelector()),
@@ -1509,6 +1613,38 @@ public final class ConsumerCraftingRuntime {
                 .quantity();
     }
 
+    private static long plannedOutputQuantity(
+            PureRecipePlanner.Result result,
+            ImmutableRecipeGraph graph,
+            MaterialRef target
+    ) {
+        long total = 0L;
+        List<RecipeNode> nodes = graph.recipesByOutput()
+                .getOrDefault(target, List.of());
+        for (PureRecipePlanner.PlannedStep step : result.steps()) {
+            RecipeNode node = nodes.stream()
+                    .filter(candidate -> candidate.recipeId()
+                            .equals(step.recipeId()))
+                    .findFirst()
+                    .orElse(null);
+            if (node == null) continue;
+            total = SaturatingLongMath.add(
+                    total,
+                    SaturatingLongMath.multiply(
+                            node.outputCount(), step.batches())
+            );
+        }
+        return total;
+    }
+
+    private static boolean graphHasFluidOutputs(
+            ImmutableRecipeGraph graph
+    ) {
+        return graph.recipesByOutput().values().stream()
+                .flatMap(List::stream)
+                .anyMatch(RecipeNode::hasFluidOutputs);
+    }
+
     private static IntegrationResourceKey itemTarget(ItemStack target) {
         if (target == null || target.isEmpty()) {
             throw new IllegalArgumentException(
@@ -1521,14 +1657,12 @@ public final class ConsumerCraftingRuntime {
             ConsumerRecipeKey key,
             RecipeNode recipe
     ) {
-        ItemStack target;
-        if (key.targetOutput() == null) {
-            target = materialStack(recipe.output());
-        } else {
-            target = itemStack(key.targetOutput());
-        }
-        MaterialRef material = ImmutableRecipeGraphProjector.material(
-                target, target.hasTag());
+        IntegrationResourceKey targetResource = key.targetOutput() == null
+                ? resourceKey(recipe.output()) : key.targetOutput();
+        MaterialRef material = materialRef(targetResource);
+        ItemStack targetOutput = targetResource.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM
+                ? itemStack(targetResource) : null;
         long requested;
         if (key.amount()
                 instanceof ConsumerRequestAmount.Executions executions) {
@@ -1538,7 +1672,8 @@ public final class ConsumerCraftingRuntime {
             requested = ((ConsumerRequestAmount.OutputUnits) key.amount())
                     .quantity();
         }
-        return new MaterialResolution(target, material, requested);
+        return new MaterialResolution(
+                targetResource, targetOutput, material, requested);
     }
 
     private static PlanningPreferences planningPreferences(
@@ -1587,7 +1722,28 @@ public final class ConsumerCraftingRuntime {
         return stack;
     }
 
+    private static MaterialRef materialRef(
+            IntegrationResourceKey resource
+    ) {
+        return switch (resource.kind()) {
+            case ITEM -> {
+                ItemStack stack = itemStack(resource);
+                yield ImmutableRecipeGraphProjector.material(
+                        stack,
+                        stack.hasTag()
+                );
+            }
+            case FLUID -> MaterialRef.fluid(
+                    resource.id(),
+                    CanonicalNbt.exactSnbt(resource.identity())
+            );
+        };
+    }
+
     private static ItemStack materialStack(MaterialRef material) {
+        if (!material.isItem()) {
+            throw new IllegalArgumentException("material is not an item");
+        }
         Item item = BuiltInRegistries.ITEM.get(material.itemId());
         if (item == Items.AIR) {
             throw new IllegalArgumentException("unknown material item");
@@ -1678,7 +1834,23 @@ public final class ConsumerCraftingRuntime {
     }
 
     private static IntegrationResourceKey resourceKey(MaterialRef material) {
-        return IntegrationResourceKey.item(materialStack(material));
+        if (material.isItem()) {
+            return IntegrationResourceKey.item(materialStack(material));
+        }
+        var fluid = ForgeRegistries.FLUIDS.getValue(material.resourceId());
+        if (fluid == null) {
+            throw new IllegalArgumentException("unknown material fluid");
+        }
+        FluidStack stack = new FluidStack(fluid, 1);
+        if (!material.nbt().isEmpty()) {
+            try {
+                stack.setTag(TagParser.parseTag(material.nbt()));
+            } catch (Exception exception) {
+                throw new IllegalArgumentException(
+                        "fluid identity is malformed", exception);
+            }
+        }
+        return IntegrationResourceKey.fluid(stack);
     }
 
     private static long requestedQuantity(ConsumerRecipeKey key) {
@@ -1798,6 +1970,30 @@ public final class ConsumerCraftingRuntime {
 
         Map<CraftingResolver.StackKey, Long> available =
                 MaterialSources.listAllAvailable(player, endpoint);
+        Map<MaterialRef, Long> availableResources =
+                new LinkedHashMap<>(ImmutableRecipeGraphProjector
+                        .projectAvailability(available));
+        if (endpoint != null
+                && endpoint.session().supports(
+                StorageCapability.FLUID_STORAGE)) {
+            var fluidSnapshotResult =
+                    endpoint.session().snapshotFluids(player);
+            if (fluidSnapshotResult.successful()) {
+                StorageFluidSnapshot fluidSnapshot =
+                        fluidSnapshotResult.snapshotValue().orElseThrow();
+                for (StoredFluid fluid : fluidSnapshot.fluids()) {
+                    MaterialRef material = MaterialRef.fluid(
+                            fluid.key().fluidId(),
+                            CanonicalNbt.exactSnbt(fluid.key().tag())
+                    );
+                    availableResources.merge(
+                            material,
+                            fluid.amount(),
+                            SaturatingLongMath::add
+                    );
+                }
+            }
+        }
         GenericCraftPacket.BindingAwareGraph bindingGraph =
                 GenericCraftPacket.bindingAwareGraph(
                         player,
@@ -1805,13 +2001,24 @@ public final class ConsumerCraftingRuntime {
                                 player.serverLevel())
                 );
         Set<ResourceLocation> projectableRecipeIds = new HashSet<>();
+        Set<ResourceLocation> fluidOutputRecipeIds = new HashSet<>();
         for (ConsumerRecipeKey requested : requestedRecipes) {
             Recipe<?> requestedRecipe = CraftRecipeResolver.resolve(
                     player.serverLevel(), requested.recipeId());
             if (requestedRecipe != null
-                    && RecipeIndex.isBackgroundProjectable(
-                    requestedRecipe)) {
+                    && (RecipeIndex.isBackgroundProjectable(
+                    requestedRecipe)
+                    || bindingGraph.graph().recipesById()
+                    .containsKey(requested.recipeId()))) {
                 projectableRecipeIds.add(requested.recipeId());
+            }
+            if (requestedRecipe != null) {
+                ModRecipeHandler handler =
+                        ModRecipeHandlers.claimFor(requestedRecipe).winner();
+                if (handler != null && handler.hasFluidOutputs(
+                        requestedRecipe)) {
+                    fluidOutputRecipeIds.add(requested.recipeId());
+                }
             }
         }
         String networkFingerprint =
@@ -1832,9 +2039,11 @@ public final class ConsumerCraftingRuntime {
                         player.getUUID(),
                         CraftPlanningRevision.current(),
                         available,
+                        availableResources,
                         bindingGraph.graph(),
                         bindingGraph.blockedOutputIds(),
                         projectableRecipeIds,
+                        fluidOutputRecipeIds,
                         networkFingerprint,
                         bindingFingerprint,
                         dimension,
@@ -1922,6 +2131,10 @@ public final class ConsumerCraftingRuntime {
                 order.destination,
                 true
         );
+        delivered = concat(delivered, observedReportedOutputs(
+                order.chain.reportedResources(),
+                order.destination
+        ));
         List<ConsumerOutputResult> recovery = observedOutputs(
                 order.chain.recoveryFinalOutputs(),
                 order.destination,
@@ -1955,6 +2168,30 @@ public final class ConsumerCraftingRuntime {
                         entry.getValue(),
                         destination,
                         delivered
+                ))
+                .toList();
+    }
+
+    static List<ConsumerOutputResult> observedReportedOutputs(
+            List<CollectedOutput> outputs,
+            ConsumerOutputDestination destination
+    ) {
+        Map<IntegrationResourceKey, Long> amounts =
+                new LinkedHashMap<>();
+        for (CollectedOutput output : outputs) {
+            if (output == null || output.amount() <= 0L) continue;
+            amounts.merge(
+                    output.resource(),
+                    output.amount(),
+                    SaturatingLongMath::add
+            );
+        }
+        return amounts.entrySet().stream()
+                .map(entry -> new ConsumerOutputResult(
+                        entry.getKey(),
+                        entry.getValue(),
+                        destination,
+                        true
                 ))
                 .toList();
     }
@@ -2146,12 +2383,13 @@ public final class ConsumerCraftingRuntime {
     }
 
     private record MaterialResolution(
-            ItemStack targetOutput,
+            IntegrationResourceKey targetResource,
+            @Nullable ItemStack targetOutput,
             MaterialRef material,
             long requestedCount
     ) {
         private MaterialResolution {
-            targetOutput = targetOutput.copy();
+            if (targetOutput != null) targetOutput = targetOutput.copy();
         }
     }
 
@@ -2192,9 +2430,11 @@ public final class ConsumerCraftingRuntime {
             UUID playerId,
             long revision,
             Map<CraftingResolver.StackKey, Long> available,
+            Map<MaterialRef, Long> availableResources,
             ImmutableRecipeGraph graph,
             Set<ResourceLocation> blockedOutputIds,
             Set<ResourceLocation> projectableRecipeIds,
+            Set<ResourceLocation> fluidOutputRecipeIds,
             String networkFingerprint,
             String bindingFingerprint,
             ResourceLocation dimension,
@@ -2205,8 +2445,10 @@ public final class ConsumerCraftingRuntime {
     ) {
         private Capture {
             available = Map.copyOf(available);
+            availableResources = Map.copyOf(availableResources);
             blockedOutputIds = Set.copyOf(blockedOutputIds);
             projectableRecipeIds = Set.copyOf(projectableRecipeIds);
+            fluidOutputRecipeIds = Set.copyOf(fluidOutputRecipeIds);
         }
 
         private boolean revisionCurrent() {
@@ -2273,9 +2515,13 @@ public final class ConsumerCraftingRuntime {
         private final ImmutableRecipeGraph planningGraph;
         private final List<CraftingResolver.ResolutionStep> executionSteps;
         private final ResourceLocation recipeId;
+        private final IntegrationResourceKey targetResource;
+        @Nullable
         private final ItemStack targetOutput;
         private final long requestedOutputUnits;
+        private final long plannedOutputUnits;
         private final String modTypeId;
+        private final boolean hasFluidOutputs;
         private final ResourceLocation dimension;
         private final BlockPos position;
         private final MachineSelectionMode machineSelectionMode;
@@ -2294,9 +2540,12 @@ public final class ConsumerCraftingRuntime {
                 ImmutableRecipeGraph planningGraph,
                 List<CraftingResolver.ResolutionStep> executionSteps,
                 ResourceLocation recipeId,
-                ItemStack targetOutput,
+                IntegrationResourceKey targetResource,
+                @Nullable ItemStack targetOutput,
                 long requestedOutputUnits,
+                long plannedOutputUnits,
                 String modTypeId,
+                boolean hasFluidOutputs,
                 ResourceLocation dimension,
                 BlockPos position,
                 MachineSelectionMode machineSelectionMode,
@@ -2314,9 +2563,13 @@ public final class ConsumerCraftingRuntime {
             this.planningGraph = planningGraph;
             this.executionSteps = List.copyOf(executionSteps);
             this.recipeId = recipeId;
-            this.targetOutput = targetOutput.copy();
+            this.targetResource = targetResource;
+            this.targetOutput = targetOutput == null
+                    ? null : targetOutput.copy();
             this.requestedOutputUnits = requestedOutputUnits;
+            this.plannedOutputUnits = plannedOutputUnits;
             this.modTypeId = modTypeId;
+            this.hasFluidOutputs = hasFluidOutputs;
             this.dimension = dimension;
             this.position = position.immutable();
             this.machineSelectionMode = machineSelectionMode;

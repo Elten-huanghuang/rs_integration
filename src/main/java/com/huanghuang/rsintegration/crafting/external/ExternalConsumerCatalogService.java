@@ -31,9 +31,11 @@ import org.jetbrains.annotations.ApiStatus;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -177,8 +179,32 @@ public final class ExternalConsumerCatalogService {
         }
 
         List<ConsumerRecipeCandidate> candidates = new ArrayList<>();
+        Set<ResourceLocation> externalIds = new HashSet<>();
+        List<Recipe<?>> recipes = new ArrayList<>(
+                level.getRecipeManager().getRecipes());
+        recipes.sort(Comparator.comparing(recipe ->
+                recipe.getId().toString()));
+        for (Recipe<?> recipe : recipes) {
+            ModRecipeHandlers.Claim claim =
+                    ModRecipeHandlers.claimFor(recipe);
+            if (!(claim.winner() instanceof ExternalRecipeHandler external)) {
+                continue;
+            }
+            RecipeView view = external.recipeView(recipe);
+            if (view == null) continue;
+            candidates.add(new ConsumerRecipeCandidate(
+                    recipe.getId(),
+                    view.processId(),
+                    external.executionKind(),
+                    view.outputs().stream()
+                            .map(output -> output.resource())
+                            .toList()
+            ));
+            externalIds.add(recipe.getId());
+        }
         for (Map.Entry<ResourceLocation, RecipeIndex.Entry> item
                 : unique.entrySet()) {
+            if (externalIds.contains(item.getKey())) continue;
             RecipeIndex.Entry entry = item.getValue();
             Recipe<?> recipe = entry.recipe();
             ModRecipeHandlers.Claim claim = ModRecipeHandlers.claimFor(recipe);

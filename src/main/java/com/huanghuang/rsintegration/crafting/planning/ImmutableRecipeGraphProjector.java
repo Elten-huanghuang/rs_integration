@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.ResourceKind;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -218,7 +219,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static boolean templateProducesOutput(IngredientRef template, MaterialRef output) {
-        return template.alternatives().stream()
+        return output.isItem() && template.alternatives().stream()
                 .anyMatch(material -> material.itemId().equals(output.itemId()));
     }
 
@@ -235,7 +236,8 @@ public final class ImmutableRecipeGraphProjector {
                 if (inputs != null && !inputs.equals(recipe.inputs())) {
                     recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
                             recipe.outputCount(), inputs, recipe.modTypeId(),
-                            recipe.recipeTypeId(), recipe.magicCosts()));
+                            recipe.recipeTypeId(), recipe.magicCosts(),
+                            recipe.hasFluidOutputs()));
                     changed = true;
                 } else {
                     recipes.add(recipe);
@@ -328,6 +330,13 @@ public final class ImmutableRecipeGraphProjector {
 
     private record DependencyEntry(ImmutableRecipeGraph graph, GraphIndexes indexes) {}
 
+    private record ResourceLookup(ResourceKind kind, ResourceLocation id) {
+        private static ResourceLookup of(MaterialRef material) {
+            return new ResourceLookup(
+                    material.kind(), material.resourceId());
+        }
+    }
+
     public static Map<MaterialRef, Long> projectAvailability(
             Map<StackKey, ? extends Number> available) {
         Map<MaterialRef, Long> projected = new HashMap<>();
@@ -339,6 +348,22 @@ public final class ImmutableRecipeGraphProjector {
             MaterialRef material = new MaterialRef(itemId, nbt);
             projected.merge(material, count, ImmutableRecipeGraphProjector::saturatedAdd);
         }
+        return Map.copyOf(projected);
+    }
+
+    /** 复制已按资源类型区分的不可变库存快照。 */
+    public static Map<MaterialRef, Long> copyAvailability(
+            Map<MaterialRef, ? extends Number> available
+    ) {
+        Map<MaterialRef, Long> projected = new HashMap<>(available.size());
+        available.forEach((material, amount) -> {
+            if (material == null || amount == null) return;
+            long count = Math.max(0L, amount.longValue());
+            if (count > 0L) {
+                projected.merge(material, count,
+                        ImmutableRecipeGraphProjector::saturatedAdd);
+            }
+        });
         return Map.copyOf(projected);
     }
 
@@ -379,26 +404,30 @@ public final class ImmutableRecipeGraphProjector {
         RecipeNode target = graph.recipesById().get(targetRecipeId);
         if (target == null) return graph;
 
-        Set<ResourceLocation> neededItems = new LinkedHashSet<>();
+        Set<ResourceLookup> neededResources = new LinkedHashSet<>();
         Set<ResourceLocation> visitedRecipes = new LinkedHashSet<>();
-        ArrayDeque<ResourceLocation> pendingItems = new ArrayDeque<>();
+        ArrayDeque<ResourceLookup> pendingResources = new ArrayDeque<>();
         visitedRecipes.add(target.recipeId());
         for (IngredientRef input : target.inputs()) {
             for (MaterialRef alternative : input.alternatives()) {
-                if (neededItems.add(alternative.itemId())) pendingItems.addLast(alternative.itemId());
+                ResourceLookup key = ResourceLookup.of(alternative);
+                if (neededResources.add(key)) pendingResources.addLast(key);
             }
         }
 
-        while (!pendingItems.isEmpty()) {
+        while (!pendingResources.isEmpty()) {
             PlanningThreadContext.throwIfCancelled();
-            ResourceLocation itemId = pendingItems.removeFirst();
-            for (RecipeNode producer : PlanningLookupCache.producers(graph, itemId)) {
-                if (!producer.output().itemId().equals(itemId)
+            ResourceLookup resource = pendingResources.removeFirst();
+            for (RecipeNode producer : PlanningLookupCache.producers(
+                    graph, resource.id())) {
+                if (producer.output().kind() != resource.kind()
+                        || !producer.output().resourceId().equals(resource.id())
                         || !visitedRecipes.add(producer.recipeId())) continue;
                 for (IngredientRef input : producer.inputs()) {
                     for (MaterialRef alternative : input.alternatives()) {
-                        if (neededItems.add(alternative.itemId())) {
-                            pendingItems.addLast(alternative.itemId());
+                        ResourceLookup key = ResourceLookup.of(alternative);
+                        if (neededResources.add(key)) {
+                            pendingResources.addLast(key);
                         }
                     }
                 }
@@ -461,7 +490,7 @@ public final class ImmutableRecipeGraphProjector {
                 RecipeNode bound = inputs != null
                         ? new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
                                 inputs, recipe.modTypeId(), recipe.recipeTypeId(),
-                                recipe.magicCosts())
+                                recipe.magicCosts(), recipe.hasFluidOutputs())
                         : recipe;
                 if (inputs != null) {
                     if (recipes == null) recipes = new ArrayList<>(entry.getValue());
@@ -535,10 +564,11 @@ public final class ImmutableRecipeGraphProjector {
                 MaterialRef output = new MaterialRef(recipe.output().itemId(), actualBase.nbt());
                 List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
                 inputs.set(1, new IngredientRef(List.of(actualBase), base.count(),
-                        NbtMatchMode.EXACT, base.role()));
+                        NbtMatchMode.EXACT, base.role(), base.recursive()));
                 RecipeNode specialized = new RecipeNode(recipe.recipeId(), output,
                         recipe.outputCount(), inputs, recipe.modTypeId(),
-                        recipe.recipeTypeId(), recipe.magicCosts());
+                        recipe.recipeTypeId(), recipe.magicCosts(),
+                        recipe.hasFluidOutputs());
                 if (!graph.recipesByOutput().getOrDefault(output, List.of()).contains(specialized)) {
                     List<RecipeNode> variants = additions.computeIfAbsent(output, ignored -> new ArrayList<>());
                     if (!variants.contains(specialized)) variants.add(specialized);
@@ -632,7 +662,7 @@ public final class ImmutableRecipeGraphProjector {
         List<MaterialRef> boundAlternatives = List.copyOf(alternatives);
         if (boundAlternatives.equals(ingredient.alternatives())) return ingredient;
         return new IngredientRef(boundAlternatives, ingredient.count(),
-                ingredient.nbtMatchMode(), ingredient.role());
+                ingredient.nbtMatchMode(), ingredient.role(), ingredient.recursive());
     }
 
     static boolean partialNbtMatches(String expectedSnbt, String actualSnbt) {
@@ -655,7 +685,8 @@ public final class ImmutableRecipeGraphProjector {
 
     private static boolean matchesIngredientUncached(MaterialRef actual, IngredientRef ingredient) {
         for (MaterialRef expected : ingredient.alternatives()) {
-            if (!actual.itemId().equals(expected.itemId())) continue;
+            if (actual.kind() != expected.kind()
+                    || !actual.resourceId().equals(expected.resourceId())) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
             if (actual.runtimeNbt()) continue;
             if (ingredient.nbtMatchMode() == NbtMatchMode.SLASHBLADE) {
@@ -674,7 +705,8 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static boolean matchesPotionPuritySemantics(MaterialRef expected, MaterialRef actual) {
-        if (expected.runtimeNbt() || actual.runtimeNbt()
+        if (!expected.isItem() || !actual.isItem()
+                || expected.runtimeNbt() || actual.runtimeNbt()
                 || !isVanillaPotionId(expected.itemId())
                 || !expected.itemId().equals(actual.itemId())) return false;
         ItemStack expectedStack = materialStack(expected);
@@ -684,6 +716,7 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     private static ItemStack materialStack(MaterialRef material) {
+        if (!material.isItem()) return ItemStack.EMPTY;
         Item item = BuiltInRegistries.ITEM.get(material.itemId());
         if (item == Items.AIR) return ItemStack.EMPTY;
         ItemStack stack = new ItemStack(item);
@@ -731,9 +764,11 @@ public final class ImmutableRecipeGraphProjector {
                 .map(material -> new MaterialRef(material.itemId(), wanted.nbt()))
                 .filter(material -> matchesIngredient(material, base)).toList();
         if (bases.isEmpty()) return null;
-        inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT, base.role()));
+        inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT,
+                base.role(), base.recursive()));
         return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
-                recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts());
+                recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
+                recipe.hasFluidOutputs());
     }
 
     /** 单刀升级把更高的目标门槛传回原料；禁止凭空提升产物数值。 */
@@ -775,7 +810,8 @@ public final class ImmutableRecipeGraphProjector {
                     original.count(), NbtMatchMode.SLASHBLADE, original.role()));
             return new RecipeNode(recipe.recipeId(), new MaterialRef(recipe.output().itemId(),
                     output.toString(), false, true), recipe.outputCount(), inputs,
-                    recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts());
+                    recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
+                    recipe.hasFluidOutputs());
         } catch (Exception ignored) {
             return null;
         }
@@ -790,7 +826,8 @@ public final class ImmutableRecipeGraphProjector {
             // Preserve the constant-time tagless lookup. Only smithing can prove
             // a tagless result from an unknown output by constraining its base.
             for (RecipeNode recipe : graph.recipesByOutput().getOrDefault(
-                    new MaterialRef(wanted.itemId(), "", true), List.of())) {
+                    new MaterialRef(wanted.kind(), wanted.resourceId(),
+                            "", true, false), List.of())) {
                 if (!"smithing".equals(recipe.modTypeId())) continue;
                 RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
                 if (specialized == null || specialized.output().runtimeNbt()) continue;
