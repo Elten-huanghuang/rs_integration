@@ -29,6 +29,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -132,6 +133,23 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                         == IBatchDelegate.PreparationState.READY,
                 () -> preparation.detail() + " / "
                         + preparation.userMessage()
+        );
+        BatchConcurrencyCapabilities concurrency =
+                delegate.concurrencyCapabilities();
+        assertEquals(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                concurrency.materials()
+        );
+        assertEquals(
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                concurrency.outputOwnership()
+        );
+        assertEquals(
+                List.of(
+                        new BlockPos(1, 0, 0),
+                        new BlockPos(0, 1, 0)
+                ),
+                concurrency.supportOffsets()
         );
         assertTrue(delegate.startPreparedOperation(
                 player,
@@ -309,7 +327,11 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                     MachineExecutionMode.IMMEDIATE_ON_INSERT,
                     false,
                     ConcurrencyCapabilities.machineSlot(),
-                    new SupportScope(List.of(), List.of(), false),
+                    new SupportScope(
+                            List.of(new BlockPos(1, 0, 0)),
+                            List.of(new BlockPos(0, 1, 0)),
+                            true
+                    ),
                     false
             ));
         }

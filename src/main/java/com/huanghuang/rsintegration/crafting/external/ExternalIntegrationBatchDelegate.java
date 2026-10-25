@@ -27,6 +27,7 @@ import com.huanghuang.rsintegration.api.execution.RunningOperation;
 import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
 import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
 import com.huanghuang.rsintegration.api.machine.FluidPortAccess;
+import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
 import com.huanghuang.rsintegration.api.machine.MachineClaim;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
@@ -37,6 +38,7 @@ import com.huanghuang.rsintegration.api.machine.MachineItemPort;
 import com.huanghuang.rsintegration.api.machine.MachineFluidPort;
 import com.huanghuang.rsintegration.api.machine.MachineState;
 import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
+import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
@@ -53,6 +55,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
@@ -86,6 +89,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -617,6 +621,21 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ));
         }
         return new OutputContract(ports);
+    }
+
+    @Override
+    @Nullable
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        if (descriptor == null) return null;
+        ConcurrencyCapabilities source = descriptor.concurrency();
+        return new BatchConcurrencyCapabilities(
+                materials(source.materials()),
+                outputOwnership(source.outputOwnership()),
+                cleanupContract(source.cleanup()),
+                sideEffects(source.sideEffects()),
+                preparationContract(source.preparation()),
+                supportOffsets(descriptor.supportScope())
+        );
     }
 
     @Override
@@ -1854,6 +1873,94 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     output.probability().maxAttempts(),
                     output.probability().rollGroup());
         };
+    }
+
+    private static BatchConcurrencyCapabilities.MaterialOwnership materials(
+            ConcurrencyCapabilities.MaterialOwnership value
+    ) {
+        return switch (value) {
+            case CHAIN_RESERVED ->
+                    BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED;
+            case SELF_EXTRACTING ->
+                    BatchConcurrencyCapabilities.MaterialOwnership.SELF_EXTRACTING;
+            case UNKNOWN ->
+                    BatchConcurrencyCapabilities.MaterialOwnership.UNKNOWN;
+        };
+    }
+
+    private static BatchConcurrencyCapabilities.OutputOwnership outputOwnership(
+            ConcurrencyCapabilities.OutputOwnership value
+    ) {
+        return switch (value) {
+            case MACHINE_SLOT ->
+                    BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT;
+            case DELEGATE_RESULT ->
+                    BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT;
+            case OWNED_WORLD_CAPTURE ->
+                    BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
+            case ENTITY ->
+                    BatchConcurrencyCapabilities.OutputOwnership.ENTITY;
+            case AMBIGUOUS ->
+                    BatchConcurrencyCapabilities.OutputOwnership.AMBIGUOUS;
+        };
+    }
+
+    private static BatchConcurrencyCapabilities.CleanupContract cleanupContract(
+            ConcurrencyCapabilities.CleanupContract value
+    ) {
+        return switch (value) {
+            case SEPARABLE_OFFLINE ->
+                    BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE;
+            case ONLINE_ONLY ->
+                    BatchConcurrencyCapabilities.CleanupContract.ONLINE_ONLY;
+            case UNKNOWN ->
+                    BatchConcurrencyCapabilities.CleanupContract.UNKNOWN;
+        };
+    }
+
+    private static BatchConcurrencyCapabilities.SideEffects sideEffects(
+            ConcurrencyCapabilities.SideEffects value
+    ) {
+        return switch (value) {
+            case NONE ->
+                    BatchConcurrencyCapabilities.SideEffects.NONE;
+            case MACHINE_LOCAL ->
+                    BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL;
+            case LOCAL_WORLD_ITEMS ->
+                    BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS;
+            case ADJACENT_MACHINE ->
+                    BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE;
+            case PLAYER_TRANSFORM ->
+                    BatchConcurrencyCapabilities.SideEffects.PLAYER_TRANSFORM;
+            case WORLD_GLOBAL ->
+                    BatchConcurrencyCapabilities.SideEffects.WORLD_GLOBAL;
+            case UNKNOWN ->
+                    BatchConcurrencyCapabilities.SideEffects.UNKNOWN;
+        };
+    }
+
+    private static BatchConcurrencyCapabilities.PreparationContract preparationContract(
+            ConcurrencyCapabilities.PreparationContract value
+    ) {
+        return switch (value) {
+            case RELIABLE ->
+                    BatchConcurrencyCapabilities.PreparationContract.RELIABLE;
+            case RETRY_SAFE ->
+                    BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE;
+            case UNKNOWN ->
+                    BatchConcurrencyCapabilities.PreparationContract.UNKNOWN;
+        };
+    }
+
+    private static List<BlockPos> supportOffsets(SupportScope scope) {
+        LinkedHashSet<BlockPos> offsets = new LinkedHashSet<>();
+        for (BlockPos offset : scope.supportOffsets()) {
+            offsets.add(offset.immutable());
+        }
+        for (BlockPos offset : scope.adjacentBlocks()) {
+            offsets.add(offset.immutable());
+        }
+        return List.copyOf(offsets);
     }
 
     private Component firstDiagnostic(
