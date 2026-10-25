@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.ExecutionClaim;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
@@ -234,8 +236,15 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         MachineIntegration machine = machineClaim.winner();
         MachineContext machineContext = new MachineContext(
                 machine.id(), level, pos.immutable(), player);
-        MachineDescriptorResult described =
-                machine.describe(machineContext, blockEntity);
+        MachineDescriptorResult described;
+        try {
+            described = machine.describe(machineContext, blockEntity);
+        } catch (RuntimeException | LinkageError failure) {
+            preparationFailure = Component.literal(
+                    "RSI Integration machine describe failed: "
+                            + failure.getClass().getSimpleName());
+            return false;
+        }
         if (described.descriptor() == null) {
             preparationFailure = firstDiagnostic(
                     described.diagnostics(),
@@ -288,26 +297,33 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         RecipeAvailabilityProvider availability =
                 recipeClaim.winner().availabilityProvider().orElse(null);
         if (availability != null) {
-            RecipeAvailability result = availability.check(
-                    new RecipeAvailabilityContext(
-                            new RecipeContext(
-                                    recipeClaim.winner().id(),
-                                    level.registryAccess(),
-                                    projection.revision()
-                            ),
-                            found,
-                            projection.view(),
-                            player,
-                            machineContext,
-                            targetOutput == null || targetOutput.isEmpty()
-                                    ? null
-                                    : IntegrationResourceKey.item(targetOutput)
-                    )
-            );
-            if (!result.executionAvailable()) {
-                preparationFailure = firstDiagnostic(
-                        result.diagnostics(),
-                        "RSI Integration recipe is temporarily unavailable");
+            try {
+                RecipeAvailability result = availability.check(
+                        new RecipeAvailabilityContext(
+                                new RecipeContext(
+                                        recipeClaim.winner().id(),
+                                        level.registryAccess(),
+                                        projection.revision()
+                                ),
+                                found,
+                                projection.view(),
+                                player,
+                                machineContext,
+                                targetOutput == null || targetOutput.isEmpty()
+                                        ? null
+                                        : IntegrationResourceKey.item(targetOutput)
+                        )
+                );
+                if (!result.executionAvailable()) {
+                    preparationFailure = firstDiagnostic(
+                            result.diagnostics(),
+                            "RSI Integration recipe is temporarily unavailable");
+                    return false;
+                }
+            } catch (RuntimeException | LinkageError failure) {
+                preparationFailure = Component.literal(
+                        "RSI Integration availability callback failed: "
+                                + failure.getClass().getSimpleName());
                 return false;
             }
         }
@@ -474,7 +490,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         ),
                         blockEntity
                 );
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | LinkageError exception) {
                 return failObservation(
                         "state provider failed: " + exception.getClass().getName());
             }
@@ -690,8 +706,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (runningOperation != null) {
-            runningOperation.onSettled(player);
-            runningOperation = null;
+            try {
+                runningOperation.onSettled(player);
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-API] custom onSettled failed for {}",
+                        recipe == null ? "unknown" : recipe.getId(),
+                        failure
+                );
+            } finally {
+                runningOperation = null;
+            }
         }
         flushPendingInputRefunds(player);
         uninsertedMaterials.clear();
@@ -748,21 +773,29 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.customMachineContext = machineContext;
         RecipeContext recipeContext = new RecipeContext(
                 recipeIntegration.id(), level.registryAccess(), recipeRevision);
-        ExecutionPlanResult planned = executionIntegration.createPlan(
-                new ExecutionRequestContext(
-                        recipeContext,
-                        recipe,
-                        recipeView,
-                        machineContext,
-                        materialView,
-                        operationStartContext.transactionId(),
-                        operationStartContext.operationId(),
-                        operationStartContext.attempt(),
-                        targetOutput == null || targetOutput.isEmpty()
-                                ? null
-                                : IntegrationResourceKey.item(targetOutput)
-                )
-        );
+        ExecutionPlanResult planned;
+        try {
+            planned = executionIntegration.createPlan(
+                    new ExecutionRequestContext(
+                            recipeContext,
+                            recipe,
+                            recipeView,
+                            machineContext,
+                            materialView,
+                            operationStartContext.transactionId(),
+                            operationStartContext.operationId(),
+                            operationStartContext.attempt(),
+                            targetOutput == null || targetOutput.isEmpty()
+                                    ? null
+                                    : IntegrationResourceKey.item(targetOutput)
+                    )
+            );
+        } catch (RuntimeException | LinkageError failure) {
+            preparationFailure = Component.literal(
+                    "RSI custom execution createPlan failed: "
+                            + failure.getClass().getSimpleName());
+            return false;
+        }
         if (planned.plan() == null) {
             preparationFailure = firstDiagnostic(
                     planned.diagnostics(),
@@ -801,18 +834,42 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private ExecutionResult startCustomIntegration(ServerPlayer player) {
-        return executionIntegration.start(
-                new OperationContext(
-                        player,
-                        operationStartContext.transactionId(),
-                        operationStartContext.operationId(),
-                        operationStartContext.attempt(),
-                        customMaterials,
-                        customMachineContext,
-                        level.getGameTime()
-                ),
-                executionPlan
-        );
+        try {
+            return executionIntegration.start(
+                    new OperationContext(
+                            player,
+                            operationStartContext.transactionId(),
+                            operationStartContext.operationId(),
+                            operationStartContext.attempt(),
+                            customMaterials,
+                            customMachineContext,
+                            level.getGameTime()
+                    ),
+                    executionPlan
+            );
+        } catch (RuntimeException | LinkageError failure) {
+            return ExecutionResult.rejected(new IntegrationDiagnostic(
+                    IntegrationDiagnosticCode.EXECUTION_START_REJECTED,
+                    IntegrationSeverity.ERROR,
+                    executionIntegration.id(),
+                    Map.of("failure", failure.getClass().getName())
+            ));
+        }
+    }
+
+    @Nullable
+    private com.huanghuang.rsintegration.api.execution.CraftObservation
+    observeRunningOperation(ServerLevel level) {
+        try {
+            return runningOperation.observe(level);
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-API] custom observation failed for {}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    failure
+            );
+            return null;
+        }
     }
 
     @Nullable
@@ -856,7 +913,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (runningOperation == null) {
             return failObservation("custom operation is missing");
         }
-        var observation = runningOperation.observe(level);
+        var observation = observeRunningOperation(level);
+        if (observation == null) {
+            return failObservation("custom observation callback failed");
+        }
         if (lastCustomStateRevision >= 0L
                 && observation.stateRevision() < lastCustomStateRevision) {
             return failObservation("custom state revision moved backwards");
@@ -877,7 +937,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private List<ItemStack> collectCustomResults(ServerPlayer player) {
         if (runningOperation == null) return List.of();
-        OperationCollection collection = runningOperation.collect(player);
+        OperationCollection collection;
+        try {
+            collection = runningOperation.collect(player);
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-API] custom collect failed for {}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    failure
+            );
+            return List.of();
+        }
         if (collection.collectionSequence() <= lastCollectionSequence) {
             return List.of();
         }
@@ -996,7 +1066,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 ));
             }
             recordFailureRecoveredInputs(recovered);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | LinkageError exception) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-API] custom cleanup failed for {}",
                     recipe == null ? "unknown" : recipe.getId(),
