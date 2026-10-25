@@ -244,7 +244,7 @@ public final class ConsumerCraftingRuntime {
 
         CaptureResult capture = capture(
                 player,
-                request.recipes().get(0).recipeId(),
+                request.recipes(),
                 request.machineSelector(),
                 request.storageSelector()
         );
@@ -401,12 +401,23 @@ public final class ConsumerCraftingRuntime {
                 validateMainThread(player);
         if (rejected != null) return rejected;
         Session session = sessions.get(ticketId);
-        ConsumerResult<ConsumerInspectionPage> invalid =
-                validateSession(player, session, capabilities);
-        if (invalid != null) {
-            return session == null || !session.closed
-                    ? rejectLike(invalid)
-                    : ConsumerResult.success(new ConsumerAck(true));
+        if (session == null
+                || !session.ticket.playerId().equals(player.getUUID())) {
+            return reject(
+                    ConsumerDiagnosticCode.SESSION_NOT_FOUND,
+                    "inspection session was not found",
+                    false
+            );
+        }
+        long age = player.serverLevel().getGameTime()
+                - session.createdGameTime;
+        if (age > capabilities.sessionTtlTicks()) {
+            session.closed = true;
+            return reject(
+                    ConsumerDiagnosticCode.SESSION_EXPIRED,
+                    "inspection session has expired",
+                    true
+            );
         }
         session.closed = true;
         return ConsumerResult.success(new ConsumerAck(true));
@@ -778,15 +789,10 @@ public final class ConsumerCraftingRuntime {
     }
 
     public void clearPlayer(UUID playerId) {
-        sessions.entrySet().removeIf(entry -> {
-            if (!entry.getValue().ticket.playerId().equals(playerId)) {
-                return false;
-            }
-            entry.getValue().closed = true;
-            return true;
-        });
-        inspectionRequests.keySet().removeIf(key ->
-                key.playerId().equals(playerId));
+        sessions.values().stream()
+                .filter(session ->
+                        session.ticket.playerId().equals(playerId))
+                .forEach(session -> session.closed = true);
         plans.entrySet().removeIf(entry ->
                 entry.getValue().playerId.equals(playerId));
         storageBindings.entrySet().removeIf(entry ->
@@ -872,10 +878,57 @@ public final class ConsumerCraftingRuntime {
                     ));
                     continue;
                 }
+                ItemStack preview = plan.targetOutput.copyWithCount(
+                        Math.max(1, SaturatingLongMath.clampToInt(
+                                plan.requestedOutputUnits)));
+                if (!endpoint.insert(player, preview, true)
+                        .remainder().orElse(ItemStack.EMPTY).isEmpty()) {
+                    plans.remove(plan.id, plan);
+                    checked.add(unavailable(
+                            result.recipe(),
+                            ConsumerCraftabilityStatus.OUTPUT_UNAVAILABLE,
+                            ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE,
+                            "selected network cannot accept the requested output"
+                    ));
+                    continue;
+                }
+            } else if (!playerInventoryCanAccept(
+                    player,
+                    plan.targetOutput,
+                    plan.requestedOutputUnits
+            )) {
+                plans.remove(plan.id, plan);
+                checked.add(unavailable(
+                        result.recipe(),
+                        ConsumerCraftabilityStatus.OUTPUT_UNAVAILABLE,
+                        ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE,
+                        "player inventory cannot accept the requested output"
+                ));
+                continue;
             }
             checked.add(result);
         }
         return List.copyOf(checked);
+    }
+
+    private static boolean playerInventoryCanAccept(
+            ServerPlayer player,
+            ItemStack target,
+            long requested
+    ) {
+        if (requested <= 0L) return true;
+        long remaining = requested;
+        int stackLimit = Math.max(1, target.getMaxStackSize());
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.isEmpty()) {
+                remaining -= stackLimit;
+            } else if (ItemStack.isSameItemSameTags(stack, target)) {
+                remaining -= Math.max(
+                        0, stack.getMaxStackSize() - stack.getCount());
+            }
+            if (remaining <= 0L) return true;
+        }
+        return false;
     }
 
     private ConsumerCraftability inspectOne(
@@ -885,12 +938,20 @@ public final class ConsumerCraftingRuntime {
     ) {
         RecipeNode indexed = session.capture.graph.recipesById().get(
                 key.recipeId());
-        if (indexed == null) {
+        if (indexed == null
+                || !session.capture.projectableRecipeIds.contains(
+                key.recipeId())) {
             return unavailable(
                     key,
-                    ConsumerCraftabilityStatus.RECIPE_NOT_FOUND,
-                    ConsumerDiagnosticCode.RECIPE_NOT_FOUND,
-                    "recipe is not projected into the current graph"
+                    indexed == null
+                            ? ConsumerCraftabilityStatus.RECIPE_NOT_FOUND
+                            : ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
+                    indexed == null
+                            ? ConsumerDiagnosticCode.RECIPE_NOT_FOUND
+                            : ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
+                    indexed == null
+                            ? "recipe is not projected into the current graph"
+                            : "recipe requires a runtime-only typed resolver"
             );
         }
         if (key.amount() instanceof ConsumerRequestAmount.Executions executions
@@ -1030,6 +1091,7 @@ public final class ConsumerCraftingRuntime {
                 result,
                 key.recipeId(),
                 material.targetOutput,
+                material.requestedCount,
                 session.capture.dimension,
                 session.capture.position,
                 machineSelectionMode(session.request.machineSelector()),
@@ -1222,10 +1284,12 @@ public final class ConsumerCraftingRuntime {
 
     private CaptureResult capture(
             ServerPlayer player,
-            ResourceLocation terminalRecipeId,
+            List<ConsumerRecipeKey> requestedRecipes,
             ConsumerMachineSelector machineSelector,
             ConsumerStorageSelector storageSelector
     ) {
+        ResourceLocation terminalRecipeId =
+                requestedRecipes.get(0).recipeId();
         ResourceLocation dimension;
         BlockPos position;
         MachineSelectionMode mode;
@@ -1336,6 +1400,16 @@ public final class ConsumerCraftingRuntime {
                         ImmutableRecipeGraphProjector.capture(
                                 player.serverLevel())
                 );
+        Set<ResourceLocation> projectableRecipeIds = new HashSet<>();
+        for (ConsumerRecipeKey requested : requestedRecipes) {
+            Recipe<?> requestedRecipe = CraftRecipeResolver.resolve(
+                    player.serverLevel(), requested.recipeId());
+            if (requestedRecipe != null
+                    && RecipeIndex.isBackgroundProjectable(
+                    requestedRecipe)) {
+                projectableRecipeIds.add(requested.recipeId());
+            }
+        }
         String networkFingerprint =
                 PlanningStateValidator.networkFingerprint(
                         endpoint == null
@@ -1356,6 +1430,7 @@ public final class ConsumerCraftingRuntime {
                         available,
                         bindingGraph.graph(),
                         bindingGraph.blockedOutputIds(),
+                        projectableRecipeIds,
                         networkFingerprint,
                         bindingFingerprint,
                         dimension,
@@ -1558,13 +1633,6 @@ public final class ConsumerCraftingRuntime {
         return null;
     }
 
-    private static <T> ConsumerResult<T> rejectLike(
-            ConsumerResult<?> source
-    ) {
-        return ConsumerResult.rejected(
-                source.diagnostics(), source.idempotentReplay());
-    }
-
     private static <T> ConsumerResult<T> reject(
             ConsumerDiagnosticCode code,
             String detail,
@@ -1631,8 +1699,14 @@ public final class ConsumerCraftingRuntime {
         sessions.values().stream()
                 .filter(session -> session.closed)
                 .limit(Math.max(0, sessions.size() - maximum))
-                .forEach(session -> sessions.remove(
-                        session.ticket.ticketId(), session));
+                .forEach(session -> {
+                    if (sessions.remove(
+                            session.ticket.ticketId(), session)) {
+                        inspectionRequests.entrySet().removeIf(entry ->
+                                entry.getValue().equals(
+                                        session.ticket.ticketId()));
+                    }
+                });
     }
 
     private void pruneOrders() {
@@ -1668,6 +1742,7 @@ public final class ConsumerCraftingRuntime {
             Map<CraftingResolver.StackKey, Long> available,
             ImmutableRecipeGraph graph,
             Set<ResourceLocation> blockedOutputIds,
+            Set<ResourceLocation> projectableRecipeIds,
             String networkFingerprint,
             String bindingFingerprint,
             ResourceLocation dimension,
@@ -1679,6 +1754,7 @@ public final class ConsumerCraftingRuntime {
         private Capture {
             available = Map.copyOf(available);
             blockedOutputIds = Set.copyOf(blockedOutputIds);
+            projectableRecipeIds = Set.copyOf(projectableRecipeIds);
         }
 
         private boolean revisionCurrent() {
@@ -1739,6 +1815,7 @@ public final class ConsumerCraftingRuntime {
         private final PureRecipePlanner.Result result;
         private final ResourceLocation recipeId;
         private final ItemStack targetOutput;
+        private final long requestedOutputUnits;
         private final ResourceLocation dimension;
         private final BlockPos position;
         private final MachineSelectionMode machineSelectionMode;
@@ -1758,6 +1835,7 @@ public final class ConsumerCraftingRuntime {
                 PureRecipePlanner.Result result,
                 ResourceLocation recipeId,
                 ItemStack targetOutput,
+                long requestedOutputUnits,
                 ResourceLocation dimension,
                 BlockPos position,
                 MachineSelectionMode machineSelectionMode,
@@ -1776,6 +1854,7 @@ public final class ConsumerCraftingRuntime {
             this.result = result;
             this.recipeId = recipeId;
             this.targetOutput = targetOutput.copy();
+            this.requestedOutputUnits = requestedOutputUnits;
             this.dimension = dimension;
             this.position = position.immutable();
             this.machineSelectionMode = machineSelectionMode;

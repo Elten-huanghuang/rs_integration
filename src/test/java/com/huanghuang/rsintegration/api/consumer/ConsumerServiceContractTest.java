@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConsumerServiceContractTest {
@@ -50,5 +51,18 @@ class ConsumerServiceContractTest {
         assertEquals(1, api.version().major());
         assertTrue(api.capabilities().maxPageSize() > 0);
         assertTrue(api.capabilities().sessionTtlTicks() > 0L);
+    }
+
+    @Test
+    void serviceLookupUsesTheInstalledImplementation() {
+        DefaultRSICraftConsumerApi api =
+                new DefaultRSICraftConsumerApi();
+        try {
+            RSIConsumerServices.install(api);
+
+            assertSame(api, RSICraftConsumerApi.get().orElseThrow());
+        } finally {
+            RSIConsumerServices.clear();
+        }
     }
 }
