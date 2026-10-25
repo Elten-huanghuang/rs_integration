@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeAvailability;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityProvider;
 import com.huanghuang.rsintegration.api.recipe.RecipeContext;
+import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeProjectionThread;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
@@ -289,6 +290,20 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         return primary != null
                 && primary.resource().kind()
                 == IntegrationResourceKey.ResourceKind.ITEM;
+    }
+
+    @Nullable
+    RecipeView recipeView(Recipe<?> recipe) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        return projection.available() ? projection.view() : null;
+    }
+
+    RecipeExecutionKind executionKind() {
+        return integration.executionKind();
+    }
+
+    ResourceLocation integrationId() {
+        return integration.id();
     }
 
     private ExternalRecipeProjection.Result project(Recipe<?> recipe) {
