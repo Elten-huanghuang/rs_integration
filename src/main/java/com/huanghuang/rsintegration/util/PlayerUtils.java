@@ -2,20 +2,17 @@ package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftFluidRecovery;
+import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
-import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.util.FakePlayer;
 
@@ -101,7 +98,7 @@ public final class PlayerUtils {
 
     /**
      * 后端无关的安全交付：玩家背包优先，背包满或区块未加载时写入所选存储端点。
-     * 存储仍无法接收的剩余物才进入世界掉落，绝不把“背包满”直接当成最终结果。
+     * 存储仍无法接收的剩余物进入持久恢复队列，绝不把“背包满”直接当成最终结果。
      */
     public static boolean safeGiveToStorage(
             ServerPlayer player,
@@ -139,27 +136,15 @@ public final class PlayerUtils {
         }
 
         if (!leftover.isEmpty()) {
-            ServerLevel dropLevel = playerChunkLoaded ? player.serverLevel() : null;
-            BlockPos dropPos = playerChunkLoaded ? player.blockPosition() : null;
-            if (!playerChunkLoaded && endpoint != null) {
-                dropLevel = endpoint.location()
-                        .flatMap(location -> location.level(player.getServer()))
-                        .orElse(null);
-                dropPos = endpoint.location()
-                        .map(StorageNetworkLocation::position)
-                        .orElse(null);
-            }
-            if (dropLevel == null || dropPos == null) {
-                dropLevel = player.getServer().overworld();
-                if (dropLevel == null) return false;
-                dropPos = dropLevel.getSharedSpawnPos();
-            }
-            dropLevel.addFreshEntity(new ItemEntity(dropLevel,
-                    dropPos.getX() + 0.5, dropPos.getY() + 0.5, dropPos.getZ() + 0.5, leftover));
+            MinecraftServer server = player.getServer();
+            if (server == null) return false;
+            CraftItemRecovery.get(server).retain(
+                    player.getUUID(), leftover);
             RSIntegrationMod.LOGGER.warn(
-                    "[RSI] Item dropped at {} (player inventory and storage both rejected it): {} x{}",
-                    dropPos, player.getGameProfile().getName(),
-                    ItemStackUtils.registryId(leftover), leftover.getCount());
+                    "[RSI] Item retained in recovery because player inventory and storage rejected it: {} x{} owner={}",
+                    ItemStackUtils.registryId(leftover),
+                    leftover.getCount(),
+                    player.getUUID());
             return false;
         }
         return true;

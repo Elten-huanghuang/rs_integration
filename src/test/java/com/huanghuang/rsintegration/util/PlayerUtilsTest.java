@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.util;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
@@ -14,6 +15,7 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Inventory;
@@ -177,6 +179,33 @@ class PlayerUtilsTest extends BootstrapTest {
 
         verify(session).insert(eq(player), argThat(stack ->
                 stack.is(Items.IRON_INGOT) && stack.getCount() == 3), eq(false));
+    }
+
+    @Test
+    void fullInventoryWithoutStorageRetainsOutputInRecovery() {
+        fillMainInventory();
+        Level level = mock(Level.class);
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(player.getServer()).thenReturn(server);
+        CraftItemRecovery recovery = mock(CraftItemRecovery.class);
+
+        try (MockedStatic<CraftItemRecovery> mocked =
+                     mockStatic(CraftItemRecovery.class)) {
+            mocked.when(() -> CraftItemRecovery.get(server))
+                    .thenReturn(recovery);
+
+            assertFalse(PlayerUtils.safeGiveToStorage(
+                    player, new ItemStack(Items.IRON_INGOT, 3), null));
+        }
+
+        verify(recovery).retain(
+                eq(player.getUUID()),
+                argThat(stack -> stack.is(Items.IRON_INGOT)
+                        && stack.getCount() == 3)
+        );
     }
 
     @Test
