@@ -893,6 +893,11 @@ public final class GenericCraftPacket {
             ServerPlayer player, ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
         BindingAwareGraph filtered = bindingAwareGraph(player,
                 ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId));
+        if (!filtered.graph().recipesById().containsKey(targetRecipeId)) {
+            // 第三方机器终端可能无法参与依赖裁剪，但完整绑定图仍保留其节点。
+            // 纯规划器会从该终端重新限定依赖范围，因此这里无需整图参与搜索。
+            filtered = bindingAwareGraph(player, graph);
+        }
         Map<ResourceLocation, List<ImmutableRecipeGraph.IngredientRef>> replacements =
                 new HashMap<>();
         for (ImmutableRecipeGraph.RecipeNode node : filtered.graph().recipesById().values()) {
