@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputDestination;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputResult;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -15,6 +17,7 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
@@ -26,6 +29,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class ConsumerCraftingRuntimeTest extends BootstrapTest {
     @Test
@@ -123,6 +127,25 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
                 outputs.get(0).resource().kind());
         assertEquals(1_000L, outputs.get(0).amount());
         assertTrue(outputs.get(0).delivered());
+    }
+
+    @Test
+    void typedTerminalTargetsRealOutputQuantityWithoutPrefillingAttempts() {
+        Recipe<?> recipe = mock(Recipe.class);
+        CraftingResolver.ResolutionStep step =
+                ConsumerCraftingRuntime.typedTerminalStep(
+                        resource("typed_terminal"),
+                        recipe,
+                        ModType.EXTERNAL_INTEGRATION,
+                        1,
+                        new ItemStack(Items.DIAMOND),
+                        17L,
+                        true
+                );
+
+        assertEquals(1, step.executions());
+        assertEquals(17L, step.productionTarget().quantity());
+        assertEquals(Items.DIAMOND, step.syntheticOutput().getItem());
     }
 
     private static MaterialRef material(String path) {

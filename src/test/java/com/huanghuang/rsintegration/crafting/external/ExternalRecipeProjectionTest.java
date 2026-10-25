@@ -276,6 +276,50 @@ class ExternalRecipeProjectionTest extends BootstrapTest {
         assertEquals(1_500L, node.inputs().get(0).count());
     }
 
+    @Test
+    void dynamicItemOutputProjectsAsRuntimeIdentityNode() {
+        CompoundTag template = new CompoundTag();
+        template.putString("template", "sword");
+        OutputDeclaration output = new OutputDeclaration(
+                id("dynamic"),
+                "output",
+                item(Items.DIAMOND_SWORD, template),
+                OutputAmount.exactly(1L),
+                OutputKind.PRIMARY,
+                OutputProbability.guaranteed(),
+                true,
+                false,
+                null
+        );
+        RecipeView view = new RecipeView(
+                id("dynamic_recipe"),
+                id("dynamic_process"),
+                List.of(),
+                List.of(),
+                List.of(output),
+                new RecipeFlags(
+                        true,
+                        false,
+                        true,
+                        true,
+                        false,
+                        true,
+                        false
+                )
+        );
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(view.recipeId());
+
+        List<ImmutableRecipeGraph.RecipeNode> nodes =
+                ExternalRecipeProjection.pureRecipeNodes(
+                        recipe, view, "integration_api");
+
+        assertEquals(1, nodes.size());
+        assertTrue(nodes.get(0).output().runtimeNbt());
+        assertTrue(nodes.get(0).dynamicIdentityTargetable());
+        assertEquals("", nodes.get(0).output().nbt());
+    }
+
     private static ExternalRecipeProjection.Result inspect(RecipeView view) {
         return ExternalRecipeProjection.inspect(
                 new StubIntegration(view),

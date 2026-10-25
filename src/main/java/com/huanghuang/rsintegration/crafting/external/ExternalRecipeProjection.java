@@ -211,7 +211,6 @@ final class ExternalRecipeProjection {
         for (OutputDeclaration output : orderedOutputs) {
             if ((output.outputKind() != OutputKind.PRIMARY
                     && !output.targetProducing())
-                    || output.dynamicIdentity()
                     || output.probability().mode() != OutputProbabilityMode.GUARANTEED
                     || output.amount().min() != output.amount().max()
                     || output.amount().max() <= 0L) {
@@ -219,7 +218,10 @@ final class ExternalRecipeProjection {
             }
             nodes.add(new RecipeNode(
                     recipe.getId(),
-                    pureMaterial(output.resource(), false),
+                    pureMaterial(
+                            output.resource(),
+                            output.dynamicIdentity()
+                    ),
                     output.amount().max(),
                     inputs,
                     modTypeId,
@@ -227,7 +229,8 @@ final class ExternalRecipeProjection {
                             ? new ResourceLocation("minecraft", "crafting")
                             : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()),
                     MagicResourceCostCatalog.costsFor(recipe),
-                    hasFluidOutputs
+                    hasFluidOutputs,
+                    output.dynamicIdentity()
             ));
         }
         return List.copyOf(nodes);

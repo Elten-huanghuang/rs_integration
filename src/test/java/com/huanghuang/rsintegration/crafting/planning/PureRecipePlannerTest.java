@@ -1765,6 +1765,43 @@ class PureRecipePlannerTest extends BootstrapTest {
                 result.failureReason(), result.toString());
     }
 
+    @Test
+    void runtimeIdentityProducerCanSatisfyAnExplicitDynamicOutputTarget() {
+        MaterialRef raw = material("dynamic_raw");
+        MaterialRef runtimeOutput = new MaterialRef(
+                id("dynamic_result"), "", true);
+        MaterialRef exactTarget = new MaterialRef(
+                id("dynamic_result"), "{query:\"ruby\"}");
+        RecipeNode producer = new RecipeNode(
+                id("dynamic_producer"),
+                runtimeOutput,
+                1,
+                List.of(ingredient(raw, 1)),
+                "generic",
+                new ResourceLocation("minecraft", "crafting"),
+                List.of(),
+                false,
+                true
+        );
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
+                Map.of(runtimeOutput, List.of(producer)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph,
+                Map.of(raw, 1),
+                List.of(new IngredientRef(
+                        List.of(exactTarget), 1, NbtMatchMode.EXACT)),
+                20
+        );
+
+        assertTrue(result.feasible(), result.toString());
+        assertEquals(
+                List.of(new PureRecipePlanner.PlannedStep(
+                        id("dynamic_producer"), 1)),
+                result.steps()
+        );
+    }
+
     private static RecipeNode recipe(String id, MaterialRef output, int count, IngredientRef... inputs) {
         return new RecipeNode(id(id), output, count, List.of(inputs));
     }

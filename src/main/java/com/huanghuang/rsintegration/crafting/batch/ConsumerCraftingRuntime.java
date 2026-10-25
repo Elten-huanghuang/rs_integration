@@ -52,12 +52,14 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.ProductionTarget;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.TerminationCoordinator;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.planning.ForcedRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -1174,7 +1176,9 @@ public final class ConsumerCraftingRuntime {
                     List.of(new IngredientRef(
                             List.of(material.material),
                             requested,
-                            NbtMatchMode.EXACT
+                            material.material.runtimeNbt()
+                                    ? NbtMatchMode.ANY
+                                    : NbtMatchMode.EXACT
                     )),
                     Math.max(1, SaturatingLongMath.clampToInt(
                             Math.max(32L, proposedStates))),
@@ -1313,6 +1317,16 @@ public final class ConsumerCraftingRuntime {
                     "recipe has no executable handler"
             );
         }
+        if (key.targetOutput() != null
+                && key.targetOutput().kind()
+                != IntegrationResourceKey.ResourceKind.ITEM) {
+            return unavailable(
+                    key,
+                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
+                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
+                    "typed execution cannot represent a fluid production target"
+            );
+        }
         ItemStack target;
         try {
             target = key.targetOutput() == null
@@ -1353,6 +1367,10 @@ public final class ConsumerCraftingRuntime {
                     "machine context rejected the typed recipe inputs"
             );
         }
+        long requestedUnits = outputsRequestedCount(
+                key, target.getCount());
+        boolean targetedProduction =
+                handler.requiresTargetedProduction(recipe, target);
         int executions;
         if (key.amount()
                 instanceof ConsumerRequestAmount.Executions count) {
@@ -1366,6 +1384,11 @@ public final class ConsumerCraftingRuntime {
                             Math.max(1, target.getCount())
                     )
             );
+        }
+        if (targetedProduction) {
+            // 概率/动态产物按真实产物进度重试，不能把目标数量预先展开成
+            // 固定执行次数，否则首轮就会超额备料。
+            executions = 1;
         }
         if (executions <= 0
                 || executions > capabilities.maxRepeatCount()) {
@@ -1514,7 +1537,8 @@ public final class ConsumerCraftingRuntime {
                     ))
             );
         }
-        if (graph.nodes().size() > capabilities.maxPlanNodes()) {
+        if ((long) graph.nodes().size() + 1L
+                > capabilities.maxPlanNodes()) {
             return unavailable(
                     key,
                     ConsumerCraftabilityStatus.PLAN_LIMIT_REACHED,
@@ -1522,16 +1546,17 @@ public final class ConsumerCraftingRuntime {
                     "typed plan exceeds the node limit"
             );
         }
-        List<CraftingResolver.ResolutionStep> steps =
-                ExecutionEquivalence.projectFlatSteps(graph);
-        if (steps.isEmpty()) {
-            return unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "typed plan has no executable steps"
-            );
-        }
+        List<CraftingResolver.ResolutionStep> steps = new ArrayList<>(
+                ExecutionEquivalence.projectFlatSteps(graph));
+        steps.add(typedTerminalStep(
+                key.recipeId(),
+                recipe,
+                type,
+                executions,
+                target,
+                requestedUnits,
+                targetedProduction
+        ));
         if (session.closed) {
             return unavailable(
                     key,
@@ -1548,8 +1573,7 @@ public final class ConsumerCraftingRuntime {
                     "consumer plan registry is full"
             );
         }
-        long requested = outputsRequestedCount(
-                key, target.getCount());
+        long requested = requestedUnits;
         ConsumerPlanId planId = new ConsumerPlanId(UUID.randomUUID());
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
                 session.ticket.playerId(),
@@ -1595,10 +1619,42 @@ public final class ConsumerCraftingRuntime {
                 requestedQuantity(key),
                 key.amount()
                         instanceof ConsumerRequestAmount.OutputUnits
+                        && !targetedProduction
                         ? requested : 0L,
                 List.of(),
                 planId,
                 List.of()
+        );
+    }
+
+    static CraftingResolver.ResolutionStep typedTerminalStep(
+            ResourceLocation recipeId,
+            Recipe<?> recipe,
+            ModType type,
+            int executions,
+            ItemStack target,
+            long requestedUnits,
+            boolean targetedProduction
+    ) {
+        ResourceLocation recipeTypeId = recipe.getType() == null
+                ? recipeId
+                : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType());
+        if (recipeTypeId == null) recipeTypeId = recipeId;
+        ProductionTarget productionTarget = targetedProduction
+                ? ProductionTarget.of(target, requestedUnits)
+                : null;
+        return new CraftingResolver.ResolutionStep(
+                recipeId,
+                type,
+                recipeTypeId,
+                List.of(),
+                List.of(),
+                false,
+                executions,
+                null,
+                target,
+                productionTarget,
+                MagicResourceCostCatalog.costsFor(recipe)
         );
     }
 
@@ -1659,7 +1715,8 @@ public final class ConsumerCraftingRuntime {
     ) {
         IntegrationResourceKey targetResource = key.targetOutput() == null
                 ? resourceKey(recipe.output()) : key.targetOutput();
-        MaterialRef material = materialRef(targetResource);
+        MaterialRef material = key.targetOutput() == null
+                ? recipe.output() : materialRef(targetResource);
         ItemStack targetOutput = targetResource.kind()
                 == IntegrationResourceKey.ResourceKind.ITEM
                 ? itemStack(targetResource) : null;

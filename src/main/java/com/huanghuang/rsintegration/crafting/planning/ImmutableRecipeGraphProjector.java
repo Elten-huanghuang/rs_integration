@@ -237,7 +237,8 @@ public final class ImmutableRecipeGraphProjector {
                     recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
                             recipe.outputCount(), inputs, recipe.modTypeId(),
                             recipe.recipeTypeId(), recipe.magicCosts(),
-                            recipe.hasFluidOutputs()));
+                            recipe.hasFluidOutputs(),
+                            recipe.dynamicIdentityTargetable()));
                     changed = true;
                 } else {
                     recipes.add(recipe);
@@ -490,7 +491,8 @@ public final class ImmutableRecipeGraphProjector {
                 RecipeNode bound = inputs != null
                         ? new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
                                 inputs, recipe.modTypeId(), recipe.recipeTypeId(),
-                                recipe.magicCosts(), recipe.hasFluidOutputs())
+                                recipe.magicCosts(), recipe.hasFluidOutputs(),
+                                recipe.dynamicIdentityTargetable())
                         : recipe;
                 if (inputs != null) {
                     if (recipes == null) recipes = new ArrayList<>(entry.getValue());
@@ -568,7 +570,8 @@ public final class ImmutableRecipeGraphProjector {
                 RecipeNode specialized = new RecipeNode(recipe.recipeId(), output,
                         recipe.outputCount(), inputs, recipe.modTypeId(),
                         recipe.recipeTypeId(), recipe.magicCosts(),
-                        recipe.hasFluidOutputs());
+                        recipe.hasFluidOutputs(),
+                        recipe.dynamicIdentityTargetable());
                 if (!graph.recipesByOutput().getOrDefault(output, List.of()).contains(specialized)) {
                     List<RecipeNode> variants = additions.computeIfAbsent(output, ignored -> new ArrayList<>());
                     if (!variants.contains(specialized)) variants.add(specialized);
@@ -768,7 +771,8 @@ public final class ImmutableRecipeGraphProjector {
                 base.role(), base.recursive()));
         return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
                 recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
-                recipe.hasFluidOutputs());
+                recipe.hasFluidOutputs(),
+                recipe.dynamicIdentityTargetable());
     }
 
     /** 单刀升级把更高的目标门槛传回原料；禁止凭空提升产物数值。 */
@@ -811,7 +815,8 @@ public final class ImmutableRecipeGraphProjector {
             return new RecipeNode(recipe.recipeId(), new MaterialRef(recipe.output().itemId(),
                     output.toString(), false, true), recipe.outputCount(), inputs,
                     recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
-                    recipe.hasFluidOutputs());
+                    recipe.hasFluidOutputs(),
+                    recipe.dynamicIdentityTargetable());
         } catch (Exception ignored) {
             return null;
         }
@@ -848,10 +853,42 @@ public final class ImmutableRecipeGraphProjector {
                     if (specialized != null && matchesIngredient(specialized.output(), demand)) {
                         candidates.add(specialized);
                     }
+                } else if (recipe.output().runtimeNbt()) {
+                    RecipeNode specialized =
+                            withRuntimeOutput(recipe, wanted);
+                    if (specialized != null
+                            && matchesIngredient(specialized.output(), demand)) {
+                        candidates.add(specialized);
+                    }
                 }
             }
         }
         return candidates;
+    }
+
+    @Nullable
+    private static RecipeNode withRuntimeOutput(
+            RecipeNode recipe,
+            MaterialRef wanted
+    ) {
+        if (!recipe.dynamicIdentityTargetable()
+                || !recipe.output().runtimeNbt()
+                || recipe.output().kind() != wanted.kind()
+                || !recipe.output().resourceId().equals(wanted.resourceId())
+                || wanted.runtimeNbt()) {
+            return null;
+        }
+        return new RecipeNode(
+                recipe.recipeId(),
+                wanted,
+                recipe.outputCount(),
+                recipe.inputs(),
+                recipe.modTypeId(),
+                recipe.recipeTypeId(),
+                recipe.magicCosts(),
+                recipe.hasFluidOutputs(),
+                recipe.dynamicIdentityTargetable()
+        );
     }
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {

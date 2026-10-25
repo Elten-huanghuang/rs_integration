@@ -136,18 +136,20 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
                              List<IngredientRef> inputs, String modTypeId,
                              ResourceLocation recipeTypeId,
                              List<MagicResourceCost> magicCosts,
-                             boolean hasFluidOutputs) {
+                             boolean hasFluidOutputs,
+                             boolean dynamicIdentityTargetable) {
         public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
                           List<IngredientRef> inputs) {
             this(recipeId, output, outputCount, inputs, "generic",
-                    new ResourceLocation("minecraft", "crafting"), List.of(), false);
+                    new ResourceLocation("minecraft", "crafting"), List.of(),
+                    false, false);
         }
 
         public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
                           List<IngredientRef> inputs, String modTypeId,
                           ResourceLocation recipeTypeId) {
             this(recipeId, output, outputCount, inputs, modTypeId, recipeTypeId,
-                    List.of(), false);
+                    List.of(), false, false);
         }
 
         public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
@@ -155,7 +157,16 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
                           ResourceLocation recipeTypeId,
                           List<MagicResourceCost> magicCosts) {
             this(recipeId, output, outputCount, inputs, modTypeId,
-                    recipeTypeId, magicCosts, false);
+                    recipeTypeId, magicCosts, false, false);
+        }
+
+        public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
+                          List<IngredientRef> inputs, String modTypeId,
+                          ResourceLocation recipeTypeId,
+                          List<MagicResourceCost> magicCosts,
+                          boolean hasFluidOutputs) {
+            this(recipeId, output, outputCount, inputs, modTypeId,
+                    recipeTypeId, magicCosts, hasFluidOutputs, false);
         }
 
         public RecipeNode {
