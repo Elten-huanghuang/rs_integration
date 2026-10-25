@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator.StalePlanningResultException;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -60,7 +61,7 @@ final class CraftPureExecutionPlanner {
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable StorageReference storageReference) {
-        if (storageEndpoint == null || !forcedRecipes.isEmpty()
+        if (storageEndpoint == null
                 || !RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()) return false;
 
         ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
@@ -102,7 +103,7 @@ final class CraftPureExecutionPlanner {
             @Nullable StorageReference storageReference, List<IngredientSpec> scaledSpecs,
             ItemStack recipeOutput, ModType terminalType,
             Map<String, ItemStack> materialLocks) {
-        if (storageEndpoint == null || !forcedRecipes.isEmpty()
+        if (storageEndpoint == null
                 || !RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()
                 || recipeOutput == null || recipeOutput.isEmpty()) return false;
 
@@ -117,15 +118,9 @@ final class CraftPureExecutionPlanner {
             return false;
         }
         ImmutableRecipeGraph baseGraph = bindingGraph.graph();
-        List<ImmutableRecipeGraph.IngredientRef> inputs = new ArrayList<>();
-        for (IngredientSpec spec : scaledSpecs) {
-            if (spec.isEmpty()) continue;
-            ImmutableRecipeGraph.IngredientRef projected =
-                    ImmutableRecipeGraphProjector.projectIngredient(spec);
-            if (projected == null) return false;
-            inputs.add(projected);
-        }
-        if (inputs.isEmpty()) return false;
+        List<ImmutableRecipeGraph.IngredientRef> inputs = physicalRootInputs(
+                baseGraph, recipeId, scaledSpecs, repeatCount);
+        if (inputs == null || inputs.isEmpty()) return false;
 
         MaterialRef outputRef = ImmutableRecipeGraphProjector.material(
                 recipeOutput, recipeOutput.hasTag());
@@ -142,6 +137,35 @@ final class CraftPureExecutionPlanner {
                         recipeId, terminalType, inferMode, repeatCount),
                 "physical");
         return true;
+    }
+
+    /**
+     * 优先使用带运行时上下文的输入；TACZ 等配方可能含不可投影的自定义槽，
+     * 此时回退到已冻结配方节点的标准输入，避免整条机器链退回 typed 解析。
+     */
+    @Nullable
+    static List<ImmutableRecipeGraph.IngredientRef> physicalRootInputs(
+            ImmutableRecipeGraph baseGraph, ResourceLocation recipeId,
+            List<IngredientSpec> scaledSpecs, int repeatCount) {
+        List<ImmutableRecipeGraph.IngredientRef> inputs = new ArrayList<>();
+        boolean projectable = true;
+        for (IngredientSpec spec : scaledSpecs) {
+            if (spec.isEmpty()) continue;
+            ImmutableRecipeGraph.IngredientRef projected =
+                    ImmutableRecipeGraphProjector.projectIngredient(spec);
+            if (projected == null) {
+                projectable = false;
+                break;
+            }
+            inputs.add(projected);
+        }
+        if (projectable && !inputs.isEmpty()) return List.copyOf(inputs);
+
+        RecipeNode indexed = baseGraph.recipesById().get(recipeId);
+        if (indexed == null) return null;
+        List<ImmutableRecipeGraph.IngredientRef> canonical =
+                SelfAmplifyingRecipePolicy.scaleTargetInputs(indexed, repeatCount);
+        return canonical.isEmpty() ? null : canonical;
     }
 
     static ImmutableRecipeGraph withPlanningRoot(ImmutableRecipeGraph baseGraph, RecipeNode root) {
@@ -200,7 +224,7 @@ final class CraftPureExecutionPlanner {
         StorageReference selectedReference = storageEndpoint.session().reference();
         PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
                 player.getUUID(), 0L, recipeId, available,
-                Map.of(), planningGraph,
+                forcedRecipeOverrides(player, forcedRecipes), planningGraph,
                 PlanningStateValidator.networkFingerprint(selectedReference, available),
                 PlanningStateValidator.bindingFingerprint(player,
                         ResourceKey.create(Registries.DIMENSION, effectiveDimension),
@@ -312,5 +336,14 @@ final class CraftPureExecutionPlanner {
                 });
         RSIntegrationMod.debug("[RSI-exec] queued async {} planning recipe={} repeat={}",
                 planKind, recipeId, repeatCount);
+    }
+
+    private static Map<ResourceLocation, ResourceLocation> forcedRecipeOverrides(
+            ServerPlayer player, Map<String, String> forcedRecipes) {
+        if (forcedRecipes.isEmpty()) return Map.of();
+        CraftForcedRecipeOverrides.Resolution resolved =
+                CraftForcedRecipeOverrides.resolve(player, forcedRecipes);
+        if (!resolved.valid() || resolved.overrides() == null) return Map.of();
+        return resolved.overrides();
     }
 }

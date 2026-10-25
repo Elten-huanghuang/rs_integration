@@ -1726,13 +1726,14 @@ public final class GenericCraftPacket {
                 // GRAPH_SAFE physical recipes are fully represented by immutable values.
                 // Queue their dependency planning before touching the legacy server-thread
                 // resolver; its short compatibility slice must never reject a normal chain.
-                if (!typedFallbackOnly && safePreferences.isEmpty()
-                        && CraftPureExecutionPlanner.queuePhysical(player, recipe, recipeId,
-                        forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
-                        targetOutput, outputDestination, machineSelectionMode, storageEndpoint,
-                        executionStorageReference, graphSpecs, recipeOutput,
-                        modType, materialLocks)) {
-                    return;
+                boolean physicalPureQueued = false;
+                if (!typedFallbackOnly && safePreferences.isEmpty()) {
+                    physicalPureQueued = CraftPureExecutionPlanner.queuePhysical(
+                            player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
+                            inferMode, baseItem, targetOutput, outputDestination,
+                            machineSelectionMode, storageEndpoint, executionStorageReference,
+                            graphSpecs, recipeOutput, modType, materialLocks);
+                    if (physicalPureQueued) return;
                 }
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph inputGraph;
@@ -1760,6 +1761,15 @@ public final class GenericCraftPacket {
                     throw timeout;
                 }
                 if (!missing.isEmpty()) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Craft] physical planning failed recipe={} modType={} missing={} "
+                                    + "cache={} cachedPure={} pureQueued={} endpoint={} forced={} dim={} pos={}",
+                            recipeId, modType.id(), missing,
+                            cachedMachinePlan != null,
+                            cachedMachinePlan != null && cachedMachinePlan.purePlan() != null,
+                            physicalPureQueued, storageEndpoint != null,
+                            forcedRecipes.size(),
+                            effectiveDim, effectivePos);
                     player.sendSystemMessage(Component.translatable(
                             "rsi.generic.error.missing_materials", CraftPacketUtils.formatMissingSummary(missing)));
                     return;

@@ -1,10 +1,15 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -84,6 +89,23 @@ class CraftGraphPreparationTest extends BootstrapTest {
         assertSame(root, result.recipesById().get(root.recipeId()));
         assertThrows(UnsupportedOperationException.class,
                 () -> result.recipesByOutput().get(output).clear());
+    }
+
+    @Test
+    void physicalRootFallsBackToFrozenRecipeInputsWhenRuntimeSpecsCannotProject() {
+        MaterialRef output = material("tacz_output");
+        MaterialRef brick = material("archaic_brick");
+        RecipeNode target = new RecipeNode(
+                new ResourceLocation("emxarms", "attachments/stock_emx_reentrantlock"),
+                output, 1, List.of(new IngredientRef(List.of(brick), 1)));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(target)));
+        List<IngredientSpec> runtimeOnly = List.of(new IngredientSpec(
+                Ingredient.of(Items.IRON_INGOT), 1, DemandRole.TRANSFORMED));
+
+        List<IngredientRef> inputs = CraftPureExecutionPlanner.physicalRootInputs(
+                graph, target.recipeId(), runtimeOnly, 2);
+
+        assertEquals(List.of(new IngredientRef(List.of(brick), 2)), inputs);
     }
 
     private static RecipeNode recipe(String name, MaterialRef output) {
