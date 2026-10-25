@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.recipe.ItemAlternative;
 import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
+import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputAmount;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
@@ -293,6 +294,13 @@ final class ExternalRecipeProjection {
         return true;
     }
 
+    static boolean compoundContains(
+            @Nullable CompoundTag actual,
+            @Nullable CompoundTag required
+    ) {
+        return contains(actual, required);
+    }
+
     private static boolean listContains(ListTag actual, ListTag required) {
         if (actual.size() != required.size()) return false;
         for (int index = 0; index < required.size(); index++) {
@@ -335,17 +343,32 @@ final class ExternalRecipeProjection {
             ResourceLocation integrationId
     ) {
         List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
-        if (!view.fluids().isEmpty()) {
-            diagnostics.add(diagnostic(
-                    IntegrationDiagnosticCode.MATERIAL_DECLARATION_INVALID,
-                    integrationId,
-                    "fluid_ingredients_not_enabled"
-            ));
-        }
         for (MaterialRequirement material : view.materials()) {
             try {
                 toIntAmount(material.amount(), "material " + material.entryId());
                 ingredient(material.ingredient());
+            } catch (IllegalArgumentException exception) {
+                diagnostics.add(diagnostic(
+                        IntegrationDiagnosticCode.MATERIAL_DECLARATION_INVALID,
+                        integrationId,
+                        exception.getMessage()
+                ));
+            }
+        }
+        for (FluidRequirement fluid : view.fluids()) {
+            try {
+                if (fluid.amount() <= 0L) {
+                    throw new IllegalArgumentException(
+                            "fluid amount must be positive");
+                }
+                for (IntegrationResourceKey alternative
+                        : fluid.fluid().alternatives()) {
+                    if (alternative.kind()
+                            != IntegrationResourceKey.ResourceKind.FLUID) {
+                        throw new IllegalArgumentException(
+                                "fluid alternative has non-fluid kind");
+                    }
+                }
             } catch (IllegalArgumentException exception) {
                 diagnostics.add(diagnostic(
                         IntegrationDiagnosticCode.MATERIAL_DECLARATION_INVALID,

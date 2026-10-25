@@ -386,6 +386,199 @@ final class BeyondDimensionsSession implements StorageSession {
         }
     }
 
+    @Override
+    public StorageFluidSnapshotResult snapshotFluids(ServerPlayer player) {
+        StorageThreadGuard.requireServerThread(player);
+        StoragePermissionResult permission = checkPermission(
+                player, StoragePermission.VIEW);
+        if (!permission.allowedAccess()) {
+            return switch (permission.status()) {
+                case DENIED -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.DENIED);
+                case UNAVAILABLE -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.UNAVAILABLE);
+                case FAILED -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.FAILED,
+                        permission.diagnosticCode());
+                case ALLOWED -> throw new IllegalStateException(
+                        "allowed permission cannot be a failure");
+            };
+        }
+        try {
+            Object nativeStorage = storage();
+            Object entries = nativeStorage.getClass()
+                    .getMethod("getStorage").invoke(nativeStorage);
+            List<StoredFluid> fluids = new ArrayList<>();
+            for (Object entry : (Iterable<?>) entries) {
+                Object key = BeyondDimensionsReflection.key(entry);
+                if (!BeyondDimensionsReflection.isFluidKey(key)) continue;
+                long amount = BeyondDimensionsReflection.amount(entry);
+                if (amount <= 0L) continue;
+                FluidStack stack = BeyondDimensionsReflection.fluidStack(key);
+                if (stack.isEmpty()) continue;
+                stack.setAmount(1);
+                fluids.add(new StoredFluid(
+                        StorageFluidKey.fromStack(reference.backendId(), stack),
+                        amount
+                ));
+            }
+            return StorageFluidSnapshotResult.success(
+                    new StorageFluidSnapshot(reference.backendId(), fluids));
+        } catch (Exception | LinkageError failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Storage] BD fluid snapshot failed player={} network={} cause={}",
+                    player.getGameProfile().getName(),
+                    reference.networkId(),
+                    failure.toString()
+            );
+            return StorageFluidSnapshotResult.failure(
+                    StorageSnapshotStatus.FAILED,
+                    StorageDiagnosticCode.BACKEND_EXCEPTION
+            );
+        }
+    }
+
+    @Override
+    public StorageFluidOperationResult extractFluidExact(
+            ServerPlayer player,
+            StorageFluidKey key,
+            long amount,
+            boolean simulate
+    ) {
+        StorageThreadGuard.requireServerThread(player);
+        Objects.requireNonNull(key, "key");
+        if (amount < 0L) {
+            throw new IllegalArgumentException("amount must not be negative");
+        }
+        if (!reference.backendId().equals(key.backendId())) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST,
+                    List.of(), List.of(), StorageDiagnosticCode.NONE);
+        }
+        StoragePermissionResult permission = checkPermission(
+                player, StoragePermission.EXTRACT);
+        if (!permission.allowedAccess()) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(simulate), amount,
+                    toOperationStatus(permission),
+                    List.of(), List.of(), permission.diagnosticCode());
+        }
+        try {
+            Object nativeStorage = storage();
+            Object nativeKey = BeyondDimensionsReflection.fluidKey(
+                    key.toStack(1));
+            Method extract = nativeStorage.getClass().getMethod(
+                    "extract",
+                    Class.forName(
+                            "com.wintercogs.beyonddimensions.api.storage.key.IStackKey"),
+                    long.class,
+                    boolean.class,
+                    boolean.class
+            );
+            Object got = extract.invoke(
+                    nativeStorage, nativeKey, amount, simulate, false);
+            long transferred = BeyondDimensionsReflection.amount(got);
+            if (transferred < 0L || transferred > amount) {
+                return StorageFluidOperationResult.failedExtraction(
+                        mode(simulate), amount,
+                        StorageOperationStatus.INVALID_RESPONSE,
+                        List.of(), List.of(),
+                        StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            if (transferred == 0L) {
+                return StorageFluidOperationResult.extracted(
+                        mode(simulate), amount, List.of());
+            }
+            FluidStack fluid = BeyondDimensionsReflection.fluidStack(
+                    BeyondDimensionsReflection.key(got));
+            fluid.setAmount((int) Math.min(Integer.MAX_VALUE, transferred));
+            StorageFluidKey actual = StorageFluidKey.fromStack(
+                    reference.backendId(), fluid);
+            if (!key.equals(actual)) {
+                return StorageFluidOperationResult.failedExtraction(
+                        mode(simulate), amount,
+                        StorageOperationStatus.INVALID_RESPONSE,
+                        List.of(), List.of(fluid),
+                        StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            return StorageFluidOperationResult.extracted(
+                    mode(simulate), amount, List.of(fluid));
+        } catch (Exception | LinkageError failure) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(simulate), amount,
+                    StorageOperationStatus.FAILED,
+                    List.of(), List.of(),
+                    StorageDiagnosticCode.BACKEND_EXCEPTION);
+        }
+    }
+
+    @Override
+    public StorageFluidOperationResult insertFluid(
+            ServerPlayer player,
+            FluidStack stack,
+            boolean simulate
+    ) {
+        StorageThreadGuard.requireServerThread(player);
+        if (stack == null || stack.isEmpty()) {
+            return StorageFluidOperationResult.inserted(
+                    mode(simulate), FluidStack.EMPTY, FluidStack.EMPTY);
+        }
+        StoragePermissionResult permission = checkPermission(
+                player, StoragePermission.INSERT);
+        if (!permission.allowedAccess()) {
+            return StorageFluidOperationResult.failedInsert(
+                    mode(simulate), stack,
+                    toOperationStatus(permission),
+                    permission.diagnosticCode());
+        }
+        try {
+            Object nativeStorage = storage();
+            FluidStack template = stack.copy();
+            template.setAmount(1);
+            Object nativeKey = BeyondDimensionsReflection.fluidKey(template);
+            Method insert = nativeStorage.getClass().getMethod(
+                    "insert",
+                    Class.forName(
+                            "com.wintercogs.beyonddimensions.api.storage.key.IStackKey"),
+                    long.class,
+                    boolean.class
+            );
+            Object remainderValue = insert.invoke(
+                    nativeStorage, nativeKey, (long) stack.getAmount(), simulate);
+            long remaining = BeyondDimensionsReflection.amount(remainderValue);
+            if (remaining < 0L || remaining > stack.getAmount()) {
+                return StorageFluidOperationResult.failedInsert(
+                        mode(simulate), stack,
+                        StorageOperationStatus.INVALID_RESPONSE,
+                        StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            FluidStack remainder = FluidStack.EMPTY;
+            if (remaining > 0L) {
+                remainder = BeyondDimensionsReflection.fluidStack(
+                        BeyondDimensionsReflection.key(remainderValue));
+                remainder.setAmount((int) remaining);
+                StorageFluidKey requested = StorageFluidKey.fromStack(
+                        reference.backendId(), stack);
+                StorageFluidKey actual = StorageFluidKey.fromStack(
+                        reference.backendId(), remainder);
+                if (!requested.equals(actual)) {
+                    return StorageFluidOperationResult.failedInsert(
+                            mode(simulate), stack,
+                            StorageOperationStatus.INVALID_RESPONSE,
+                            StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+                }
+            }
+            return StorageFluidOperationResult.inserted(
+                    mode(simulate), stack, remainder);
+        } catch (Exception | LinkageError failure) {
+            return StorageFluidOperationResult.failedInsert(
+                    mode(simulate), stack,
+                    StorageOperationStatus.FAILED,
+                    StorageDiagnosticCode.BACKEND_EXCEPTION);
+        }
+    }
+
     private static ItemStack nativeStack(Object nativeKey, ItemStack template) throws Exception {
         return InkFluidSupport.isToken(template)
                 ? InkFluidSupport.token(template.getItem(), BeyondDimensionsReflection.fluidStack(nativeKey))
@@ -447,4 +640,15 @@ final class BeyondDimensionsSession implements StorageSession {
     }
 
     private static StorageOperationMode mode(boolean simulate) { return simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM; }
+
+    private static StorageOperationStatus toOperationStatus(
+            StoragePermissionResult permission
+    ) {
+        return switch (permission.status()) {
+            case ALLOWED -> StorageOperationStatus.SUCCESS;
+            case DENIED -> StorageOperationStatus.DENIED;
+            case UNAVAILABLE -> StorageOperationStatus.UNAVAILABLE;
+            case FAILED -> StorageOperationStatus.FAILED;
+        };
+    }
 }

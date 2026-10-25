@@ -16,6 +16,9 @@ import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -26,6 +29,7 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,6 +95,27 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
     ) {
         ExternalRecipeProjection.Result projection = project(recipe);
         if (!projection.available()) return false;
+        if (!projection.view().fluids().isEmpty()) {
+            if (player == null) return false;
+            var endpoint = CraftStorageEndpoints.resolveDefault(player)
+                    .orElse(null);
+            if (endpoint == null
+                    || !endpoint.session().supports(
+                    StorageCapability.FLUID_STORAGE)) {
+                return false;
+            }
+            var snapshotResult = endpoint.session().snapshotFluids(player);
+            if (!snapshotResult.successful()) return false;
+            var snapshot = snapshotResult.snapshotValue().orElseThrow();
+            Map<StorageFluidKey, Long> reserved = new LinkedHashMap<>();
+            for (var fluid : projection.view().fluids()) {
+                StorageFluidKey key = ExternalFluidMatcher.find(
+                        fluid, snapshot, reserved);
+                if (key == null) return false;
+                ExternalFluidMatcher.reserve(
+                        reserved, key, fluid.amount());
+            }
+        }
         RecipeAvailabilityProvider provider =
                 integration.availabilityProvider().orElse(null);
         if (provider == null) return true;

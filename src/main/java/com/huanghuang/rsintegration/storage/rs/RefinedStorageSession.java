@@ -2,6 +2,11 @@ package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageFluidKey;
+import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
+import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
+import com.huanghuang.rsintegration.storage.StorageFluidSnapshotResult;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageInsertObserver;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
@@ -19,10 +24,12 @@ import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.storage.StorageThreadGuard;
 import com.huanghuang.rsintegration.storage.StoredItem;
+import com.huanghuang.rsintegration.storage.StoredFluid;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.fluids.FluidStack;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import java.util.Set;
 import net.minecraft.world.item.Item;
@@ -71,6 +78,56 @@ final class RefinedStorageSession implements StorageSession {
     @Override
     public StorageItemKey itemKey(ItemStack stack) {
         return RefinedStorageItemKeys.fromStack(stack);
+    }
+
+    @Override
+    public Set<StorageCapability> capabilities() {
+        return Set.of(
+                StorageCapability.ITEM_STORAGE,
+                StorageCapability.FLUID_STORAGE
+        );
+    }
+
+    @Override
+    public StorageFluidSnapshotResult snapshotFluids(ServerPlayer player) {
+        StorageThreadGuard.requireServerThread(player);
+        StoragePermissionResult permission = checkPermissionInternal(
+                player, StoragePermission.VIEW);
+        if (!permission.allowedAccess()) {
+            return switch (permission.status()) {
+                case DENIED -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.DENIED);
+                case UNAVAILABLE -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.UNAVAILABLE);
+                case FAILED -> StorageFluidSnapshotResult.failure(
+                        StorageSnapshotStatus.FAILED,
+                        permission.diagnosticCode());
+                case ALLOWED -> throw new IllegalStateException(
+                        "allowed permission cannot be a failure");
+            };
+        }
+        try {
+            List<StoredFluid> fluids = new ArrayList<>();
+            for (FluidStack stack : driver.snapshotFluids()) {
+                if (stack == null || stack.isEmpty()) continue;
+                FluidStack identity = stack.copy();
+                identity.setAmount(1);
+                fluids.add(new StoredFluid(
+                        StorageFluidKey.fromStack(
+                                reference.backendId(), identity),
+                        stack.getAmount()
+                ));
+            }
+            return StorageFluidSnapshotResult.success(
+                    new StorageFluidSnapshot(reference.backendId(), fluids));
+        } catch (RefinedStorageUnavailableException exception) {
+            return StorageFluidSnapshotResult.failure(
+                    StorageSnapshotStatus.UNAVAILABLE);
+        } catch (RuntimeException | LinkageError exception) {
+            return StorageFluidSnapshotResult.failure(
+                    StorageSnapshotStatus.FAILED,
+                    StorageDiagnosticCode.BACKEND_EXCEPTION);
+        }
     }
 
     @Override
@@ -235,6 +292,143 @@ final class RefinedStorageSession implements StorageSession {
         return result;
     }
 
+    @Override
+    public StorageFluidOperationResult extractFluidExact(
+            ServerPlayer player,
+            StorageFluidKey key,
+            long amount,
+            boolean simulate
+    ) {
+        StorageThreadGuard.requireServerThread(player);
+        Objects.requireNonNull(key, "key");
+        validateAmount(amount);
+        if (!RefinedStorageIds.BACKEND.equals(key.backendId())) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(simulate), amount,
+                    StorageOperationStatus.INVALID_REQUEST,
+                    List.of(), List.of(), StorageDiagnosticCode.NONE);
+        }
+        StoragePermissionResult permission = checkPermissionInternal(
+                player, StoragePermission.EXTRACT);
+        if (!permission.allowedAccess()) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(simulate), amount,
+                    toOperationStatus(permission),
+                    List.of(), List.of(), permission.diagnosticCode());
+        }
+        if (simulate) {
+            StorageFluidSnapshotResult snapshot = snapshotFluids(player);
+            if (!snapshot.successful()) {
+                return StorageFluidOperationResult.failedExtraction(
+                        mode(true), amount,
+                        toOperationStatus(snapshot.status()),
+                        List.of(), List.of(),
+                        snapshot.diagnosticCode());
+            }
+            long available = snapshot.snapshotValue().orElseThrow()
+                    .countExact(key);
+            return StorageFluidOperationResult.extracted(
+                    mode(true),
+                    amount,
+                    fluidChunks(key.toStack(1), Math.min(amount, available))
+            );
+        }
+        FluidStack template = key.toStack(1);
+        List<FluidStack> extracted = new ArrayList<>();
+        long remaining = amount;
+        try {
+            while (remaining > 0L) {
+                int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
+                FluidStack got = driver.extractFluid(
+                        template, chunk, false);
+                if (got == null || got.isEmpty()) break;
+                if (!key.equals(StorageFluidKey.fromStack(
+                        reference.backendId(), got))) {
+                    return StorageFluidOperationResult.failedExtraction(
+                            mode(false), amount,
+                            StorageOperationStatus.INVALID_RESPONSE,
+                            extracted, List.of(got),
+                            StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+                }
+                extracted.add(got.copy());
+                remaining -= got.getAmount();
+                if (got.getAmount() < chunk) break;
+            }
+        } catch (RefinedStorageUnavailableException exception) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(false), amount,
+                    StorageOperationStatus.UNAVAILABLE,
+                    extracted, List.of(),
+                    StorageDiagnosticCode.NONE);
+        } catch (RuntimeException | LinkageError exception) {
+            return StorageFluidOperationResult.failedExtraction(
+                    mode(false), amount,
+                    StorageOperationStatus.FAILED,
+                    extracted, List.of(),
+                    StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
+        }
+        return StorageFluidOperationResult.extracted(
+                mode(false), amount, extracted);
+    }
+
+    @Override
+    public StorageFluidOperationResult insertFluid(
+            ServerPlayer player,
+            FluidStack stack,
+            boolean simulate
+    ) {
+        StorageThreadGuard.requireServerThread(player);
+        if (stack == null || stack.isEmpty()) {
+            return StorageFluidOperationResult.inserted(
+                    mode(simulate), FluidStack.EMPTY, FluidStack.EMPTY);
+        }
+        StoragePermissionResult permission = checkPermissionInternal(
+                player, StoragePermission.INSERT);
+        if (!permission.allowedAccess()) {
+            return StorageFluidOperationResult.failedInsert(
+                    mode(simulate), stack,
+                    toOperationStatus(permission),
+                    permission.diagnosticCode());
+        }
+        try {
+            FluidStack remainder = driver.insertFluid(
+                    stack.copy(), simulate);
+            if (remainder == null) {
+                return StorageFluidOperationResult.failedInsert(
+                        mode(simulate), stack,
+                        StorageOperationStatus.INVALID_RESPONSE,
+                        StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            if (!remainder.isEmpty()
+                    && !StorageFluidKey.fromStack(
+                    reference.backendId(), stack).equals(
+                    StorageFluidKey.fromStack(
+                            reference.backendId(), remainder))) {
+                return StorageFluidOperationResult.failedInsert(
+                        mode(simulate), stack,
+                        StorageOperationStatus.INVALID_RESPONSE,
+                        StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            if (!simulate && remainder.getAmount() < stack.getAmount()) {
+                FluidStack accepted = stack.copy();
+                accepted.setAmount(stack.getAmount() - remainder.getAmount());
+                driver.recordFluidInsertion(player, accepted);
+            }
+            return StorageFluidOperationResult.inserted(
+                    mode(simulate), stack, remainder);
+        } catch (RefinedStorageUnavailableException exception) {
+            return StorageFluidOperationResult.failedInsert(
+                    mode(simulate), stack,
+                    StorageOperationStatus.UNAVAILABLE,
+                    StorageDiagnosticCode.NONE);
+        } catch (RuntimeException | LinkageError exception) {
+            return StorageFluidOperationResult.failedInsert(
+                    mode(simulate), stack,
+                    StorageOperationStatus.FAILED,
+                    StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
+        }
+    }
+
     private static StorageOperationResult failedPermissionExtraction(long amount,
                                                                     StoragePermissionResult permission,
                                                                     StorageOperationMode mode) {
@@ -272,6 +466,23 @@ final class RefinedStorageSession implements StorageSession {
 
     private static void validateAmount(long amount) {
         if (amount < 0) throw new IllegalArgumentException("amount must not be negative");
+    }
+
+    private static List<FluidStack> fluidChunks(
+            FluidStack template,
+            long amount
+    ) {
+        if (template.isEmpty() || amount <= 0L) return List.of();
+        List<FluidStack> stacks = new ArrayList<>();
+        long remaining = amount;
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
+            FluidStack copy = template.copy();
+            copy.setAmount(chunk);
+            stacks.add(copy);
+            remaining -= chunk;
+        }
+        return List.copyOf(stacks);
     }
 
     private static StorageOperationMode mode(boolean simulate) {

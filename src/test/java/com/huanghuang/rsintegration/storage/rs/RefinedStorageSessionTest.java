@@ -9,6 +9,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -136,6 +139,27 @@ class RefinedStorageSessionTest extends BootstrapTest {
     }
 
     @Test
+    void fluidSnapshotAndExactExtractionUseTheSameLongIdentity() {
+        driver.fluids.add(new FluidStack(Fluids.WATER, 1500));
+        FluidStack template = new FluidStack(Fluids.WATER, 1);
+        StorageFluidKey key = StorageFluidKey.fromStack(
+                RefinedStorageIds.BACKEND, template);
+
+        StorageFluidSnapshot snapshot = session.snapshotFluids(player)
+                .snapshotValue().orElseThrow();
+        assertEquals(1500L, snapshot.countExact(key));
+
+        StorageFluidOperationResult result = session.extractFluidExact(
+                player, key, 1000L, false);
+
+        assertEquals(StorageOperationStatus.SUCCESS, result.status());
+        assertEquals(1000L,
+                result.transferredAmountExact().orElseThrow());
+        assertEquals(500,
+                driver.fluids.get(0).getAmount());
+    }
+
+    @Test
     void failureAfterOneVariantPreservesConfirmedExtractionAndNextReadIsFresh() {
         driver.items.addAll(List.of(namedIron("first", 2), namedIron("second", 3)));
         driver.failVariant = "second";
@@ -167,6 +191,7 @@ class RefinedStorageSessionTest extends BootstrapTest {
 
     private static final class FakeDriver implements RefinedStorageDriver {
         final List<ItemStack> items = new ArrayList<>();
+        final List<FluidStack> fluids = new ArrayList<>();
         boolean available = true;
         boolean allowed = true;
         int reads;
@@ -181,6 +206,31 @@ class RefinedStorageSessionTest extends BootstrapTest {
             lastTypes = types;
             return RefinedStorageSnapshotRead.available(items.stream()
                     .filter(stack -> types == null || types.contains(stack.getItem())).toList());
+        }
+        @Override public List<FluidStack> snapshotFluids() {
+            return fluids.stream().map(FluidStack::copy).toList();
+        }
+        @Override public FluidStack extractFluid(
+                FluidStack template,
+                int amount,
+                boolean simulate
+        ) {
+            for (FluidStack stored : fluids) {
+                if (stored.isFluidEqual(template)) {
+                    int extracted = Math.min(amount, stored.getAmount());
+                    FluidStack result = stored.copy();
+                    result.setAmount(extracted);
+                    if (!simulate) stored.shrink(extracted);
+                    return result;
+                }
+            }
+            return FluidStack.EMPTY;
+        }
+        @Override public FluidStack insertFluid(
+                FluidStack stack,
+                boolean simulate
+        ) {
+            return simulate ? stack.copy() : FluidStack.EMPTY;
         }
         @Override public ItemStack extract(ItemStack template, int amount, boolean simulate) {
             if (!simulate && template.hasTag() && template.getTag().getString("variant").equals(failVariant)) {

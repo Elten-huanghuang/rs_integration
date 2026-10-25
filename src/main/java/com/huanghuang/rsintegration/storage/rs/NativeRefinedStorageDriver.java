@@ -64,6 +64,20 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
         }
     }
 
+    @Override
+    public List<FluidStack> snapshotFluids() {
+        requireAvailable();
+        var cache = network.getFluidStorageCache();
+        if (cache == null || cache.getList() == null) return List.of();
+        List<FluidStack> fluids = new ArrayList<>();
+        for (var entry : cache.getList().getStacks()) {
+            FluidStack stack = entry.getStack();
+            if (stack == null || stack.isEmpty()) continue;
+            fluids.add(stack.copy());
+        }
+        return List.copyOf(fluids);
+    }
+
     private void requireAvailable() {
         if (!isAvailable()) throw new RefinedStorageUnavailableException();
     }
@@ -244,6 +258,40 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
         requireAvailable();
         if (InkFluidSupport.isToken(stack)) return InkFluidSupport.insert(network, stack, simulate);
         return network.insertItem(stack, stack.getCount(), simulate ? Action.SIMULATE : Action.PERFORM);
+    }
+
+    @Override
+    public FluidStack extractFluid(
+            FluidStack template,
+            int amount,
+            boolean simulate
+    ) {
+        requireAvailable();
+        return network.extractFluid(
+                template,
+                amount,
+                simulate ? Action.SIMULATE : Action.PERFORM
+        );
+    }
+
+    @Override
+    public FluidStack insertFluid(FluidStack stack, boolean simulate) {
+        requireAvailable();
+        return network.insertFluid(
+                stack,
+                stack.getAmount(),
+                simulate ? Action.SIMULATE : Action.PERFORM
+        );
+    }
+
+    @Override
+    public void recordFluidInsertion(
+            ServerPlayer player,
+            FluidStack accepted
+    ) {
+        requireAvailable();
+        var tracker = network.getFluidStorageTracker();
+        if (tracker != null) tracker.changed(player, accepted);
     }
 
     @Override

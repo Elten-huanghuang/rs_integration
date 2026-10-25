@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.recipe.InputConsumption;
+import com.huanghuang.rsintegration.api.recipe.FluidIngredientView;
+import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.ItemAlternative;
 import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
@@ -27,6 +29,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -155,6 +160,52 @@ class ExternalRecipeProjectionTest extends BootstrapTest {
         assertEquals(
                 IntegrationDiagnosticCode.MATERIAL_DECLARATION_INVALID,
                 result.diagnostics().get(0).code());
+    }
+
+    @Test
+    void fluidRequirementsRemainPartOfTheRecipeInsteadOfBeingRejectedAsItems() {
+        FluidStack water = new FluidStack(Fluids.WATER, 1);
+        IntegrationResourceKey fluid = new IntegrationResourceKey(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                ForgeRegistries.FLUIDS.getKey(water.getFluid()),
+                new CompoundTag()
+        );
+        FluidRequirement requirement = new FluidRequirement(
+                id("water"),
+                new FluidIngredientView(
+                        List.of(fluid),
+                        ResourceMatchMode.EXACT_IDENTITY
+                ),
+                1000L,
+                InputConsumption.consumed(),
+                "fluids",
+                0,
+                true
+        );
+        RecipeView base = view(
+                List.of(material(
+                        "input",
+                        ingredient(
+                                ResourceMatchMode.ANY_IDENTITY,
+                                item(Items.DIAMOND, new CompoundTag())),
+                        1L,
+                        InputConsumption.consumed(),
+                        true)),
+                List.of(output("result", Items.STICK, 1L))
+        );
+        RecipeView withFluid = new RecipeView(
+                base.recipeId(),
+                base.processId(),
+                base.materials(),
+                List.of(requirement),
+                base.outputs(),
+                base.flags()
+        );
+
+        ExternalRecipeProjection.Result result = inspect(withFluid);
+
+        assertTrue(result.available());
+        assertEquals(1000L, result.view().fluids().get(0).amount());
     }
 
     private static ExternalRecipeProjection.Result inspect(RecipeView view) {

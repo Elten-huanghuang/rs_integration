@@ -5,6 +5,7 @@ import java.lang.reflect.Method;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.fluids.FluidStack;
 import java.util.List;
 import net.minecraft.world.item.Item;
 
@@ -115,4 +116,38 @@ public interface StorageSession {
     }
 
     StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate);
+
+    default StorageFluidSnapshotResult snapshotFluids(ServerPlayer player) {
+        return StorageFluidSnapshotResult.failure(
+                StorageSnapshotStatus.INVALID_RESPONSE,
+                StorageDiagnosticCode.UNSUPPORTED_CAPABILITY
+        );
+    }
+
+    default StorageFluidOperationResult extractFluidExact(
+            ServerPlayer player,
+            StorageFluidKey key,
+            long amount,
+            boolean simulate
+    ) {
+        return StorageFluidOperationResult.extracted(
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
+                amount,
+                List.of()
+        );
+    }
+
+    default StorageFluidOperationResult insertFluid(
+            ServerPlayer player,
+            FluidStack stack,
+            boolean simulate
+    ) {
+        return StorageFluidOperationResult.inserted(
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
+                stack,
+                stack
+        );
+    }
 }

@@ -24,6 +24,7 @@ import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
 import com.huanghuang.rsintegration.api.execution.RunningOperation;
 import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
 import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
+import com.huanghuang.rsintegration.api.machine.FluidPortAccess;
 import com.huanghuang.rsintegration.api.machine.MachineClaim;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
@@ -31,9 +32,11 @@ import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
+import com.huanghuang.rsintegration.api.machine.MachineFluidPort;
 import com.huanghuang.rsintegration.api.machine.MachineState;
 import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
+import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.api.recipe.OutputProbabilityMode;
@@ -51,6 +54,12 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
+import com.huanghuang.rsintegration.storage.StorageFluidKey;
+import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
+import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
+import com.huanghuang.rsintegration.storage.StoredFluid;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -60,11 +69,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.capability.IFluidHandler;
+import net.minecraftforge.fluids.capability.IFluidHandler.FluidAction;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -109,7 +123,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private Component preparationFailure;
     private final Map<SlotKey, ItemStack> inputBaseline = new LinkedHashMap<>();
     private final Map<SlotKey, ItemStack> outputBaseline = new LinkedHashMap<>();
+    private final Map<FluidSlotKey, FluidStack> fluidInputBaseline =
+            new LinkedHashMap<>();
+    private final Map<FluidSlotKey, FluidStack> fluidOutputBaseline =
+            new LinkedHashMap<>();
     private final List<InsertedMaterial> insertedMaterials = new ArrayList<>();
+    private final List<ItemStack> uninsertedMaterials = new ArrayList<>();
+    private final List<ItemStack> pendingInputRefunds = new ArrayList<>();
 
     @Override
     public boolean startOperation(OperationStartContext context) {
@@ -237,14 +257,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             custom = executionClaim.winner();
         }
-        if (!projection.view().fluids().isEmpty()) {
-            preparationFailure = Component.literal(
-                    "RSI fluid standard I/O is not connected yet");
-            return false;
-        }
         if (!customRecipe) {
             List<IntegrationDiagnosticMessage> validation =
-                    validateItemPorts(projection.view(), machineDescriptor);
+                    validatePorts(projection.view(), machineDescriptor);
             if (!validation.isEmpty()) {
                 preparationFailure = Component.literal(
                         validation.get(0).message());
@@ -301,7 +316,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.lastStateRevision = -1L;
         this.inputBaseline.clear();
         this.outputBaseline.clear();
+        this.fluidInputBaseline.clear();
+        this.fluidOutputBaseline.clear();
         this.insertedMaterials.clear();
+        this.uninsertedMaterials.clear();
+        this.pendingInputRefunds.clear();
         setMachineDim(level.dimension().location());
         setMachineServer(player.server);
         if (!customRecipe
@@ -344,6 +363,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.resultsCollected = false;
         this.startedAtTick = level.getGameTime();
         this.insertedMaterials.clear();
+        this.uninsertedMaterials.clear();
+        this.pendingInputRefunds.clear();
+        for (ItemStack stack : materials) {
+            if (!stack.isEmpty()) uninsertedMaterials.add(stack.copy());
+        }
+        if (materials.size() < recipeView.materials().size()) {
+            preparationFailure = Component.literal(
+                    "RSI Integration prepared material list is incomplete");
+            return false;
+        }
         snapshotSlots(inputBaseline,
                 descriptor.itemPorts().stream()
                         .filter(port -> port.direction() == InputOutputAccess.INPUT)
@@ -352,34 +381,53 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 descriptor.itemPorts().stream()
                         .filter(port -> port.direction() == InputOutputAccess.OUTPUT)
                         .toList());
+        snapshotFluidSlots(
+                fluidInputBaseline,
+                descriptor.fluidPorts().stream()
+                        .filter(port ->
+                                port.direction() == InputOutputAccess.INPUT)
+                        .toList()
+        );
+        snapshotFluidSlots(
+                fluidOutputBaseline,
+                descriptor.fluidPorts().stream()
+                        .filter(port ->
+                                port.direction() == InputOutputAccess.OUTPUT)
+                        .toList()
+        );
         if (!hasOutputCapacity(player)) {
             preparationFailure = Component.literal(
                     "RSI Integration machine output ports have insufficient capacity");
             return false;
         }
-        if (materials.size() < recipeView.materials().size()) {
-            preparationFailure = Component.literal(
-                    "RSI Integration prepared material list is incomplete");
-            return false;
-        }
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
-            ItemStack stack = materials.get(index);
+            ItemStack stack = materials.get(index).copy();
             if (stack.isEmpty()) {
                 preparationFailure = Component.literal(
                         "RSI Integration prepared material is empty: "
                                 + requirement.entryId());
                 return false;
             }
+            int existing = matchingInputCount(requirement, stack);
+            if (existing > 0) {
+                int used = Math.min(existing, stack.getCount());
+                pendingInputRefunds.add(stack.copyWithCount(used));
+                stack.shrink(used);
+            }
+            if (stack.isEmpty()) continue;
             ItemStack remainder = insertMaterial(
-                    player, requirement, stack.copy());
+                    player, requirement, stack);
             if (!remainder.isEmpty()) {
                 preparationFailure = Component.literal(
                         "RSI Integration input port rejected "
                                 + requirement.entryId());
                 return false;
             }
+            int inserted = stack.getCount() - remainder.getCount();
+            removeUninserted(requirement.entryId(), stack, inserted);
         }
+        if (!insertFluidInputs(player)) return false;
         markCraftStarted();
         this.operationStarted = true;
         forceMachineChunk(level, machinePos, true);
@@ -441,7 +489,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return doneObservation();
             }
         }
-        if (hasNewExpectedOutput()) {
+        if (hasNewExpectedOutput() || hasNewExpectedFluidOutput()) {
             return doneObservation();
         }
         if (executionKind == RecipeExecutionKind.STANDARD_IO
@@ -469,7 +517,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         Map<ItemStackKey, ItemStack> collected = new LinkedHashMap<>();
         for (OutputDeclaration output : recipeView.outputs()) {
             if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.ITEM) {
+                    == IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
             long requested = output.amount().max();
@@ -484,6 +532,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 merge(collected, actual);
             }
         }
+        collectFluidOutputs(player);
         return collected.values().stream()
                 .map(ItemStack::copy)
                 .toList();
@@ -499,12 +548,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (recipeView == null) return OutputContract.none();
         List<OutputContract.Port> ports = new ArrayList<>();
         for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM) {
+                continue;
+            }
             long max = output.amount().max();
             if (max > Integer.MAX_VALUE) return OutputContract.none();
-            ItemStack prototype = output.resource().kind()
-                    == IntegrationResourceKey.ResourceKind.ITEM
-                    ? ExternalRecipeProjection.toStack(output.resource(), 1L)
-                    : ItemStack.EMPTY;
+            ItemStack prototype = ExternalRecipeProjection.toStack(
+                    output.resource(), 1L);
             ports.add(new OutputContract.Port(
                     output.portId().toString(),
                     null,
@@ -553,6 +604,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return;
         }
         List<ItemStack> recovered = new ArrayList<>();
+        List<FluidStack> recoveredFluids = new ArrayList<>();
+        for (ItemStack uninserted : uninsertedMaterials) {
+            if (uninserted != null && !uninserted.isEmpty()) {
+                recovered.add(uninserted.copy());
+            }
+        }
         for (MachineItemPort port : descriptor == null
                 ? List.<MachineItemPort>of()
                 : descriptor.itemPorts()) {
@@ -566,7 +623,32 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ItemStack extracted = extract(port, removable, player);
             if (!extracted.isEmpty()) recovered.add(extracted);
         }
+        if (player != null && descriptor != null) {
+            for (var port : descriptor.fluidPorts()) {
+                if (port.direction() != InputOutputAccess.INPUT) continue;
+                FluidStack baseline = fluidInputBaseline.get(
+                        new FluidSlotKey(port));
+                int protectedAmount = baseline == null
+                        ? 0 : baseline.getAmount();
+                FluidStack current = getFluid(port);
+                int removable = Math.max(
+                        0, current.getAmount() - protectedAmount);
+                if (removable <= 0) continue;
+                FluidStack extracted = extractFluid(port, removable);
+                if (!extracted.isEmpty()) recoveredFluids.add(extracted);
+            }
+            refundFluids(player, recoveredFluids);
+        }
         recordFailureRecoveredInputs(recovered);
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        if (executionKind == RecipeExecutionKind.CUSTOM) {
+            clearCustomOperation(player);
+            return;
+        }
+        recordFailureRecoveredInputs(uninsertedMaterials);
     }
 
     @Override
@@ -592,6 +674,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             runningOperation.onSettled(player);
             runningOperation = null;
         }
+        flushPendingInputRefunds(player);
+        uninsertedMaterials.clear();
+        pendingInputRefunds.clear();
         releaseReusableMaterials(player);
         resetState();
     }
@@ -788,6 +873,68 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 .toList();
     }
 
+    private void collectFluidOutputs(ServerPlayer player) {
+        if (!hasStorageAccess()) return;
+        for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.FLUID) {
+                continue;
+            }
+            long remaining = Math.min(
+                    Integer.MAX_VALUE, output.amount().max());
+            for (var port : descriptor.fluidPorts()) {
+                if (remaining <= 0L
+                        || port.direction() != InputOutputAccess.OUTPUT
+                        || !output.outputGroup().equals(
+                        port.outputGroup())) {
+                    continue;
+                }
+                FluidStack current = getFluid(port);
+                if (current.isEmpty()
+                        || !matchesFluid(current, output.resource())) {
+                    continue;
+                }
+                FluidStack baseline = fluidOutputBaseline.get(
+                        new FluidSlotKey(port));
+                int protectedAmount = baseline != null
+                        && matchesFluid(baseline, output.resource())
+                        ? baseline.getAmount() : 0;
+                int available = Math.max(
+                        0, current.getAmount() - protectedAmount);
+                if (available <= 0) continue;
+                FluidStack extracted = extractFluid(
+                        port, (int) Math.min(remaining, available));
+                if (extracted.isEmpty()) continue;
+                remaining -= extracted.getAmount();
+                StorageFluidOperationResult inserted =
+                        storageEndpoint().session().insertFluid(
+                                player, extracted, false);
+                if (inserted.remainder() != null
+                        && !inserted.remainder().isEmpty()) {
+                    RSIntegrationMod.LOGGER.error(
+                            "[RSI-API] failed to insert collected fluid {} mB into storage",
+                            inserted.remainder().getAmount());
+                }
+            }
+        }
+    }
+
+    private static boolean matchesFluid(
+            FluidStack stack,
+            IntegrationResourceKey expected
+    ) {
+        if (stack == null || stack.isEmpty()
+                || expected.kind()
+                != IntegrationResourceKey.ResourceKind.FLUID) {
+            return false;
+        }
+        return expected.id().equals(
+                ForgeRegistries.FLUIDS.getKey(stack.getFluid()))
+                && expected.identity().equals(
+                stack.getTag() == null
+                        ? new CompoundTag() : stack.getTag());
+    }
+
     private void clearCustomOperation(@Nullable ServerPlayer player) {
         RunningOperation operation = runningOperation;
         runningOperation = null;
@@ -862,8 +1009,236 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return remainder;
     }
 
+    private boolean insertFluidInputs(ServerPlayer player) {
+        if (recipeView.fluids().isEmpty()) return true;
+        if (!hasStorageAccess()
+                || !storageEndpoint().session().supports(
+                StorageCapability.FLUID_STORAGE)) {
+            preparationFailure = Component.literal(
+                    "RSI Integration selected storage has no fluid capability");
+            return false;
+        }
+        var snapshotResult = storageEndpoint().session().snapshotFluids(player);
+        if (!snapshotResult.successful()) {
+            preparationFailure = Component.literal(
+                    "RSI Integration fluid snapshot failed: "
+                            + snapshotResult.status());
+            return false;
+        }
+        StorageFluidSnapshot snapshot =
+                snapshotResult.snapshotValue().orElseThrow();
+        Map<StorageFluidKey, Long> reserved = new LinkedHashMap<>();
+        for (FluidRequirement requirement : recipeView.fluids()) {
+            StorageFluidKey key = ExternalFluidMatcher.find(
+                    requirement, snapshot, reserved);
+            if (key == null) {
+                preparationFailure = Component.literal(
+                        "RSI Integration fluid is unavailable: "
+                                + requirement.entryId());
+                return false;
+            }
+            ExternalFluidMatcher.reserve(
+                    reserved, key, requirement.amount());
+            StorageFluidOperationResult simulated =
+                    storageEndpoint().session().extractFluidExact(
+                            player, key, requirement.amount(), true);
+            if (simulated.status() != StorageOperationStatus.SUCCESS
+                    || simulated.transferredAmountExact()
+                    .orElse(-1L) != requirement.amount()) {
+                preparationFailure = Component.literal(
+                        "RSI Integration fluid extraction preflight failed: "
+                                + requirement.entryId());
+                return false;
+            }
+            StorageFluidOperationResult extracted =
+                    storageEndpoint().session().extractFluidExact(
+                            player, key, requirement.amount(), false);
+            if (extracted.status() != StorageOperationStatus.SUCCESS) {
+                refundFluids(player, extracted.transferredFluids());
+                preparationFailure = Component.literal(
+                        "RSI Integration fluid extraction failed: "
+                                + requirement.entryId());
+                return false;
+            }
+            long remaining = requirement.amount();
+            for (FluidStack fluid : extracted.transferredFluids()) {
+                if (remaining <= 0L) break;
+                FluidStack toInsert = fluid.copy();
+                toInsert.setAmount((int) Math.min(
+                        Integer.MAX_VALUE,
+                        Math.min(remaining, toInsert.getAmount())
+                ));
+                long remainder = insertFluidIntoMachine(
+                        requirement, toInsert);
+                remaining -= toInsert.getAmount() - remainder;
+                if (remainder > 0L) {
+                    FluidStack refund = toInsert.copy();
+                    refund.setAmount((int) remainder);
+                    refundFluids(player, List.of(refund));
+                    preparationFailure = Component.literal(
+                            "RSI Integration fluid port rejected "
+                                    + requirement.entryId());
+                    return false;
+                }
+            }
+            if (remaining > 0L) {
+                preparationFailure = Component.literal(
+                        "RSI Integration fluid extraction was short: "
+                                + requirement.entryId());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private long insertFluidIntoMachine(
+            FluidRequirement requirement,
+            FluidStack fluid
+    ) {
+        if (descriptor == null || fluid.isEmpty()) return fluid.getAmount();
+        long remaining = fluid.getAmount();
+        for (var port : descriptor.fluidPorts()) {
+            if (remaining <= 0L) break;
+            if (port.direction() != InputOutputAccess.INPUT
+                    || !requirement.inputGroup().equals(port.inputGroup())
+                    || port.access() == FluidPortAccess.CUSTOM) {
+                continue;
+            }
+            IFluidHandler handler = fluidHandler(port.side());
+            if (handler == null) continue;
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE,
+                    Math.min(remaining, port.capacity())
+            );
+            FluidStack offer = fluid.copy();
+            offer.setAmount(chunk);
+            int accepted = handler.fill(offer, FluidAction.EXECUTE);
+            if (accepted < 0 || accepted > chunk) {
+                return remaining;
+            }
+            remaining -= accepted;
+            if (accepted < chunk) break;
+        }
+        return remaining;
+    }
+
+    private void refundFluids(
+            ServerPlayer player,
+            List<FluidStack> fluids
+    ) {
+        if (!hasStorageAccess()) return;
+        for (FluidStack fluid : fluids) {
+            if (fluid == null || fluid.isEmpty()) continue;
+            StorageFluidOperationResult refund =
+                    storageEndpoint().session().insertFluid(
+                            player, fluid.copy(), false);
+            if (refund.remainder() == null || refund.remainder().isEmpty()) {
+                continue;
+            }
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-API] failed to return {} mB of {} to storage",
+                    refund.remainder().getAmount(),
+                    refund.remainder().getFluid()
+            );
+        }
+    }
+
+    private int matchingInputCount(
+            MaterialRequirement requirement,
+            ItemStack material
+    ) {
+        if (descriptor == null || material.isEmpty()) return 0;
+        var ingredient = ExternalRecipeProjection.ingredient(
+                requirement.ingredient());
+        int available = 0;
+        for (MachineItemPort port : descriptor.itemPorts()) {
+            if (port.direction() != InputOutputAccess.INPUT
+                    || !requirement.inputGroup().equals(port.inputGroup())) {
+                continue;
+            }
+            ItemStack current = get(port, null);
+            if (!current.isEmpty()
+                    && ingredient.test(current)) {
+                available += current.getCount();
+            }
+        }
+        return available;
+    }
+
+    private void removeUninserted(
+            ResourceLocation entryId,
+            ItemStack material,
+            int amount
+    ) {
+        if (amount <= 0) return;
+        int remaining = amount;
+        for (int index = 0;
+             index < uninsertedMaterials.size() && remaining > 0;
+             index++) {
+            ItemStack candidate = uninsertedMaterials.get(index);
+            if (candidate.isEmpty()
+                    || !ItemStack.isSameItemSameTags(candidate, material)) {
+                continue;
+            }
+            int removed = Math.min(remaining, candidate.getCount());
+            candidate.shrink(removed);
+            remaining -= removed;
+            if (candidate.isEmpty()) {
+                uninsertedMaterials.remove(index);
+                index--;
+            }
+        }
+        if (remaining > 0) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-API] unable to subtract {} inserted item(s) from pending recovery for {}",
+                    remaining, entryId);
+        }
+    }
+
+    private void flushPendingInputRefunds(@Nullable ServerPlayer player) {
+        for (ItemStack refund : pendingInputRefunds) {
+            if (refund.isEmpty()) continue;
+            ItemStack remainder = insertIntoStorage(player, refund.copy(), false);
+            if (remainder.isEmpty()) continue;
+            if (player != null && player.getInventory().add(remainder)) continue;
+            if (player != null) {
+                player.drop(remainder, false);
+            } else if (level != null && machinePos != null) {
+                ItemEntity entity = new ItemEntity(
+                                level,
+                                machinePos.getX() + 0.5D,
+                                machinePos.getY() + 1.0D,
+                                machinePos.getZ() + 0.5D,
+                                remainder
+                        );
+                level.addFreshEntity(entity);
+            }
+        }
+        pendingInputRefunds.clear();
+    }
+
     private boolean hasOutputCapacity(ServerPlayer player) {
         for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.FLUID) {
+                long maximum = output.amount().max();
+                FluidStack expected = fluidStack(
+                        output.resource(),
+                        Math.min(Integer.MAX_VALUE, maximum)
+                );
+                long capacity = 0L;
+                for (MachineFluidPort port : descriptor.fluidPorts()) {
+                    if (port.direction() != InputOutputAccess.OUTPUT
+                            || !output.outputGroup().equals(
+                            port.outputGroup())) {
+                        continue;
+                    }
+                    capacity += fluidCapacityFor(port, expected);
+                    if (capacity >= maximum) break;
+                }
+                if (capacity < maximum) return false;
+                continue;
+            }
             if (output.resource().kind()
                     != IntegrationResourceKey.ResourceKind.ITEM) {
                 continue;
@@ -900,6 +1275,31 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 int baseline = before == null ? 0 : before.getCount();
                 if (current.getCount() > baseline
                         && matches(current, output)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasNewExpectedFluidOutput() {
+        for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.FLUID) {
+                continue;
+            }
+            for (MachineFluidPort port : descriptor.fluidPorts()) {
+                if (port.direction() != InputOutputAccess.OUTPUT
+                        || !output.outputGroup().equals(
+                        port.outputGroup())) {
+                    continue;
+                }
+                FluidStack current = getFluid(port);
+                FluidStack before = fluidOutputBaseline.get(
+                        new FluidSlotKey(port));
+                int baseline = before == null ? 0 : before.getAmount();
+                if (current.getAmount() > baseline
+                        && matchesFluid(current, output.resource())) {
                     return true;
                 }
             }
@@ -1007,6 +1407,26 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return 0L;
     }
 
+    private long fluidCapacityFor(
+            MachineFluidPort port,
+            FluidStack expected
+    ) {
+        if (expected.isEmpty()
+                || port.access() == FluidPortAccess.CUSTOM) {
+            return 0L;
+        }
+        IFluidHandler handler = fluidHandler(port.side());
+        if (handler == null) return 0L;
+        int chunk = (int) Math.min(
+                Integer.MAX_VALUE,
+                Math.min(port.capacity(), expected.getAmount())
+        );
+        FluidStack probe = expected.copy();
+        probe.setAmount(chunk);
+        int accepted = handler.fill(probe, FluidAction.SIMULATE);
+        return Math.max(0, Math.min(chunk, accepted));
+    }
+
     private ItemStack insert(
             MachineItemPort port,
             ItemStack stack,
@@ -1090,12 +1510,67 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Nullable
+    private IFluidHandler fluidHandler(@Nullable Direction side) {
+        BlockEntity blockEntity = blockEntity();
+        if (blockEntity == null) return null;
+        return blockEntity.getCapability(
+                ForgeCapabilities.FLUID_HANDLER, side).orElse(null);
+    }
+
+    private void snapshotFluidSlots(
+            Map<FluidSlotKey, FluidStack> target,
+            List<MachineFluidPort> ports
+    ) {
+        target.clear();
+        for (var port : ports) {
+            target.put(new FluidSlotKey(port), getFluid(port).copy());
+        }
+    }
+
+    private FluidStack getFluid(
+            MachineFluidPort port
+    ) {
+        IFluidHandler handler = fluidHandler(port.side());
+        return handler == null
+                ? FluidStack.EMPTY
+                : handler.getFluidInTank(port.tank()).copy();
+    }
+
+    private FluidStack extractFluid(
+            MachineFluidPort port,
+            int amount
+    ) {
+        IFluidHandler handler = fluidHandler(port.side());
+        return handler == null
+                ? FluidStack.EMPTY
+                : handler.drain(amount, FluidAction.EXECUTE);
+    }
+
+    private static FluidStack fluidStack(
+            IntegrationResourceKey resource,
+            long amount
+    ) {
+        if (resource.kind() != IntegrationResourceKey.ResourceKind.FLUID
+                || amount <= 0L) {
+            return FluidStack.EMPTY;
+        }
+        var fluid = ForgeRegistries.FLUIDS.getValue(resource.id());
+        if (fluid == null) return FluidStack.EMPTY;
+        FluidStack stack = new FluidStack(
+                fluid, (int) Math.min(Integer.MAX_VALUE, amount));
+        if (!resource.identity().isEmpty()) {
+            stack.setTag(resource.identity());
+        }
+        return stack;
+    }
+
+    @Nullable
     private BlockEntity blockEntity() {
         if (level == null || machinePos == null) return null;
         return level.getBlockEntity(machinePos);
     }
 
-    private List<IntegrationDiagnosticMessage> validateItemPorts(
+    private List<IntegrationDiagnosticMessage> validatePorts(
             RecipeView view,
             MachineDescriptor descriptor
     ) {
@@ -1122,6 +1597,32 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (!matched) {
                 failures.add(new IntegrationDiagnosticMessage(
                         "no item output port for group " + output.outputGroup()));
+            }
+        }
+        for (FluidRequirement fluid : view.fluids()) {
+            boolean matched = descriptor.fluidPorts().stream().anyMatch(port ->
+                    port.direction() == InputOutputAccess.INPUT
+                            && fluid.inputGroup().equals(port.inputGroup())
+                            && port.access() != FluidPortAccess.CUSTOM);
+            if (!matched) {
+                failures.add(new IntegrationDiagnosticMessage(
+                        "no fluid input port for group "
+                                + fluid.inputGroup()));
+            }
+        }
+        for (OutputDeclaration output : view.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.FLUID) {
+                continue;
+            }
+            boolean matched = descriptor.fluidPorts().stream().anyMatch(port ->
+                    port.direction() == InputOutputAccess.OUTPUT
+                            && output.outputGroup().equals(port.outputGroup())
+                            && port.access() != FluidPortAccess.CUSTOM);
+            if (!matched) {
+                failures.add(new IntegrationDiagnosticMessage(
+                        "no fluid output port for group "
+                                + output.outputGroup()));
             }
         }
         return List.copyOf(failures);
@@ -1166,6 +1667,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private record SlotKey(ItemPortAccess access, int slot, @Nullable Direction side) {
         SlotKey(MachineItemPort port) {
             this(port.access(), port.slot(), port.side());
+        }
+    }
+
+    private record FluidSlotKey(
+            FluidPortAccess access,
+            int tank,
+            @Nullable Direction side
+    ) {
+        FluidSlotKey(MachineFluidPort port) {
+            this(port.access(), port.tank(), port.side());
         }
     }
 
