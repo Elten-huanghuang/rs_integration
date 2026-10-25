@@ -24,6 +24,11 @@ public final class VanillaMachineRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
+    public int claimPriority() {
+        return CLAIM_PRIORITY_VANILLA_FAMILY;
+    }
+
+    @Override
     public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
         return canHandle(recipe);
     }

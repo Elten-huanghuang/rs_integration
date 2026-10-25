@@ -1,11 +1,17 @@
 package com.huanghuang.rsintegration.recipe;
 
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyRecipeHandler;
+import com.huanghuang.rsintegration.mods.malum.MalumRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
+import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
 import net.minecraft.world.item.crafting.Recipe;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -14,6 +20,30 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ModRecipeHandlersClaimTest {
+    @Test
+    void priorityLayersSeparateGenericFamilyAndSpecializedClaims() {
+        assertTrue(ModRecipeHandler.CLAIM_PRIORITY_GENERIC
+                < ModRecipeHandler.CLAIM_PRIORITY_VANILLA_FAMILY);
+        assertTrue(ModRecipeHandler.CLAIM_PRIORITY_VANILLA_FAMILY
+                < ModRecipeHandler.CLAIM_PRIORITY_MOD_FAMILY);
+        assertTrue(ModRecipeHandler.CLAIM_PRIORITY_MOD_FAMILY
+                < ModRecipeHandler.CLAIM_PRIORITY_SPECIALIZED);
+    }
+
+    @Test
+    void broadModHandlersYieldToConcreteRecipeFamilies() {
+        assertEquals(ModRecipeHandler.CLAIM_PRIORITY_VANILLA_FAMILY,
+                new VanillaMachineRecipeHandler().claimPriority());
+        assertEquals(ModRecipeHandler.CLAIM_PRIORITY_VANILLA_FAMILY,
+                new SmithingRecipeHandler().claimPriority());
+        assertEquals(ModRecipeHandler.CLAIM_PRIORITY_MOD_FAMILY,
+                new EreAlchemyRecipeHandler().claimPriority());
+        assertEquals(ModRecipeHandler.CLAIM_PRIORITY_MOD_FAMILY,
+                new WRRecipeHandler().claimPriority());
+        assertEquals(ModRecipeHandler.CLAIM_PRIORITY_MOD_FAMILY,
+                new MalumRecipeHandler().claimPriority());
+    }
+
     @Test
     void higherPriorityWinsWithoutDependingOnRegistrationOrder() {
         ModRecipeHandler low = handler(0);

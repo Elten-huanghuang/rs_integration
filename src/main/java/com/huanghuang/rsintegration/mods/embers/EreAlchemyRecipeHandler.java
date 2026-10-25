@@ -28,6 +28,11 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId(ModIds.ID_EMBERS_ALCHEMY); }
 
     @Override
+    public int claimPriority() {
+        return CLAIM_PRIORITY_MOD_FAMILY;
+    }
+
+    @Override
     public boolean supportsIntermediateProjection(Recipe<?> recipe) {
         // The tablet still needs the flat executor for locking and pedestal
         // placement, but its item/tablet inputs are stable graph dependencies.

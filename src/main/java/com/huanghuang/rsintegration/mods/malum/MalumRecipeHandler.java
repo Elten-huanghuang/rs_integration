@@ -35,6 +35,11 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
     @Override
     public ModType modType() { return ModType.byId("malum"); }
 
+    @Override
+    public int claimPriority() {
+        return CLAIM_PRIORITY_MOD_FAMILY;
+    }
+
     /**
      * Spirit focusing recipes implement CraftingRecipe for JEI compatibility,
      * but their central input has Malum-specific durability semantics. The

@@ -1,5 +1,4 @@
 package com.huanghuang.rsintegration.recipe;
-import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 
@@ -70,7 +69,6 @@ public final class ModRecipeHandlers {
         HANDLERS.add(new SmithingRecipeHandler());
         HANDLERS.add(new VanillaBrewingRecipeHandler());
         HANDLERS.add(new FluidContainerRecipeHandler());
-        HANDLERS.add(new MarketRecipeHandler());
         for (ModRecipeHandler handler : HANDLERS) {
             if (handler.cacheByRecipeClass()) CLASS_HANDLERS.add(handler);
         }

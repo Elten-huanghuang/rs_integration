@@ -24,6 +24,15 @@ import java.util.List;
  */
 public interface ModRecipeHandler {
 
+    /**
+     * claim 是配方语义的归属判定，不按注册顺序决定。
+     * 数字越大越优先，层级从通用回退到具体机器族依次升高。
+     */
+    int CLAIM_PRIORITY_GENERIC = -1_000;
+    int CLAIM_PRIORITY_VANILLA_FAMILY = -500;
+    int CLAIM_PRIORITY_MOD_FAMILY = -100;
+    int CLAIM_PRIORITY_SPECIALIZED = 0;
+
     @Nonnull
     ModType modType();
 
@@ -32,7 +41,7 @@ public interface ModRecipeHandler {
 
     /** 数值越大越优先；同优先级且同时命中时视为配方 claim 冲突。 */
     default int claimPriority() {
-        return 0;
+        return CLAIM_PRIORITY_SPECIALIZED;
     }
 
     /** Whether {@link #canHandle} depends only on the recipe class. */

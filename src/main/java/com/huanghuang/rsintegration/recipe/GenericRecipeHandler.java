@@ -24,7 +24,7 @@ final class GenericRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public int claimPriority() {
-        return -1_000;
+        return CLAIM_PRIORITY_GENERIC;
     }
 
     @Override

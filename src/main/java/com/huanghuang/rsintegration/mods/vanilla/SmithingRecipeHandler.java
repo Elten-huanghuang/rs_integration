@@ -37,6 +37,11 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
                 || recipe instanceof SmithingTrimRecipe;
     }
 
+    @Override
+    public int claimPriority() {
+        return CLAIM_PRIORITY_VANILLA_FAMILY;
+    }
+
     /**
      * Smithing slots are positional.  CraftTweaker exposes a generic ingredient
      * list for some smithing recipe implementations, but that list is not a

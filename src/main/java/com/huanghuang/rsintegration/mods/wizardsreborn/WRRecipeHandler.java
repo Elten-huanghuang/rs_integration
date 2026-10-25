@@ -34,6 +34,11 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("wizards_reborn"); }
 
     @Override
+    public int claimPriority() {
+        return CLAIM_PRIORITY_MOD_FAMILY;
+    }
+
+    @Override
     public boolean cacheByRecipeClass() {
         // CraftTweaker wraps recipes of different WR machine families in one
         // recipe class; the namespace/path is part of the dispatch key.
